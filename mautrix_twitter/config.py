@@ -37,6 +37,7 @@ class Config(BaseBridgeConfig):
     def forbidden_defaults(self) -> List[ForbiddenDefault]:
         return [
             *super().forbidden_defaults,
+            ForbiddenDefault("appservice.database", "postgres://username:password@hostname/db"),
             ForbiddenDefault("bridge.permissions", ForbiddenKey("example.com")),
         ]
 
