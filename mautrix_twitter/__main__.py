@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from mautrix.bridge import Bridge, BaseUser, BasePuppet, BasePortal
+from mautrix.bridge.state_store.asyncpg import PgBridgeStateStore
 from mautrix.types import RoomID, UserID
+from mautrix.util.async_db import Database
 
 from .version import version, linkified_version
 from .config import Config
+from .db import upgrade_table
+from .matrix import MatrixHandler
 
 
 class TwitterBridge(Bridge):
@@ -30,9 +34,22 @@ class TwitterBridge(Bridge):
     version = version
     markdown_version = linkified_version
     config_class = Config
+    matrix_class = MatrixHandler
+
+    db: Database
+    state_store: PgBridgeStateStore
+
+    def make_state_store(self) -> None:
+        self.state_store = PgBridgeStateStore(self.db, self.get_puppet, self.get_double_puppet)
 
     def prepare_db(self) -> None:
-        pass
+        self.db = Database(self.config["appservice.database"], upgrade_table=upgrade_table,
+                           loop=self.loop)
+
+    async def start(self) -> None:
+        await self.db.start()
+        await self.state_store.upgrade_table.upgrade(self.db.pool)
+        await super().start()
 
     async def get_user(self, user_id: UserID) -> 'BaseUser':
         pass

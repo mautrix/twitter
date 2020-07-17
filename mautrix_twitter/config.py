@@ -13,8 +13,7 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Any, Dict, List, NamedTuple
-from ruamel.yaml.comments import CommentedMap
+from typing import Any, List, NamedTuple
 import os
 
 from mautrix.types import UserID
@@ -22,8 +21,7 @@ from mautrix.client import Client
 from mautrix.bridge.config import (BaseBridgeConfig, ConfigUpdateHelper, ForbiddenKey,
                                    ForbiddenDefault)
 
-Permissions = NamedTuple("Permissions", relaybot=bool, user=bool, puppeting=bool,
-                         matrix_puppeting=bool, admin=bool, level=str)
+Permissions = NamedTuple("Permissions", user=bool, admin=bool, level=str)
 
 
 class Config(BaseBridgeConfig):
@@ -73,27 +71,11 @@ class Config(BaseBridgeConfig):
 
         copy_dict("bridge.permissions")
 
-        if "bridge.relaybot" not in self:
-            copy("bridge.authless_relaybot_portals", "bridge.relaybot.authless_portals")
-        else:
-            copy("bridge.relaybot.private_chat.invite")
-            copy("bridge.relaybot.private_chat.state_changes")
-            copy("bridge.relaybot.private_chat.message")
-            copy("bridge.relaybot.group_chat_invite")
-            copy("bridge.relaybot.ignore_unbridged_group_chat")
-            copy("bridge.relaybot.authless_portals")
-            copy("bridge.relaybot.whitelist_group_admins")
-            copy("bridge.relaybot.whitelist")
-            copy("bridge.relaybot.ignore_own_incoming_events")
-
     def _get_permissions(self, key: str) -> Permissions:
         level = self["bridge.permissions"].get(key, "")
         admin = level == "admin"
-        matrix_puppeting = level == "full" or admin
-        puppeting = level == "puppeting" or matrix_puppeting
-        user = level == "user" or puppeting
-        relaybot = level == "relaybot" or user
-        return Permissions(relaybot, user, puppeting, matrix_puppeting, admin, level)
+        user = level == "user" or admin
+        return Permissions(user, admin, level)
 
     def get_permissions(self, mxid: UserID) -> Permissions:
         permissions = self["bridge.permissions"]

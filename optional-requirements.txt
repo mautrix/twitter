@@ -1,9 +1,6 @@
 # Format: #/name defines a new extras_require group called name
 # Uncommented lines after the group definition insert things into that group.
 
-#/postgres
-asyncpg>=0.20,<0.21
-
 #/e2be
 python-olm>=3,<4
 pycryptodome>=3,<4
