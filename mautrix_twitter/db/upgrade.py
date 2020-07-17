@@ -26,8 +26,8 @@ async def upgrade_v1(conn: Connection) -> None:
     await conn.execute("""CREATE TABLE portal (
         twid        VARCHAR(255),
         receiver    BIGINT,
+        conv_type   twitter_conv_type NOT NULL,
         other_user  BIGINT,
-        conv_type   twitter_conv_type,
         mxid        VARCHAR(255),
         name        VARCHAR(255),
         encrypted   BOOLEAN NOT NULL DEFAULT false,
@@ -39,6 +39,7 @@ async def upgrade_v1(conn: Connection) -> None:
         twid        BIGINT,
         auth_token  VARCHAR(255),
         csrf_token  VARCHAR(255),
+        poll_cursor VARCHAR(255),
         notice_room VARCHAR(255)
     )""")
     await conn.execute("""CREATE TABLE puppet (
@@ -47,7 +48,7 @@ async def upgrade_v1(conn: Connection) -> None:
         photo_url VARCHAR(255),
         photo_mxc VARCHAR(255),
 
-        matrix_registered BOOLEAN NOT NULL DEFAULT false,
+        is_registered BOOLEAN NOT NULL DEFAULT false,
 
         custom_mxid  VARCHAR(255),
         access_token TEXT,
@@ -63,8 +64,8 @@ async def upgrade_v1(conn: Connection) -> None:
             ON UPDATE CASCADE ON DELETE CASCADE
     )""")
     await conn.execute("""CREATE TABLE message (
-        mxid     VARCHAR(255),
-        mx_room  VARCHAR(255),
+        mxid     VARCHAR(255) NOT NULL,
+        mx_room  VARCHAR(255) NOT NULL,
         twid     BIGINT,
         receiver BIGINT,
 
@@ -75,13 +76,15 @@ async def upgrade_v1(conn: Connection) -> None:
                        "                                          'like', 'excited', 'agree',"
                        "                                          'disagree')")
     await conn.execute("""CREATE TABLE reaction (
-        mxid        VARCHAR(255),
-        mx_room     VARCHAR(255),
+        mxid        VARCHAR(255) NOT NULL,
+        mx_room     VARCHAR(255) NOT NULL,
         tw_msgid    BIGINT,
         tw_receiver BIGINT,
         tw_sender   BIGINT,
-        reaction    twitter_reaction_key,
+        reaction    twitter_reaction_key NOT NULL,
 
-        PRIMARY KEY(tw_msgid, tw_receiver, tw_sender),
+        PRIMARY KEY (tw_msgid, tw_receiver, tw_sender),
+        FOREIGN KEY (tw_msgid, tw_receiver) REFERENCES message(twid, receiver)
+            ON DELETE CASCADE ON UPDATE CASCADE,
         UNIQUE (mxid, mx_room)
     )""")

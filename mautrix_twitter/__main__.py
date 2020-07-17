@@ -20,8 +20,11 @@ from mautrix.util.async_db import Database
 
 from .version import version, linkified_version
 from .config import Config
-from .db import upgrade_table
+from .db import upgrade_table, init as init_db
 from .matrix import MatrixHandler
+from .user import User
+from .portal import Portal
+from .puppet import Puppet
 
 
 class TwitterBridge(Bridge):
@@ -37,6 +40,7 @@ class TwitterBridge(Bridge):
     matrix_class = MatrixHandler
 
     db: Database
+    config: Config
     state_store: PgBridgeStateStore
 
     def make_state_store(self) -> None:
@@ -45,10 +49,14 @@ class TwitterBridge(Bridge):
     def prepare_db(self) -> None:
         self.db = Database(self.config["appservice.database"], upgrade_table=upgrade_table,
                            loop=self.loop)
+        init_db(self.db)
 
     async def start(self) -> None:
         await self.db.start()
         await self.state_store.upgrade_table.upgrade(self.db.pool)
+        self.add_startup_actions(await User.init_cls(self))
+        self.add_startup_actions(await Puppet.init_cls(self))
+        Portal.init_cls(self)
         await super().start()
 
     async def get_user(self, user_id: UserID) -> 'BaseUser':

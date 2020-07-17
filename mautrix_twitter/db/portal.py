@@ -1,0 +1,70 @@
+# mautrix-twitter - A Matrix-Twitter DM puppeting bridge
+# Copyright (C) 2020 Tulir Asokan
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from typing import Optional, ClassVar, List, TYPE_CHECKING
+
+from attr import dataclass
+
+from mautrix.types import UserID, RoomID
+from mautrix.util.async_db import Database
+
+from mautwitdm import ConversationType
+
+fake_db = Database("") if TYPE_CHECKING else None
+
+
+@dataclass
+class Portal:
+    db: ClassVar[Database] = fake_db
+
+    twid: str
+    receiver: int
+    conv_type: ConversationType
+    other_user: Optional[int]
+    mxid: Optional[RoomID]
+    name: Optional[str]
+    encrypted: bool
+
+    async def insert(self) -> None:
+        q = ("INSERT INTO portal (twid, receiver, conv_type, other_user, mxid, name, encrypted) "
+             "VALUES ($1, $2, $3, $4, $5, $6, $7)")
+        await self.db.execute(q, self.twid, self.receiver, self.other_user, self.conv_type.value,
+                              self.mxid, self.name, self.encrypted)
+
+    async def update(self) -> None:
+        q = ("UPDATE portal SET conv_type=$3, other_user=$4, mxid=$5, name=$6, encrypted=$7 "
+             "WHERE twid=$1 AND receiver=$2")
+        await self.db.execute(q, self.twid, self.receiver, self.other_user, self.conv_type.value,
+                              self.mxid, self.name, self.encrypted)
+
+    @classmethod
+    async def get_by_mxid(cls, mxid: RoomID) -> Optional['Portal']:
+        q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted "
+             "FROM portal WHERE mxid=$1")
+        row = await cls.db.fetchrow(q, mxid)
+        if not row:
+            return None
+        row["conv_type"] = ConversationType(row["conv_type"])
+        return cls(**row)
+
+    @classmethod
+    async def get_by_twid(cls, twid: str, receiver: int = 0) -> Optional['Portal']:
+        q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted "
+             "FROM portal WHERE twid=$1 AND receiver=$2")
+        row = await cls.db.fetchrow(q, twid, receiver)
+        if not row:
+            return None
+        row["conv_type"] = ConversationType(row["conv_type"])
+        return cls(**row)
