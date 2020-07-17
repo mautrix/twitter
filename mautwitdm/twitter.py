@@ -19,9 +19,9 @@ from .poller import TwitterPoller
 
 
 class TwitterAPI(TwitterUploader, TwitterPoller):
+    """The main entrypoint for using the internal Twitter DM API."""
     base_url: URL = URL("https://api.twitter.com/1.1")
     dm_url: URL = base_url / "dm"
-    upload_url: URL = URL("https://upload.twitter.com/i/media/upload.json")
 
     loop: asyncio.AbstractEventLoop
     http: ClientSession
@@ -37,13 +37,21 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
                  ) -> None:
         self.loop = loop or asyncio.get_event_loop()
         self.http = http or ClientSession(loop=self.loop)
-        self.log = log or logging.getLogger("mau.twitter.api")
+        self.log = log or logging.getLogger("mautwitdm")
         self.node_id = node_id or getnode()
         self.poll_cursor = None
         self._handlers = defaultdict(lambda: [])
         self.active = True
 
     def set_tokens(self, auth_token: str, csrf_token: str) -> None:
+        """
+        Set the authentication tokens. After this, use :meth:`get_user_identifier` to check if the
+        auth is working correctly.
+
+        Args:
+            auth_token: The auth_token cookie value.
+            csrf_token: The ct0 cookie/x-csrf-token header value.
+        """
         cookie = SimpleCookie()
         cookie["auth_token"] = auth_token
         cookie["auth_token"].update({"domain": "twitter.com", "path": "/"})
@@ -54,6 +62,12 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
 
     @property
     def headers(self) -> Dict[str, str]:
+        """
+        Get the headers to use with every request to Twitter.
+
+        Returns:
+            A key-value HTTP header list.
+        """
         return {
             "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
                              "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
@@ -70,6 +84,12 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
         }
 
     def new_request_id(self) -> UUID:
+        """
+        Create a new request ID for DM send requests.
+
+        Returns:
+            A v1 UUID.
+        """
         return uuid1(self.node_id)
 
     def conversation(self, id: str) -> Conversation:
@@ -88,6 +108,7 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
             return (await resp.json()).get("user_identifier", None)
 
     async def get_settings(self) -> Dict[str, Any]:
+        """Get the account settings of the currently logged in account."""
         async with self.http.get(self.base_url / "account" / "settings.json",
                                  headers=self.headers) as resp:
             resp.raise_for_status()

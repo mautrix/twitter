@@ -22,6 +22,7 @@ class TwitterPoller:
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
     http: ClientSession
+    headers: Dict[str, str]
 
     poll_sleep: int = 1
     poll_cursor: Optional[str]
@@ -61,6 +62,14 @@ class TwitterPoller:
         }
 
     async def inbox_initial_state(self) -> InitialStateResponse:
+        """
+        Get the initial DM inbox state, including conversations, user profiles and some messages.
+
+        This also gets the initial :attr:`poll_cursor` value.
+
+        Returns:
+            The response data from the server.
+        """
         url = (self.dm_url / "inbox_initial_state.json").with_query({
             **self.full_state_params,
             "filter_low_quality": "true",
@@ -87,15 +96,30 @@ class TwitterPoller:
             self.poll_cursor = response.cursor
             return response
 
-    async def poll_forever(self) -> None:
+    async def poll_forever(self, raise_exceptions: bool = True) -> None:
+        """
+        Poll for updates forever.
+
+        Args:
+            raise_exceptions: Whether or not fatal errors should be raised after logging.
+                :class:`asyncio.CancelledError` will not be raised in any case.
+        """
         try:
             await self._poll_forever()
         except asyncio.CancelledError:
             self.log.debug("Polling stopped")
         except Exception:
             self.log.exception("Fatal error while polling")
+            if raise_exceptions:
+                raise
 
     async def dispatch(self, event: T) -> None:
+        """
+        Dispatch an event to handlers registered with :meth:`add_handler`.
+
+        Args:
+            event: The event to dispatch.
+        """
         for handler in self._handlers[type(event)]:
             await handler(event)
 
@@ -126,15 +150,37 @@ class TwitterPoller:
             await asyncio.sleep(self.poll_sleep)
 
     def start(self) -> asyncio.Task:
+        """
+        Start polling forever in the background. This calls :meth:`poll_forever` and puts it in an
+        asyncio Task. The task is stored so it can be cancelled with :meth:`stop`.
+
+        Returns:
+            The created asyncio task.
+        """
         self._poll_task = self.loop.create_task(self.poll_forever())
         return self._poll_task
 
-    def stop(self) -> asyncio.Task:
-        self._poll_task.cancel()
-        return self._poll_task
+    def stop(self) -> None:
+        """Stop the ongoing poll task. Any ongoing handlers will also be cancelled."""
+        if self._poll_task:
+            self._poll_task.cancel()
 
     def add_handler(self, event_type: Type[T], handler: Handler) -> None:
+        """
+        Add an event handler.
+
+        Args:
+            event_type: The type of event to handle.
+            handler: The handler function.
+        """
         self._handlers[event_type].append(handler)
 
     def remove_handler(self, event_type: Type[T], handler: Handler) -> None:
+        """
+        Remove an event handler.
+
+        Args:
+            event_type: The type of event the handler was registered for.
+            handler: The handler function to remove.
+        """
         self._handlers[event_type].remove(handler)
