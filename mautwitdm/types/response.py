@@ -7,22 +7,18 @@ from typing import Optional, List, Dict
 
 from attr import dataclass
 
-from mautrix.types import SerializableAttrs, SerializableEnum
+from mautrix.types import SerializableAttrs
 
 from .user import User
 from .entry import Entry
-from .conversation import Conversation
+from .conversation import Conversation, TimelineStatus
 
 
 @dataclass
 class SendResponse(SerializableAttrs['SendResponse']):
     entries: List[Entry]
     users: Dict[str, User]
-
-
-class TimelineStatus(SerializableEnum):
-    AT_END = "AT_END"
-    HAS_MORE = "HAS_MORE"
+    conversations: Optional[Dict[str, Conversation]] = None
 
 
 @dataclass

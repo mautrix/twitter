@@ -9,15 +9,30 @@ from attr import dataclass
 
 from mautrix.types import SerializableAttrs, SerializableEnum
 
+from .util import StringTimestamp
+
 
 class ConversationType(SerializableEnum):
     ONE_TO_ONE = "ONE_TO_ONE"
+    GROUP_DM = "GROUP_DM"
+
+
+class TimelineStatus(SerializableEnum):
+    AT_END = "AT_END"
+    HAS_MORE = "HAS_MORE"
 
 
 @dataclass
 class Participant(SerializableAttrs['Participant']):
     user_id: str
+
+    # This seems to be only for one-to-one chats
     last_read_event_id: Optional[str] = None
+
+    # These seem to be only for group chats
+    join_time: Optional[StringTimestamp] = None
+    join_conversation_event_id: Optional[str] = None
+    is_admin: Optional[bool] = None
 
 
 @dataclass
@@ -29,6 +44,19 @@ class Conversation(SerializableAttrs['Conversation']):
     participants: List[Participant]
     notifications_disabled: bool
     mention_notifications_disabled: bool
-    read_only: bool
     trusted: bool
     low_quality: bool
+
+    # These are present in some responses
+    min_entry_id: Optional[str] = None
+    max_entry_id: Optional[str] = None
+    status: Optional[TimelineStatus] = None
+
+    # This seems to be only for one-to-one chats
+    read_only: Optional[bool] = None
+
+    # These seem to be only for group chats
+    create_time: Optional[StringTimestamp] = None
+    created_by_user_id: Optional[str] = None
+    name: Optional[str] = None
+    last_read_event_id: Optional[str] = None

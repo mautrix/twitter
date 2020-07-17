@@ -139,14 +139,8 @@ class TwitterPoller:
             for conversation in (resp.conversations or {}).values():
                 await self.dispatch(conversation)
             for entry in resp.entries or []:
-                if entry.trust_conversation:
-                    await self.dispatch(entry.trust_conversation)
-                if entry.message:
-                    await self.dispatch(entry.message)
-                if entry.reaction_delete:
-                    await self.dispatch(entry.reaction_delete)
-                if entry.reaction_create:
-                    await self.dispatch(entry.reaction_create)
+                for entry_type in entry.all_types:
+                    await self.dispatch(entry_type)
             await asyncio.sleep(self.poll_sleep)
 
     def start(self) -> asyncio.Task:
