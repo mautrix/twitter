@@ -11,6 +11,7 @@ from aiohttp import ClientSession
 from yarl import URL
 
 from .types import PollResponse, InitialStateResponse
+from .errors import check_error
 
 T = TypeVar('T')
 Handler = Callable[[T], Awaitable[Any]]
@@ -76,7 +77,7 @@ class TwitterPoller:
             "include_quality": "all",
         })
         async with self.http.get(url, headers=self.headers) as resp:
-            data = await resp.json()
+            data = await check_error(resp)
             response = InitialStateResponse.deserialize(data["inbox_initial_state"])
             self.poll_cursor = response.cursor
             return response
@@ -91,7 +92,7 @@ class TwitterPoller:
             "include_quality": "all",
         })
         async with self.http.get(url, headers=self.headers) as resp:
-            data = await resp.json()
+            data = await check_error(resp)
             response = PollResponse.deserialize(data["user_events"])
             self.poll_cursor = response.cursor
             return response

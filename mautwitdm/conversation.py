@@ -9,6 +9,7 @@ from uuid import UUID
 from yarl import URL
 
 from .types import ReactionKey, SendResponse, FetchConversationResponse
+from .errors import check_error
 
 if TYPE_CHECKING:
     from .twitter import TwitterAPI
@@ -33,17 +34,17 @@ class Conversation:
                "last_read_event_id": last_read_event_id}
         url = self.api_url / "mark_read.json"
         async with self.api.http.post(url, headers=self.api.headers, json=req) as resp:
-            resp.raise_for_status()
+            await check_error(resp)
 
     async def mark_typing(self) -> None:
         """Send a typing notification. This request should be repeated every 2-3 seconds."""
         async with self.api.http.post(self.api_url / "typing.json", headers=self.api.headers) as r:
-            r.raise_for_status()
+            await check_error(r)
 
     async def accept(self) -> None:
         """Accept the conversation (when DMing users who you don't follow)."""
         async with self.api.http.post(self.api_url / "accept.json", headers=self.api.headers) as r:
-            r.raise_for_status()
+            await check_error(r)
 
     async def send(self, text: str, media_id: Optional[str] = None,
                    request_id: Optional[Union[UUID, str]] = None) -> SendResponse:
@@ -72,8 +73,7 @@ class Conversation:
         if media_id:
             data["media_id"] = media_id
         async with self.api.http.post(url, data=data, headers=self.api.headers) as resp:
-            resp.raise_for_status()
-            resp_data = await resp.json()
+            resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)
 
     async def react(self, message_id: str, key: ReactionKey) -> None:
@@ -91,7 +91,7 @@ class Conversation:
             "dm_id": message_id,
         })
         async with self.api.http.post(url, headers=self.api.headers) as resp:
-            resp.raise_for_status()
+            await check_error(resp)
 
     async def delete_reaction(self, message_id: str, key: ReactionKey) -> None:
         """
@@ -107,7 +107,7 @@ class Conversation:
             "dm_id": message_id,
         })
         async with self.api.http.post(url, headers=self.api.headers) as resp:
-            resp.raise_for_status()
+            await check_error(resp)
 
     async def fetch(self, max_id: Optional[str] = None, include_info: bool = True
                     ) -> FetchConversationResponse:
@@ -131,6 +131,5 @@ class Conversation:
         if max_id:
             req = req.update_query({"max_id": max_id})
         async with self.api.http.get(req, headers=self.api.headers) as resp:
-            resp.raise_for_status()
-            resp_data = await resp.json()
+            resp_data = await check_error(resp)
         return FetchConversationResponse.deserialize(resp_data)

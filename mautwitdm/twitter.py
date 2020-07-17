@@ -3,7 +3,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, NamedTuple, List
 from uuid import UUID, uuid1, getnode
 from collections import defaultdict
 from http.cookies import SimpleCookie
@@ -13,9 +13,13 @@ import asyncio
 from aiohttp import ClientSession
 from yarl import URL
 
+from .types import User
 from .conversation import Conversation
 from .uploader import TwitterUploader
 from .poller import TwitterPoller
+from .errors import check_error
+
+Tokens = NamedTuple('Tokens', auth_token=str, csrf_token=str)
 
 
 class TwitterAPI(TwitterUploader, TwitterPoller):
@@ -59,6 +63,14 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
         cookie["ct0"].update({"domain": "twitter.com", "path": "/"})
         self._csrf_token = csrf_token
         self.http.cookie_jar.update_cookies(cookie, URL("https://twitter.com/"))
+
+    @property
+    def tokens(self) -> Optional[Tokens]:
+        cookies = self.http.cookie_jar.filter_cookies(URL("https://twitter.com/"))
+        try:
+            return Tokens(auth_token=cookies["auth_token"].value, csrf_token=cookies["ct0"].value)
+        except KeyError:
+            return None
 
     @property
     def headers(self) -> Dict[str, str]:
@@ -106,12 +118,23 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
     async def get_user_identifier(self) -> Optional[str]:
         async with self.http.post(self.base_url / "branch" / "init.json", json={},
                                   headers=self.headers) as resp:
-            resp.raise_for_status()
-            return (await resp.json()).get("user_identifier", None)
+            resp_data = await check_error(resp)
+            return resp_data.get("user_identifier", None)
 
     async def get_settings(self) -> Dict[str, Any]:
         """Get the account settings of the currently logged in account."""
         async with self.http.get(self.base_url / "account" / "settings.json",
                                  headers=self.headers) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+            return await check_error(resp)
+
+    async def lookup_users(self, user_ids: Optional[List[int]] = None,
+                           usernames: Optional[List[str]] = None) -> List[User]:
+        query = {"include_entities": "false", "tweet_mode": "extended"}
+        if user_ids:
+            query["user_id"] = ",".join(str(id) for id in user_ids)
+        if usernames:
+            query["screen_name"] = ",".join(usernames)
+        req = (self.base_url / "users" / "lookup.json").with_query(query)
+        async with self.http.get(req, headers=self.headers) as resp:
+            resp_data = await check_error(resp)
+            return [User.deserialize(user) for user in resp_data]

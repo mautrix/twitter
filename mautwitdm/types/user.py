@@ -28,11 +28,16 @@ class User(SerializableAttrs['User']):
     can_media_tag: bool
     following: bool
     follow_request_sent: bool
-    blocking: bool
 
     friends_count: int
     followers_count: int
 
-    # Note: the DM /new.json response users have more fields that /user_updates.json doesn't.
-    # Those aren't that important so they're listed here. If they're needed, a new FullUser class
-    # could be added.
+    statuses_count: Optional[int] = None
+
+    followed_by: Optional[bool] = None
+    blocking: Optional[bool] = None
+    suspended: Optional[bool] = None
+    bocked_by: Optional[bool] = None
+
+    url: Optional[str] = None
+    location: Optional[str] = None

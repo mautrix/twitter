@@ -1,3 +1,4 @@
+from .user import User
 from .conversation import ConversationType, Participant, Conversation
 from .message_entity import (MessageEntityURL, MessageEntityUserMention, MessageEntitySimple,
                              MessageEntities)

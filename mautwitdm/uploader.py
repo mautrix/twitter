@@ -12,6 +12,7 @@ from aiohttp import ClientSession, MultipartWriter
 from yarl import URL
 
 from .types import MediaUploadResponse
+from .errors import check_error
 
 
 class TwitterUploader:
@@ -29,8 +30,7 @@ class TwitterUploader:
         while True:
             await asyncio.sleep(wait_requests)
             async with self.http.get(query_req, headers=self.headers) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
+                data = await check_error(resp)
             state = data["processing_info"]["state"]
             if state == "succeeded":
                 return MediaUploadResponse.deserialize(data)
@@ -54,14 +54,13 @@ class TwitterUploader:
             multipart_data.append(data[i * max_size: (i + 1) * max_size])
             req = base_upload_req.update_query({"segment_index": i})
             async with self.http.post(req, data=multipart_data, headers=self.headers) as resp:
-                resp.raise_for_status()
+                await check_error(resp)
         finalize_req = self.upload_url.with_query({
             "command": "FINALIZE",
             "media_id": media_id,
         })
         async with self.http.post(finalize_req, headers=self.headers) as resp:
-            resp.raise_for_status()
-            resp_data = await resp.json()
+            resp_data = await check_error(resp)
         processing_info = resp_data.get("processing_info", {})
         if processing_info.get("state", None) == "pending":
             check_after = processing_info.get("check_after_secs", 1)
@@ -91,8 +90,7 @@ class TwitterUploader:
             raise ValueError("Either data bytes or url must be provided")
         init_url = self.upload_url.with_query(init_req)
         async with self.http.post(init_url, headers=self.headers) as resp:
-            resp.raise_for_status()
-            resp_data = await resp.json()
+            resp_data = await check_error(resp)
         media_id = resp_data["media_id_string"]
 
         if url is not None:

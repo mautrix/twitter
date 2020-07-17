@@ -67,7 +67,7 @@ class ReactionCreateEntry(SerializableAttrs['ReactionCreateEntry']):
 
 
 @dataclass
-class ReactionDeleteEntry(SerializableAttrs['ReactionDelete']):
+class ReactionDeleteEntry(SerializableAttrs['ReactionDeleteEntry']):
     id: str
     time: StringTimestamp
     affects_sort: bool
