@@ -69,9 +69,11 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
             A key-value HTTP header list.
         """
         return {
+            # Hardcoded authorization header from the web app
             "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
                              "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:79.0) Gecko/20100101 Firefox/79.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:78.0) "
+                          "Gecko/20100101 Firefox/78.0",
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.5",
             "DNT": "1",
