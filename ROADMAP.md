@@ -2,7 +2,7 @@
 
 * Matrix → Twitter
   * [ ] Message content
-    * [ ] Text
+    * [x] Text
     * [ ] Formatting
     * [ ] Media
       * [ ] Images
@@ -17,7 +17,7 @@
   * [ ] Read receipts
 * Twitter → Matrix
   * [ ] Message content
-    * [ ] Text
+    * [x] Text
     * [ ] Formatting
     * [ ] Media
   * [ ] Message reactions
@@ -32,10 +32,10 @@
 * Misc
   * [ ] Automatic portal creation
     * [ ] At startup
-    * [ ] When receiving invite or message
+    * [x] When receiving invite or message
   * [ ] Private chat creation by inviting Matrix puppet of Twitter user to new room
   * [ ] Option to use own Matrix account for messages sent from other Twitter clients
-  * [ ] E2EE in Matrix rooms
+  * [x] E2EE in Matrix rooms
 
 † Information not automatically sent from source, i.e. implementation may not be possible
 ‡ Maybe, i.e. this feature may or may not be implemented at some point
