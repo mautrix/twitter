@@ -55,8 +55,8 @@ class TwitterBridge(Bridge):
     async def start(self) -> None:
         await self.db.start()
         await self.state_store.upgrade_table.upgrade(self.db.pool)
-        self.add_startup_actions(await User.init_cls(self))
-        self.add_startup_actions(await Puppet.init_cls(self))
+        self.add_startup_actions(User.init_cls(self))
+        self.add_startup_actions(Puppet.init_cls(self))
         Portal.init_cls(self)
         if self.config["bridge.resend_bridge_info"]:
             self.add_startup_actions(self.resend_bridge_info())
@@ -71,7 +71,7 @@ class TwitterBridge(Bridge):
         self.config["bridge.resend_bridge_info"] = False
         self.config.save()
         self.log.info("Re-sending bridge info state event to all portals")
-        for portal in await Portal.all_with_room():
+        async for portal in Portal.all_with_room():
             await portal.update_bridge_info()
         self.log.info("Finished re-sending bridge info state events")
 

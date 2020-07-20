@@ -7,7 +7,7 @@ from typing import Any
 import json
 import time
 
-from aiohttp import ClientResponse
+from aiohttp import ClientResponse, ContentTypeError
 from multidict import CIMultiDictProxy
 
 
@@ -42,6 +42,9 @@ class RateLimitError(TwitterError):
 async def check_error(resp: ClientResponse) -> Any:
     try:
         resp_data = await resp.json()
+    except ContentTypeError:
+        resp.raise_for_status()
+        return
     except json.JSONDecodeError:
         resp.raise_for_status()
         raise

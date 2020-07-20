@@ -35,6 +35,7 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
     active: bool
 
     _csrf_token: str
+    _typing_in: Optional[Conversation]
 
     def __init__(self, http: Optional[ClientSession] = None, log: Optional[logging.Logger] = None,
                  loop: Optional[asyncio.AbstractEventLoop] = None, node_id: Optional[int] = None
@@ -46,6 +47,7 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
         self.poll_cursor = None
         self._handlers = defaultdict(lambda: [])
         self.active = True
+        self._typing_in = None
 
     def set_tokens(self, auth_token: str, csrf_token: str) -> None:
         """
@@ -63,6 +65,16 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
         cookie["ct0"].update({"domain": "twitter.com", "path": "/"})
         self._csrf_token = csrf_token
         self.http.cookie_jar.update_cookies(cookie, URL("https://twitter.com/"))
+
+    def mark_typing(self, conversation_id: Optional[str]) -> None:
+        """
+        Mark the user as typing in the specified conversation. This will make the polling task call
+        :meth:`Conversation.mark_typing` of the specified conversation after each poll.
+
+        Args:
+            conversation_id: The conversation where the user is typing, or ``None`` to stop typing.
+        """
+        self._typing_in = self.conversation(conversation_id)
 
     @property
     def tokens(self) -> Optional[Tokens]:

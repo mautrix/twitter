@@ -41,6 +41,12 @@ class Reaction:
         await self.db.execute(q, self.mxid, self.mx_room, self.tw_msgid, self.tw_receiver,
                               self.tw_sender, self.reaction.value)
 
+    async def edit(self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey) -> None:
+        await self.db.execute("UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3 "
+                              "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6",
+                              mxid, mx_room, reaction.value, self.tw_msgid, self.tw_receiver,
+                              self.tw_sender)
+
     async def delete(self) -> None:
         q = "DELETE FROM reaction WHERE tw_msgid=$1 AND tw_receiver=$2 AND tw_sender=$3"
         await self.db.execute(q, self.tw_msgid, self.tw_receiver, self.tw_sender)
@@ -56,7 +62,7 @@ class Reaction:
         return cls(reaction=ReactionKey(data.pop("reaction")), **data)
 
     @classmethod
-    async def get_by_twid(cls, tw_msgid: int, tw_sender: int, tw_receiver: int = 0
+    async def get_by_twid(cls, tw_msgid: int, tw_receiver: int, tw_sender: int,
                           ) -> Optional['Reaction']:
         q = ("SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
              "FROM reaction WHERE tw_msgid=$1 AND tw_sender=$2 AND tw_receiver=$3")

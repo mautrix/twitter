@@ -8,6 +8,7 @@ from .message_attachment import (MessageAttachment, MessageAttachmentMedia, Mess
                                  VideoInfo, VideoVariant)
 from .message import MessageData, MessageEntry
 from .reaction import ReactionKey, ReactionCreateEntry, ReactionDeleteEntry
-from .entry import TrustConversationEntry, Entry
+from .entry import (Entry, TrustConversationEntry, ConversationReadEntry, ConversationCreateEntry,
+                    ConversationNameUpdateEntry)
 from .response import (SendResponse, PollResponse, InitialStateResponse, MediaUploadResponse,
                        FetchConversationResponse, TimelineStatus)

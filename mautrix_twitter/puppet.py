@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Optional, Dict, List, Awaitable, TYPE_CHECKING, cast
+from typing import Optional, Dict, AsyncIterable, Awaitable, AsyncGenerator, TYPE_CHECKING, cast
 from os import path
 
 from aiohttp import ClientSession
@@ -22,7 +22,7 @@ from yarl import URL
 from mautwitdm.types import User
 from mautrix.bridge import BasePuppet
 from mautrix.appservice import IntentAPI
-from mautrix.types import ContentURI, UserID, SyncToken
+from mautrix.types import ContentURI, UserID, SyncToken, RoomID
 from mautrix.util.simple_template import SimpleTemplate
 
 from .db import Puppet as DBPuppet
@@ -58,7 +58,7 @@ class Puppet(DBPuppet, BasePuppet):
         self.intent = self._fresh_intent()
 
     @classmethod
-    async def init_cls(cls, bridge: 'TwitterBridge') -> List[Awaitable[None]]:
+    def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
         cls.config = bridge.config
         cls.loop = bridge.loop
         cls.mx = bridge.matrix
@@ -70,7 +70,7 @@ class Puppet(DBPuppet, BasePuppet):
         secret = cls.config["bridge.login_shared_secret"]
         cls.login_shared_secret = secret.encode("utf-8") if secret else None
         cls.login_device_name = "Twitter DM Bridge"
-        return [puppet.try_start() for puppet in await cls.all_with_custom_mxid()]
+        return (puppet.try_start() async for puppet in cls.all_with_custom_mxid())
 
     def intent_for(self, portal: 'p.Portal') -> IntentAPI:
         if portal.other_user == self.twid or (self.config["bridge.backfill.invite_own_puppet"]
@@ -112,6 +112,10 @@ class Puppet(DBPuppet, BasePuppet):
             await self.default_mxid_intent.set_avatar_url(mxc)
             return True
         return False
+
+    async def default_puppet_should_leave_room(self, room_id: RoomID) -> bool:
+        portal = await p.Portal.get_by_mxid(room_id)
+        return portal and portal.other_user != self.twid
 
     # region Database getters
 
@@ -173,14 +177,14 @@ class Puppet(DBPuppet, BasePuppet):
         return None
 
     @classmethod
-    async def all_with_custom_mxid(cls) -> List['Puppet']:
+    async def all_with_custom_mxid(cls) -> AsyncGenerator['Puppet', None]:
         puppets = await super().all_with_custom_mxid()
         puppet: cls
         for index, puppet in enumerate(puppets):
             try:
-                puppets[index] = cls.by_twid[puppet.twid]
+                yield cls.by_twid[puppet.twid]
             except KeyError:
                 puppet._add_to_cache()
-        return puppets
+                yield puppet
 
     # endregion

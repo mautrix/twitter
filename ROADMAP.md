@@ -10,31 +10,29 @@
       * [ ] Video
       * [ ] Files
       * [ ] Stickers
-  * [ ] Message redactions
-  * [ ] Message reactions
-  * [ ] Message edits
+  * [x] Message reactions
   * [ ] Typing notifications
-  * [ ] Read receipts
+  * [x] Read receipts
 * Twitter → Matrix
   * [ ] Message content
     * [x] Text
     * [ ] Formatting
     * [ ] Media
-  * [ ] Message reactions
-  * [ ] Message edits
+  * [x] Message reactions
   * [ ] Message history
     * [ ] When creating portal
     * [ ] Missed messages
-  * [ ] Avatars
-  * [ ] Presence
-  * [ ] Typing notifications
-  * [ ] Read receipts
+  * [x] Avatars
+  * [ ] † Typing notifications
+  * [ ] † Read receipts
 * Misc
   * [ ] Automatic portal creation
     * [ ] At startup
     * [x] When receiving invite or message
   * [ ] Private chat creation by inviting Matrix puppet of Twitter user to new room
   * [ ] Option to use own Matrix account for messages sent from other Twitter clients
+    * [x] Automatic login with shared secret
+    * [ ] Manual login with `login-matrix`
   * [x] E2EE in Matrix rooms
 
 † Information not automatically sent from source, i.e. implementation may not be possible

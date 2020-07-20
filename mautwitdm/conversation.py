@@ -28,12 +28,12 @@ class Conversation:
         """The base URL for API requests related to this conversation."""
         return self.api.dm_url / "conversation" / self.id
 
-    async def mark_read(self, last_read_event_id: str) -> None:
+    async def mark_read(self, last_read_event_id: Union[int, str]) -> None:
         """Mark the conversation as read, up to the given event ID."""
         req = {"conversationId": self.id,
-               "last_read_event_id": last_read_event_id}
+               "last_read_event_id": str(last_read_event_id)}
         url = self.api_url / "mark_read.json"
-        async with self.api.http.post(url, headers=self.api.headers, json=req) as resp:
+        async with self.api.http.post(url, headers=self.api.headers, data=req) as resp:
             await check_error(resp)
 
     async def mark_typing(self) -> None:
@@ -76,7 +76,7 @@ class Conversation:
             resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)
 
-    async def react(self, message_id: str, key: ReactionKey) -> None:
+    async def react(self, message_id: Union[str, int], key: ReactionKey) -> None:
         """
         React to a message. Reacting to the same message multiple times will override earlier
         reactions.
@@ -88,12 +88,12 @@ class Conversation:
         url = (self.api.dm_url / "reaction" / "new.json").with_query({
             "reaction_key": str(key),
             "conversation_id": self.id,
-            "dm_id": message_id,
+            "dm_id": str(message_id),
         })
         async with self.api.http.post(url, headers=self.api.headers) as resp:
             await check_error(resp)
 
-    async def delete_reaction(self, message_id: str, key: ReactionKey) -> None:
+    async def delete_reaction(self, message_id: Union[str, int], key: ReactionKey) -> None:
         """
         Delete an earlier reaction.
 
@@ -104,7 +104,7 @@ class Conversation:
         url = (self.api.dm_url / "reaction" / "delete.json").with_query({
             "reaction_key": str(key),
             "conversation_id": self.id,
-            "dm_id": message_id,
+            "dm_id": str(message_id),
         })
         async with self.api.http.post(url, headers=self.api.headers) as resp:
             await check_error(resp)

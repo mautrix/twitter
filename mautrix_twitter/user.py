@@ -13,13 +13,14 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Dict, Optional, List, Awaitable, Union, TYPE_CHECKING, cast
+from typing import (Dict, Optional, AsyncIterable, Awaitable, AsyncGenerator, Union, TYPE_CHECKING,
+                    cast)
 import asyncio
 import logging
 
 from mautwitdm import TwitterAPI
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
-                             User as TwitterUser)
+                             User as TwitterUser, ConversationReadEntry)
 from mautrix.bridge import BaseUser
 from mautrix.types import UserID, RoomID
 from mautrix.appservice import AppService
@@ -60,11 +61,11 @@ class User(DBUser, BaseUser):
         self.username = None
 
     @classmethod
-    async def init_cls(cls, bridge: 'TwitterBridge') -> List[Awaitable[None]]:
+    def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
         cls.config = bridge.config
         cls.az = bridge.az
         cls.loop = bridge.loop
-        return [user.try_connect() for user in await cls.all_logged_in()]
+        return (user.try_connect() async for user in cls.all_logged_in())
 
     async def update(self) -> None:
         if self.client:
@@ -102,17 +103,26 @@ class User(DBUser, BaseUser):
         self.client.add_handler(MessageEntry, self.handle_message)
         self.client.add_handler(ReactionCreateEntry, self.handle_reaction)
         self.client.add_handler(ReactionDeleteEntry, self.handle_reaction)
+        self.client.add_handler(ConversationReadEntry, self.handle_receipt)
 
         settings = await self.client.get_settings()
         self.username = settings["screen_name"]
 
-        if not self.twid:
-            user_info = await self.client.lookup_users(usernames=[self.username])
-            self.twid = user_info[0].id
-            self.by_twid[self.twid] = self
+        user_info = (await self.client.lookup_users(usernames=[self.username]))[0]
+        self.twid = user_info.id
+        self.by_twid[self.twid] = self
 
         await self.update()
         self.client.start()
+
+        puppet = await pu.Puppet.get_by_twid(self.twid)
+        await puppet.update_info(user_info)
+        try:
+            if puppet.custom_mxid != self.mxid and puppet.can_auto_login(self.mxid):
+                self.log.info(f"Automatically enabling custom puppet")
+                await puppet.switch_mxid(access_token="auto", mxid=self.mxid)
+        except Exception:
+            self.log.exception("Failed to automatically enable custom puppet")
 
     async def stop(self) -> None:
         if self.client:
@@ -152,10 +162,30 @@ class User(DBUser, BaseUser):
                                              conv_type=evt.conversation.type)
         if not portal.mxid:
             await portal.create_matrix_room(self, evt.conversation)
-        await portal.handle_twitter_message(self, evt.message_data, evt.request_id)
+        sender = await pu.Puppet.get_by_twid(int(evt.message_data.sender_id))
+        await portal.handle_twitter_message(self, sender, evt.message_data, evt.request_id)
 
     async def handle_reaction(self, evt: Union[ReactionCreateEntry, ReactionDeleteEntry]) -> None:
-        pass
+        portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
+                                             conv_type=evt.conversation.type)
+        if not portal.mxid:
+            self.log.debug(f"Ignoring reaction in conversation {evt.conversation_id} with no room")
+            return
+        puppet = await pu.Puppet.get_by_twid(int(evt.sender_id))
+        if isinstance(evt, ReactionCreateEntry):
+            await portal.handle_twitter_reaction_add(puppet, int(evt.message_id),
+                                                     evt.reaction_key, evt.time)
+        else:
+            await portal.handle_twitter_reaction_remove(puppet, int(evt.message_id),
+                                                        evt.reaction_key)
+
+    async def handle_receipt(self, evt: ConversationReadEntry) -> None:
+        portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
+                                             conv_type=evt.conversation.type)
+        if not portal.mxid:
+            return
+        sender = await pu.Puppet.get_by_twid(self.twid)
+        await portal.handle_twitter_receipt(sender, int(evt.last_read_event_id))
 
     # endregion
     # region Database getters
@@ -200,14 +230,14 @@ class User(DBUser, BaseUser):
         return None
 
     @classmethod
-    async def all_logged_in(cls) -> List['User']:
+    async def all_logged_in(cls) -> AsyncGenerator['User', None]:
         users = await super().all_logged_in()
         user: cls
         for index, user in enumerate(users):
             try:
-                users[index] = cls.by_mxid[user.mxid]
+                yield cls.by_mxid[user.mxid]
             except KeyError:
                 user._add_to_cache()
-        return users
+                yield user
 
     # endregion

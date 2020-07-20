@@ -12,6 +12,7 @@ from yarl import URL
 
 from .types import PollResponse, InitialStateResponse
 from .errors import check_error
+from .conversation import Conversation
 
 T = TypeVar('T')
 Handler = Callable[[T], Awaitable[Any]]
@@ -30,6 +31,7 @@ class TwitterPoller:
     poll_cursor: Optional[str]
     _poll_task: Optional[asyncio.Task]
     _handlers: HandlerMap
+    _typing_in: Optional[Conversation]
 
     @property
     def poll_params(self) -> Dict[str, str]:
@@ -44,7 +46,7 @@ class TwitterPoller:
             "include_groups": "true",
             "include_inbox_timelines": "true",
             "include_ext_media_color": "true",
-            "support_reactions": "true",
+            "supports_reactions": "true",
             "ext": "mediaColor,altText,mediaStats,highlightedLabel",
         }
 
@@ -153,6 +155,8 @@ class TwitterPoller:
                 continue
             await self._dispatch_all(resp)
             await asyncio.sleep(self.poll_sleep)
+            if self._typing_in:
+                await self._typing_in.mark_typing()
 
     def start(self) -> asyncio.Task:
         """

@@ -13,19 +13,21 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Dict, Tuple, Optional, List, Deque, Set, Any, TYPE_CHECKING, cast
+from typing import (Dict, Tuple, Optional, List, Deque, Set, Any, Union, AsyncGenerator,
+                    TYPE_CHECKING, cast)
 from collections import deque
+from datetime import datetime
 import asyncio
 
-from mautwitdm.types import ConversationType, Conversation, MessageData, Participant
+from mautwitdm.types import ConversationType, Conversation, MessageData, Participant, ReactionKey
 from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
                            TextMessageEventContent)
-from mautrix.errors import MatrixError
+from mautrix.errors import MatrixError, MForbidden
 from mautrix.util.simple_lock import SimpleLock
 
-from .db import Portal as DBPortal, Message as DBMessage
+from .db import Portal as DBPortal, Message as DBMessage, Reaction as DBReaction
 from .config import Config
 from . import user as u, puppet as p, matrix as m
 
@@ -48,9 +50,11 @@ class Portal(DBPortal, BasePortal):
     backfill_lock: SimpleLock
     _msgid_dedup: Deque[int]
     _reqid_dedup: Set[str]
+    _reaction_dedup: Deque[Tuple[int, int, ReactionKey]]
 
     _main_intent: IntentAPI
     _last_participant_update: Set[int]
+    _reaction_lock: asyncio.Lock
 
     def __init__(self, twid: str, receiver: int, conv_type: ConversationType,
                  other_user: Optional[int] = None, mxid: Optional[RoomID] = None,
@@ -59,12 +63,14 @@ class Portal(DBPortal, BasePortal):
         self._create_room_lock = asyncio.Lock()
         self.log = self.log.getChild(twid)
         self._msgid_dedup = deque(maxlen=100)
+        self._reaction_dedup = deque(maxlen=100)
         self._reqid_dedup = set()
         self._last_participant_update = set()
 
         self.backfill_lock = SimpleLock("Waiting for backfilling to finish before handling %s",
                                         log=self.log)
         self._main_intent = None
+        self._reaction_lock = asyncio.Lock()
 
     @property
     def is_direct(self) -> bool:
@@ -73,7 +79,7 @@ class Portal(DBPortal, BasePortal):
     @property
     def main_intent(self) -> IntentAPI:
         if not self._main_intent:
-            raise ValueError("Portal must be postinited before main_intent can be used")
+            raise ValueError("Portal must be postinit()ed before main_intent can be used")
         return self._main_intent
 
     @classmethod
@@ -83,12 +89,31 @@ class Portal(DBPortal, BasePortal):
         cls.az = bridge.az
         cls.loop = bridge.loop
 
+    # region Misc
+
     async def _send_delivery_receipt(self, event_id: EventID) -> None:
         if event_id and self.config["bridge.delivery_receipts"]:
             try:
                 await self.az.intent.mark_read(self.mxid, event_id)
             except Exception:
                 self.log.exception("Failed to send delivery receipt for %s", event_id)
+
+    async def _upsert_reaction(self, existing: DBReaction, intent: IntentAPI, mxid: EventID,
+                               message: DBMessage, sender: Union['u.User', 'p.Puppet'],
+                               reaction: ReactionKey) -> None:
+        if existing:
+            self.log.debug(f"_upsert_reaction redacting {existing.mxid} and inserting {mxid}"
+                           f" (message: {message.mxid})")
+            await intent.redact(existing.mx_room, existing.mxid)
+            await existing.edit(reaction=reaction, mxid=mxid, mx_room=message.mx_room)
+        else:
+            self.log.debug(f"_upsert_reaction inserting {mxid} (message: {message.mxid})")
+            await DBReaction(mxid=mxid, mx_room=message.mx_room, tw_msgid=message.twid,
+                             tw_receiver=self.receiver, tw_sender=sender.twid,
+                             reaction=reaction).insert()
+
+    # endregion
+    # region Matrix event handling
 
     async def handle_matrix_message(self, sender: 'u.User', message: MessageEventContent,
                                     event_id: EventID) -> None:
@@ -105,11 +130,67 @@ class Portal(DBPortal, BasePortal):
         await msg.insert()
         self._reqid_dedup.remove(request_id)
         await self._send_delivery_receipt(event_id)
+        self.log.debug(f"Handled Matrix message {event_id} -> {resp_msg_id}")
 
-    async def handle_twitter_message(self, source: 'u.User', message: MessageData, request_id: str
-                                     ) -> None:
+    async def handle_matrix_reaction(self, sender: 'u.User', event_id: EventID,
+                                     reacting_to: EventID, reaction_val: str) -> None:
+        try:
+            reaction = ReactionKey.from_emoji(reaction_val)
+        except ValueError:
+            self.log.debug(f"Ignoring unsupported reaction {event_id} with value {reaction_val}")
+            return
+
+        message = await DBMessage.get_by_mxid(reacting_to, self.mxid)
+        if not message:
+            self.log.debug(f"Ignoring reaction to unknown event {reacting_to}")
+            return
+
+        existing = await DBReaction.get_by_twid(message.twid, message.receiver, sender.twid)
+        if existing and existing.reaction == reaction:
+            return
+
+        dedup_id = (message.twid, sender.twid, reaction)
+        self._reaction_dedup.appendleft(dedup_id)
+        async with self._reaction_lock:
+            await sender.client.conversation(self.twid).react(message.twid, reaction)
+            await self._upsert_reaction(existing, self.main_intent, event_id, message, sender,
+                                        reaction)
+            self.log.trace(f"{sender.mxid} reacted to {message.twid} with {reaction}")
+        await self._send_delivery_receipt(event_id)
+
+    async def handle_matrix_redaction(self, sender: 'u.User', event_id: EventID,
+                                      redaction_event_id: EventID) -> None:
+        if not self.mxid:
+            return
+
+        reaction = await DBReaction.get_by_mxid(event_id, self.mxid)
+        if reaction:
+            try:
+                await reaction.delete()
+                await sender.client.conversation(self.twid).delete_reaction(reaction.tw_msgid,
+                                                                            reaction.reaction)
+                await self._send_delivery_receipt(redaction_event_id)
+                self.log.trace(f"Removed {reaction} after Matrix redaction")
+            except Exception:
+                self.log.exception("Removing reaction failed")
+
+    async def handle_matrix_leave(self, user: 'u.User') -> None:
+        if self.is_direct:
+            self.log.info(f"{user.mxid} left private chat portal with {self.twid}")
+            if user.twid == self.receiver:
+                self.log.info(f"{user.mxid} was the recipient of this portal. "
+                              "Cleaning up and deleting...")
+                await self.cleanup_and_delete()
+        else:
+            self.log.debug(f"{user.mxid} left portal to {self.twid}")
+            # TODO cleanup if empty
+
+    # endregion
+    # region Twitter event handling
+
+    async def handle_twitter_message(self, source: 'u.User', sender: 'p.Puppet',
+                                     message: MessageData, request_id: str) -> None:
         msg_id = int(message.id)
-        sender_id = int(message.sender_id)
         if request_id in self._reqid_dedup:
             self.log.debug(f"Ignoring message {message.id} by {message.sender_id}"
                            " as it was sent by us (request_id in dedup queue)")
@@ -121,13 +202,59 @@ class Portal(DBPortal, BasePortal):
                            " as it was already handled (message.id found in database)")
         else:
             self._msgid_dedup.appendleft(msg_id)
-            sender = await p.Puppet.get_by_twid(sender_id)
             intent = sender.intent_for(self)
             content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text)
             event_id = await self._send_message(intent, content, timestamp=message.time)
             msg = DBMessage(mxid=event_id, mx_room=self.mxid, twid=msg_id, receiver=self.receiver)
             await msg.insert()
             await self._send_delivery_receipt(event_id)
+            self.log.debug(f"Handled Twitter message {msg_id} -> {event_id}")
+
+    async def handle_twitter_reaction_add(self, sender: 'p.Puppet', msg_id: int,
+                                          reaction: ReactionKey, time: datetime) -> None:
+        async with self._reaction_lock:
+            dedup_id = (msg_id, sender.twid, reaction)
+            if dedup_id in self._reaction_dedup:
+                return
+            self._reaction_dedup.appendleft(dedup_id)
+
+        existing = await DBReaction.get_by_twid(msg_id, self.receiver, sender.twid)
+        if existing and existing.reaction == reaction:
+            return
+
+        message = await DBMessage.get_by_twid(msg_id, self.receiver)
+        if not message:
+            self.log.debug(f"Ignoring reaction to unknown message {msg_id}")
+            return
+
+        intent = sender.intent_for(self)
+        mxid = await intent.react(message.mx_room, message.mxid, reaction.emoji, timestamp=time)
+        self.log.debug(f"{sender.twid} reacted to {message.mxid} -> {mxid}")
+        await self._upsert_reaction(existing, intent, mxid, message, sender, reaction)
+
+    async def handle_twitter_reaction_remove(self, sender: 'p.Puppet', msg_id: int,
+                                             key: ReactionKey) -> None:
+        reaction = await DBReaction.get_by_twid(msg_id, self.receiver, sender.twid)
+        if reaction and reaction.reaction == key:
+            try:
+                await sender.intent_for(self).redact(reaction.mx_room, reaction.mxid)
+            except MForbidden:
+                await self.main_intent.redact(reaction.mx_room, reaction.mxid)
+            await reaction.delete()
+            self.log.trace(f"Removed {reaction} after Twitter removal")
+
+    async def handle_twitter_receipt(self, sender: 'p.Puppet', read_up_to: int) -> None:
+        message = await DBMessage.get_by_twid(read_up_to, self.receiver)
+        if not message:
+            self.log.trace(f"Ignoring read receipt from {sender.twid} "
+                           f"up to unknown message {read_up_to}")
+            return
+
+        self.log.trace(f"{sender.twid} read messages up to {read_up_to} ({message.mxid})")
+        await sender.intent_for(self).mark_read(message.mx_room, message.mxid)
+
+    # endregion
+    # region Updating portal info
 
     async def update_info(self, conv: Conversation) -> None:
         if self.conv_type == ConversationType.ONE_TO_ONE:
@@ -171,6 +298,8 @@ class Portal(DBPortal, BasePortal):
             twid = int(participant.user_id)
             puppet = await p.Puppet.get_by_twid(twid)
             await puppet.intent_for(self).ensure_joined(self.mxid)
+            if participant.last_read_event_id:
+                await self.handle_twitter_receipt(puppet, int(participant.last_read_event_id))
 
         # Kick puppets who shouldn't be here
         for user_id in await self.main_intent.get_room_members(self.mxid):
@@ -179,8 +308,14 @@ class Portal(DBPortal, BasePortal):
                 await self.main_intent.kick_user(self.mxid, p.Puppet.get_mxid_from_id(twid),
                                                  reason="User had left this Twitter chat")
 
+    # endregion
+    # region Backfilling
+
     async def backfill(self, user: 'u.User', is_initial: bool = False) -> None:
         pass
+
+    # endregion
+    # region Bridge info state event
 
     @property
     def bridge_info_state_key(self) -> str:
@@ -216,6 +351,9 @@ class Portal(DBPortal, BasePortal):
         except Exception:
             self.log.warning("Failed to update bridge info", exc_info=True)
 
+    # endregion
+    # region Creating Matrix rooms
+
     async def create_matrix_room(self, source: 'u.User', info: Conversation) -> Optional[RoomID]:
         if self.mxid:
             try:
@@ -224,11 +362,7 @@ class Portal(DBPortal, BasePortal):
                 self.log.exception("Failed to update portal")
             return self.mxid
         async with self._create_room_lock:
-            try:
-                return await self._create_matrix_room(source, info)
-            except Exception:
-                self.log.exception("Failed to create portal")
-                return None
+            return await self._create_matrix_room(source, info)
 
     async def _update_matrix_room(self, source: 'u.User', info: Conversation) -> None:
         await self.main_intent.invite_user(self.mxid, source.mxid, check_cache=True)
@@ -324,26 +458,37 @@ class Portal(DBPortal, BasePortal):
 
         return self.mxid
 
+    # endregion
     # region Database getters
 
     async def postinit(self) -> None:
         self.by_twid[(self.twid, self.receiver)] = self
         if self.mxid:
             self.by_mxid[self.mxid] = self
-        if self.other_user:
-            self._main_intent = ((await p.Puppet.get_by_twid(self.other_user)).default_mxid_intent
-                                 if self.is_direct else self.az.intent)
+        if self.other_user and self.is_direct:
+            self._main_intent = (await p.Puppet.get_by_twid(self.other_user)).default_mxid_intent
+        elif not self.is_direct:
+            self._main_intent = self.az.intent
+
+    async def delete(self) -> None:
+        self.by_mxid.pop(self.mxid, None)
+        self.by_twid.pop((self.twid, self.receiver), None)
+        await super().delete()
+        await DBMessage.delete_all(self.mxid)
+
+    async def save(self) -> None:
+        await self.update()
 
     @classmethod
-    async def all_with_room(cls) -> List['Portal']:
+    async def all_with_room(cls) -> AsyncGenerator['Portal', None]:
         portals = await super().all_with_room()
         portal: cls
         for index, portal in enumerate(portals):
             try:
-                portals[index] = cls.by_twid[(portal.twid, portal.receiver)]
+                yield cls.by_twid[(portal.twid, portal.receiver)]
             except KeyError:
                 await portal.postinit()
-        return portals
+                yield portal
 
     @classmethod
     async def get_by_mxid(cls, mxid: RoomID) -> Optional['Portal']:
