@@ -88,6 +88,7 @@ class Portal(DBPortal, BasePortal):
         cls.matrix = bridge.matrix
         cls.az = bridge.az
         cls.loop = bridge.loop
+        cls.bridge = bridge
 
     # region Misc
 
@@ -119,6 +120,10 @@ class Portal(DBPortal, BasePortal):
                                     event_id: EventID) -> None:
         if not sender.client:
             self.log.debug(f"Ignoring message {event_id} as user is not connected")
+            return
+        elif ((message.get(self.bridge.real_user_content_key,
+                         False) and await p.Puppet.get_by_custom_mxid(sender.mxid))):
+            self.log.debug(f"Ignoring puppet-sent message by confirmed puppet user {sender.mxid}")
             return
         request_id = str(sender.client.new_request_id())
         self._reqid_dedup.add(request_id)
@@ -472,8 +477,9 @@ class Portal(DBPortal, BasePortal):
 
     async def delete(self) -> None:
         self.by_mxid.pop(self.mxid, None)
-        self.by_twid.pop((self.twid, self.receiver), None)
-        await super().delete()
+        self.mxid = None
+        self.encrypted = False
+        await self.update()
         await DBMessage.delete_all(self.mxid)
 
     async def save(self) -> None:

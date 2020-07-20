@@ -3,7 +3,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Dict, Optional, Type, TypeVar, List, Callable, Awaitable, Any
+from typing import Dict, Optional, Type, TypeVar, List, Callable, Awaitable, Any, Union
 import logging
 import asyncio
 
@@ -29,6 +29,7 @@ class TwitterPoller:
     # Rate limit for polling is 450 requests in 900 seconds per access token
     poll_sleep: int = 3
     poll_cursor: Optional[str]
+    dispatch_initial_resp: bool
     _poll_task: Optional[asyncio.Task]
     _handlers: HandlerMap
     _typing_in: Optional[Conversation]
@@ -65,7 +66,7 @@ class TwitterPoller:
             **self.poll_params,
         }
 
-    async def inbox_initial_state(self) -> InitialStateResponse:
+    async def inbox_initial_state(self, set_poll_cursor: bool = True) -> InitialStateResponse:
         """
         Get the initial DM inbox state, including conversations, user profiles and some messages.
 
@@ -82,7 +83,8 @@ class TwitterPoller:
         async with self.http.get(url, headers=self.headers) as resp:
             data = await check_error(resp)
             response = InitialStateResponse.deserialize(data["inbox_initial_state"])
-            self.poll_cursor = response.cursor
+            if set_poll_cursor:
+                self.poll_cursor = response.cursor
             return response
 
     async def _poll_once(self) -> PollResponse:
@@ -130,7 +132,7 @@ class TwitterPoller:
             except Exception:
                 self.log.exception(f"Error while handling event of type {type(event)}")
 
-    async def _dispatch_all(self, resp: PollResponse) -> None:
+    async def dispatch_all(self, resp: Union[PollResponse, InitialStateResponse]) -> None:
         for user in (resp.users or {}).values():
             await self.dispatch(user)
         for conversation in (resp.conversations or {}).values():
@@ -145,7 +147,9 @@ class TwitterPoller:
     async def _poll_forever(self) -> None:
         if not self.poll_cursor:
             self.log.debug("Poll cursor not set, calling initial state to get cursor")
-            await self.inbox_initial_state()
+            resp = await self.inbox_initial_state()
+            if self.dispatch_initial_resp:
+                await self.dispatch_all(resp)
         while True:
             try:
                 resp = await self._poll_once()
@@ -153,7 +157,7 @@ class TwitterPoller:
                 self.log.warning("Error while polling", exc_info=True)
                 await asyncio.sleep(self.poll_sleep * 5)
                 continue
-            await self._dispatch_all(resp)
+            await self.dispatch_all(resp)
             await asyncio.sleep(self.poll_sleep)
             if self._typing_in:
                 await self._typing_in.mark_typing()

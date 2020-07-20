@@ -98,6 +98,7 @@ class User(DBUser, BaseUser):
         await client.get_user_identifier()
 
         self.client = client
+        self.client.dispatch_initial_resp = True
         self.client.add_handler(Conversation, self.handle_conversation_update)
         self.client.add_handler(TwitterUser, self.handle_user_update)
         self.client.add_handler(MessageEntry, self.handle_message)
@@ -151,7 +152,13 @@ class User(DBUser, BaseUser):
 
     async def handle_conversation_update(self, evt: Conversation) -> None:
         portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid, conv_type=evt.type)
-        await portal.update_info(evt)
+        if not portal.mxid:
+            if self.config["bridge.create_portals_on_sync"]:
+                await portal.create_matrix_room(self, evt)
+        else:
+            # We don't want to do the invite_user and such things each time conversation info
+            # comes down polling, so if the room already exists, only call .update_info()
+            await portal.update_info(evt)
 
     async def handle_user_update(self, user: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(user.id)

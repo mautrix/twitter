@@ -70,9 +70,8 @@ bridge:
     # Maximum length of displayname
     displayname_max_length: 100
 
-    # Number of most recently active conversations to check when syncing chats.
-    # Set to 0 to remove limit.
-    sync_conversation_limit: 30
+    # Whether or not portals should be created automatically even if there's no incoming message.
+    create_portals_on_sync: true
     # Whether or not to use /sync to get read receipts and typing notifications when using your own
     # Matrix account as the Matrix puppet for your Twitter account.
     sync_with_custom_puppets: true

@@ -56,7 +56,7 @@ class Config(BaseBridgeConfig):
 
         copy("bridge.displayname_max_length")
 
-        copy("bridge.sync_conversation_limit")
+        copy("bridge.create_portals_on_sync")
         copy("bridge.sync_with_custom_puppets")
         copy("bridge.login_shared_secret")
         copy("bridge.federate_rooms")

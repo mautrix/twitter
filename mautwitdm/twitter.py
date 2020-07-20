@@ -45,6 +45,7 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
         self.log = log or logging.getLogger("mautwitdm")
         self.node_id = node_id or getnode()
         self.poll_cursor = None
+        self.dispatch_initial_resp = False
         self._handlers = defaultdict(lambda: [])
         self.active = True
         self._typing_in = None

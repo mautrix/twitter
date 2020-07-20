@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 HelpCacheKey = NamedTuple('HelpCacheKey', is_management=bool, is_portal=bool, is_admin=bool,
                           is_logged_in=bool)
 SECTION_AUTH = HelpSection("Authentication", 10, "")
+SECTION_CONNECTION = HelpSection("Connection management", 15, "")
 
 
 class CommandEvent(BaseCommandEvent):

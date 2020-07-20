@@ -26,8 +26,8 @@
   * [ ] † Typing notifications
   * [ ] † Read receipts
 * Misc
-  * [ ] Automatic portal creation
-    * [ ] At startup
+  * [x] Automatic portal creation
+    * [x] At startup
     * [x] When receiving invite or message
   * [ ] Private chat creation by inviting Matrix puppet of Twitter user to new room
   * [ ] Option to use own Matrix account for messages sent from other Twitter clients
