@@ -63,6 +63,15 @@ class Puppet:
         return cls(**row)
 
     @classmethod
+    async def get_by_custom_mxid(cls, mxid: UserID) -> Optional['Puppet']:
+        row = await cls.db.fetchrow("SELECT twid, name, photo_url, photo_mxc, is_registered,"
+                                    "       custom_mxid, access_token, next_batch "
+                                    "FROM puppet WHERE custom_mxid=$1", mxid)
+        if not row:
+            return None
+        return cls(**row)
+
+    @classmethod
     async def all_with_custom_mxid(cls) -> List['Puppet']:
         rows = await cls.db.fetch("SELECT twid, name, photo_url, photo_mxc, is_registered,"
                                   "       custom_mxid, access_token, next_batch "

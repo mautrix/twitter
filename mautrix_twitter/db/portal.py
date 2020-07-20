@@ -17,10 +17,10 @@ from typing import Optional, ClassVar, List, TYPE_CHECKING
 
 from attr import dataclass
 
-from mautrix.types import UserID, RoomID
+from mautrix.types import RoomID
 from mautrix.util.async_db import Database
 
-from mautwitdm import ConversationType
+from mautwitdm.types import ConversationType
 
 fake_db = Database("") if TYPE_CHECKING else None
 
@@ -40,13 +40,13 @@ class Portal:
     async def insert(self) -> None:
         q = ("INSERT INTO portal (twid, receiver, conv_type, other_user, mxid, name, encrypted) "
              "VALUES ($1, $2, $3, $4, $5, $6, $7)")
-        await self.db.execute(q, self.twid, self.receiver, self.other_user, self.conv_type.value,
+        await self.db.execute(q, self.twid, self.receiver, self.conv_type.value, self.other_user,
                               self.mxid, self.name, self.encrypted)
 
     async def update(self) -> None:
         q = ("UPDATE portal SET conv_type=$3, other_user=$4, mxid=$5, name=$6, encrypted=$7 "
              "WHERE twid=$1 AND receiver=$2")
-        await self.db.execute(q, self.twid, self.receiver, self.other_user, self.conv_type.value,
+        await self.db.execute(q, self.twid, self.receiver, self.conv_type.value, self.other_user,
                               self.mxid, self.name, self.encrypted)
 
     @classmethod
@@ -56,8 +56,8 @@ class Portal:
         row = await cls.db.fetchrow(q, mxid)
         if not row:
             return None
-        row["conv_type"] = ConversationType(row["conv_type"])
-        return cls(**row)
+        data = {**row}
+        return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
 
     @classmethod
     async def get_by_twid(cls, twid: str, receiver: int = 0) -> Optional['Portal']:
@@ -66,5 +66,12 @@ class Portal:
         row = await cls.db.fetchrow(q, twid, receiver)
         if not row:
             return None
-        row["conv_type"] = ConversationType(row["conv_type"])
-        return cls(**row)
+        data = {**row}
+        return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
+
+    @classmethod
+    async def all_with_room(cls) -> List['Portal']:
+        q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
+             'WHERE mxid IS NOT NULL')
+        rows = await cls.db.fetch(q)
+        return [cls(**row) for row in rows]

@@ -16,8 +16,9 @@
 from typing import TYPE_CHECKING
 
 from mautrix.bridge import BaseMatrixHandler
+from mautrix.types import Event, ReactionEvent, MessageEvent, StateEvent, EncryptedEvent
 
-from . import commands as com
+from . import commands as com, puppet as pu
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
@@ -33,3 +34,9 @@ class MatrixHandler(BaseMatrixHandler):
         self.user_id_suffix = f"{suffix}:{homeserver}"
 
         super().__init__(command_processor=com.CommandProcessor(bridge), bridge=bridge)
+
+    def filter_matrix_event(self, evt: Event) -> bool:
+        if not isinstance(evt, (ReactionEvent, MessageEvent, StateEvent, EncryptedEvent)):
+            return True
+        return (evt.sender == self.az.bot_mxid
+                or pu.Puppet.get_id_from_mxid(evt.sender) is not None)

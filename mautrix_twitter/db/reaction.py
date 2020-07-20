@@ -17,10 +17,9 @@ from typing import Optional, ClassVar, TYPE_CHECKING
 
 from attr import dataclass
 
+from mautwitdm.types import ReactionKey
 from mautrix.types import RoomID, EventID
 from mautrix.util.async_db import Database
-
-from mautwitdm import ReactionKey
 
 fake_db = Database("") if TYPE_CHECKING else None
 
@@ -53,8 +52,8 @@ class Reaction:
         row = await cls.db.fetchrow(q, mxid, mx_room)
         if not row:
             return None
-        row["reaction"] = ReactionKey(row["reaction"])
-        return cls(**row)
+        data = {**row}
+        return cls(reaction=ReactionKey(data.pop("reaction")), **data)
 
     @classmethod
     async def get_by_twid(cls, tw_msgid: int, tw_sender: int, tw_receiver: int = 0
@@ -64,5 +63,5 @@ class Reaction:
         row = await cls.db.fetchrow(q, tw_msgid, tw_sender, tw_receiver)
         if not row:
             return None
-        row["reaction"] = ReactionKey(row["reaction"])
-        return cls(**row)
+        data = {**row}
+        return cls(reaction=ReactionKey(data.pop("reaction")), **data)

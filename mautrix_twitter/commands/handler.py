@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 HelpCacheKey = NamedTuple('HelpCacheKey', is_management=bool, is_portal=bool, is_admin=bool,
                           is_logged_in=bool)
+SECTION_AUTH = HelpSection("Authentication", 10, "")
 
 
 class CommandEvent(BaseCommandEvent):
@@ -55,17 +56,13 @@ class CommandHandler(BaseCommandHandler):
 
     management_only: bool
     needs_auth: bool
-    needs_puppeting: bool
-    needs_matrix_puppeting: bool
     needs_admin: bool
 
     def __init__(self, handler: Callable[[CommandEvent], Awaitable[EventID]],
                  management_only: bool, name: str, help_text: str, help_args: str,
-                 help_section: HelpSection, needs_auth: bool, needs_puppeting: bool,
-                 needs_matrix_puppeting: bool, needs_admin: bool) -> None:
+                 help_section: HelpSection, needs_auth: bool, needs_admin: bool) -> None:
         super().__init__(handler, management_only, name, help_text, help_args, help_section,
-                         needs_auth=needs_auth, needs_puppeting=needs_puppeting,
-                         needs_matrix_puppeting=needs_matrix_puppeting, needs_admin=needs_admin)
+                         needs_auth=needs_auth, needs_admin=needs_admin)
 
     async def get_permission_error(self, evt: CommandEvent) -> Optional[str]:
         if self.management_only and not evt.is_management:

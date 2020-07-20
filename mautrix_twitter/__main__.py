@@ -40,6 +40,7 @@ class TwitterBridge(Bridge):
     matrix_class = MatrixHandler
 
     db: Database
+    matrix: MatrixHandler
     config: Config
     state_store: PgBridgeStateStore
 
@@ -57,19 +58,34 @@ class TwitterBridge(Bridge):
         self.add_startup_actions(await User.init_cls(self))
         self.add_startup_actions(await Puppet.init_cls(self))
         Portal.init_cls(self)
+        if self.config["bridge.resend_bridge_info"]:
+            self.add_startup_actions(self.resend_bridge_info())
         await super().start()
 
-    async def get_user(self, user_id: UserID) -> 'BaseUser':
-        pass
+    def prepare_stop(self) -> None:
+        self.add_shutdown_actions(user.stop() for user in User.by_twid.values())
+        for puppet in Puppet.by_custom_mxid.values():
+            puppet.stop()
 
-    async def get_portal(self, room_id: RoomID) -> 'BasePortal':
-        pass
+    async def resend_bridge_info(self) -> None:
+        self.config["bridge.resend_bridge_info"] = False
+        self.config.save()
+        self.log.info("Re-sending bridge info state event to all portals")
+        for portal in await Portal.all_with_room():
+            await portal.update_bridge_info()
+        self.log.info("Finished re-sending bridge info state events")
 
-    async def get_puppet(self, user_id: UserID, create: bool = False) -> 'BasePuppet':
-        pass
+    async def get_user(self, user_id: UserID) -> User:
+        return await User.get_by_mxid(user_id)
 
-    async def get_double_puppet(self, user_id: UserID) -> 'BasePuppet':
-        pass
+    async def get_portal(self, room_id: RoomID) -> Portal:
+        return await Portal.get_by_mxid(room_id)
+
+    async def get_puppet(self, user_id: UserID, create: bool = False) -> Puppet:
+        return await Puppet.get_by_mxid(user_id, create=create)
+
+    async def get_double_puppet(self, user_id: UserID) -> Puppet:
+        return await Puppet.get_by_custom_mxid(user_id)
 
 
 TwitterBridge().run()
