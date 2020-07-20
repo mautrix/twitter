@@ -11,6 +11,7 @@ from mautrix.types import SerializableAttrs
 
 from .message_entity import MessageEntities
 from .message_attachment import MessageAttachment
+from .conversation import Conversation
 from .util import StringTimestamp
 
 
@@ -18,9 +19,10 @@ from .util import StringTimestamp
 class MessageData(SerializableAttrs['MessageData']):
     id: str
     time: StringTimestamp
-    recipient_id: str
     sender_id: str
     text: str
+    recipient_id: Optional[str] = None
+    conversation_id: Optional[str] = None
     entities: Optional[MessageEntities] = None
     attachment: Optional[MessageAttachment] = None
 
@@ -30,6 +32,8 @@ class MessageEntry(SerializableAttrs['MessageEntry']):
     id: str
     time: StringTimestamp
     affects_sort: bool
-    request_id: str
     conversation_id: str
     message_data: MessageData
+    request_id: Optional[str] = None
+
+    conversation: Optional[Conversation] = None

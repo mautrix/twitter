@@ -10,6 +10,7 @@ from attr import dataclass
 from mautrix.types import SerializableAttrs
 
 from .message import MessageEntry
+from .conversation import Conversation
 from .reaction import ReactionDeleteEntry, ReactionCreateEntry
 from .util import StringTimestamp
 
@@ -22,14 +23,18 @@ class TrustConversationEntry(SerializableAttrs['TrustConversationEntry']):
     conversation_id: str
     reason: str
 
+    conversation: Optional[Conversation] = None
+
 
 @dataclass
 class ConversationCreateEntry(SerializableAttrs['ConversationCreateEntry']):
     id: str
     time: StringTimestamp
     affects_sort: bool
-    request_id: str
     conversation_id: str
+    request_id: Optional[str] = None
+
+    conversation: Optional[Conversation] = None
 
 
 @dataclass
@@ -41,9 +46,23 @@ class ConversationNameUpdateEntry(SerializableAttrs['ConversationNameUpdateEntry
     conversation_name: str
     by_user_id: str
 
+    conversation: Optional[Conversation] = None
+
+
+@dataclass
+class ConversationReadEntry(SerializableAttrs['ConversationReadEntry']):
+    id: str
+    last_read_event_id: str
+    time: StringTimestamp
+    conversation_id: str
+    affects_sort: bool
+
+    conversation: Optional[Conversation] = None
+
 
 EntryType = Union[MessageEntry, TrustConversationEntry, ConversationCreateEntry,
-                  ConversationNameUpdateEntry, ReactionCreateEntry, ReactionCreateEntry]
+                  ConversationNameUpdateEntry, ReactionCreateEntry, ReactionCreateEntry,
+                  ConversationReadEntry]
 
 
 @dataclass
@@ -54,10 +73,11 @@ class Entry(SerializableAttrs['Entry']):
     conversation_name_update: Optional[ConversationNameUpdateEntry] = None
     reaction_create: Optional[ReactionCreateEntry] = None
     reaction_delete: Optional[ReactionDeleteEntry] = None
+    conversation_read: Optional[ConversationReadEntry] = None
 
     @property
     def all_types(self) -> List[EntryType]:
         items = (self.conversation_create, self.conversation_name_update, self.trust_conversation,
-                 self.message, self.reaction_create, self.reaction_delete)
+                 self.message, self.reaction_create, self.reaction_delete, self.conversation_read)
         return [item for item in items
                 if item is not None]

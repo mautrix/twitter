@@ -3,13 +3,14 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Dict
+from typing import Dict, Optional
 
 from attr import dataclass
 
 from mautrix.types import SerializableAttrs, SerializableEnum
 
 from .util import StringTimestamp
+from .conversation import Conversation
 
 
 class ReactionKey(SerializableEnum):
@@ -65,6 +66,8 @@ class ReactionCreateEntry(SerializableAttrs['ReactionCreateEntry']):
     reaction_key: ReactionKey
     sender_id: str
 
+    conversation: Optional[Conversation] = None
+
 
 @dataclass
 class ReactionDeleteEntry(SerializableAttrs['ReactionDeleteEntry']):
@@ -75,3 +78,5 @@ class ReactionDeleteEntry(SerializableAttrs['ReactionDeleteEntry']):
     message_id: str
     reaction_key: ReactionKey
     sender_id: str
+
+    conversation: Optional[Conversation] = None

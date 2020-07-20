@@ -5,8 +5,10 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 from typing import Any
 import json
+import time
 
 from aiohttp import ClientResponse
+from multidict import CIMultiDictProxy
 
 
 class TwitterError(Exception):
@@ -17,6 +19,24 @@ class TwitterError(Exception):
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
+
+
+class RateLimitError(TwitterError):
+    limit: int
+    remaining: int
+    reset: int
+
+    def __init__(self, code: int, message: str, headers: CIMultiDictProxy[str]) -> None:
+        self.code = code
+        self.message = message
+        # TODO make sure this works
+        print(headers)
+        self.limit = int(headers["x-rate-limit-limit"])
+        # self.remaining = int(headers["x-rate-limit-remaining"])
+        self.reset = int(headers["x-rate-limit-reset"])
+        time_till_reset = int(time.time() - self.reset)
+        Exception.__init__(self, f"Rate limit exceeded. Will reset in {time_till_reset} seconds "
+                                 f"(endpoint is limited to {self.limit} requests in 15 minutes)")
 
 
 async def check_error(resp: ClientResponse) -> Any:
@@ -32,7 +52,11 @@ async def check_error(resp: ClientResponse) -> Any:
 
     try:
         error = resp_data["errors"][0]
-        raise TwitterError(error["code"], error["message"])
-    except KeyError:
+        code = error["code"]
+        message = error["message"]
+    except (KeyError, IndexError):
         resp.raise_for_status()
         raise
+    if code == 88:
+        raise RateLimitError(code, message, resp.headers)
+    raise TwitterError(code, message)

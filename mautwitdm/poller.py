@@ -25,7 +25,8 @@ class TwitterPoller:
     http: ClientSession
     headers: Dict[str, str]
 
-    poll_sleep: int = 1
+    # Rate limit for polling is 450 requests in 900 seconds per access token
+    poll_sleep: int = 3
     poll_cursor: Optional[str]
     _poll_task: Optional[asyncio.Task]
     _handlers: HandlerMap
@@ -122,7 +123,22 @@ class TwitterPoller:
             event: The event to dispatch.
         """
         for handler in self._handlers[type(event)]:
-            await handler(event)
+            try:
+                await handler(event)
+            except Exception:
+                self.log.exception(f"Error while handling event of type {type(event)}")
+
+    async def _dispatch_all(self, resp: PollResponse) -> None:
+        for user in (resp.users or {}).values():
+            await self.dispatch(user)
+        for conversation in (resp.conversations or {}).values():
+            await self.dispatch(conversation)
+        for entry in resp.entries or []:
+            if not entry:
+                continue
+            for entry_type in entry.all_types:
+                entry_type.conversation = resp.conversations[entry_type.conversation_id]
+                await self.dispatch(entry_type)
 
     async def _poll_forever(self) -> None:
         if not self.poll_cursor:
@@ -135,13 +151,7 @@ class TwitterPoller:
                 self.log.warning("Error while polling", exc_info=True)
                 await asyncio.sleep(self.poll_sleep * 5)
                 continue
-            for user in (resp.users or {}).values():
-                await self.dispatch(user)
-            for conversation in (resp.conversations or {}).values():
-                await self.dispatch(conversation)
-            for entry in resp.entries or []:
-                for entry_type in entry.all_types:
-                    await self.dispatch(entry_type)
+            await self._dispatch_all(resp)
             await asyncio.sleep(self.poll_sleep)
 
     def start(self) -> asyncio.Task:
@@ -152,12 +162,14 @@ class TwitterPoller:
         Returns:
             The created asyncio task.
         """
+        self.log.debug("Starting poll task")
         self._poll_task = self.loop.create_task(self.poll_forever())
         return self._poll_task
 
     def stop(self) -> None:
         """Stop the ongoing poll task. Any ongoing handlers will also be cancelled."""
         if self._poll_task:
+            self.log.debug("Cancelling ongoing poll task")
             self._poll_task.cancel()
 
     def add_handler(self, event_type: Type[T], handler: Handler) -> None:
