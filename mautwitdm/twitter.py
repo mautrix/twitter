@@ -16,13 +16,14 @@ from yarl import URL
 from .types import User
 from .conversation import Conversation
 from .uploader import TwitterUploader
+from .streamer import TwitterStreamer
 from .poller import TwitterPoller
 from .errors import check_error
 
 Tokens = NamedTuple('Tokens', auth_token=str, csrf_token=str)
 
 
-class TwitterAPI(TwitterUploader, TwitterPoller):
+class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
     """The main entrypoint for using the internal Twitter DM API."""
     base_url: URL = URL("https://api.twitter.com/1.1")
     dm_url: URL = base_url / "dm"
@@ -33,9 +34,9 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
 
     node_id: int
     active: bool
+    user_agent: str
 
     _csrf_token: str
-    _typing_in: Optional[Conversation]
 
     def __init__(self, http: Optional[ClientSession] = None, log: Optional[logging.Logger] = None,
                  loop: Optional[asyncio.AbstractEventLoop] = None, node_id: Optional[int] = None
@@ -49,6 +50,10 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
         self._handlers = defaultdict(lambda: [])
         self.active = True
         self._typing_in = None
+        self.user_agent = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:78.0) "
+                           "Gecko/20100101 Firefox/78.0")
+        self.skip_poll_wait = asyncio.Event()
+        self.topics = set()
 
     def set_tokens(self, auth_token: str, csrf_token: str) -> None:
         """
@@ -97,8 +102,7 @@ class TwitterAPI(TwitterUploader, TwitterPoller):
             # Hardcoded authorization header from the web app
             "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
                              "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:78.0) "
-                          "Gecko/20100101 Firefox/78.0",
+            "User-Agent": self.user_agent,
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.5",
             "DNT": "1",

@@ -114,7 +114,7 @@ class User(DBUser, BaseUser):
         self.by_twid[self.twid] = self
 
         await self.update()
-        self.client.start()
+        self.client.start_polling()
 
         puppet = await pu.Puppet.get_by_twid(self.twid)
         await puppet.update_info(user_info)
@@ -127,12 +127,12 @@ class User(DBUser, BaseUser):
 
     async def stop(self) -> None:
         if self.client:
-            self.client.stop()
+            self.client.stop_polling()
         await self.update()
 
     async def logout(self) -> None:
         if self.client:
-            self.client.stop()
+            self.client.stop_polling()
         puppet = await pu.Puppet.get_by_twid(self.twid, create=False)
         if puppet and puppet.is_real_user:
             await puppet.switch_mxid(None, None)

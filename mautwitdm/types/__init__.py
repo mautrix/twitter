@@ -12,3 +12,4 @@ from .entry import (Entry, TrustConversationEntry, ConversationReadEntry, Conver
                     ConversationNameUpdateEntry)
 from .response import (SendResponse, PollResponse, InitialStateResponse, MediaUploadResponse,
                        FetchConversationResponse, TimelineStatus)
+from .stream_payload import StreamEvent, DMUpdateEvent, DMTypingEvent

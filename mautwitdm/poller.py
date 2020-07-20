@@ -13,25 +13,27 @@ from yarl import URL
 from .types import PollResponse, InitialStateResponse
 from .errors import check_error
 from .conversation import Conversation
+from .dispatcher import TwitterDispatcher
 
 T = TypeVar('T')
 Handler = Callable[[T], Awaitable[Any]]
 HandlerMap = Dict[Type[T], List[Handler]]
 
 
-class TwitterPoller:
+class TwitterPoller(TwitterDispatcher):
+    """This class handles polling for new messages using ``/dm/user_updates.json``."""
     dm_url: URL
+
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
     http: ClientSession
     headers: Dict[str, str]
+    skip_poll_wait: asyncio.Event
 
-    # Rate limit for polling is 450 requests in 900 seconds per access token
     poll_sleep: int = 3
     poll_cursor: Optional[str]
     dispatch_initial_resp: bool
     _poll_task: Optional[asyncio.Task]
-    _handlers: HandlerMap
     _typing_in: Optional[Conversation]
 
     @property
@@ -119,19 +121,6 @@ class TwitterPoller:
             if raise_exceptions:
                 raise
 
-    async def dispatch(self, event: T) -> None:
-        """
-        Dispatch an event to handlers registered with :meth:`add_handler`.
-
-        Args:
-            event: The event to dispatch.
-        """
-        for handler in self._handlers[type(event)]:
-            try:
-                await handler(event)
-            except Exception:
-                self.log.exception(f"Error while handling event of type {type(event)}")
-
     async def dispatch_all(self, resp: Union[PollResponse, InitialStateResponse]) -> None:
         for user in (resp.users or {}).values():
             await self.dispatch(user)
@@ -158,14 +147,17 @@ class TwitterPoller:
                 await asyncio.sleep(self.poll_sleep * 5)
                 continue
             await self.dispatch_all(resp)
-            await asyncio.sleep(self.poll_sleep)
+            try:
+                await asyncio.wait_for(self.skip_poll_wait.wait(), self.poll_sleep)
+            except asyncio.TimeoutError:
+                pass
             if self._typing_in:
                 await self._typing_in.mark_typing()
 
-    def start(self) -> asyncio.Task:
+    def start_polling(self) -> asyncio.Task:
         """
         Start polling forever in the background. This calls :meth:`poll_forever` and puts it in an
-        asyncio Task. The task is stored so it can be cancelled with :meth:`stop`.
+        asyncio Task. The task is stored so it can be cancelled with :meth:`stop_polling`.
 
         Returns:
             The created asyncio task.
@@ -174,28 +166,8 @@ class TwitterPoller:
         self._poll_task = self.loop.create_task(self.poll_forever())
         return self._poll_task
 
-    def stop(self) -> None:
+    def stop_polling(self) -> None:
         """Stop the ongoing poll task. Any ongoing handlers will also be cancelled."""
         if self._poll_task:
             self.log.debug("Cancelling ongoing poll task")
             self._poll_task.cancel()
-
-    def add_handler(self, event_type: Type[T], handler: Handler) -> None:
-        """
-        Add an event handler.
-
-        Args:
-            event_type: The type of event to handle.
-            handler: The handler function.
-        """
-        self._handlers[event_type].append(handler)
-
-    def remove_handler(self, event_type: Type[T], handler: Handler) -> None:
-        """
-        Remove an event handler.
-
-        Args:
-            event_type: The type of event the handler was registered for.
-            handler: The handler function to remove.
-        """
-        self._handlers[event_type].remove(handler)
