@@ -218,7 +218,8 @@ class Portal(DBPortal, BasePortal):
             event_id = None
             if message.attachment:
                 content = await self._handle_twitter_attachment(source, sender, message)
-                event_id = await self._send_message(intent, content, timestamp=message.time)
+                if content:
+                    event_id = await self._send_message(intent, content, timestamp=message.time)
             if message.text and not message.text.isspace():
                 content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text)
                 event_id = await self._send_message(intent, content, timestamp=message.time)
