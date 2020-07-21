@@ -112,10 +112,10 @@ class TweetAttachmentStatus(SerializableAttrs['TweetAttachmentStatus']):
     quote_count: int
     favorited: bool
     retweeted: bool
-    possibly_sensitive: bool
-    possibly_sensitive_editable: bool
-    lang: str
-    supplemental_language: Optional[str]
+    lang: Optional[str] = None
+    supplemental_language: Optional[str] = None
+    possibly_sensitive: Optional[bool] = None
+    possibly_sensitive_editable: Optional[bool] = None
     entities: Optional[MessageEntities] = None
     extended_entities: Optional[ExtendedMessageEntities] = None
 
