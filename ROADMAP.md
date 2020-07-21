@@ -6,10 +6,10 @@
     * [ ] Formatting
     * [ ] Media
       * [ ] Images
-      * [ ] Audio
-      * [ ] Video
+      * [ ] Videos
+      * [ ] Gifs
       * [ ] Files
-      * [ ] Stickers
+      * [ ] ‡ Audio
   * [x] Message reactions
   * [ ] Typing notifications
   * [x] Read receipts
@@ -18,6 +18,10 @@
     * [x] Text
     * [ ] Formatting
     * [ ] Media
+      * [x] Images
+      * [ ] Videos
+      * [ ] Gifs
+      * [ ] Files
   * [x] Message reactions
   * [ ] Message history
     * [ ] When creating portal

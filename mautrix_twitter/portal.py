@@ -17,13 +17,15 @@ from typing import (Dict, Tuple, Optional, List, Deque, Set, Any, Union, AsyncGe
                     TYPE_CHECKING, cast)
 from collections import deque
 from datetime import datetime
+from os import path
 import asyncio
 
-from mautwitdm.types import ConversationType, Conversation, MessageData, Participant, ReactionKey
+from mautwitdm.types import (ConversationType, Conversation, MessageData, Participant, ReactionKey,
+                             MessageAttachmentMedia)
 from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
-                           TextMessageEventContent)
+                           TextMessageEventContent, MediaMessageEventContent, ImageInfo)
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.util.simple_lock import SimpleLock
 
@@ -33,6 +35,11 @@ from . import user as u, puppet as p, matrix as m
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
+
+try:
+    from mautrix.crypto.attachments import encrypt_attachment, decrypt_attachment
+except ImportError:
+    encrypt_attachment = decrypt_attachment = None
 
 StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
@@ -122,7 +129,7 @@ class Portal(DBPortal, BasePortal):
             self.log.debug(f"Ignoring message {event_id} as user is not connected")
             return
         elif ((message.get(self.bridge.real_user_content_key,
-                         False) and await p.Puppet.get_by_custom_mxid(sender.mxid))):
+                           False) and await p.Puppet.get_by_custom_mxid(sender.mxid))):
             self.log.debug(f"Ignoring puppet-sent message by confirmed puppet user {sender.mxid}")
             return
         request_id = str(sender.client.new_request_id())
@@ -208,12 +215,61 @@ class Portal(DBPortal, BasePortal):
         else:
             self._msgid_dedup.appendleft(msg_id)
             intent = sender.intent_for(self)
-            content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text)
-            event_id = await self._send_message(intent, content, timestamp=message.time)
-            msg = DBMessage(mxid=event_id, mx_room=self.mxid, twid=msg_id, receiver=self.receiver)
-            await msg.insert()
-            await self._send_delivery_receipt(event_id)
-            self.log.debug(f"Handled Twitter message {msg_id} -> {event_id}")
+            event_id = None
+            if message.attachment:
+                content = await self._handle_twitter_attachment(source, sender, message)
+                event_id = await self._send_message(intent, content, timestamp=message.time)
+            if message.text and not message.text.isspace():
+                content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text)
+                event_id = await self._send_message(intent, content, timestamp=message.time)
+            if event_id:
+                msg = DBMessage(mxid=event_id, mx_room=self.mxid, twid=msg_id,
+                                receiver=self.receiver)
+                await msg.insert()
+                await self._send_delivery_receipt(event_id)
+                self.log.debug(f"Handled Twitter message {msg_id} -> {event_id}")
+
+    async def _handle_twitter_attachment(self, source: 'u.User', sender: 'p.Puppet',
+                                         message: MessageData
+                                         ) -> Optional[MediaMessageEventContent]:
+        attachment = content = None
+        intent = sender.intent_for(self)
+        all_attachments = message.attachment
+        if all_attachments.photo:
+            attachment = all_attachments.photo
+            content = await self._handle_twitter_image(source, attachment, intent)
+        if attachment:
+            # Remove the attachment link from message.text
+            start, end = attachment.indices
+            message.text = message.text[:start] + message.text[end:]
+        return content
+
+    async def _handle_twitter_image(self, source: 'u.User', attachment: MessageAttachmentMedia,
+                                    intent: IntentAPI) -> MediaMessageEventContent:
+        file_name = path.basename(attachment.media_url_https)
+        data, mime_type = await source.client.download_media(attachment)
+
+        upload_mime_type = mime_type
+        upload_file_name = file_name
+        decryption_info = None
+        if self.encrypted and encrypt_attachment:
+            data, decryption_info = encrypt_attachment(data)
+            upload_mime_type = "application/octet-stream"
+            upload_file_name = None
+
+        mxc = await intent.upload_media(data, mime_type=upload_mime_type,
+                                        filename=upload_file_name)
+
+        if decryption_info:
+            decryption_info.url = mxc
+            mxc = None
+
+        info = ImageInfo(mimetype=mime_type, size=len(data),
+                         width=attachment.original_info.width,
+                         height=attachment.original_info.height)
+        return MediaMessageEventContent(body=file_name, url=mxc, info=info,
+                                        file=decryption_info, msgtype=MessageType.IMAGE,
+                                        external_url=attachment.media_url_https)
 
     async def handle_twitter_reaction_add(self, sender: 'p.Puppet', msg_id: int,
                                           reaction: ReactionKey, time: datetime) -> None:

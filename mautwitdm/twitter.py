@@ -13,7 +13,7 @@ import asyncio
 from aiohttp import ClientSession
 from yarl import URL
 
-from .types import User
+from .types import User, MessageAttachmentMedia
 from .conversation import Conversation
 from .uploader import TwitterUploader
 from .streamer import TwitterStreamer
@@ -21,6 +21,7 @@ from .poller import TwitterPoller
 from .errors import check_error
 
 Tokens = NamedTuple('Tokens', auth_token=str, csrf_token=str)
+DownloadResp = NamedTuple('DownloadResp', data=bytes, mime_type=str)
 
 
 class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
@@ -113,6 +114,17 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
             "x-twitter-active-user": "yes",
             "x-csrf-token": self._csrf_token,
         }
+
+    async def download_media(self, media: MessageAttachmentMedia) -> DownloadResp:
+        headers = {
+            "Accept": "*/*",
+            "DNT": "1",
+            "Referer": "https://twitter.com/messages",
+            "User-Agent": self.user_agent,
+        }
+        async with self.http.get(media.media_url_https, headers=headers) as resp:
+            await check_error(resp)
+            return DownloadResp(data=await resp.read(), mime_type=resp.headers["Content-Type"])
 
     def new_request_id(self) -> UUID:
         """
