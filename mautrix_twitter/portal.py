@@ -508,6 +508,12 @@ class Portal(DBPortal, BasePortal):
                         self.log.debug("Failed to join custom puppet into newly created portal",
                                        exc_info=True)
 
+            if not info.trusted:
+                msg = "This is a message request. Replying here will accept the request."
+                if info.low_quality:
+                    msg += " Note: Twitter has marked this as a \"low quality\" message."
+                await self.main_intent.send_notice(self.mxid, msg)
+
             # TODO
             # in_community = await source._community_helper.add_room(source._community_id, self.mxid)
             # DBUserPortal(user=source.fbid, portal=self.fbid, portal_receiver=self.fb_receiver,
