@@ -125,6 +125,11 @@ class User(DBUser, BaseUser):
         except Exception:
             self.log.exception("Failed to automatically enable custom puppet")
 
+    async def get_info(self) -> TwitterUser:
+        settings = await self.client.get_settings()
+        self.username = settings["screen_name"]
+        return (await self.client.lookup_users(usernames=[self.username]))[0]
+
     async def stop(self) -> None:
         if self.client:
             self.client.stop_polling()

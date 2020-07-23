@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from mautrix.bridge import Bridge, BaseUser, BasePuppet, BasePortal
+from mautrix.bridge import Bridge
 from mautrix.bridge.state_store.asyncpg import PgBridgeStateStore
 from mautrix.types import RoomID, UserID
 from mautrix.util.async_db import Database
@@ -25,6 +25,7 @@ from .matrix import MatrixHandler
 from .user import User
 from .portal import Portal
 from .puppet import Puppet
+from .web import ProvisioningAPI
 
 
 class TwitterBridge(Bridge):
@@ -43,6 +44,7 @@ class TwitterBridge(Bridge):
     matrix: MatrixHandler
     config: Config
     state_store: PgBridgeStateStore
+    provisioning_api: ProvisioningAPI
 
     def make_state_store(self) -> None:
         self.state_store = PgBridgeStateStore(self.db, self.get_puppet, self.get_double_puppet)
@@ -51,6 +53,12 @@ class TwitterBridge(Bridge):
         self.db = Database(self.config["appservice.database"], upgrade_table=upgrade_table,
                            loop=self.loop)
         init_db(self.db)
+
+    def prepare_bridge(self) -> None:
+        super().prepare_bridge()
+        cfg = self.config["appservice.provisioning"]
+        self.provisioning_api = ProvisioningAPI(cfg["shared_secret"])
+        self.az.app.add_subapp(cfg["prefix"], self.provisioning_api.app)
 
     async def start(self) -> None:
         await self.db.start()

@@ -30,9 +30,7 @@ async def ping(evt: CommandEvent) -> None:
     if not await evt.sender.is_logged_in():
         await evt.reply("You're not logged into Twitter")
         return
-    settings = await evt.sender.client.get_settings()
-    evt.sender.username = settings["screen_name"]
-    user_info = (await evt.sender.client.lookup_users(usernames=[evt.sender.username]))[0]
+    user_info = await evt.sender.get_info()
     await evt.reply(f"You're logged in as {user_info.name} "
                     f"([@{evt.sender.username}](https://twitter.com/{evt.sender.username}), "
                     f"user ID: {evt.sender.twid})")

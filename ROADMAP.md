@@ -33,6 +33,7 @@
   * [x] Automatic portal creation
     * [x] At startup
     * [x] When receiving invite or message
+  * [x] Provisioning API for logging in
   * [ ] Private chat creation by inviting Matrix puppet of Twitter user to new room
   * [ ] Option to use own Matrix account for messages sent from other Twitter clients
     * [x] Automatic login with shared secret
