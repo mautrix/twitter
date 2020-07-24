@@ -5,11 +5,9 @@
     * [x] Text
     * [ ] Formatting
     * [ ] Media
-      * [ ] Images
-      * [ ] Videos
-      * [ ] Gifs
-      * [ ] Files
-      * [ ] ‡ Audio
+      * [x] Images
+      * [x] Videos
+      * [x] Gifs
   * [x] Message reactions
   * [ ] Typing notifications
   * [x] Read receipts
@@ -21,7 +19,6 @@
       * [x] Images
       * [ ] Videos
       * [ ] Gifs
-      * [ ] Files
   * [x] Message reactions
   * [x] Message history
     * [x] When creating portal

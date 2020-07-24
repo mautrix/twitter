@@ -33,6 +33,7 @@ class TwitterUploader:
                 data = await check_error(resp)
             state = data["processing_info"]["state"]
             if state == "succeeded":
+                self.log.debug(f"Server completed processing of {media_id}")
                 return MediaUploadResponse.deserialize(data)
             elif state == "in_progress":
                 progress = data["processing_info"]["progress_percent"]
@@ -50,11 +51,12 @@ class TwitterUploader:
         })
         for i in range(math.ceil(len(data) / max_size)):
             multipart_data = MultipartWriter("form-data")
-            multipart_data.set_content_disposition("form-data", name="media", filename="blob")
-            multipart_data.append(data[i * max_size: (i + 1) * max_size])
+            part = multipart_data.append(data[i * max_size: (i + 1) * max_size])
+            part.set_content_disposition("form-data", name="media", filename="blob")
             req = base_upload_req.update_query({"segment_index": i})
             async with self.http.post(req, data=multipart_data, headers=self.headers) as resp:
                 await check_error(resp)
+                self.log.debug(f"Uploaded segment {i} of {media_id}")
         finalize_req = self.upload_url.with_query({
             "command": "FINALIZE",
             "media_id": media_id,
@@ -63,20 +65,27 @@ class TwitterUploader:
             resp_data = await check_error(resp)
         processing_info = resp_data.get("processing_info", {})
         if processing_info.get("state", None) == "pending":
+            self.log.debug(f"Finished uploading {media_id}, but server is still processing it")
             check_after = processing_info.get("check_after_secs", 1)
             return await self._wait_processing(media_id, check_after)
+        self.log.debug(f"Finished uploading {media_id}")
         return MediaUploadResponse.deserialize(resp_data)
 
     async def upload(self, data: bytes = None, url: str = None, mime_type: str = None
                      ) -> MediaUploadResponse:
         if mime_type == "image/gif":
             category = "dm_gif"
+            size_limit = 15 * 1024 * 1024
         elif mime_type.startswith("image/"):
             category = "dm_image"
+            size_limit = 5 * 1024 * 1024
         elif mime_type.startswith("video/"):
             category = "dm_video"
+            size_limit = 15 * 1024 * 1024
         else:
             raise ValueError("Unsupported mime type")
+        if len(data) > size_limit:
+            raise ValueError("File too big")
         init_req = {
             "command": "INIT",
             "media_type": mime_type,
@@ -92,6 +101,7 @@ class TwitterUploader:
         async with self.http.post(init_url, headers=self.headers) as resp:
             resp_data = await check_error(resp)
         media_id = resp_data["media_id_string"]
+        self.log.debug(f"Started upload, got media ID {media_id}")
 
         if url is not None:
             processing_info = resp_data.get("processing_info", {})

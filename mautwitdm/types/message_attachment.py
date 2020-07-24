@@ -136,3 +136,12 @@ class MessageAttachment(SerializableAttrs['MessageAttachment']):
     video: Optional[MessageAttachmentMedia] = None
     animated_gif: Optional[MessageAttachmentMedia] = None
     tweet: Optional[MessageAttachmentTweet] = None
+
+    @property
+    def media(self) -> Optional[MessageAttachmentMedia]:
+        if self.video:
+            return self.video
+        if self.animated_gif:
+            return self.animated_gif
+        if self.photo:
+            return self.photo

@@ -46,7 +46,7 @@ class Conversation:
         async with self.api.http.post(self.api_url / "accept.json", headers=self.api.headers) as r:
             await check_error(r)
 
-    async def send(self, text: str, media_id: Optional[str] = None,
+    async def send(self, text: str, media_id: Optional[Union[str, int]] = None,
                    request_id: Optional[Union[UUID, str]] = None) -> SendResponse:
         """
         Send a message to this conversation.
@@ -71,7 +71,7 @@ class Conversation:
         }
         url = self.api.dm_url / "new.json"
         if media_id:
-            data["media_id"] = media_id
+            data["media_id"] = str(media_id)
         async with self.api.http.post(url, data=data, headers=self.api.headers) as resp:
             resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)

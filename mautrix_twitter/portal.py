@@ -14,11 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import (Dict, Tuple, Optional, List, Deque, Set, Any, Union, AsyncGenerator,
-                    TYPE_CHECKING, cast)
+                    NamedTuple, TYPE_CHECKING, cast)
 from collections import deque
 from datetime import datetime
 from os import path
 import asyncio
+
+import magic
 
 from mautwitdm.types import (ConversationType, Conversation, MessageData, Participant, ReactionKey,
                              MessageAttachmentMedia, TimelineStatus, ReactionCreateEntry,
@@ -26,7 +28,8 @@ from mautwitdm.types import (ConversationType, Conversation, MessageData, Partic
 from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
-                           TextMessageEventContent, MediaMessageEventContent, ImageInfo)
+                           TextMessageEventContent, MediaMessageEventContent, ImageInfo, VideoInfo,
+                           ContentURI, EncryptedFile)
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.util.simple_lock import SimpleLock
 
@@ -45,6 +48,9 @@ except ImportError:
 StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
 BackfillEntryTypes = Union[MessageEntry, ReactionCreateEntry, ReactionDeleteEntry]
+ReuploadedMediaInfo = NamedTuple('ReuploadedMediaInfo', mxc=Optional[ContentURI],
+                                 decryption_info=Optional[EncryptedFile],
+                                 mime_type=str, file_name=str, size=int)
 
 
 class Portal(DBPortal, BasePortal):
@@ -138,7 +144,24 @@ class Portal(DBPortal, BasePortal):
             return
         request_id = str(sender.client.new_request_id())
         self._reqid_dedup.add(request_id)
-        resp = await sender.client.conversation(self.twid).send(message.body,
+        text = message.body
+        media_id = None
+        if message.msgtype == MessageType.EMOTE:
+            text = f"/me {text}"
+        elif message.msgtype.is_media:
+            if message.file and decrypt_attachment:
+                data = await self.main_intent.download_media(message.file.url)
+                data = decrypt_attachment(data, message.file.key.key,
+                                          message.file.hashes.get("sha256"), message.file.iv)
+            else:
+                data = await self.main_intent.download_media(message.url)
+            mime_type = message.info.mimetype or magic.from_buffer(data, mime=True)
+            # TODO this will throw errors if the mime type is not supported
+            #      those errors should be sent back to the client
+            upload_resp = await sender.client.upload(data, mime_type=mime_type)
+            media_id = upload_resp.media_id
+            text = ""
+        resp = await sender.client.conversation(self.twid).send(text, media_id=media_id,
                                                                 request_id=request_id)
         resp_msg_id = int(resp.entries[0].message.id)
         self._msgid_dedup.appendleft(resp_msg_id)
@@ -237,20 +260,42 @@ class Portal(DBPortal, BasePortal):
     async def _handle_twitter_attachment(self, source: 'u.User', sender: 'p.Puppet',
                                          message: MessageData
                                          ) -> Optional[MediaMessageEventContent]:
-        attachment = content = None
+        content = None
         intent = sender.intent_for(self)
-        all_attachments = message.attachment
-        if all_attachments.photo:
-            attachment = all_attachments.photo
-            content = await self._handle_twitter_image(source, attachment, intent)
-        if attachment:
+        print(message.attachment)
+        media = message.attachment.media
+        if media:
+            # TODO this doesn't actually work for gifs and videos
+            #      The actual url is in media.video_info.variants[0].url
+            #      Gifs are also videos
+            reuploaded_info = await self._reupload_twitter_media(source, media, intent)
+            content = MediaMessageEventContent(body=reuploaded_info.file_name,
+                                               url=reuploaded_info.mxc,
+                                               file=reuploaded_info.decryption_info,
+                                               external_url=media.media_url_https)
+            if message.attachment.video:
+                content.msgtype = MessageType.VIDEO
+                content.info = VideoInfo(mimetype=reuploaded_info.mime_type,
+                                         size=reuploaded_info.size,
+                                         width=media.original_info.width,
+                                         height=media.original_info.height,
+                                         duration=media.video_info.duration_millis // 1000)
+            elif message.attachment.photo or message.attachment.animated_gif:
+                content.msgtype = MessageType.IMAGE
+                content.info = ImageInfo(mimetype=reuploaded_info.mime_type,
+                                         size=reuploaded_info.size,
+                                         width=media.original_info.width,
+                                         height=media.original_info.height)
             # Remove the attachment link from message.text
-            start, end = attachment.indices
+            start, end = media.indices
             message.text = message.text[:start] + message.text[end:]
+        elif message.attachment.tweet:
+            # TODO special handling for tweets?
+            pass
         return content
 
-    async def _handle_twitter_image(self, source: 'u.User', attachment: MessageAttachmentMedia,
-                                    intent: IntentAPI) -> MediaMessageEventContent:
+    async def _reupload_twitter_media(self, source: 'u.User', attachment: MessageAttachmentMedia,
+                                      intent: IntentAPI) -> ReuploadedMediaInfo:
         file_name = path.basename(attachment.media_url_https)
         data, mime_type = await source.client.download_media(attachment)
 
@@ -269,12 +314,7 @@ class Portal(DBPortal, BasePortal):
             decryption_info.url = mxc
             mxc = None
 
-        info = ImageInfo(mimetype=mime_type, size=len(data),
-                         width=attachment.original_info.width,
-                         height=attachment.original_info.height)
-        return MediaMessageEventContent(body=file_name, url=mxc, info=info,
-                                        file=decryption_info, msgtype=MessageType.IMAGE,
-                                        external_url=attachment.media_url_https)
+        return ReuploadedMediaInfo(mxc, decryption_info, mime_type, file_name, len(data))
 
     async def handle_twitter_reaction_add(self, sender: 'p.Puppet', msg_id: int,
                                           reaction: ReactionKey, time: datetime) -> None:
