@@ -98,7 +98,6 @@ class User(DBUser, BaseUser):
         await client.get_user_identifier()
 
         self.client = client
-        self.client.dispatch_initial_resp = True
         self.client.add_handler(Conversation, self.handle_conversation_update)
         self.client.add_handler(TwitterUser, self.handle_user_update)
         self.client.add_handler(MessageEntry, self.handle_message)
@@ -106,24 +105,53 @@ class User(DBUser, BaseUser):
         self.client.add_handler(ReactionDeleteEntry, self.handle_reaction)
         self.client.add_handler(ConversationReadEntry, self.handle_receipt)
 
-        settings = await self.client.get_settings()
-        self.username = settings["screen_name"]
-
-        user_info = (await self.client.lookup_users(usernames=[self.username]))[0]
+        user_info = await self.get_info()
         self.twid = user_info.id
         self.by_twid[self.twid] = self
 
         await self.update()
-        self.client.start_polling()
 
+        if self.poll_cursor:
+            self.log.debug("Poll cursor set, starting polling right away (not initial syncing)")
+            self.client.start_polling()
+        else:
+            self.loop.create_task(self._try_initial_sync())
+        self.loop.create_task(self._try_sync_puppet(user_info))
+
+    async def _try_sync_puppet(self, user_info: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(self.twid)
-        await puppet.update_info(user_info)
+        try:
+            await puppet.update_info(user_info)
+        except Exception:
+            self.log.exception("Failed to update own puppet info")
         try:
             if puppet.custom_mxid != self.mxid and puppet.can_auto_login(self.mxid):
                 self.log.info(f"Automatically enabling custom puppet")
                 await puppet.switch_mxid(access_token="auto", mxid=self.mxid)
         except Exception:
             self.log.exception("Failed to automatically enable custom puppet")
+
+    async def _try_initial_sync(self) -> None:
+        try:
+            await self.sync()
+        except Exception:
+            self.log.exception("Exception while syncing conversations")
+        self.log.debug("Initial sync completed, starting polling")
+        self.client.start_polling()
+
+    async def sync(self) -> None:
+        resp = await self.client.inbox_initial_state(set_poll_cursor=False)
+        if not self.poll_cursor:
+            self.poll_cursor = resp.cursor
+        self.client.poll_cursor = self.poll_cursor
+        limit = self.config["bridge.initial_conversation_sync"]
+        conversations = sorted(resp.conversations.values(), key=lambda conv: conv.sort_timestamp)
+        if limit < 0:
+            limit = len(conversations)
+        for i, conversation in enumerate(conversations):
+            await self.handle_conversation_update(conversation, create_portal=i < limit)
+        for user in resp.users.values():
+            await self.handle_user_update(user)
 
     async def get_info(self) -> TwitterUser:
         settings = await self.client.get_settings()
@@ -155,10 +183,11 @@ class User(DBUser, BaseUser):
     # endregion
     # region Event handlers
 
-    async def handle_conversation_update(self, evt: Conversation) -> None:
+    async def handle_conversation_update(self, evt: Conversation, create_portal: bool = False
+                                         ) -> None:
         portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid, conv_type=evt.type)
         if not portal.mxid:
-            if self.config["bridge.create_portals_on_sync"]:
+            if create_portal:
                 await portal.create_matrix_room(self, evt)
         else:
             # We don't want to do the invite_user and such things each time conversation info

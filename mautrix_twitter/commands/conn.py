@@ -39,8 +39,5 @@ async def ping(evt: CommandEvent) -> None:
 @command_handler(needs_auth=True, management_only=False, help_section=SECTION_CONNECTION,
                  help_text="Synchronize portals")
 async def sync(evt: CommandEvent) -> None:
-    resp = await evt.sender.client.inbox_initial_state()
-    # Don't dispatch messages here, the normal polling is still running
-    resp.entries = []
-    await evt.sender.client.dispatch_all(resp)
+    await evt.sender.sync()
     await evt.reply("Synchronization complete")

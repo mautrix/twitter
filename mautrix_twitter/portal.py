@@ -21,9 +21,10 @@ from os import path
 import asyncio
 
 from mautwitdm.types import (ConversationType, Conversation, MessageData, Participant, ReactionKey,
-                             MessageAttachmentMedia)
+                             MessageAttachmentMedia, TimelineStatus, ReactionCreateEntry,
+                             ReactionDeleteEntry, MessageEntry)
 from mautrix.appservice import AppService, IntentAPI
-from mautrix.bridge import BasePortal
+from mautrix.bridge import BasePortal, NotificationDisabler
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
                            TextMessageEventContent, MediaMessageEventContent, ImageInfo)
 from mautrix.errors import MatrixError, MForbidden
@@ -43,6 +44,7 @@ except ImportError:
 
 StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
+BackfillEntryTypes = Union[MessageEntry, ReactionCreateEntry, ReactionDeleteEntry]
 
 
 class Portal(DBPortal, BasePortal):
@@ -96,6 +98,8 @@ class Portal(DBPortal, BasePortal):
         cls.az = bridge.az
         cls.loop = bridge.loop
         cls.bridge = bridge
+        NotificationDisabler.puppet_cls = p.Puppet
+        NotificationDisabler.config_enabled = cls.config["bridge.backfill.disable_notifications"]
 
     # region Misc
 
@@ -373,8 +377,84 @@ class Portal(DBPortal, BasePortal):
     # endregion
     # region Backfilling
 
-    async def backfill(self, user: 'u.User', is_initial: bool = False) -> None:
-        pass
+    async def backfill(self, source: 'u.User', is_initial: bool = False) -> None:
+        if not is_initial:
+            raise RuntimeError("Non-initial backfilling is not supported")
+        limit = self.config["bridge.backfill.initial_limit"]
+        if limit == 0:
+            return
+        elif limit < 0:
+            limit = None
+        with self.backfill_lock:
+            await self._backfill(source, limit)
+
+    async def _backfill(self, source: 'u.User', limit: int) -> None:
+        self.log.debug("Backfilling history through %s", source.mxid)
+
+        entries = await self._fetch_backfill_entries(source, limit)
+        if not entries:
+            self.log.debug("Didn't get any entries from server")
+            return
+
+        self.log.debug("Got %d entries from server", len(entries))
+
+        backfill_leave = await self._invite_own_puppet_backfill(source)
+        async with NotificationDisabler(self.mxid, source):
+            for entry in reversed(entries):
+                await self._handle_backfill_entry(source, entry)
+        for intent in backfill_leave:
+            self.log.trace("Leaving room with %s post-backfill", intent.mxid)
+            await intent.leave_room(self.mxid)
+        self.log.info("Backfilled %d messages through %s", len(entries), source.mxid)
+
+    async def _fetch_backfill_entries(self, source: 'u.User', limit: int
+                                      ) -> List[BackfillEntryTypes]:
+        conv = source.client.conversation(self.twid)
+        entries = []
+        self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
+        try:
+            max_id = None
+            while True:
+                resp = await conv.fetch(max_id=max_id, include_info=False)
+                max_id = resp.min_entry_id
+                for entry in resp.entries:
+                    if entry:
+                        entries += entry.all_types
+                    if len(entries) >= limit:
+                        break
+                if len(entries) >= limit:
+                    self.log.debug("Got more messages than limit")
+                    break
+                elif resp.status == TimelineStatus.AT_END:
+                    self.log.debug("Got all messages in conversation")
+                    break
+        except Exception:
+            self.log.warning("Exception while fetching messages", exc_info=True)
+
+        return [entry for entry in entries
+                if isinstance(entry, (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry))]
+
+    async def _invite_own_puppet_backfill(self, source: 'u.User') -> Set[IntentAPI]:
+        backfill_leave = set()
+        # TODO we should probably only invite the puppet when needed
+        if self.config["bridge.backfill.invite_own_puppet"]:
+            self.log.debug("Adding %s's default puppet to room for backfilling", source.mxid)
+            sender = await p.Puppet.get_by_twid(source.twid)
+            await self.main_intent.invite_user(self.mxid, sender.default_mxid)
+            await sender.default_mxid_intent.join_room_by_id(self.mxid)
+            backfill_leave.add(sender.default_mxid_intent)
+        return backfill_leave
+
+    async def _handle_backfill_entry(self, source: 'u.User', entry: BackfillEntryTypes) -> None:
+        sender = await p.Puppet.get_by_twid(int(entry.sender_id))
+        if isinstance(entry, MessageEntry):
+            await self.handle_twitter_message(source, sender, entry.message_data, entry.request_id)
+        if isinstance(entry, ReactionCreateEntry):
+            await self.handle_twitter_reaction_add(sender, int(entry.message_id),
+                                                   entry.reaction_key, entry.time)
+        elif isinstance(entry, ReactionDeleteEntry):
+            await self.handle_twitter_reaction_remove(sender, int(entry.message_id),
+                                                      entry.reaction_key)
 
     # endregion
     # region Bridge info state event
@@ -539,11 +619,11 @@ class Portal(DBPortal, BasePortal):
             self._main_intent = self.az.intent
 
     async def delete(self) -> None:
+        await DBMessage.delete_all(self.mxid)
         self.by_mxid.pop(self.mxid, None)
         self.mxid = None
         self.encrypted = False
         await self.update()
-        await DBMessage.delete_all(self.mxid)
 
     async def save(self) -> None:
         await self.update()

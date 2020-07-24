@@ -19,9 +19,9 @@ from .util import StringTimestamp
 class TrustConversationEntry(SerializableAttrs['TrustConversationEntry']):
     id: str
     time: StringTimestamp
-    affects_sort: bool
     conversation_id: str
     reason: str
+    affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
 
@@ -30,8 +30,8 @@ class TrustConversationEntry(SerializableAttrs['TrustConversationEntry']):
 class ConversationCreateEntry(SerializableAttrs['ConversationCreateEntry']):
     id: str
     time: StringTimestamp
-    affects_sort: bool
     conversation_id: str
+    affects_sort: Optional[bool] = None
     request_id: Optional[str] = None
 
     conversation: Optional[Conversation] = None
@@ -41,10 +41,10 @@ class ConversationCreateEntry(SerializableAttrs['ConversationCreateEntry']):
 class ConversationNameUpdateEntry(SerializableAttrs['ConversationNameUpdateEntry']):
     id: str
     time: StringTimestamp
-    affects_sort: bool
     conversation_id: str
     conversation_name: str
     by_user_id: str
+    affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
 
@@ -55,7 +55,7 @@ class ConversationReadEntry(SerializableAttrs['ConversationReadEntry']):
     last_read_event_id: str
     time: StringTimestamp
     conversation_id: str
-    affects_sort: bool
+    affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
 

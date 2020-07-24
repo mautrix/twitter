@@ -31,9 +31,13 @@ class MessageData(SerializableAttrs['MessageData']):
 class MessageEntry(SerializableAttrs['MessageEntry']):
     id: str
     time: StringTimestamp
-    affects_sort: bool
     conversation_id: str
     message_data: MessageData
+    affects_sort: Optional[bool] = None
     request_id: Optional[str] = None
+
+    @property
+    def sender_id(self) -> str:
+        return self.message_data.sender_id
 
     conversation: Optional[Conversation] = None

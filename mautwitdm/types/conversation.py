@@ -40,7 +40,7 @@ class Conversation(SerializableAttrs['Conversation']):
     conversation_id: str
     type: ConversationType
     sort_event_id: str
-    sort_timestamp: str
+    sort_timestamp: StringTimestamp
     participants: List[Participant]
     notifications_disabled: bool
     mention_notifications_disabled: bool

@@ -23,9 +23,9 @@
       * [ ] Gifs
       * [ ] Files
   * [x] Message reactions
-  * [ ] Message history
-    * [ ] When creating portal
-    * [ ] Missed messages
+  * [x] Message history
+    * [x] When creating portal
+    * [x] Missed messages
   * [x] Avatars
   * [ ] † Typing notifications
   * [ ] † Read receipts

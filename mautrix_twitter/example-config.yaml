@@ -70,8 +70,9 @@ bridge:
     # Maximum length of displayname
     displayname_max_length: 100
 
-    # Whether or not portals should be created automatically even if there's no incoming message.
-    create_portals_on_sync: true
+    # Number of conversations to sync (and create portals for) on login.
+    # Set 0 to disable automatic syncing.
+    initial_conversation_sync: 10
     # Whether or not to use /sync to get read receipts and typing notifications when using your own
     # Matrix account as the Matrix puppet for your Twitter account.
     sync_with_custom_puppets: true
@@ -84,6 +85,22 @@ bridge:
     # Whether or not created rooms should have federation enabled.
     # If false, created portal rooms will never be federated.
     federate_rooms: true
+    # Settings for backfilling messages from Twitter.
+    #
+    # Missed message backfilling is currently based on receiving them from the Twitter polling API,
+    # rather than manually asking for messages in each conversation. Due to this, there's no way to
+    # set a limit for missed message backfilling.
+    backfill:
+        # Whether or not the Twitter users of logged in Matrix users should be
+        # invited to private chats when backfilling history from Twitter. This is
+        # usually needed to prevent rate limits and to allow timestamp massaging.
+        invite_own_puppet: true
+        # Maximum number of messages to backfill initially.
+        # Set to 0 to disable backfilling when creating portal.
+        initial_limit: 0
+        # If using double puppeting, should notifications be disabled
+        # while the initial backfill is in progress?
+        disable_notifications: false
     # End-to-bridge encryption support options. These require matrix-nio to be installed with pip
     # and login_shared_secret to be configured in order to get a device for the bridge bot.
     #

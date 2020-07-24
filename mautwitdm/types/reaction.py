@@ -60,11 +60,11 @@ _emoji_to_key: Dict[str, ReactionKey] = {
 class ReactionCreateEntry(SerializableAttrs['ReactionCreateEntry']):
     id: str
     time: StringTimestamp
-    affects_sort: bool
     conversation_id: str
     message_id: str
     reaction_key: ReactionKey
     sender_id: str
+    affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
 
@@ -73,10 +73,10 @@ class ReactionCreateEntry(SerializableAttrs['ReactionCreateEntry']):
 class ReactionDeleteEntry(SerializableAttrs['ReactionDeleteEntry']):
     id: str
     time: StringTimestamp
-    affects_sort: bool
     conversation_id: str
     message_id: str
     reaction_key: ReactionKey
     sender_id: str
+    affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
