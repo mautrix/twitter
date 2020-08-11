@@ -19,6 +19,7 @@ from collections import deque
 from datetime import datetime
 from os import path
 import asyncio
+import html
 
 import magic
 
@@ -248,6 +249,7 @@ class Portal(DBPortal, BasePortal):
                 if content:
                     event_id = await self._send_message(intent, content, timestamp=message.time)
             if message.text and not message.text.isspace():
+                message.text = html.unescape(message.text)
                 content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text)
                 event_id = await self._send_message(intent, content, timestamp=message.time)
             if event_id:
@@ -262,7 +264,6 @@ class Portal(DBPortal, BasePortal):
                                          ) -> Optional[MediaMessageEventContent]:
         content = None
         intent = sender.intent_for(self)
-        print(message.attachment)
         media = message.attachment.media
         if media:
             # TODO this doesn't actually work for gifs and videos
