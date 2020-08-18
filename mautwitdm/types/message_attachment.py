@@ -126,8 +126,8 @@ class MessageAttachmentTweet(SerializableAttrs['MessageAttachmentTweet']):
     url: str
     display_url: str
     expanded_url: str
-    indices: Tuple[int, int]
     status: TweetAttachmentStatus
+    indices: Optional[Tuple[int, int]] = None
 
 
 @dataclass
