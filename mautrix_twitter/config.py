@@ -43,6 +43,8 @@ class Config(BaseBridgeConfig):
         super().do_update(helper)
         copy, copy_dict, base = helper
 
+        copy("homeserver.asmux")
+
         copy("appservice.provisioning.enabled")
         copy("appservice.provisioning.prefix")
         copy("appservice.provisioning.shared_secret")
@@ -58,6 +60,7 @@ class Config(BaseBridgeConfig):
 
         copy("bridge.initial_conversation_sync")
         copy("bridge.sync_with_custom_puppets")
+        copy("bridge.sync_direct_chat_list")
         copy("bridge.login_shared_secret")
         copy("bridge.federate_rooms")
         copy("bridge.backfill.invite_own_puppet")

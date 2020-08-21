@@ -70,6 +70,13 @@ class Portal:
         return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
 
     @classmethod
+    async def find_private_chats(cls, receiver: int) -> List['Portal']:
+        q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
+             "WHERE receiver=$1 AND conv_type='ONE_TO_ONE'")
+        rows = await cls.db.fetch(q, receiver)
+        return [cls(**row) for row in rows]
+
+    @classmethod
     async def all_with_room(cls) -> List['Portal']:
         q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
              'WHERE mxid IS NOT NULL')

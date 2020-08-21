@@ -13,8 +13,8 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import (Dict, Optional, AsyncIterable, Awaitable, AsyncGenerator, Union, TYPE_CHECKING,
-                    cast)
+from typing import (Dict, Optional, AsyncIterable, Awaitable, AsyncGenerator, Union, List,
+                    TYPE_CHECKING, cast)
 import asyncio
 import logging
 
@@ -25,7 +25,7 @@ from mautrix.bridge import BaseUser
 from mautrix.types import UserID, RoomID
 from mautrix.appservice import AppService
 
-from .db import User as DBUser
+from .db import User as DBUser, Portal as DBPortal
 from .config import Config
 from . import puppet as pu, portal as po
 
@@ -59,9 +59,11 @@ class User(DBUser, BaseUser):
         self.log = self.log.getChild(self.mxid)
         self.client = None
         self.username = None
+        self.dm_update_lock = asyncio.Lock()
 
     @classmethod
     def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
+        cls.bridge = bridge
         cls.config = bridge.config
         cls.az = bridge.az
         cls.loop = bridge.loop
@@ -139,6 +141,13 @@ class User(DBUser, BaseUser):
         self.log.debug("Initial sync completed, starting polling")
         self.client.start_polling()
 
+    async def get_direct_chats(self) -> Dict[UserID, List[RoomID]]:
+        return {
+            pu.Puppet.get_mxid_from_id(portal.other_user): [portal.mxid]
+            for portal in await DBPortal.find_private_chats(self.twid)
+            if portal.mxid
+        }
+
     async def sync(self) -> None:
         resp = await self.client.inbox_initial_state(set_poll_cursor=False)
         if not self.poll_cursor:
@@ -152,6 +161,7 @@ class User(DBUser, BaseUser):
             await self.handle_conversation_update(conversation, create_portal=i < limit)
         for user in resp.users.values():
             await self.handle_user_update(user)
+        await self.update_direct_chats()
 
     async def get_info(self) -> TwitterUser:
         settings = await self.client.get_settings()

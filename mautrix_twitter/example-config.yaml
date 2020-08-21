@@ -7,6 +7,7 @@ homeserver:
     # Whether or not to verify the SSL certificate of the homeserver.
     # Only applies if address starts with https://
     verify_ssl: true
+    asmux: false
 
 # Application service host/registration related details
 # Changing these values requires regeneration of the registration.
@@ -73,9 +74,13 @@ bridge:
     # Number of conversations to sync (and create portals for) on login.
     # Set 0 to disable automatic syncing.
     initial_conversation_sync: 10
-    # Whether or not to use /sync to get read receipts and typing notifications when using your own
-    # Matrix account as the Matrix puppet for your Twitter account.
+    # Whether or not to use /sync to get read receipts and typing notifications
+    # when double puppeting is enabled
     sync_with_custom_puppets: true
+    # Whether or not to update the m.direct account data event when double puppeting is enabled.
+    # Note that updating the m.direct event is not atomic (except with mautrix-asmux)
+    # and is therefore prone to race conditions.
+    sync_direct_chat_list: false
     # Shared secret for https://github.com/devture/matrix-synapse-shared-secret-auth
     #
     # If set, custom puppets will be enabled automatically for local users
