@@ -51,7 +51,7 @@ setuptools.setup(
     python_requires="~=3.6",
 
     classifiers=[
-        "Development Status :: 2 - Pre-Alpha",
+        "Development Status :: 3 - Alpha",
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
         "Topic :: Communications :: Chat",
         "Framework :: AsyncIO",
