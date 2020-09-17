@@ -60,6 +60,7 @@ class Portal(DBPortal, BasePortal):
     config: Config
     matrix: 'm.MatrixHandler'
     az: AppService
+    private_chat_portal_meta: bool
 
     _main_intent: Optional[IntentAPI]
     _create_room_lock: asyncio.Lock
@@ -105,6 +106,7 @@ class Portal(DBPortal, BasePortal):
         cls.az = bridge.az
         cls.loop = bridge.loop
         cls.bridge = bridge
+        cls.private_chat_portal_meta = cls.config["bridge.private_chat_portal_meta"]
         NotificationDisabler.puppet_cls = p.Puppet
         NotificationDisabler.config_enabled = cls.config["bridge.backfill.disable_notifications"]
 
@@ -373,7 +375,10 @@ class Portal(DBPortal, BasePortal):
             puppet = await p.Puppet.get_by_twid(self.other_user)
             if not self._main_intent:
                 self._main_intent = puppet.default_mxid_intent
-            changed = await self._update_name(puppet.name)
+            if self.encrypted or self.private_chat_portal_meta:
+                changed = await self._update_name(puppet.name)
+            else:
+                changed = False
         else:
             changed = await self._update_name(conv.name)
         if changed:
@@ -593,7 +598,7 @@ class Portal(DBPortal, BasePortal):
             })
             if self.is_direct:
                 invites.append(self.az.bot_mxid)
-        if self.encrypted or not self.is_direct:
+        if self.encrypted or self.private_chat_portal_meta or not self.is_direct:
             name = self.name
         if self.config["appservice.community_id"]:
             initial_state.append({

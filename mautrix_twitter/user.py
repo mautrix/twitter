@@ -157,10 +157,10 @@ class User(DBUser, BaseUser):
         conversations = sorted(resp.conversations.values(), key=lambda conv: conv.sort_timestamp)
         if limit < 0:
             limit = len(conversations)
-        for i, conversation in enumerate(conversations):
-            await self.handle_conversation_update(conversation, create_portal=i < limit)
         for user in resp.users.values():
             await self.handle_user_update(user)
+        for i, conversation in enumerate(conversations):
+            await self.handle_conversation_update(conversation, create_portal=i < limit)
         await self.update_direct_chats()
 
     async def get_info(self) -> TwitterUser:
