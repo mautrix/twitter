@@ -57,15 +57,13 @@ setuptools.setup(
         "Framework :: AsyncIO",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
     ],
-    entry_points="""
-        [console_scripts]
-        mautrix-twitter=mautrix_twitter.__main__:main
-    """,
     package_data={"mautrix_twitter": [
         "example-config.yaml",
     ]},
+    data_files=[
+        (".", ["mautrix_twitter/example-config.yaml"]),
+    ],
 )
