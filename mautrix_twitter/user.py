@@ -19,11 +19,13 @@ import asyncio
 import logging
 
 from mautwitdm import TwitterAPI
+from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
 from mautrix.bridge import BaseUser
 from mautrix.types import UserID, RoomID
 from mautrix.appservice import AppService
+from mautrix.util.opt_prometheus import Summary, Enum, async_time
 
 from .db import User as DBUser, Portal as DBPortal
 from .config import Config
@@ -31,6 +33,17 @@ from . import puppet as pu, portal as po
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
+
+METRIC_CONVERSATION_UPDATE = Summary("bridge_on_conversation_update",
+                                     "calls to handle_conversation_update")
+METRIC_USER_UPDATE = Summary("bridge_on_user_update", "calls to handle_user_update")
+METRIC_MESSAGE = Summary("bridge_on_message", "calls to handle_message")
+METRIC_REACTION = Summary("bridge_on_reaction", "calls to handle_reaction")
+METRIC_RECEIPT = Summary("bridge_on_receipt", "calls to handle_receipt")
+METRIC_LOGGED_IN = Enum("bridge_logged_in", "Bridge Logged in", states=["true", "false"],
+                        labelnames=("twid",))
+METRIC_CONNECTED = Enum("bridge_connected", "Bridge Connected", states=["true", "false"],
+                        labelnames=("twid",))
 
 
 class User(DBUser, BaseUser):
@@ -106,9 +119,13 @@ class User(DBUser, BaseUser):
         self.client.add_handler(ReactionCreateEntry, self.handle_reaction)
         self.client.add_handler(ReactionDeleteEntry, self.handle_reaction)
         self.client.add_handler(ConversationReadEntry, self.handle_receipt)
+        self.client.add_handler(PollingStarted, self.on_connect)
+        self.client.add_handler(PollingStopped, self.on_disconnect)
+        self.client.add_handler(PollingErrored, self.on_disconnect)
 
         user_info = await self.get_info()
         self.twid = user_info.id
+        METRIC_LOGGED_IN.labels(twid=self.twid).state("true")
         self.by_twid[self.twid] = self
 
         await self.update()
@@ -119,6 +136,12 @@ class User(DBUser, BaseUser):
         else:
             self.loop.create_task(self._try_initial_sync())
         self.loop.create_task(self._try_sync_puppet(user_info))
+
+    async def on_connect(self, evt: PollingStarted) -> None:
+        METRIC_CONNECTED.labels(twid=self.twid).state("true")
+
+    async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
+        METRIC_CONNECTED.labels(twid=self.twid).state("false")
 
     async def _try_sync_puppet(self, user_info: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(self.twid)
@@ -171,11 +194,14 @@ class User(DBUser, BaseUser):
     async def stop(self) -> None:
         if self.client:
             self.client.stop_polling()
+        METRIC_CONNECTED.labels(twid=self.twid).state("false")
         await self.update()
 
     async def logout(self) -> None:
         if self.client:
             self.client.stop_polling()
+        METRIC_CONNECTED.labels(twid=self.twid).state("false")
+        METRIC_LOGGED_IN.labels(twid=self.twid).state("false")
         puppet = await pu.Puppet.get_by_twid(self.twid, create=False)
         if puppet and puppet.is_real_user:
             await puppet.switch_mxid(None, None)
@@ -193,6 +219,7 @@ class User(DBUser, BaseUser):
     # endregion
     # region Event handlers
 
+    @async_time(METRIC_CONVERSATION_UPDATE)
     async def handle_conversation_update(self, evt: Conversation, create_portal: bool = False
                                          ) -> None:
         portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid, conv_type=evt.type)
@@ -204,10 +231,12 @@ class User(DBUser, BaseUser):
             # comes down polling, so if the room already exists, only call .update_info()
             await portal.update_info(evt)
 
+    @async_time(METRIC_USER_UPDATE)
     async def handle_user_update(self, user: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(user.id)
         await puppet.update_info(user)
 
+    @async_time(METRIC_MESSAGE)
     async def handle_message(self, evt: MessageEntry) -> None:
         portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
                                              conv_type=evt.conversation.type)
@@ -216,6 +245,7 @@ class User(DBUser, BaseUser):
         sender = await pu.Puppet.get_by_twid(int(evt.message_data.sender_id))
         await portal.handle_twitter_message(self, sender, evt.message_data, evt.request_id)
 
+    @async_time(METRIC_REACTION)
     async def handle_reaction(self, evt: Union[ReactionCreateEntry, ReactionDeleteEntry]) -> None:
         portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
                                              conv_type=evt.conversation.type)
@@ -230,6 +260,7 @@ class User(DBUser, BaseUser):
             await portal.handle_twitter_reaction_remove(puppet, int(evt.message_id),
                                                         evt.reaction_key)
 
+    @async_time(METRIC_RECEIPT)
     async def handle_receipt(self, evt: ConversationReadEntry) -> None:
         portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
                                              conv_type=evt.conversation.type)

@@ -7,6 +7,7 @@ from typing import Dict, Optional, Type, TypeVar, List, Callable, Awaitable, Any
 import logging
 import asyncio
 
+from attr import dataclass
 from aiohttp import ClientSession
 from yarl import URL
 
@@ -18,6 +19,19 @@ from .dispatcher import TwitterDispatcher
 T = TypeVar('T')
 Handler = Callable[[T], Awaitable[Any]]
 HandlerMap = Dict[Type[T], List[Handler]]
+
+
+class PollingStarted:
+    pass
+
+
+class PollingStopped:
+    pass
+
+
+@dataclass
+class PollingErrored:
+    error: Exception
 
 
 class TwitterPoller(TwitterDispatcher):
@@ -116,7 +130,9 @@ class TwitterPoller(TwitterDispatcher):
             await self._poll_forever()
         except asyncio.CancelledError:
             self.log.debug("Polling stopped")
-        except Exception:
+            await self.dispatch(PollingStopped())
+        except Exception as e:
+            await self.dispatch(PollingErrored(e))
             self.log.exception("Fatal error while polling")
             if raise_exceptions:
                 raise
@@ -139,6 +155,7 @@ class TwitterPoller(TwitterDispatcher):
             resp = await self.inbox_initial_state()
             if self.dispatch_initial_resp:
                 await self.dispatch_all(resp)
+        await self.dispatch(PollingStarted())
         while True:
             try:
                 resp = await self._poll_once()
