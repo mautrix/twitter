@@ -167,7 +167,7 @@ class User(DBUser, BaseUser):
     async def get_direct_chats(self) -> Dict[UserID, List[RoomID]]:
         return {
             pu.Puppet.get_mxid_from_id(portal.other_user): [portal.mxid]
-            for portal in await DBPortal.find_private_chats(self.twid)
+            for portal in await DBPortal.find_private_chats_of(self.twid)
             if portal.mxid
         }
 

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import (Dict, Tuple, Optional, List, Deque, Set, Any, Union, AsyncGenerator,
-                    NamedTuple, TYPE_CHECKING, cast)
+                    Awaitable, NamedTuple, TYPE_CHECKING, cast)
 from collections import deque
 from datetime import datetime
 from os import path
@@ -386,6 +386,16 @@ class Portal(DBPortal, BasePortal):
             await self.update()
         await self._update_participants(conv.participants)
 
+    async def update_name(self, name: str) -> None:
+        if not self.encrypted and not self.private_chat_portal_meta:
+            return
+
+        changed = await self._update_name(name)
+
+        if changed:
+            await self.update_bridge_info()
+            await self.update()
+
     async def _update_name(self, name: str) -> bool:
         if self.name != name:
             self.name = name
@@ -678,9 +688,16 @@ class Portal(DBPortal, BasePortal):
         await self.update()
 
     @classmethod
-    async def all_with_room(cls) -> AsyncGenerator['Portal', None]:
-        portals = await super().all_with_room()
-        portal: cls
+    def all_with_room(cls) -> AsyncGenerator['Portal', None]:
+        return cls._db_to_portals(super().all_with_room())
+
+    @classmethod
+    def find_private_chats_with(cls, other_user: int) -> AsyncGenerator['Portal', None]:
+        return cls._db_to_portals(super().find_private_chats_with(other_user))
+
+    @classmethod
+    async def _db_to_portals(cls, query: Awaitable[List['Portal']]) -> AsyncGenerator['Portal', None]:
+        portals = await query
         for index, portal in enumerate(portals):
             try:
                 yield cls.by_twid[(portal.twid, portal.receiver)]

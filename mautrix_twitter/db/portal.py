@@ -70,10 +70,17 @@ class Portal:
         return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
 
     @classmethod
-    async def find_private_chats(cls, receiver: int) -> List['Portal']:
+    async def find_private_chats_of(cls, receiver: int) -> List['Portal']:
         q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
              "WHERE receiver=$1 AND conv_type='ONE_TO_ONE'")
         rows = await cls.db.fetch(q, receiver)
+        return [cls(**row) for row in rows]
+
+    @classmethod
+    async def find_private_chats_with(cls, other_user: int) -> List['Portal']:
+        q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
+             "WHERE other_user=$1 AND conv_type='ONE_TO_ONE'")
+        rows = await cls.db.fetch(q, other_user)
         return [cls(**row) for row in rows]
 
     @classmethod

@@ -95,8 +95,13 @@ class Puppet(DBPuppet, BasePuppet):
         if name != self.name:
             self.name = name
             await self.default_mxid_intent.set_displayname(self.name)
+            await self._update_portal_names()
             return True
         return False
+
+    async def _update_portal_names(self) -> None:
+        async for portal in p.Portal.find_private_chats_with(self.twid):
+            await portal.update_name(self.name)
 
     async def _update_avatar(self, image_url: str) -> bool:
         if image_url != self.photo_url:
