@@ -16,6 +16,7 @@
 from typing import Optional, ClassVar, List, TYPE_CHECKING
 
 from attr import dataclass
+import asyncpg
 
 from mautrix.types import RoomID
 from mautrix.util.async_db import Database
@@ -50,14 +51,18 @@ class Portal:
                               self.mxid, self.name, self.encrypted)
 
     @classmethod
+    def _from_row(cls, row: asyncpg.Record) -> 'Portal':
+        data = {**row}
+        return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
+
+    @classmethod
     async def get_by_mxid(cls, mxid: RoomID) -> Optional['Portal']:
         q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted "
              "FROM portal WHERE mxid=$1")
         row = await cls.db.fetchrow(q, mxid)
         if not row:
             return None
-        data = {**row}
-        return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
+        return cls._from_row(row)
 
     @classmethod
     async def get_by_twid(cls, twid: str, receiver: int = 0) -> Optional['Portal']:
@@ -66,26 +71,25 @@ class Portal:
         row = await cls.db.fetchrow(q, twid, receiver)
         if not row:
             return None
-        data = {**row}
-        return cls(conv_type=ConversationType(data.pop("conv_type")), **data)
+        return cls._from_row(row)
 
     @classmethod
     async def find_private_chats_of(cls, receiver: int) -> List['Portal']:
         q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
              "WHERE receiver=$1 AND conv_type='ONE_TO_ONE'")
         rows = await cls.db.fetch(q, receiver)
-        return [cls(**row) for row in rows]
+        return [cls._from_row(row) for row in rows]
 
     @classmethod
     async def find_private_chats_with(cls, other_user: int) -> List['Portal']:
         q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
              "WHERE other_user=$1 AND conv_type='ONE_TO_ONE'")
         rows = await cls.db.fetch(q, other_user)
-        return [cls(**row) for row in rows]
+        return [cls._from_row(row) for row in rows]
 
     @classmethod
     async def all_with_room(cls) -> List['Portal']:
         q = ("SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
              'WHERE mxid IS NOT NULL')
         rows = await cls.db.fetch(q)
-        return [cls(**row) for row in rows]
+        return [cls._from_row(row) for row in rows]
