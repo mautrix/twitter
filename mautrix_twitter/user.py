@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import (Dict, Optional, AsyncIterable, Awaitable, AsyncGenerator, Union, List,
                     TYPE_CHECKING, cast)
+from collections import defaultdict
 import asyncio
 import logging
 
@@ -25,7 +26,7 @@ from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEn
 from mautrix.bridge import BaseUser
 from mautrix.types import UserID, RoomID
 from mautrix.appservice import AppService
-from mautrix.util.opt_prometheus import Summary, Enum, async_time
+from mautrix.util.opt_prometheus import Summary, Gauge, async_time
 
 from .db import User as DBUser, Portal as DBPortal
 from .config import Config
@@ -40,10 +41,8 @@ METRIC_USER_UPDATE = Summary("bridge_on_user_update", "calls to handle_user_upda
 METRIC_MESSAGE = Summary("bridge_on_message", "calls to handle_message")
 METRIC_REACTION = Summary("bridge_on_reaction", "calls to handle_reaction")
 METRIC_RECEIPT = Summary("bridge_on_receipt", "calls to handle_receipt")
-METRIC_LOGGED_IN = Enum("bridge_logged_in", "Bridge Logged in", states=["true", "false"],
-                        labelnames=("twid",))
-METRIC_CONNECTED = Enum("bridge_connected", "Bridge Connected", states=["true", "false"],
-                        labelnames=("twid",))
+METRIC_LOGGED_IN = Gauge("bridge_logged_in", "Users logged into the bridge")
+METRIC_CONNECTED = Gauge("bridge_connected", "Bridged users connected to Twitter")
 
 
 class User(DBUser, BaseUser):
@@ -73,6 +72,7 @@ class User(DBUser, BaseUser):
         self.client = None
         self.username = None
         self.dm_update_lock = asyncio.Lock()
+        self._metric_value = defaultdict(lambda: False)
 
     @classmethod
     def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
@@ -125,7 +125,7 @@ class User(DBUser, BaseUser):
 
         user_info = await self.get_info()
         self.twid = user_info.id
-        METRIC_LOGGED_IN.labels(twid=self.twid).state("true")
+        self._track_metric(METRIC_LOGGED_IN, True)
         self.by_twid[self.twid] = self
 
         await self.update()
@@ -138,10 +138,10 @@ class User(DBUser, BaseUser):
         self.loop.create_task(self._try_sync_puppet(user_info))
 
     async def on_connect(self, evt: PollingStarted) -> None:
-        METRIC_CONNECTED.labels(twid=self.twid).state("true")
+        self._track_metric(METRIC_CONNECTED, True)
 
     async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
-        METRIC_CONNECTED.labels(twid=self.twid).state("false")
+        self._track_metric(METRIC_CONNECTED, False)
 
     async def _try_sync_puppet(self, user_info: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(self.twid)
@@ -194,14 +194,14 @@ class User(DBUser, BaseUser):
     async def stop(self) -> None:
         if self.client:
             self.client.stop_polling()
-        METRIC_CONNECTED.labels(twid=self.twid).state("false")
+        self._track_metric(METRIC_CONNECTED, False)
         await self.update()
 
     async def logout(self) -> None:
         if self.client:
             self.client.stop_polling()
-        METRIC_CONNECTED.labels(twid=self.twid).state("false")
-        METRIC_LOGGED_IN.labels(twid=self.twid).state("false")
+        self._track_metric(METRIC_CONNECTED, False)
+        self._track_metric(METRIC_LOGGED_IN, False)
         puppet = await pu.Puppet.get_by_twid(self.twid, create=False)
         if puppet and puppet.is_real_user:
             await puppet.switch_mxid(None, None)
