@@ -59,6 +59,7 @@ class User(DBUser, BaseUser):
     username: Optional[str]
 
     _notice_room_lock: asyncio.Lock
+    _is_logged_in: Optional[bool]
 
     def __init__(self, mxid: UserID, twid: Optional[int] = None, auth_token: Optional[str] = None,
                  csrf_token: Optional[str] = None, poll_cursor: Optional[str] = None,
@@ -73,6 +74,7 @@ class User(DBUser, BaseUser):
         self.username = None
         self.dm_update_lock = asyncio.Lock()
         self._metric_value = defaultdict(lambda: False)
+        self._is_logged_in = None
 
     @classmethod
     def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
@@ -90,11 +92,15 @@ class User(DBUser, BaseUser):
 
     # region Connection management
 
-    async def is_logged_in(self) -> bool:
-        try:
-            return self.client and await self.client.get_user_identifier() is not None
-        except Exception:
+    async def is_logged_in(self, ignore_cache: bool = False) -> bool:
+        if not self.client:
             return False
+        if self._is_logged_in is None:
+            try:
+                self._is_logged_in = await self.client.get_user_identifier() is not None
+            except Exception:
+                self._is_logged_in = False
+        return self.client and self._is_logged_in
 
     async def try_connect(self) -> None:
         try:
@@ -210,6 +216,7 @@ class User(DBUser, BaseUser):
         except KeyError:
             pass
         self.client = None
+        self._is_logged_in = None
         self.twid = None
         self.poll_cursor = None
         self.auth_token = None
@@ -279,6 +286,9 @@ class User(DBUser, BaseUser):
 
     @classmethod
     async def get_by_mxid(cls, mxid: UserID, create: bool = True) -> Optional['User']:
+        # Never allow ghosts to be users
+        if pu.Puppet.get_id_from_mxid(mxid):
+            return None
         try:
             return cls.by_mxid[mxid]
         except KeyError:

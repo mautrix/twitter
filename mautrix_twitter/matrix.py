@@ -18,7 +18,7 @@ from typing import List, Union, TYPE_CHECKING
 from mautrix.bridge import BaseMatrixHandler
 from mautrix.types import (Event, ReactionEvent, MessageEvent, StateEvent, EncryptedEvent, RoomID,
                            EventID, UserID, ReactionEventContent, RelationType, EventType,
-                           ReceiptEvent, TypingEvent, PresenceEvent, RedactionEvent)
+                           ReceiptEvent, TypingEvent, PresenceEvent, RedactionEvent, ReceiptType)
 
 from .db import Message as DBMessage
 from . import puppet as pu, portal as po, user as u
@@ -93,25 +93,11 @@ class MatrixHandler(BaseMatrixHandler):
         await portal.handle_matrix_reaction(user, event_id, content.relates_to.event_id,
                                             content.relates_to.key)
 
-    @staticmethod
-    async def handle_receipt(evt: ReceiptEvent) -> None:
-        # These events come from custom puppet syncing, so there's always only one user.
-        event_id, receipts = evt.content.popitem()
-        receipt_type, users = receipts.popitem()
-        user_id, data = users.popitem()
-
-        user = await u.User.get_by_mxid(user_id, create=False)
-        if not user or not user.client:
-            return
-
-        portal = await po.Portal.get_by_mxid(evt.room_id)
-        if not portal:
-            return
-
+    async def handle_read_receipt(self, user: 'u.User', portal: 'po.Portal', event_id: EventID
+                                  ) -> None:
         message = await DBMessage.get_by_mxid(event_id, portal.mxid)
         if not message:
             return
-
         user.log.debug(f"Marking messages in {portal.twid} read up to {message.twid}")
         await user.client.conversation(portal.twid).mark_read(message.twid)
 
@@ -132,5 +118,5 @@ class MatrixHandler(BaseMatrixHandler):
                                      ) -> None:
         if evt.type == EventType.TYPING:
             await self.handle_typing(evt.room_id, evt.content.user_ids)
-        elif evt.type == EventType.RECEIPT:
-            await self.handle_receipt(evt)
+        else:
+            await super().handle_ephemeral_event(evt)
