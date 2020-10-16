@@ -67,8 +67,11 @@ class Puppet(DBPuppet, BasePuppet):
         cls.mxid_template = SimpleTemplate(cls.config["bridge.username_template"], "userid",
                                            prefix="@", suffix=f":{cls.hs_domain}", type=int)
         cls.sync_with_custom_puppets = cls.config["bridge.sync_with_custom_puppets"]
-        secret = cls.config["bridge.login_shared_secret"]
-        cls.login_shared_secret = secret.encode("utf-8") if secret else None
+        cls.homeserver_url_map = {server: URL(url) for server, url
+                                  in cls.config["bridge.double_puppet_server_map"].items()}
+        cls.allow_discover_url = cls.config["bridge.double_puppet_allow_discovery"]
+        cls.login_shared_secret_map = {server: secret.encode("utf-8") for server, secret
+                                       in cls.config["bridge.login_shared_secret_map"].items()}
         cls.login_device_name = "Twitter DM Bridge"
         return (puppet.try_start() async for puppet in cls.all_with_custom_mxid())
 

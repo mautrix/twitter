@@ -88,3 +88,8 @@ async def upgrade_v1(conn: Connection) -> None:
             ON DELETE CASCADE ON UPDATE CASCADE,
         UNIQUE (mxid, mx_room)
     )""")
+
+
+@upgrade_table.register(description="Add double-puppeting base_url to puppet table")
+async def upgrade_v2(conn: Connection) -> None:
+    await conn.execute("ALTER TABLE puppet ADD COLUMN base_url TEXT")
