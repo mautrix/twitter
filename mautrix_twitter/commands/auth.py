@@ -13,7 +13,10 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from . import command_handler, CommandEvent, SECTION_AUTH
+from mautrix.bridge.commands import HelpSection, command_handler
+from .typehint import CommandEvent
+
+SECTION_AUTH = HelpSection("Authentication", 10, "")
 
 
 @command_handler(needs_auth=False, management_only=True,

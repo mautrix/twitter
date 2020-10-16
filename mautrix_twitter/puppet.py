@@ -47,10 +47,10 @@ class Puppet(DBPuppet, BasePuppet):
     def __init__(self, twid: int, name: Optional[str] = None, photo_url: Optional[str] = None,
                  photo_mxc: Optional[ContentURI] = None, is_registered: bool = False,
                  custom_mxid: Optional[UserID] = None, access_token: Optional[str] = None,
-                 next_batch: Optional[SyncToken] = None) -> None:
+                 next_batch: Optional[SyncToken] = None, base_url: Optional[URL] = None) -> None:
         super().__init__(twid=twid, name=name, photo_url=photo_url, photo_mxc=photo_mxc,
                          is_registered=is_registered, custom_mxid=custom_mxid,
-                         access_token=access_token, next_batch=next_batch)
+                         access_token=access_token, next_batch=next_batch, base_url=base_url)
         self.log = self.log.getChild(str(twid))
 
         self.default_mxid = self.get_mxid_from_id(twid)

@@ -21,22 +21,20 @@ from mautrix.types import (Event, ReactionEvent, MessageEvent, StateEvent, Encry
                            ReceiptEvent, TypingEvent, PresenceEvent, RedactionEvent)
 
 from .db import Message as DBMessage
-from . import commands as com, puppet as pu, portal as po, user as u
+from . import puppet as pu, portal as po, user as u
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
 
 
 class MatrixHandler(BaseMatrixHandler):
-    commands: 'com.CommandProcessor'
-
     def __init__(self, bridge: 'TwitterBridge') -> None:
         prefix, suffix = bridge.config["bridge.username_template"].format(userid=":").split(":")
         homeserver = bridge.config["homeserver.domain"]
         self.user_id_prefix = f"@{prefix}"
         self.user_id_suffix = f"{suffix}:{homeserver}"
 
-        super().__init__(command_processor=com.CommandProcessor(bridge), bridge=bridge)
+        super().__init__(bridge=bridge)
 
     def filter_matrix_event(self, evt: Event) -> bool:
         if not isinstance(evt, (ReactionEvent, MessageEvent, StateEvent, EncryptedEvent,

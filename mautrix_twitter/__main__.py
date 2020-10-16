@@ -26,6 +26,7 @@ from .user import User
 from .portal import Portal
 from .puppet import Puppet
 from .web import ProvisioningAPI
+from . import commands
 
 
 class TwitterBridge(Bridge):
