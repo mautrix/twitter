@@ -44,7 +44,7 @@ class Puppet:
     async def insert(self) -> None:
         q = ("INSERT INTO puppet (twid, name, photo_url, photo_mxc, is_registered, custom_mxid,"
              "                    access_token, next_batch, base_url) "
-             "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)")
+             "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
         await self.db.execute(q, self.twid, self.name, self.photo_url, self.photo_mxc,
                               self.is_registered, self.custom_mxid, self.access_token,
                               self.next_batch, str(self.base_url) if self.base_url else None)
