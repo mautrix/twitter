@@ -18,7 +18,8 @@ from typing import List, Union, TYPE_CHECKING
 from mautrix.bridge import BaseMatrixHandler
 from mautrix.types import (Event, ReactionEvent, MessageEvent, StateEvent, EncryptedEvent, RoomID,
                            EventID, UserID, ReactionEventContent, RelationType, EventType,
-                           ReceiptEvent, TypingEvent, PresenceEvent, RedactionEvent, ReceiptType)
+                           ReceiptEvent, TypingEvent, PresenceEvent, RedactionEvent,
+                           SingleReceiptEventContent)
 
 from .db import Message as DBMessage
 from . import puppet as pu, portal as po, user as u
@@ -38,7 +39,7 @@ class MatrixHandler(BaseMatrixHandler):
 
     def filter_matrix_event(self, evt: Event) -> bool:
         if not isinstance(evt, (ReactionEvent, MessageEvent, StateEvent, EncryptedEvent,
-                                RedactionEvent)):
+                                RedactionEvent, ReceiptEvent, TypingEvent)):
             return True
         return (evt.sender == self.az.bot_mxid
                 or pu.Puppet.get_id_from_mxid(evt.sender) is not None)
@@ -93,8 +94,8 @@ class MatrixHandler(BaseMatrixHandler):
         await portal.handle_matrix_reaction(user, event_id, content.relates_to.event_id,
                                             content.relates_to.key)
 
-    async def handle_read_receipt(self, user: 'u.User', portal: 'po.Portal', event_id: EventID
-                                  ) -> None:
+    async def handle_read_receipt(self, user: 'u.User', portal: 'po.Portal', event_id: EventID,
+                                  data: SingleReceiptEventContent) -> None:
         message = await DBMessage.get_by_mxid(event_id, portal.mxid)
         if not message:
             return
