@@ -637,15 +637,16 @@ class Portal(DBPortal, BasePortal):
             self.by_mxid[self.mxid] = self
             if not self.is_direct:
                 await self._update_participants(info.participants)
-            else:
-                puppet = await p.Puppet.get_by_custom_mxid(source.mxid)
-                if puppet:
-                    try:
-                        await puppet.intent.join_room_by_id(self.mxid)
+
+            puppet = await p.Puppet.get_by_custom_mxid(source.mxid)
+            if puppet:
+                try:
+                    await puppet.intent.join_room_by_id(self.mxid)
+                    if self.is_direct:
                         await source.update_direct_chats({self.main_intent.mxid: [self.mxid]})
-                    except MatrixError:
-                        self.log.debug("Failed to join custom puppet into newly created portal",
-                                       exc_info=True)
+                except MatrixError:
+                    self.log.debug("Failed to join custom puppet into newly created portal",
+                                   exc_info=True)
 
             if not info.trusted:
                 msg = "This is a message request. Replying here will accept the request."

@@ -20,11 +20,11 @@ import asyncio
 import logging
 
 from mautwitdm import TwitterAPI
-from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored
+from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, PollingErrorResolved
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
 from mautrix.bridge import BaseUser
-from mautrix.types import UserID, RoomID
+from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
 from mautrix.appservice import AppService
 from mautrix.util.opt_prometheus import Summary, Gauge, async_time
 
@@ -59,6 +59,7 @@ class User(DBUser, BaseUser):
     username: Optional[str]
 
     _notice_room_lock: asyncio.Lock
+    _notice_send_lock: asyncio.Lock
     _is_logged_in: Optional[bool]
 
     def __init__(self, mxid: UserID, twid: Optional[int] = None, auth_token: Optional[str] = None,
@@ -67,6 +68,7 @@ class User(DBUser, BaseUser):
         super().__init__(mxid=mxid, twid=twid, auth_token=auth_token, csrf_token=csrf_token,
                          poll_cursor=poll_cursor, notice_room=notice_room)
         self._notice_room_lock = asyncio.Lock()
+        self._notice_send_lock = asyncio.Lock()
         perms = self.config.get_permissions(mxid)
         self.is_whitelisted, self.is_admin, self.permission_level = perms
         self.log = self.log.getChild(self.mxid)
@@ -126,8 +128,11 @@ class User(DBUser, BaseUser):
         self.client.add_handler(ReactionDeleteEntry, self.handle_reaction)
         self.client.add_handler(ConversationReadEntry, self.handle_receipt)
         self.client.add_handler(PollingStarted, self.on_connect)
+        self.client.add_handler(PollingErrorResolved, self.on_connect)
         self.client.add_handler(PollingStopped, self.on_disconnect)
         self.client.add_handler(PollingErrored, self.on_disconnect)
+        self.client.add_handler(PollingErrored, self.on_error)
+        self.client.add_handler(PollingErrorResolved, self.on_error_resolved)
 
         user_info = await self.get_info()
         self.twid = user_info.id
@@ -148,6 +153,48 @@ class User(DBUser, BaseUser):
 
     async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
         self._track_metric(METRIC_CONNECTED, False)
+
+    # TODO this stuff could probably be moved to mautrix-python
+    async def get_notice_room(self) -> RoomID:
+        if not self.notice_room:
+            async with self._notice_room_lock:
+                # If someone already created the room while this call was waiting,
+                # don't make a new room
+                if self.notice_room:
+                    return self.notice_room
+                self.notice_room = await self.az.intent.create_room(
+                    is_direct=True, invitees=[self.mxid],
+                    topic="Twitter DM bridge notices")
+                await self.update()
+        return self.notice_room
+
+    async def send_bridge_notice(self, text: str, edit: Optional[EventID] = None,
+                                 important: bool = False) -> Optional[EventID]:
+        event_id = None
+        try:
+            self.log.debug("Sending bridge notice: %s", text)
+            content = TextMessageEventContent(body=text, msgtype=(MessageType.TEXT if important
+                                                                  else MessageType.NOTICE))
+            if edit:
+                content.set_edit(edit)
+            # This is locked to prevent notices going out in the wrong order
+            async with self._notice_send_lock:
+                event_id = await self.az.intent.send_message(await self.get_notice_room(), content)
+        except Exception:
+            self.log.warning("Failed to send bridge notice", exc_info=True)
+        return edit or event_id
+
+    async def on_error(self, evt: PollingErrored) -> None:
+        if evt.fatal:
+            await self.send_bridge_notice(f"Fatal error while polling Twitter: {evt.error}",
+                                          important=evt.fatal)
+        elif evt.first and self.config["bridge.temporary_disconnect_notices"]:
+            await self.send_bridge_notice(f"Error while polling Twitter: {evt.error}  \n"
+                                          f"The bridge will keep retrying.")
+
+    async def on_error_resolved(self, evt: PollingErrorResolved) -> None:
+        if self.config["bridge.temporary_disconnect_notices"]:
+            await self.send_bridge_notice("Twitter polling error resolved")
 
     async def _try_sync_puppet(self, user_info: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(self.twid)

@@ -32,6 +32,12 @@ class PollingStopped:
 @dataclass
 class PollingErrored:
     error: Exception
+    fatal: bool
+    first: bool
+
+
+class PollingErrorResolved:
+    pass
 
 
 class TwitterPoller(TwitterDispatcher):
@@ -132,7 +138,7 @@ class TwitterPoller(TwitterDispatcher):
             self.log.debug("Polling stopped")
             await self.dispatch(PollingStopped())
         except Exception as e:
-            await self.dispatch(PollingErrored(e))
+            await self.dispatch(PollingErrored(e, fatal=True, first=True))
             self.log.exception("Fatal error while polling")
             if raise_exceptions:
                 raise
@@ -156,13 +162,19 @@ class TwitterPoller(TwitterDispatcher):
             if self.dispatch_initial_resp:
                 await self.dispatch_all(resp)
         await self.dispatch(PollingStarted())
+        errored = False
         while True:
             try:
                 resp = await self._poll_once()
-            except Exception:
+            except Exception as e:
                 self.log.warning("Error while polling", exc_info=True)
+                await self.dispatch(PollingErrored(e, fatal=False, first=not errored))
+                errored = True
                 await asyncio.sleep(self.poll_sleep * 5)
                 continue
+            if errored:
+                errored = False
+                await self.dispatch(PollingErrorResolved)
             await self.dispatch_all(resp)
             try:
                 await asyncio.wait_for(self.skip_poll_wait.wait(), self.poll_sleep)
