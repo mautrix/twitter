@@ -84,6 +84,8 @@ class User(DBUser, BaseUser):
         cls.config = bridge.config
         cls.az = bridge.az
         cls.loop = bridge.loop
+        TwitterAPI.error_sleep = cls.config["bridge.error_sleep"]
+        TwitterAPI.max_poll_errors = cls.config["bridge.max_poll_errors"]
         return (user.try_connect() async for user in cls.all_logged_in())
 
     async def update(self) -> None:
@@ -188,7 +190,7 @@ class User(DBUser, BaseUser):
         if evt.fatal:
             await self.send_bridge_notice(f"Fatal error while polling Twitter: {evt.error}",
                                           important=evt.fatal)
-        elif evt.first and self.config["bridge.temporary_disconnect_notices"]:
+        elif evt.count == 1 and self.config["bridge.temporary_disconnect_notices"]:
             await self.send_bridge_notice(f"Error while polling Twitter: {evt.error}  \n"
                                           f"The bridge will keep retrying.")
 

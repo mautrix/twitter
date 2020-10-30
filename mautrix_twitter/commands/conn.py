@@ -44,3 +44,25 @@ async def ping(evt: CommandEvent) -> None:
 async def sync(evt: CommandEvent) -> None:
     await evt.sender.sync()
     await evt.reply("Synchronization complete")
+
+
+@command_handler(needs_auth=True, management_only=False, help_section=SECTION_CONNECTION,
+                 help_text="Start the Twitter poll task")
+async def start_polling(evt: CommandEvent) -> None:
+    if evt.sender.client.is_polling():
+        await evt.reply("You already have a poll loop. If you want to restart it, "
+                        "use `$cmdprefix+sp stop-polling` first.")
+    else:
+        evt.sender.client.start_polling()
+        await evt.reply("Started poll task")
+
+
+@command_handler(needs_auth=True, management_only=False, help_section=SECTION_CONNECTION,
+                 help_text="Stop the Twitter poll task")
+async def stop_polling(evt: CommandEvent) -> None:
+    if evt.sender.client.is_polling():
+        evt.sender.client.stop_polling()
+        await evt.reply("Stopped poll task")
+    else:
+        await evt.reply("You don't have a running poll task. "
+                        "You can start one with `$cmdprefix+sp start-polling`.")

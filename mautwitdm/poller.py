@@ -33,7 +33,7 @@ class PollingStopped:
 class PollingErrored:
     error: Exception
     fatal: bool
-    first: bool
+    count: int
 
 
 class PollingErrorResolved:
@@ -51,6 +51,8 @@ class TwitterPoller(TwitterDispatcher):
     skip_poll_wait: asyncio.Event
 
     poll_sleep: int = 3
+    error_sleep: int = 5
+    max_poll_errors: int = 12
     poll_cursor: Optional[str]
     dispatch_initial_resp: bool
     _poll_task: Optional[asyncio.Task]
@@ -138,7 +140,7 @@ class TwitterPoller(TwitterDispatcher):
             self.log.debug("Polling stopped")
             await self.dispatch(PollingStopped())
         except Exception as e:
-            await self.dispatch(PollingErrored(e, fatal=True, first=True))
+            await self.dispatch(PollingErrored(e, fatal=True, count=0))
             self.log.exception("Fatal error while polling")
             if raise_exceptions:
                 raise
@@ -162,18 +164,23 @@ class TwitterPoller(TwitterDispatcher):
             if self.dispatch_initial_resp:
                 await self.dispatch_all(resp)
         await self.dispatch(PollingStarted())
-        errored = False
+        errors = 0
         while True:
             try:
                 resp = await self._poll_once()
             except Exception as e:
-                self.log.warning("Error while polling", exc_info=True)
-                await self.dispatch(PollingErrored(e, fatal=False, first=not errored))
-                errored = True
-                await asyncio.sleep(self.poll_sleep * 5)
+                if errors > self.max_poll_errors > 0:
+                    self.log.debug(f"Error count ({errors}) exceeded maximum, "
+                                   f"raising error as fatal")
+                    raise
+                errors += 1
+                sleep = min(15 * 60, self.error_sleep * errors)
+                self.log.warning(f"Error while polling, retrying in {sleep}s", exc_info=True)
+                await self.dispatch(PollingErrored(e, fatal=False, count=errors))
+                await asyncio.sleep(sleep)
                 continue
-            if errored:
-                errored = False
+            if errors > 0:
+                errors = 0
                 await self.dispatch(PollingErrorResolved)
             await self.dispatch_all(resp)
             try:
@@ -183,6 +190,9 @@ class TwitterPoller(TwitterDispatcher):
             if self._typing_in:
                 await self._typing_in.mark_typing()
 
+    def is_polling(self) -> bool:
+        return self._poll_task and not self._poll_task.done()
+
     def start_polling(self) -> asyncio.Task:
         """
         Start polling forever in the background. This calls :meth:`poll_forever` and puts it in an
@@ -191,6 +201,7 @@ class TwitterPoller(TwitterDispatcher):
         Returns:
             The created asyncio task.
         """
+        self.stop_polling()
         self.log.debug("Starting poll task")
         self._poll_task = self.loop.create_task(self.poll_forever())
         return self._poll_task
@@ -200,3 +211,4 @@ class TwitterPoller(TwitterDispatcher):
         if self._poll_task:
             self.log.debug("Cancelling ongoing poll task")
             self._poll_task.cancel()
+            self._poll_task = None

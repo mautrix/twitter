@@ -157,6 +157,11 @@ bridge:
     delivery_error_reports: false
     # Whether or not non-fatal polling errors should send notices to the notice room.
     temporary_disconnect_notices: true
+    # Number of seconds to sleep more than the previous error when a polling error occurs.
+    # Growth is capped at 15 minutes.
+    error_sleep: 5
+    # Maximum number of polling errors before giving up. Set to -1 to retry forever.
+    max_poll_errors: 12
     # Set this to true to tell the bridge to re-send m.bridge events to all rooms on the next run.
     # This field will automatically be changed back to false after it,
     # except if the config file is not writable.
