@@ -181,7 +181,7 @@ class TwitterPoller(TwitterDispatcher):
                 continue
             if errors > 0:
                 errors = 0
-                await self.dispatch(PollingErrorResolved)
+                await self.dispatch(PollingErrorResolved())
             await self.dispatch_all(resp)
             try:
                 await asyncio.wait_for(self.skip_poll_wait.wait(), self.poll_sleep)
