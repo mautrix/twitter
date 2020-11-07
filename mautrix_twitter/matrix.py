@@ -38,7 +38,7 @@ class MatrixHandler(BaseMatrixHandler):
         super().__init__(bridge=bridge)
 
     def filter_matrix_event(self, evt: Event) -> bool:
-        if isinstance(evt, ReceiptEvent, TypingEvent):
+        if isinstance(evt, (ReceiptEvent, TypingEvent)):
             return False
         elif not isinstance(evt, (ReactionEvent, MessageEvent, StateEvent, EncryptedEvent,
                                 RedactionEvent)):
