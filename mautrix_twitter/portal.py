@@ -33,6 +33,7 @@ from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, Mess
                            ContentURI, EncryptedFile)
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.util.simple_lock import SimpleLock
+from mautrix.util.network_retry import call_with_net_retry
 
 from .db import Portal as DBPortal, Message as DBMessage, Reaction as DBReaction
 from .config import Config
@@ -310,8 +311,8 @@ class Portal(DBPortal, BasePortal):
             upload_mime_type = "application/octet-stream"
             upload_file_name = None
 
-        mxc = await intent.upload_media(data, mime_type=upload_mime_type,
-                                        filename=upload_file_name)
+        mxc = await call_with_net_retry(intent.upload_media, data, mime_type=upload_mime_type,
+                                        filename=upload_file_name, _action="upload media")
 
         if decryption_info:
             decryption_info.url = mxc
