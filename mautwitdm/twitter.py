@@ -23,8 +23,8 @@ from .errors import check_error
 Tokens = NamedTuple('Tokens', auth_token=str, csrf_token=str)
 DownloadResp = NamedTuple('DownloadResp', data=bytes, mime_type=str)
 
-
 twitter_com = URL("https://twitter.com/")
+
 
 class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
     """The main entrypoint for using the internal Twitter DM API."""
