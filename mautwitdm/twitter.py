@@ -24,6 +24,8 @@ Tokens = NamedTuple('Tokens', auth_token=str, csrf_token=str)
 DownloadResp = NamedTuple('DownloadResp', data=bytes, mime_type=str)
 
 
+twitter_com = URL("https://twitter.com/")
+
 class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
     """The main entrypoint for using the internal Twitter DM API."""
     base_url: URL = URL("https://api.twitter.com/1.1")
@@ -36,8 +38,6 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
     node_id: int
     active: bool
     user_agent: str
-
-    _csrf_token: str
 
     def __init__(self, http: Optional[ClientSession] = None, log: Optional[logging.Logger] = None,
                  loop: Optional[asyncio.AbstractEventLoop] = None, node_id: Optional[int] = None
@@ -71,8 +71,7 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
         cookie["auth_token"].update({"domain": "twitter.com", "path": "/"})
         cookie["ct0"] = csrf_token
         cookie["ct0"].update({"domain": "twitter.com", "path": "/"})
-        self._csrf_token = csrf_token
-        self.http.cookie_jar.update_cookies(cookie, URL("https://twitter.com/"))
+        self.http.cookie_jar.update_cookies(cookie, twitter_com)
 
     def mark_typing(self, conversation_id: Optional[str]) -> None:
         """
@@ -100,6 +99,7 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
         Returns:
             A key-value HTTP header list.
         """
+        csrf_token = self.http.cookie_jar.filter_cookies(twitter_com)["ct0"].value
         return {
             # Hardcoded authorization header from the web app
             "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
@@ -113,7 +113,7 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
             "x-twitter-auth-type": "OAuth2Session",
             "x-twitter-client-language": "en",
             "x-twitter-active-user": "yes",
-            "x-csrf-token": self._csrf_token,
+            "x-csrf-token": csrf_token,
         }
 
     async def download_media(self, media: MessageAttachmentMedia) -> DownloadResp:
