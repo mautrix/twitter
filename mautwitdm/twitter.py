@@ -116,14 +116,14 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
             "x-csrf-token": csrf_token,
         }
 
-    async def download_media(self, media: MessageAttachmentMedia) -> DownloadResp:
+    async def download_media(self, url: str) -> DownloadResp:
         headers = {
             "Accept": "*/*",
             "DNT": "1",
             "Referer": "https://twitter.com/messages",
             "User-Agent": self.user_agent,
         }
-        async with self.http.get(media.media_url_https, headers=headers) as resp:
+        async with self.http.get(url, headers=headers) as resp:
             await check_error(resp)
             return DownloadResp(data=await resp.read(), mime_type=resp.headers["Content-Type"])
 

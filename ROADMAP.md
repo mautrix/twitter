@@ -15,10 +15,10 @@
   * [ ] Message content
     * [x] Text
     * [ ] Formatting
-    * [ ] Media
+    * [x] Media
       * [x] Images
-      * [ ] Videos
-      * [ ] Gifs
+      * [x] Videos
+      * [x] Gifs
   * [x] Message reactions
   * [x] Message history
     * [x] When creating portal
