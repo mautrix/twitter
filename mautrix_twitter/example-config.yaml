@@ -124,11 +124,8 @@ bridge:
         # If using double puppeting, should notifications be disabled
         # while the initial backfill is in progress?
         disable_notifications: false
-    # End-to-bridge encryption support options. These require matrix-nio to be installed with pip
-    # and login_shared_secret to be configured in order to get a device for the bridge bot.
-    #
-    # Additionally, https://github.com/matrix-org/synapse/pull/5758 is required if using a normal
-    # application service.
+    # End-to-bridge encryption support options. You must install the e2be optional dependency for
+    # this to work. See https://github.com/tulir/mautrix-telegram/wiki/End‐to‐bridge-encryption
     encryption:
         # Allow encryption, work in group chat rooms with e2ee enabled
         allow: false
