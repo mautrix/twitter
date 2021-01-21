@@ -6,6 +6,7 @@
 from typing import Optional, List, Dict
 
 from attr import dataclass
+import attr
 
 from mautrix.types import SerializableAttrs
 
@@ -67,9 +68,9 @@ class InitialStateResponse(SerializableAttrs['InitialStateResponse']):
     untrusted_last_seen_event_id: str
 
     inbox_timelines: InboxTimelines
-    entries: List[Entry]
-    users: Dict[str, User]
-    conversations: Dict[str, Conversation]
+    entries: List[Entry] = attr.ib(factory=lambda: [])
+    users: Dict[str, User] = attr.ib(factory=lambda: {})
+    conversations: Dict[str, Conversation] = attr.ib(factory=lambda: {})
 
 
 @dataclass
