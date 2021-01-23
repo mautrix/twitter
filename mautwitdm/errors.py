@@ -29,9 +29,8 @@ class RateLimitError(TwitterError):
     def __init__(self, code: int, message: str, headers: CIMultiDictProxy[str]) -> None:
         self.code = code
         self.message = message
-        # TODO make sure this works
-        print(headers)
         self.limit = int(headers["x-rate-limit-limit"])
+        # this is probably always zero, so no need to get it
         # self.remaining = int(headers["x-rate-limit-remaining"])
         self.reset = int(headers["x-rate-limit-reset"])
         time_till_reset = int(time.time() - self.reset)

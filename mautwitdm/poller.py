@@ -6,13 +6,14 @@
 from typing import Dict, Optional, Type, TypeVar, List, Callable, Awaitable, Any, Union
 import logging
 import asyncio
+import time
 
 from attr import dataclass
 from aiohttp import ClientSession
 from yarl import URL
 
 from .types import PollResponse, InitialStateResponse
-from .errors import check_error
+from .errors import check_error, RateLimitError
 from .conversation import Conversation
 from .dispatcher import TwitterDispatcher
 
@@ -168,6 +169,14 @@ class TwitterPoller(TwitterDispatcher):
         while True:
             try:
                 resp = await self._poll_once()
+            except RateLimitError as e:
+                sleep = e.reset - int(time.time())
+                self.log.warning(f"Got rate limit until {e.reset} while polling, "
+                                 f"waiting {sleep} seconds")
+                if self.poll_sleep < 8:
+                    self.poll_sleep += 1
+                    self.log.debug(f"Increased poll sleep to {self.poll_sleep}")
+                await asyncio.sleep(sleep)
             except Exception as e:
                 if errors > self.max_poll_errors > 0:
                     self.log.debug(f"Error count ({errors}) exceeded maximum, "
