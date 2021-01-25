@@ -177,6 +177,7 @@ class TwitterPoller(TwitterDispatcher):
                     self.poll_sleep += 1
                     self.log.debug(f"Increased poll sleep to {self.poll_sleep}")
                 await asyncio.sleep(sleep)
+                continue
             except Exception as e:
                 if errors > self.max_poll_errors > 0:
                     self.log.debug(f"Error count ({errors}) exceeded maximum, "
