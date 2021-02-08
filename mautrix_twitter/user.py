@@ -23,7 +23,7 @@ from mautwitdm import TwitterAPI
 from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, PollingErrorResolved
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
-from mautrix.bridge import BaseUser
+from mautrix.bridge import BaseUser, async_getter_lock
 from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
 from mautrix.appservice import AppService
 from mautrix.util.opt_prometheus import Summary, Gauge, async_time
@@ -278,7 +278,8 @@ class User(DBUser, BaseUser):
     @async_time(METRIC_CONVERSATION_UPDATE)
     async def handle_conversation_update(self, evt: Conversation, create_portal: bool = False
                                          ) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid, conv_type=evt.type)
+        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
+                                             conv_type=evt.type)
         if not portal.mxid:
             if create_portal:
                 await portal.create_matrix_room(self, evt)
@@ -294,7 +295,7 @@ class User(DBUser, BaseUser):
 
     @async_time(METRIC_MESSAGE)
     async def handle_message(self, evt: MessageEntry) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
+        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
                                              conv_type=evt.conversation.type)
         if not portal.mxid:
             await portal.create_matrix_room(self, evt.conversation)
@@ -303,7 +304,7 @@ class User(DBUser, BaseUser):
 
     @async_time(METRIC_REACTION)
     async def handle_reaction(self, evt: Union[ReactionCreateEntry, ReactionDeleteEntry]) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
+        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
                                              conv_type=evt.conversation.type)
         if not portal.mxid:
             self.log.debug(f"Ignoring reaction in conversation {evt.conversation_id} with no room")
@@ -318,7 +319,7 @@ class User(DBUser, BaseUser):
 
     @async_time(METRIC_RECEIPT)
     async def handle_receipt(self, evt: ConversationReadEntry) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, self.twid,
+        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
                                              conv_type=evt.conversation.type)
         if not portal.mxid:
             return
@@ -334,7 +335,8 @@ class User(DBUser, BaseUser):
             self.by_twid[self.twid] = self
 
     @classmethod
-    async def get_by_mxid(cls, mxid: UserID, create: bool = True) -> Optional['User']:
+    @async_getter_lock
+    async def get_by_mxid(cls, mxid: UserID, *, create: bool = True) -> Optional['User']:
         # Never allow ghosts to be users
         if pu.Puppet.get_id_from_mxid(mxid):
             return None
@@ -357,6 +359,7 @@ class User(DBUser, BaseUser):
         return None
 
     @classmethod
+    @async_getter_lock
     async def get_by_twid(cls, twid: int) -> Optional['User']:
         try:
             return cls.by_twid[twid]

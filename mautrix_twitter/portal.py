@@ -27,7 +27,7 @@ from mautwitdm.types import (ConversationType, Conversation, MessageData, Partic
                              TimelineStatus, ReactionCreateEntry, ReactionDeleteEntry,
                              MessageEntry, VideoVariant)
 from mautrix.appservice import AppService, IntentAPI
-from mautrix.bridge import BasePortal, NotificationDisabler
+from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
                            TextMessageEventContent, MediaMessageEventContent, ImageInfo, VideoInfo,
                            ThumbnailInfo, ContentURI, EncryptedFile)
@@ -736,6 +736,7 @@ class Portal(DBPortal, BasePortal):
                 yield portal
 
     @classmethod
+    @async_getter_lock
     async def get_by_mxid(cls, mxid: RoomID) -> Optional['Portal']:
         try:
             return cls.by_mxid[mxid]
@@ -750,7 +751,8 @@ class Portal(DBPortal, BasePortal):
         return None
 
     @classmethod
-    async def get_by_twid(cls, twid: str, receiver: int = 0,
+    @async_getter_lock
+    async def get_by_twid(cls, twid: str, *, receiver: int = 0,
                           conv_type: Optional[ConversationType] = None) -> Optional['Portal']:
         if conv_type == ConversationType.GROUP_DM and receiver != 0:
             receiver = 0

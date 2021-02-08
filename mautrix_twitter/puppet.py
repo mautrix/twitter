@@ -20,7 +20,7 @@ from aiohttp import ClientSession
 from yarl import URL
 
 from mautwitdm.types import User
-from mautrix.bridge import BasePuppet
+from mautrix.bridge import BasePuppet, async_getter_lock
 from mautrix.appservice import IntentAPI
 from mautrix.types import ContentURI, UserID, SyncToken, RoomID
 from mautrix.util.simple_template import SimpleTemplate
@@ -139,10 +139,11 @@ class Puppet(DBPuppet, BasePuppet):
     async def get_by_mxid(cls, mxid: UserID, create: bool = True) -> Optional['Puppet']:
         twid = cls.get_id_from_mxid(mxid)
         if twid:
-            return await cls.get_by_twid(twid, create)
+            return await cls.get_by_twid(twid, create=create)
         return None
 
     @classmethod
+    @async_getter_lock
     async def get_by_custom_mxid(cls, mxid: UserID) -> Optional['Puppet']:
         try:
             return cls.by_custom_mxid[mxid]
@@ -165,7 +166,8 @@ class Puppet(DBPuppet, BasePuppet):
         return UserID(cls.mxid_template.format_full(twid))
 
     @classmethod
-    async def get_by_twid(cls, twid: int, create: bool = True) -> Optional['Puppet']:
+    @async_getter_lock
+    async def get_by_twid(cls, twid: int, *, create: bool = True) -> Optional['Puppet']:
         try:
             return cls.by_twid[twid]
         except KeyError:
