@@ -4,6 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 from typing import List, Optional
+from datetime import datetime
 
 from attr import dataclass
 
@@ -39,13 +40,14 @@ class Participant(SerializableAttrs['Participant']):
 class Conversation(SerializableAttrs['Conversation']):
     conversation_id: str
     type: ConversationType
-    sort_event_id: str
-    sort_timestamp: StringTimestamp
     participants: List[Participant]
     notifications_disabled: bool
     mention_notifications_disabled: bool
     trusted: bool
     low_quality: bool
+
+    sort_event_id: Optional[str] = None
+    sort_timestamp: StringTimestamp = datetime.fromtimestamp(0)
 
     # These are present in some responses
     min_entry_id: Optional[str] = None
