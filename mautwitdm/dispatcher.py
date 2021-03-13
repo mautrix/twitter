@@ -4,7 +4,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.'
 from typing import Dict, Type, TypeVar, List, Callable, Awaitable, Any
-import logging
+
+from mautrix.util.logging import TraceLogger
 
 T = TypeVar('T')
 Handler = Callable[[T], Awaitable[Any]]
@@ -16,7 +17,7 @@ class TwitterDispatcher:
     This class is used to dispatch events that :class:`TwitterPoller` and :class:`TwitterStreamer`
     get from Twitter.
     """
-    log: logging.Logger
+    log: TraceLogger
     _handlers: HandlerMap
 
     async def dispatch(self, event: T) -> None:
@@ -26,6 +27,7 @@ class TwitterDispatcher:
         Args:
             event: The event to dispatch.
         """
+        self.log.trace("Dispatching %s", event)
         for handler in self._handlers[type(event)]:
             try:
                 await handler(event)

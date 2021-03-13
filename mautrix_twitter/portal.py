@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2021 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -18,7 +18,6 @@ from typing import (Dict, Tuple, Optional, List, Deque, Set, Any, Union, AsyncGe
 from collections import deque
 from datetime import datetime
 import asyncio
-import html
 
 from yarl import URL
 import magic
@@ -29,14 +28,15 @@ from mautwitdm.types import (ConversationType, Conversation, MessageData, Partic
 from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
-                           TextMessageEventContent, MediaMessageEventContent, ImageInfo, VideoInfo,
-                           ThumbnailInfo, ContentURI, EncryptedFile)
+                           MediaMessageEventContent, ImageInfo, VideoInfo, ThumbnailInfo,
+                           ContentURI, EncryptedFile)
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.util.simple_lock import SimpleLock
 from mautrix.util.network_retry import call_with_net_retry
 
 from .db import Portal as DBPortal, Message as DBMessage, Reaction as DBReaction
 from .config import Config
+from .formatter import twitter_to_matrix
 from . import user as u, puppet as p, matrix as m
 
 if TYPE_CHECKING:
@@ -252,8 +252,7 @@ class Portal(DBPortal, BasePortal):
                 if content:
                     event_id = await self._send_message(intent, content, timestamp=message.time)
             if message.text and not message.text.isspace():
-                message.text = html.unescape(message.text)
-                content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text)
+                content = await twitter_to_matrix(message)
                 event_id = await self._send_message(intent, content, timestamp=message.time)
             if event_id:
                 msg = DBMessage(mxid=event_id, mx_room=self.mxid, twid=msg_id,

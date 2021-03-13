@@ -1,9 +1,9 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2021 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 from attr import dataclass
 
@@ -39,3 +39,8 @@ class MessageEntities(SerializableAttrs['MessageEntities']):
     symbols: List[MessageEntitySimple]
     user_mentions: List[MessageEntityUserMention]
     urls: List[MessageEntityURL]
+
+    @property
+    def all(self) -> List[Union[MessageEntitySimple, MessageEntityUserMention, MessageEntityURL]]:
+        entities = self.hashtags + self.symbols + self.user_mentions + self.urls
+        return sorted(entities, key=lambda entity: entity.indices[0])
