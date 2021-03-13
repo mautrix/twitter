@@ -27,7 +27,7 @@ MessageEntity = Union[MessageEntityURL, MessageEntityUserMention]
 async def twitter_to_matrix(message: MessageData) -> TextMessageEventContent:
     content = TextMessageEventContent(msgtype=MessageType.TEXT, body=message.text,
                                       format=Format.HTML, formatted_body=message.text)
-    for entity in reversed(message.entities.all):
+    for entity in reversed(message.entities.all) if message.entities else []:
         start, end = entity.indices
         if isinstance(entity, MessageEntityURL):
             content.body = content.body[:start] + entity.expanded_url + content.body[end:]
