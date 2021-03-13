@@ -123,9 +123,18 @@ class TwitterPoller(TwitterDispatcher):
         })
         async with self.http.get(url, headers=self.headers) as resp:
             data = await check_error(resp)
-            if "user_events" not in data:
-                self.log.warning("Got data without user_events: %s", data)
-            response = PollResponse.deserialize(data["user_events"])
+            try:
+                user_events = data["user_events"]
+            except KeyError:
+                try:
+                    inbox_initial_state = data["inbox_initial_state"]
+                except KeyError:
+                    self.log.warning("Got unknown poll response: %s", data)
+                    raise
+                else:
+                    response = InitialStateResponse.deserialize(inbox_initial_state)
+            else:
+                response = PollResponse.deserialize(user_events)
             self.poll_cursor = response.cursor
             return response
 
