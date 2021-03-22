@@ -266,11 +266,11 @@ class Portal(DBPortal, BasePortal):
         order = ["video/mp4"]
         try:
             best_quality = order.index(best.content_type)
-        except IndexError:
+        except (IndexError, ValueError):
             best_quality = -1
         try:
             current_quality = order.index(current.content_type)
-        except IndexError:
+        except (IndexError, ValueError):
             current_quality = -1
         return current_quality > best_quality
 
@@ -663,8 +663,7 @@ class Portal(DBPortal, BasePortal):
             await self.update()
             self.log.debug(f"Matrix room created: {self.mxid}")
             self.by_mxid[self.mxid] = self
-            if not self.is_direct:
-                await self._update_participants(info.participants)
+            await self._update_participants(info.participants)
 
             puppet = await p.Puppet.get_by_custom_mxid(source.mxid)
             if puppet:
@@ -691,6 +690,10 @@ class Portal(DBPortal, BasePortal):
                 await self.backfill(source, is_initial=True)
             except Exception:
                 self.log.exception("Failed to backfill new portal")
+
+            # Update participants again after backfill to sync read receipts
+            self._last_participant_update = set()
+            await self._update_participants(info.participants)
 
         return self.mxid
 
