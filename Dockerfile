@@ -16,7 +16,7 @@ RUN apk add --no-cache \
       # encryption
       olm-dev \
       py3-cffi \
-	  py3-pycryptodome \
+      py3-pycryptodome \
       py3-unpaddedbase64 \
       py3-future \
       bash \
