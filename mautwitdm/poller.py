@@ -166,8 +166,21 @@ class TwitterPoller(TwitterDispatcher):
             if not entry:
                 continue
             for entry_type in entry.all_types:
-                entry_type.conversation = resp.conversations[entry_type.conversation_id]
-                await self.dispatch(entry_type)
+                try:
+                    entry_type.conversation = resp.conversations[entry_type.conversation_id]
+                except KeyError:
+                    msg = ("Poll response didn't contain conversation info "
+                           f"for {entry_type.conversation_id} "
+                           f"(entry type {type(entry_type)}, ID {entry_type.id}")
+                    if entry_type.conversation:
+                        self.log.debug(f"{msg}, but the entry had its own conversation info")
+                        await self.dispatch(entry_type)
+                    else:
+                        # TODO we could still dispatch the event and guess the conversation type
+                        #      in event handlers if necessary.
+                        self.log.warning(msg)
+                else:
+                    await self.dispatch(entry_type)
 
     async def _poll_forever(self) -> None:
         if not self.poll_cursor:
