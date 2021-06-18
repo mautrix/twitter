@@ -15,34 +15,34 @@ from .util import StringDateTime
 
 
 @dataclass
-class ImageSizeInfo(SerializableAttrs['ImageSizeInfo']):
+class ImageSizeInfo(SerializableAttrs):
     resize: str
     w: int
     h: int
 
 
 @dataclass
-class OriginalImageSizeInfo(SerializableAttrs['OriginalImageSizeInfo']):
+class OriginalImageSizeInfo(SerializableAttrs):
     width: int
     height: int
 
 
 @dataclass
-class VideoVariant(SerializableAttrs['VideoVariant']):
+class VideoVariant(SerializableAttrs):
     content_type: str
     url: str
     bitrate: Optional[int] = None
 
 
 @dataclass
-class VideoInfo(SerializableAttrs['VideoInfo']):
+class VideoInfo(SerializableAttrs):
     aspect_ratio: Tuple[int, int]
     variants: List[VideoVariant]
     duration_millis: Optional[int] = None
 
 
 @dataclass
-class MessageAttachmentMedia(SerializableAttrs['MessageAttachmentMedia']):
+class MessageAttachmentMedia(SerializableAttrs):
     id: int
     id_str: str
     indices: Tuple[int, int]
@@ -58,14 +58,14 @@ class MessageAttachmentMedia(SerializableAttrs['MessageAttachmentMedia']):
 
 
 @dataclass
-class ImageBindingValue(SerializableAttrs['ImageBindingValue']):
+class ImageBindingValue(SerializableAttrs):
     url: str
     width: int
     height: int
 
 
 @dataclass
-class CardBindingValue(SerializableAttrs['CardBindingValue']):
+class CardBindingValue(SerializableAttrs):
     type: str
     string_value: Optional[str] = None
     image_value: Optional[ImageBindingValue] = None
@@ -73,7 +73,7 @@ class CardBindingValue(SerializableAttrs['CardBindingValue']):
 
 
 @dataclass
-class MessageAttachmentCard(SerializableAttrs['MessageAttachmentCard']):
+class MessageAttachmentCard(SerializableAttrs):
     name: str
     url: str
     binding_values: Dict[str, CardBindingValue]
@@ -81,17 +81,17 @@ class MessageAttachmentCard(SerializableAttrs['MessageAttachmentCard']):
 
 
 @dataclass
-class MessageEntityMedia(MessageAttachmentMedia, SerializableAttrs['MessageEntityMedia']):
+class MessageEntityMedia(MessageAttachmentMedia, SerializableAttrs):
     indices: Optional[Tuple[int, int]] = None
 
 
 @dataclass
-class ExtendedMessageEntities(SerializableAttrs['ExtendedMessageEntities']):
+class ExtendedMessageEntities(SerializableAttrs):
     media: List[MessageEntityMedia]
 
 
 @dataclass
-class TweetAttachmentStatus(SerializableAttrs['TweetAttachmentStatus']):
+class TweetAttachmentStatus(SerializableAttrs):
     created_at: StringDateTime
     id: int
     id_str: str
@@ -121,7 +121,7 @@ class TweetAttachmentStatus(SerializableAttrs['TweetAttachmentStatus']):
 
 
 @dataclass
-class MessageAttachmentTweet(SerializableAttrs['MessageAttachmentTweet']):
+class MessageAttachmentTweet(SerializableAttrs):
     id: str
     url: str
     display_url: str
@@ -131,7 +131,7 @@ class MessageAttachmentTweet(SerializableAttrs['MessageAttachmentTweet']):
 
 
 @dataclass
-class MessageAttachment(SerializableAttrs['MessageAttachment']):
+class MessageAttachment(SerializableAttrs):
     photo: Optional[MessageAttachmentMedia] = None
     video: Optional[MessageAttachmentMedia] = None
     animated_gif: Optional[MessageAttachmentMedia] = None

@@ -11,26 +11,26 @@ from mautrix.types import SerializableAttrs
 
 
 @dataclass
-class DMTypingEvent(SerializableAttrs['DMTypingEvent']):
+class DMTypingEvent(SerializableAttrs):
     user_id: str
     conversation_id: str
 
 
 @dataclass
-class DMUpdateEvent(SerializableAttrs['DMUpdateEvent']):
+class DMUpdateEvent(SerializableAttrs):
     user_id: str
     conversation_id: str
 
 
 @dataclass
-class SubscriptionError(SerializableAttrs['SubscriptionError']):
+class SubscriptionError(SerializableAttrs):
     topic: str
     code: int
     message: str
 
 
 @dataclass
-class SubscriptionsEvent(SerializableAttrs['SubscriptionsEvent']):
+class SubscriptionsEvent(SerializableAttrs):
     errors: List[SubscriptionError]
 
 
@@ -38,7 +38,7 @@ StreamEventType = Union[SubscriptionsEvent, DMTypingEvent, DMUpdateEvent]
 
 
 @dataclass
-class StreamEvent(SerializableAttrs['Event']):
+class StreamEvent(SerializableAttrs):
     dm_typing: Optional[DMTypingEvent] = None
     dm_update: Optional[DMUpdateEvent] = None
     subscriptions: Optional[SubscriptionsEvent] = None

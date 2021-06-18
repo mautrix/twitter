@@ -11,7 +11,7 @@ from mautrix.types import SerializableAttrs
 
 
 @dataclass
-class MessageEntityURL(SerializableAttrs['MessageEntityURL']):
+class MessageEntityURL(SerializableAttrs):
     url: str
     expanded_url: str
     display_url: str
@@ -19,7 +19,7 @@ class MessageEntityURL(SerializableAttrs['MessageEntityURL']):
 
 
 @dataclass
-class MessageEntityUserMention(SerializableAttrs['MessageEntityUserMention']):
+class MessageEntityUserMention(SerializableAttrs):
     screen_name: str
     name: str
     id: int
@@ -28,13 +28,13 @@ class MessageEntityUserMention(SerializableAttrs['MessageEntityUserMention']):
 
 
 @dataclass
-class MessageEntitySimple(SerializableAttrs['MessageEntitySimple']):
+class MessageEntitySimple(SerializableAttrs):
     text: str
     indices: Tuple[int, int]
 
 
 @dataclass
-class MessageEntities(SerializableAttrs['MessageEntities']):
+class MessageEntities(SerializableAttrs):
     hashtags: List[MessageEntitySimple]
     symbols: List[MessageEntitySimple]
     user_mentions: List[MessageEntityUserMention]

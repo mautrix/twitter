@@ -13,7 +13,7 @@ from .util import StringDateTime
 
 
 @dataclass
-class User(SerializableAttrs['User']):
+class User(SerializableAttrs):
     id: int
     id_str: str
     name: str

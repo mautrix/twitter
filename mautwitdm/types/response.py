@@ -16,14 +16,14 @@ from .conversation import Conversation, TimelineStatus
 
 
 @dataclass
-class SendResponse(SerializableAttrs['SendResponse']):
+class SendResponse(SerializableAttrs):
     entries: List[Entry]
     users: Dict[str, User]
     conversations: Optional[Dict[str, Conversation]] = None
 
 
 @dataclass
-class FetchConversationResponse(SerializableAttrs['FetchConversationResponse']):
+class FetchConversationResponse(SerializableAttrs):
     status: TimelineStatus
     min_entry_id: str
     max_entry_id: str
@@ -34,7 +34,7 @@ class FetchConversationResponse(SerializableAttrs['FetchConversationResponse']):
 
 
 @dataclass
-class PollResponse(SerializableAttrs['PollResponse']):
+class PollResponse(SerializableAttrs):
     cursor: str
     last_seen_event_id: str
     trusted_last_seen_event_id: str
@@ -48,20 +48,20 @@ class PollResponse(SerializableAttrs['PollResponse']):
 
 
 @dataclass
-class InboxTimeline(SerializableAttrs['InboxTimeline']):
+class InboxTimeline(SerializableAttrs):
     status: TimelineStatus
     min_entry_id: Optional[str] = None
 
 
 @dataclass
-class InboxTimelines(SerializableAttrs['InboxTimelines']):
+class InboxTimelines(SerializableAttrs):
     trusted: InboxTimeline
     untrusted: InboxTimeline
     untrusted_low_quality: InboxTimeline
 
 
 @dataclass
-class InitialStateResponse(SerializableAttrs['InitialStateResponse']):
+class InitialStateResponse(SerializableAttrs):
     cursor: str
     last_seen_event_id: str
     trusted_last_seen_event_id: str
@@ -74,19 +74,19 @@ class InitialStateResponse(SerializableAttrs['InitialStateResponse']):
 
 
 @dataclass
-class ImageInfo(SerializableAttrs['ImageInfo']):
+class ImageInfo(SerializableAttrs):
     image_type: str
     w: int
     h: int
 
 
 @dataclass
-class VideoInfo(SerializableAttrs['VideoInfo']):
+class VideoInfo(SerializableAttrs):
     video_type: str
 
 
 @dataclass
-class MediaUploadResponse(SerializableAttrs['MediaUploadResponse']):
+class MediaUploadResponse(SerializableAttrs):
     media_id: int
     media_id_string: str
     media_key: str

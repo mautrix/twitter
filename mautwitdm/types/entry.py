@@ -16,7 +16,7 @@ from .util import StringTimestamp
 
 
 @dataclass
-class TrustConversationEntry(SerializableAttrs['TrustConversationEntry']):
+class TrustConversationEntry(SerializableAttrs):
     id: str
     time: StringTimestamp
     conversation_id: str
@@ -27,7 +27,7 @@ class TrustConversationEntry(SerializableAttrs['TrustConversationEntry']):
 
 
 @dataclass
-class ConversationCreateEntry(SerializableAttrs['ConversationCreateEntry']):
+class ConversationCreateEntry(SerializableAttrs):
     id: str
     time: StringTimestamp
     conversation_id: str
@@ -38,7 +38,7 @@ class ConversationCreateEntry(SerializableAttrs['ConversationCreateEntry']):
 
 
 @dataclass
-class ConversationNameUpdateEntry(SerializableAttrs['ConversationNameUpdateEntry']):
+class ConversationNameUpdateEntry(SerializableAttrs):
     id: str
     time: StringTimestamp
     conversation_id: str
@@ -50,7 +50,7 @@ class ConversationNameUpdateEntry(SerializableAttrs['ConversationNameUpdateEntry
 
 
 @dataclass
-class ConversationReadEntry(SerializableAttrs['ConversationReadEntry']):
+class ConversationReadEntry(SerializableAttrs):
     id: str
     last_read_event_id: str
     time: StringTimestamp
@@ -66,7 +66,7 @@ EntryType = Union[MessageEntry, TrustConversationEntry, ConversationCreateEntry,
 
 
 @dataclass
-class Entry(SerializableAttrs['Entry']):
+class Entry(SerializableAttrs):
     message: Optional[MessageEntry] = None
     trust_conversation: Optional[TrustConversationEntry] = None
     conversation_create: Optional[ConversationCreateEntry] = None

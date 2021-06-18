@@ -57,7 +57,7 @@ _emoji_to_key: Dict[str, ReactionKey] = {
 
 
 @dataclass
-class ReactionCreateEntry(SerializableAttrs['ReactionCreateEntry']):
+class ReactionCreateEntry(SerializableAttrs):
     id: str
     time: StringTimestamp
     conversation_id: str
@@ -70,7 +70,7 @@ class ReactionCreateEntry(SerializableAttrs['ReactionCreateEntry']):
 
 
 @dataclass
-class ReactionDeleteEntry(SerializableAttrs['ReactionDeleteEntry']):
+class ReactionDeleteEntry(SerializableAttrs):
     id: str
     time: StringTimestamp
     conversation_id: str

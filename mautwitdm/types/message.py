@@ -16,7 +16,7 @@ from .util import StringTimestamp
 
 
 @dataclass
-class MessageData(SerializableAttrs['MessageData']):
+class MessageData(SerializableAttrs):
     id: str
     time: StringTimestamp
     sender_id: str
@@ -28,7 +28,7 @@ class MessageData(SerializableAttrs['MessageData']):
 
 
 @dataclass
-class MessageEntry(SerializableAttrs['MessageEntry']):
+class MessageEntry(SerializableAttrs):
     id: str
     time: StringTimestamp
     conversation_id: str

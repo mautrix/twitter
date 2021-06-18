@@ -52,8 +52,8 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
         self._handlers = defaultdict(lambda: [])
         self.active = True
         self._typing_in = None
-        self.user_agent = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:78.0) "
-                           "Gecko/20100101 Firefox/78.0")
+        self.user_agent = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) "
+                           "Gecko/20100101 Firefox/89.0")
         self.skip_poll_wait = asyncio.Event()
         self.topics = set()
 

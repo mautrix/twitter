@@ -24,7 +24,7 @@ class TimelineStatus(SerializableEnum):
 
 
 @dataclass
-class Participant(SerializableAttrs['Participant']):
+class Participant(SerializableAttrs):
     user_id: str
 
     # This seems to be only for one-to-one chats
@@ -37,7 +37,7 @@ class Participant(SerializableAttrs['Participant']):
 
 
 @dataclass
-class Conversation(SerializableAttrs['Conversation']):
+class Conversation(SerializableAttrs):
     conversation_id: str
     type: ConversationType
     participants: List[Participant]
