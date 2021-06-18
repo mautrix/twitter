@@ -85,6 +85,7 @@ class Config(BaseBridgeConfig):
         copy("bridge.delivery_receipts")
         copy("bridge.delivery_error_reports")
         copy("bridge.temporary_disconnect_notices")
+        copy("bridge.disable_bridge_notices")
         copy("bridge.error_sleep")
         copy("bridge.max_poll_errors")
         copy("bridge.resend_bridge_info")

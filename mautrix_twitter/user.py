@@ -15,7 +15,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import (Dict, Optional, AsyncIterable, Awaitable, AsyncGenerator, Union, List,
                     TYPE_CHECKING, cast)
-from collections import defaultdict
 import asyncio
 import logging
 
@@ -23,9 +22,8 @@ from mautwitdm import TwitterAPI
 from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, PollingErrorResolved
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
-from mautrix.bridge import BaseUser, async_getter_lock
+from mautrix.bridge import BaseUser, BridgeState, async_getter_lock
 from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
-from mautrix.appservice import AppService
 from mautrix.util.opt_prometheus import Summary, Gauge, async_time
 
 from .db import User as DBUser, Portal as DBPortal
@@ -44,39 +42,42 @@ METRIC_RECEIPT = Summary("bridge_on_receipt", "calls to handle_receipt")
 METRIC_LOGGED_IN = Gauge("bridge_logged_in", "Users logged into the bridge")
 METRIC_CONNECTED = Gauge("bridge_connected", "Bridged users connected to Twitter")
 
+BridgeState.human_readable_errors.update({
+    "logged-out": "You're not logged into Twitter",
+    "twitter-not-connected": None,
+    "twitter-connection-error": "An error occurred while polling Twitter for new messages",
+})
+
 
 class User(DBUser, BaseUser):
     by_mxid: Dict[UserID, 'User'] = {}
     by_twid: Dict[int, 'User'] = {}
     config: Config
-    az: AppService
-    loop: asyncio.AbstractEventLoop
 
     client: Optional[TwitterAPI]
 
-    is_admin: bool
     permission_level: str
     username: Optional[str]
 
     _notice_room_lock: asyncio.Lock
     _notice_send_lock: asyncio.Lock
     _is_logged_in: Optional[bool]
+    _connected: bool
 
     def __init__(self, mxid: UserID, twid: Optional[int] = None, auth_token: Optional[str] = None,
                  csrf_token: Optional[str] = None, poll_cursor: Optional[str] = None,
                  notice_room: Optional[RoomID] = None) -> None:
         super().__init__(mxid=mxid, twid=twid, auth_token=auth_token, csrf_token=csrf_token,
                          poll_cursor=poll_cursor, notice_room=notice_room)
+        BaseUser.__init__(self)
         self._notice_room_lock = asyncio.Lock()
         self._notice_send_lock = asyncio.Lock()
         perms = self.config.get_permissions(mxid)
         self.is_whitelisted, self.is_admin, self.permission_level = perms
-        self.log = self.log.getChild(self.mxid)
         self.client = None
         self.username = None
-        self.dm_update_lock = asyncio.Lock()
-        self._metric_value = defaultdict(lambda: False)
         self._is_logged_in = None
+        self._connected = False
 
     @classmethod
     def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
@@ -150,11 +151,30 @@ class User(DBUser, BaseUser):
             self.loop.create_task(self._try_initial_sync())
         self.loop.create_task(self._try_sync_puppet(user_info))
 
-    async def on_connect(self, evt: PollingStarted) -> None:
+    async def fill_bridge_state(self, state: BridgeState) -> None:
+        await super().fill_bridge_state(state)
+        state.remote_id = str(self.twid)
+        puppet = await pu.Puppet.get_by_twid(self.twid)
+        state.remote_name = puppet.name
+
+    async def get_bridge_state(self) -> BridgeState:
+        if not self.twid:
+            return BridgeState(ok=False, error="logged-out")
+        elif not self._connected:
+            return BridgeState(ok=False, error="twitter-not-connected")
+        return BridgeState(ok=True)
+
+    async def on_connect(self, evt: Union[PollingStarted, PollingErrorResolved]) -> None:
         self._track_metric(METRIC_CONNECTED, True)
+        self._connected = True
+        await self.push_bridge_state(ok=True)
 
     async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
         self._track_metric(METRIC_CONNECTED, False)
+        self._connected = False
+        await self.push_bridge_state(ok=False, error=("twitter-not-connected"
+                                                      if isinstance(evt, PollingStopped)
+                                                      else "twitter-connection-error"))
 
     # TODO this stuff could probably be moved to mautrix-python
     async def get_notice_room(self) -> RoomID:
@@ -172,6 +192,8 @@ class User(DBUser, BaseUser):
 
     async def send_bridge_notice(self, text: str, edit: Optional[EventID] = None,
                                  important: bool = False) -> Optional[EventID]:
+        if self.config["bridge.disable_bridge_notices"]:
+            return None
         event_id = None
         try:
             self.log.debug("Sending bridge notice: %s", text)
