@@ -1,4 +1,4 @@
-FROM alpine:3.13
+FROM alpine:3.14
 
 ARG TARGETARCH=amd64
 
@@ -10,11 +10,12 @@ RUN apk add --no-cache \
       py3-magic \
       py3-ruamel.yaml \
       py3-commonmark \
+      py3-prometheus-client \
       # Other dependencies
       ca-certificates \
       su-exec \
       # encryption
-      olm-dev \
+      py3-olm \
       py3-cffi \
       py3-pycryptodome \
       py3-unpaddedbase64 \
