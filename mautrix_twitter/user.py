@@ -23,6 +23,7 @@ from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, Pol
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
 from mautrix.bridge import BaseUser, BridgeState, async_getter_lock
+from mautrix.util.bridge_state import BridgeStateEvent
 from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
 from mautrix.util.opt_prometheus import Summary, Gauge, async_time
 
@@ -157,24 +158,17 @@ class User(DBUser, BaseUser):
         puppet = await pu.Puppet.get_by_twid(self.twid)
         state.remote_name = puppet.name
 
-    async def get_bridge_state(self) -> BridgeState:
-        if not self.twid:
-            return BridgeState(ok=False, error="logged-out")
-        elif not self._connected:
-            return BridgeState(ok=False, error="twitter-not-connected")
-        return BridgeState(ok=True)
-
     async def on_connect(self, evt: Union[PollingStarted, PollingErrorResolved]) -> None:
         self._track_metric(METRIC_CONNECTED, True)
         self._connected = True
-        await self.push_bridge_state(ok=True)
+        await self.push_bridge_state(BridgeStateEvent.CONNECTED)
 
     async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
         self._track_metric(METRIC_CONNECTED, False)
         self._connected = False
-        await self.push_bridge_state(ok=False, error=("twitter-not-connected"
-                                                      if isinstance(evt, PollingStopped)
-                                                      else "twitter-connection-error"))
+        if isinstance(evt, PollingStopped):
+            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
+                                         error="twitter-not-connected")
 
     # TODO this stuff could probably be moved to mautrix-python
     async def get_notice_room(self) -> RoomID:
@@ -191,7 +185,10 @@ class User(DBUser, BaseUser):
         return self.notice_room
 
     async def send_bridge_notice(self, text: str, edit: Optional[EventID] = None,
+                                 state_event: Optional[BridgeStateEvent] = None,
                                  important: bool = False) -> Optional[EventID]:
+        if state_event:
+            await self.push_bridge_state(state_event, message=text)
         if self.config["bridge.disable_bridge_notices"]:
             return None
         event_id = None
@@ -211,14 +208,18 @@ class User(DBUser, BaseUser):
     async def on_error(self, evt: PollingErrored) -> None:
         if evt.fatal:
             await self.send_bridge_notice(f"Fatal error while polling Twitter: {evt.error}",
+                                          state_event=BridgeStateEvent.UNKNOWN_ERROR,
                                           important=evt.fatal)
         elif evt.count == 1 and self.config["bridge.temporary_disconnect_notices"]:
-            await self.send_bridge_notice(f"Error while polling Twitter: {evt.error}  \n"
-                                          f"The bridge will keep retrying.")
+            await self.send_bridge_notice(
+                f"Error while polling Twitter: {evt.error}\nThe bridge will keep retrying.",
+                state_event=BridgeStateEvent.TRANSIENT_DISCONNECT,
+            )
 
     async def on_error_resolved(self, evt: PollingErrorResolved) -> None:
         if self.config["bridge.temporary_disconnect_notices"]:
-            await self.send_bridge_notice("Twitter polling error resolved")
+            await self.send_bridge_notice("Twitter polling error resolved",
+                                          state_event=BridgeStateEvent.CONNECTED)
 
     async def _try_sync_puppet(self, user_info: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(self.twid)
@@ -249,6 +250,7 @@ class User(DBUser, BaseUser):
         }
 
     async def sync(self) -> None:
+        await self.push_bridge_state(BridgeStateEvent.BACKFILLING)
         resp = await self.client.inbox_initial_state(set_poll_cursor=False)
         if not self.poll_cursor:
             self.poll_cursor = resp.cursor

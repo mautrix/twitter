@@ -101,5 +101,8 @@ class TwitterBridge(Bridge):
     def is_bridge_ghost(self, user_id: UserID) -> bool:
         return bool(Puppet.get_id_from_mxid(user_id))
 
+    async def count_logged_in_users(self) -> int:
+        return len([user for user in User.by_twid.values() if user.twid])
+
 
 TwitterBridge().run()
