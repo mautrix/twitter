@@ -166,14 +166,9 @@ class User(DBUser, BaseUser):
     async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
         self._track_metric(METRIC_CONNECTED, False)
         self._connected = False
-        await self.push_bridge_state(
-            BridgeStateEvent.UNKNOWN_ERROR,
-            error=(
-                "twitter-not-connected"
-                if isinstance(evt, PollingStopped)
-                else "twitter-connection-error"
-            )
-        )
+        if isinstance(evt, PollingStopped):
+            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
+                                         error="twitter-not-connected")
 
     # TODO this stuff could probably be moved to mautrix-python
     async def get_notice_room(self) -> RoomID:
