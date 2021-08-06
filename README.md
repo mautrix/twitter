@@ -1,8 +1,8 @@
 # mautrix-twitter
-![Languages](https://img.shields.io/github/languages/top/tulir/mautrix-twitter.svg)
-[![License](https://img.shields.io/github/license/tulir/mautrix-twitter.svg)](LICENSE)
-[![Release](https://img.shields.io/github/release/tulir/mautrix-twitter/all.svg)](https://github.com/tulir/mautrix-twitter/releases)
-[![GitLab CI](https://mau.dev/tulir/mautrix-twitter/badges/master/pipeline.svg)](https://mau.dev/tulir/mautrix-twitter/container_registry)
+![Languages](https://img.shields.io/github/languages/top/mautrix/twitter.svg)
+[![License](https://img.shields.io/github/license/mautrix/twitter.svg)](LICENSE)
+[![Release](https://img.shields.io/github/release/mautrix/twitter/all.svg)](https://github.com/mautrix/twitter/releases)
+[![GitLab CI](https://mau.dev/mautrix/twitter/badges/master/pipeline.svg)](https://mau.dev/mautrix/twitter/container_registry)
 
 A Matrix-Twitter DM puppeting bridge.
 
@@ -16,7 +16,7 @@ Some quick links:
 * Basic usage: [Authentication](https://docs.mau.fi/bridges/python/twitter/authentication.html)
 
 ### Features & Roadmap
-[ROADMAP.md](https://github.com/tulir/mautrix-twitter/blob/master/ROADMAP.md)
+[ROADMAP.md](https://github.com/mautrix/twitter/blob/master/ROADMAP.md)
 contains a general overview of what is supported by the bridge.
 
 ## Discussion

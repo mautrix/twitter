@@ -35,7 +35,7 @@ linkified_version = {linkified_version!r}
 setuptools.setup(
     name="mautrix-twitter",
     version=version,
-    url="https://github.com/tulir/mautrix-twitter",
+    url="https://github.com/mautrix/twitter",
 
     author="Tulir Asokan",
     author_email="tulir@maunium.net",

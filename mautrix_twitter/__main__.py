@@ -34,7 +34,7 @@ class TwitterBridge(Bridge):
     name = "mautrix-twitter"
     command = "python -m mautrix-twitter"
     description = "A Matrix-Twitter DM puppeting bridge."
-    repo_url = "https://github.com/tulir/mautrix-twitter"
+    repo_url = "https://github.com/mautrix/twitter"
     real_user_content_key = "net.maunium.twitter.puppet"
     version = version
     markdown_version = linkified_version
