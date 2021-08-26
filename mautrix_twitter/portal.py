@@ -589,14 +589,25 @@ class Portal(DBPortal, BasePortal):
         async with self._create_room_lock:
             return await self._create_matrix_room(source, info)
 
-    async def _update_matrix_room(self, source: 'u.User', info: Conversation) -> None:
-        await self.main_intent.invite_user(self.mxid, source.mxid, check_cache=True)
-        puppet = await p.Puppet.get_by_custom_mxid(source.mxid)
+    def _get_invite_content(self, double_puppet: Optional['p.Puppet']) -> Dict[str, Any]:
+        invite_content = {}
+        if double_puppet:
+            invite_content["fi.mau.will_auto_accept"] = True
+        if self.is_direct:
+            invite_content["is_direct"] = True
+        return invite_content
+
+    async def _add_user(self, user: 'u.User') -> None:
+        puppet = await p.Puppet.get_by_custom_mxid(user.mxid)
+        await self.main_intent.invite_user(self.mxid, user.mxid, check_cache=True,
+                                           extra_content=self._get_invite_content(puppet))
         if puppet:
             did_join = await puppet.intent.ensure_joined(self.mxid)
-            if did_join and self.conv_type == ConversationType.ONE_TO_ONE:
-                await source.update_direct_chats({self.main_intent.mxid: [self.mxid]})
+            if did_join and self.is_direct:
+                await user.update_direct_chats({self.main_intent.mxid: [self.mxid]})
 
+    async def _update_matrix_room(self, source: 'u.User', info: Conversation) -> None:
+        await self._add_user(source)
         await self.update_info(info)
 
         # TODO
@@ -626,7 +637,7 @@ class Portal(DBPortal, BasePortal):
             "state_key": self.bridge_info_state_key,
             "content": self.bridge_info,
         }]
-        invites = [source.mxid]
+        invites = []
         if self.config["bridge.encryption.default"] and self.matrix.e2ee:
             self.encrypted = True
             initial_state.append({
@@ -662,6 +673,7 @@ class Portal(DBPortal, BasePortal):
             await self.update()
             self.log.debug(f"Matrix room created: {self.mxid}")
             self.by_mxid[self.mxid] = self
+            await self._add_user(source)
             await self._update_participants(info.participants)
 
             puppet = await p.Puppet.get_by_custom_mxid(source.mxid)
