@@ -154,9 +154,18 @@ class User(DBUser, BaseUser):
 
     async def fill_bridge_state(self, state: BridgeState) -> None:
         await super().fill_bridge_state(state)
-        state.remote_id = str(self.twid)
-        puppet = await pu.Puppet.get_by_twid(self.twid)
-        state.remote_name = puppet.name
+        if self.twid:
+            state.remote_id = str(self.twid)
+            puppet = await pu.Puppet.get_by_twid(self.twid)
+            state.remote_name = puppet.name
+
+    async def get_bridge_states(self) -> List[BridgeState]:
+        if not self.twid:
+            return []
+        state = BridgeState(state_event=BridgeStateEvent.UNKNOWN_ERROR)
+        if self._connected:
+            state.state_event = BridgeStateEvent.CONNECTED
+        return [state]
 
     async def on_connect(self, evt: Union[PollingStarted, PollingErrorResolved]) -> None:
         self._track_metric(METRIC_CONNECTED, True)
