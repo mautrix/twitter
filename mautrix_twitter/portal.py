@@ -29,8 +29,9 @@ from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
                            MediaMessageEventContent, ImageInfo, VideoInfo, ThumbnailInfo,
-                           ContentURI, EncryptedFile)
+                           ContentURI, EncryptedFile, TextMessageEventContent)
 from mautrix.errors import MatrixError, MForbidden
+from mautrix.util.message_send_checkpoint import MessageSendCheckpointStatus
 from mautrix.util.simple_lock import SimpleLock
 
 from .db import Portal as DBPortal, Message as DBMessage, Reaction as DBReaction
@@ -145,6 +146,27 @@ class Portal(DBPortal, BasePortal):
                            False) and await p.Puppet.get_by_custom_mxid(sender.mxid))):
             self.log.debug(f"Ignoring puppet-sent message by confirmed puppet user {sender.mxid}")
             return
+        try:
+            await self._handle_matrix_message(sender, message, event_id)
+        except Exception as e:
+            sender.send_remote_checkpoint(
+                status=MessageSendCheckpointStatus.PERM_FAILURE,
+                event_id=event_id,
+                room_id=self.mxid,
+                event_type=EventType.ROOM_MESSAGE,
+                message_type=message.msgtype,
+                error=e,
+            )
+            await self._send_message(
+                self.main_intent,
+                TextMessageEventContent(
+                    msgtype=MessageType.NOTICE,
+                    body=f"\u26a0 Your message may not have been bridged: {e}",
+                ),
+            )
+
+    async def _handle_matrix_message(self, sender: 'u.User', message: MessageEventContent,
+                                    event_id: EventID) -> None:
         request_id = str(sender.client.new_request_id())
         self._reqid_dedup.add(request_id)
         text = message.body
@@ -159,62 +181,107 @@ class Portal(DBPortal, BasePortal):
             else:
                 data = await self.main_intent.download_media(message.url)
             mime_type = message.info.mimetype or magic.from_buffer(data, mime=True)
-            # TODO this will throw errors if the mime type is not supported
-            #      those errors should be sent back to the client
             upload_resp = await sender.client.upload(data, mime_type=mime_type)
             media_id = upload_resp.media_id
             text = ""
         resp = await sender.client.conversation(self.twid).send(text, media_id=media_id,
                                                                 request_id=request_id)
+        await self._send_delivery_receipt(event_id)
+        sender.send_remote_checkpoint(
+            status=MessageSendCheckpointStatus.SUCCESS,
+            event_id=event_id,
+            room_id=self.mxid,
+            event_type=EventType.ROOM_MESSAGE,
+            message_type=message.msgtype,
+        )
         resp_msg_id = int(resp.entries[0].message.id)
         self._msgid_dedup.appendleft(resp_msg_id)
         msg = DBMessage(mxid=event_id, mx_room=self.mxid, twid=resp_msg_id, receiver=self.receiver)
         await msg.insert()
         self._reqid_dedup.remove(request_id)
-        await self._send_delivery_receipt(event_id)
         self.log.debug(f"Handled Matrix message {event_id} -> {resp_msg_id}")
 
     async def handle_matrix_reaction(self, sender: 'u.User', event_id: EventID,
                                      reacting_to: EventID, reaction_val: str) -> None:
         try:
-            reaction = ReactionKey.from_emoji(reaction_val)
-        except ValueError:
-            self.log.debug(f"Ignoring unsupported reaction {event_id} with value {reaction_val}")
-            return
+            await self._handle_matrix_reaction(sender, event_id, reacting_to, reaction_val)
+        except Exception as e:
+            self.log.exception(f"Failed to react to {event_id}")
+            sender.send_remote_checkpoint(
+                MessageSendCheckpointStatus.PERM_FAILURE,
+                event_id,
+                self.mxid,
+                EventType.REACTION,
+                error=e,
+            )
 
+    async def _handle_matrix_reaction(self, sender: 'u.User', event_id: EventID,
+                                     reacting_to: EventID, reaction_val: str) -> None:
+        reaction = ReactionKey.from_emoji(reaction_val)
         message = await DBMessage.get_by_mxid(reacting_to, self.mxid)
         if not message:
-            self.log.debug(f"Ignoring reaction to unknown event {reacting_to}")
-            return
+            raise ValueError(f"Ignoring reaction to unknown event {reacting_to}")
 
-        existing = await DBReaction.get_by_twid(message.twid, message.receiver, sender.twid)
-        if existing and existing.reaction == reaction:
-            return
-
-        dedup_id = (message.twid, sender.twid, reaction)
-        self._reaction_dedup.appendleft(dedup_id)
         async with self._reaction_lock:
+            dedup_id = (message.twid, sender.twid, reaction)
+            self._reaction_dedup.appendleft(dedup_id)
+
+            existing = await DBReaction.get_by_twid(message.twid, message.receiver, sender.twid)
+            if existing and existing.reaction == reaction:
+                return
+
             await sender.client.conversation(self.twid).react(message.twid, reaction)
+            sender.send_remote_checkpoint(
+                MessageSendCheckpointStatus.SUCCESS,
+                event_id,
+                self.mxid,
+                EventType.REACTION,
+            )
+            await self._send_delivery_receipt(event_id)
             await self._upsert_reaction(existing, self.main_intent, event_id, message, sender,
                                         reaction)
             self.log.trace(f"{sender.mxid} reacted to {message.twid} with {reaction}")
-        await self._send_delivery_receipt(event_id)
 
     async def handle_matrix_redaction(self, sender: 'u.User', event_id: EventID,
                                       redaction_event_id: EventID) -> None:
         if not self.mxid:
             return
 
-        reaction = await DBReaction.get_by_mxid(event_id, self.mxid)
-        if reaction:
-            try:
-                await reaction.delete()
-                await sender.client.conversation(self.twid).delete_reaction(reaction.tw_msgid,
-                                                                            reaction.reaction)
-                await self._send_delivery_receipt(redaction_event_id)
-                self.log.trace(f"Removed {reaction} after Matrix redaction")
-            except Exception:
-                self.log.exception("Removing reaction failed")
+        async with self._reaction_lock:
+            reaction = await DBReaction.get_by_mxid(event_id, self.mxid)
+            if reaction:
+                try:
+                    await reaction.delete()
+                    await sender.client.conversation(self.twid).delete_reaction(reaction.tw_msgid,
+                                                                                reaction.reaction)
+                except Exception:
+                    self.log.exception("Removing reaction failed")
+                    sender.send_remote_checkpoint(
+                        MessageSendCheckpointStatus.PERM_FAILURE,
+                        event_id,
+                        self.mxid,
+                        EventType.ROOM_REDACTION,
+                        error=e,
+                    )
+                else:
+                    sender.send_remote_checkpoint(
+                        MessageSendCheckpointStatus.SUCCESS,
+                        event_id,
+                        self.mxid,
+                        EventType.ROOM_REDACTION,
+                    )
+                    await self._send_delivery_receipt(redaction_event_id)
+                    self.log.trace(f"Removed {reaction} after Matrix redaction")
+
+                return
+
+        sender.send_remote_checkpoint(
+            MessageSendCheckpointStatus.PERM_FAILURE,
+            event_id,
+            self.mxid,
+            EventType.ROOM_REDACTION,
+            error=Exception(f"Failed to redact {event_id}. Most likely is not a reaction."),
+        )
 
     async def handle_matrix_leave(self, user: 'u.User') -> None:
         if self.is_direct:
