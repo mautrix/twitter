@@ -142,10 +142,6 @@ class Portal(DBPortal, BasePortal):
         if not sender.client:
             self.log.debug(f"Ignoring message {event_id} as user is not connected")
             return
-        elif ((message.get(self.bridge.real_user_content_key,
-                           False) and await p.Puppet.get_by_custom_mxid(sender.mxid))):
-            self.log.debug(f"Ignoring puppet-sent message by confirmed puppet user {sender.mxid}")
-            return
         try:
             await self._handle_matrix_message(sender, message, event_id)
         except Exception as e:
