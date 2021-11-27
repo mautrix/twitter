@@ -13,12 +13,12 @@ import asyncio
 from aiohttp import ClientSession
 from yarl import URL
 
-from .types import User, MessageAttachmentMedia
+from .types import User
 from .conversation import Conversation
 from .uploader import TwitterUploader
 from .streamer import TwitterStreamer
 from .poller import TwitterPoller
-from .errors import check_error
+from .errors import TwitterError, check_error
 
 Tokens = NamedTuple('Tokens', auth_token=str, csrf_token=str)
 DownloadResp = NamedTuple('DownloadResp', data=bytes, mime_type=str)
@@ -148,7 +148,16 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
     async def get_user_identifier(self) -> Optional[str]:
         async with self.http.post(self.base_url / "branch" / "init.json", json={},
                                   headers=self.headers) as resp:
-            resp_data = await check_error(resp)
+            try:
+                resp_data = await check_error(resp)
+            except TwitterError as e:
+                # Sometimes branch/init.json returns 38: countryCode parameter is missing.
+                # It still checks auth and we don't actually need this user identifier,
+                # so it might be safe to ignore
+                if e.code == 38:
+                    self.log.warning(f"Ignoring {e} in branch/init.json request")
+                    return ""
+                raise
             return resp_data.get("user_identifier", None)
 
     async def get_settings(self) -> Dict[str, Any]:
