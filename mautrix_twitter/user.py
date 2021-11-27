@@ -22,8 +22,8 @@ from mautwitdm import TwitterAPI
 from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, PollingErrorResolved
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
-from mautrix.bridge import BaseUser, BridgeState, async_getter_lock
-from mautrix.util.bridge_state import BridgeStateEvent
+from mautrix.bridge import BaseUser, async_getter_lock
+from mautrix.util.bridge_state import BridgeState, BridgeStateEvent
 from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
 from mautrix.util.opt_prometheus import Summary, Gauge, async_time
 
