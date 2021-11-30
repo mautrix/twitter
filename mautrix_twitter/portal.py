@@ -242,21 +242,26 @@ class Portal(DBPortal, BasePortal):
     async def handle_matrix_redaction(self, sender: 'u.User', event_id: EventID,
                                       redaction_event_id: EventID) -> None:
         try:
-            await self._handle_matrix_redaction(sender, event_id, redaction_event_id)
+            await self._handle_matrix_redaction(sender, event_id)
         except Exception as e:
             sender.send_remote_checkpoint(
                 MessageSendCheckpointStatus.PERM_FAILURE,
-                event_id,
+                redaction_event_id,
                 self.mxid,
                 EventType.ROOM_REDACTION,
                 error=e,
             )
             await self._send_error_notice(f"Failed to redact {event_id}", e)
+        else:
+            sender.send_remote_checkpoint(
+                MessageSendCheckpointStatus.SUCCESS,
+                redaction_event_id,
+                self.mxid,
+                EventType.ROOM_REDACTION,
+            )
+            await self._send_delivery_receipt(redaction_event_id)
 
-    async def _handle_matrix_redaction(self, sender: 'u.User', event_id: EventID,
-                                      redaction_event_id: EventID) -> None:
-        assert self.mxid, "MXID is None"
-
+    async def _handle_matrix_redaction(self, sender: 'u.User', event_id: EventID) -> None:
         async with self._reaction_lock:
             reaction = await DBReaction.get_by_mxid(event_id, self.mxid)
             if reaction:
@@ -268,13 +273,6 @@ class Portal(DBPortal, BasePortal):
                     self.log.exception("Removing reaction failed")
                     raise
                 else:
-                    sender.send_remote_checkpoint(
-                        MessageSendCheckpointStatus.SUCCESS,
-                        event_id,
-                        self.mxid,
-                        EventType.ROOM_REDACTION,
-                    )
-                    await self._send_delivery_receipt(redaction_event_id)
                     self.log.trace(f"Removed {reaction} after Matrix redaction")
 
                 return
