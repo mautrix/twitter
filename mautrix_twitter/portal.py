@@ -106,7 +106,7 @@ class Portal(DBPortal, BasePortal):
         cls.matrix = bridge.matrix
         cls.az = bridge.az
         cls.loop = bridge.loop
-        cls.bridge = bridge
+        BasePortal.bridge = bridge
         cls.private_chat_portal_meta = cls.config["bridge.private_chat_portal_meta"]
         NotificationDisabler.puppet_cls = p.Puppet
         NotificationDisabler.config_enabled = cls.config["bridge.backfill.disable_notifications"]
