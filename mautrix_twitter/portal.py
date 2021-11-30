@@ -509,7 +509,7 @@ class Portal(DBPortal, BasePortal):
         for participant in participants:
             twid = int(participant.user_id)
             puppet = await p.Puppet.get_by_twid(twid)
-            await puppet.intent_for(self).ensure_joined(self.mxid)
+            await puppet.intent_for(self).ensure_joined(self.mxid, bot=self.main_intent)
             if participant.last_read_event_id:
                 await self.handle_twitter_receipt(puppet, int(participant.last_read_event_id))
 
