@@ -16,7 +16,6 @@
 from typing import Dict, Any
 
 from mautrix.bridge import Bridge
-from mautrix.bridge.state_store.asyncpg import PgBridgeStateStore
 from mautrix.types import RoomID, UserID
 
 from .version import version, linkified_version
@@ -45,11 +44,7 @@ class TwitterBridge(Bridge):
 
     matrix: MatrixHandler
     config: Config
-    state_store: PgBridgeStateStore
     provisioning_api: ProvisioningAPI
-
-    def make_state_store(self) -> None:
-        self.state_store = PgBridgeStateStore(self.db, self.get_puppet, self.get_double_puppet)
 
     def prepare_db(self) -> None:
         super().prepare_db()
