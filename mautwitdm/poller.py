@@ -237,7 +237,7 @@ class TwitterPoller(TwitterDispatcher):
         """
         self.stop_polling()
         self.log.debug("Starting poll task")
-        self._poll_task = self.loop.create_task(self.poll_forever())
+        self._poll_task = asyncio.create_task(self.poll_forever())
         return self._poll_task
 
     def stop_polling(self) -> None:

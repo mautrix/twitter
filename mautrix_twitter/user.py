@@ -163,8 +163,8 @@ class User(DBUser, BaseUser):
             self.log.debug("Poll cursor set, starting polling right away (not initial syncing)")
             self.client.start_polling()
         else:
-            self.loop.create_task(self._try_initial_sync())
-        self.loop.create_task(self._try_sync_puppet(user_info))
+            asyncio.create_task(self._try_initial_sync())
+        asyncio.create_task(self._try_sync_puppet(user_info))
 
     async def fill_bridge_state(self, state: BridgeState) -> None:
         await super().fill_bridge_state(state)

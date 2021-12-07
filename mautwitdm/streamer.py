@@ -128,7 +128,7 @@ class TwitterStreamer(TwitterDispatcher):
             The created asyncio task.
         """
         self.log.debug("Starting streaming task")
-        self._stream_task = self.loop.create_task(self.stream_forever())
+        self._stream_task = asyncio.create_task(self.stream_forever())
         return self._stream_task
 
     def stop_streaming(self) -> None:
