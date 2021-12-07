@@ -21,6 +21,10 @@ class TwitterError(Exception):
         self.message = message
 
 
+class TwitterAuthError(TwitterError):
+    pass
+
+
 class RateLimitError(TwitterError):
     limit: int
     remaining: int
@@ -61,4 +65,6 @@ async def check_error(resp: ClientResponse) -> Any:
         raise
     if code == 88:
         raise RateLimitError(code, message, resp.headers)
+    elif code == 32:
+        raise TwitterAuthError(code, message)
     raise TwitterError(code, message)

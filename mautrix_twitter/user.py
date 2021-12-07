@@ -22,6 +22,7 @@ from mautwitdm import TwitterAPI
 from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, PollingErrorResolved
 from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
                              User as TwitterUser, ConversationReadEntry)
+from mautwitdm.errors import TwitterAuthError, TwitterError
 from mautrix.bridge import BaseUser, async_getter_lock
 from mautrix.util.bridge_state import BridgeState, BridgeStateEvent
 from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
@@ -45,6 +46,7 @@ METRIC_CONNECTED = Gauge("bridge_connected", "Bridged users connected to Twitter
 
 BridgeState.human_readable_errors.update({
     "logged-out": "You're not logged into Twitter",
+    "twitter-connection-failed": "Failed to connect to Twitter",
     "twitter-not-connected": None,
     "twitter-connection-error": "An error occurred while polling Twitter for new messages",
 })
@@ -111,8 +113,20 @@ class User(DBUser, BaseUser):
     async def try_connect(self) -> None:
         try:
             await self.connect()
-        except Exception:
+        except TwitterAuthError as e:
+            self.log.exception("Auth error while connecting to Twitter")
+            await self.push_bridge_state(BridgeStateEvent.BAD_CREDENTIALS,
+                                         error="twitter-connection-failed",
+                                         message=e.message)
+        except TwitterError as e:
             self.log.exception("Error while connecting to Twitter")
+            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
+                                         error="twitter-connection-failed",
+                                         message=e.message)
+        except Exception:
+            self.log.exception("Unknown exception while connecting to Twitter")
+            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
+                                         error="twitter-connection-failed")
 
     async def connect(self, auth_token: Optional[str] = None, csrf_token: Optional[str] = None
                       ) -> None:
