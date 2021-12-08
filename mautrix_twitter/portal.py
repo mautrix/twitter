@@ -237,7 +237,7 @@ class Portal(DBPortal, BasePortal):
             await self._send_delivery_receipt(event_id)
             await self._upsert_reaction(existing, self.main_intent, event_id, message, sender,
                                         reaction)
-            self.log.trace(f"{sender.mxid} reacted to {message.twid} with {reaction}")
+            self.log.debug(f"{sender.mxid} reacted to {message.twid} with {reaction}")
 
     async def handle_matrix_redaction(self, sender: 'u.User', event_id: EventID,
                                       redaction_event_id: EventID) -> None:
@@ -440,16 +440,16 @@ class Portal(DBPortal, BasePortal):
             except MForbidden:
                 await self.main_intent.redact(reaction.mx_room, reaction.mxid)
             await reaction.delete()
-            self.log.trace(f"Removed {reaction} after Twitter removal")
+            self.log.debug(f"Removed {reaction} after Twitter removal")
 
     async def handle_twitter_receipt(self, sender: 'p.Puppet', read_up_to: int) -> None:
         message = await DBMessage.get_by_twid(read_up_to, self.receiver)
         if not message:
-            self.log.trace(f"Ignoring read receipt from {sender.twid} "
+            self.log.debug(f"Ignoring read receipt from {sender.twid} "
                            f"up to unknown message {read_up_to}")
             return
 
-        self.log.trace(f"{sender.twid} read messages up to {read_up_to} ({message.mxid})")
+        self.log.debug(f"{sender.twid} read messages up to {read_up_to} ({message.mxid})")
         await sender.intent_for(self).mark_read(message.mx_room, message.mxid)
 
     # endregion
