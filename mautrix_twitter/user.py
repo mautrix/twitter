@@ -116,12 +116,12 @@ class User(DBUser, BaseUser):
         except TwitterAuthError as e:
             self.log.exception("Auth error while connecting to Twitter")
             await self.push_bridge_state(BridgeStateEvent.BAD_CREDENTIALS,
-                                         error="twitter-connection-failed",
+                                         error="twitter-auth-error",
                                          message=e.message)
         except TwitterError as e:
             self.log.exception("Error while connecting to Twitter")
             await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
-                                         error="twitter-connection-failed",
+                                         error="twitter-unknown-error",
                                          message=e.message)
         except Exception:
             self.log.exception("Unknown exception while connecting to Twitter")
