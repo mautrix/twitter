@@ -143,6 +143,11 @@ class Portal(DBPortal, BasePortal):
             TextMessageEventContent(msgtype=MessageType.NOTICE, body=f"\u26a0 {body}: {err}"),
         )
 
+    def _status_from_exception(self, e: Exception) -> MessageSendCheckpointStatus:
+        if isinstance(e, NotImplementedError):
+            return MessageSendCheckpointStatus.UNSUPPORTED
+        return MessageSendCheckpointStatus.PERM_FAILURE
+
     async def handle_matrix_message(self, sender: 'u.User', message: MessageEventContent,
                                     event_id: EventID) -> None:
         if not sender.client:
@@ -151,13 +156,9 @@ class Portal(DBPortal, BasePortal):
         try:
             await self._handle_matrix_message(sender, message, event_id)
         except Exception as e:
+            status = self._status_from_exception(e)
             sender.send_remote_checkpoint(
-                status=MessageSendCheckpointStatus.PERM_FAILURE,
-                event_id=event_id,
-                room_id=self.mxid,
-                event_type=EventType.ROOM_MESSAGE,
-                message_type=message.msgtype,
-                error=e,
+                status, event_id, self.mxid, EventType.ROOM_MESSAGE, message.msgtype, error=e,
             )
             await self._send_error_notice("Your message may not have been bridged", e)
 
@@ -202,13 +203,10 @@ class Portal(DBPortal, BasePortal):
         try:
             await self._handle_matrix_reaction(sender, event_id, reacting_to, reaction_val)
         except Exception as e:
+            status = self._status_from_exception(e)
             self.log.exception(f"Failed to react to {event_id}")
             sender.send_remote_checkpoint(
-                MessageSendCheckpointStatus.PERM_FAILURE,
-                event_id,
-                self.mxid,
-                EventType.REACTION,
-                error=e,
+                status, event_id, self.mxid, EventType.REACTION, error=e
             )
             await self._send_error_notice(f"Failed to react to {event_id}", e)
 
@@ -244,12 +242,9 @@ class Portal(DBPortal, BasePortal):
         try:
             await self._handle_matrix_redaction(sender, event_id)
         except Exception as e:
+            status = self._status_from_exception(e)
             sender.send_remote_checkpoint(
-                MessageSendCheckpointStatus.PERM_FAILURE,
-                redaction_event_id,
-                self.mxid,
-                EventType.ROOM_REDACTION,
-                error=e,
+                status, event_id, self.mxid, EventType.ROOM_REDACTION, error=e
             )
             await self._send_error_notice(f"Failed to redact {event_id}", e)
         else:
@@ -262,6 +257,8 @@ class Portal(DBPortal, BasePortal):
             await self._send_delivery_receipt(redaction_event_id)
 
     async def _handle_matrix_redaction(self, sender: 'u.User', event_id: EventID) -> None:
+        assert self.mxid, "MXID is None"
+
         async with self._reaction_lock:
             reaction = await DBReaction.get_by_mxid(event_id, self.mxid)
             if reaction:
@@ -277,7 +274,7 @@ class Portal(DBPortal, BasePortal):
 
                 return
 
-        raise Exception("Message redactions are not supported.")
+        raise NotImplementedError("Message redactions are not supported.")
 
     async def handle_matrix_leave(self, user: 'u.User') -> None:
         if self.is_direct:
