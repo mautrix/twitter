@@ -31,7 +31,7 @@ class ReactionKey(SerializableEnum):
         try:
             return _emoji_to_key[emoji.rstrip("\uFE0F")]
         except KeyError:
-            raise ValueError(f"Unsupported reaction emoji {emoji}")
+            raise NotImplementedError(f"Unsupported reaction emoji {emoji}")
 
 
 _key_to_emoji: Dict[ReactionKey, str] = {

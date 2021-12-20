@@ -83,9 +83,9 @@ class TwitterUploader:
             category = "dm_video"
             size_limit = 15 * 1024 * 1024
         else:
-            raise ValueError("Unsupported mime type")
+            raise NotImplementedError(f"Unsupported mime type {mime_type}")
         if len(data) > size_limit:
-            raise ValueError("File too big")
+            raise NotImplementedError("File too big")
         init_req = {
             "command": "INIT",
             "media_type": mime_type,
