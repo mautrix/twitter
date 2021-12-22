@@ -244,6 +244,10 @@ class User(DBUser, BaseUser):
                 f"Error while polling Twitter: {evt.error}\nThe bridge will keep retrying.",
                 state_event=BridgeStateEvent.TRANSIENT_DISCONNECT,
             )
+        else:
+            state_event = (BridgeStateEvent.TRANSIENT_DISCONNECT if evt.count < 5
+                           else BridgeStateEvent.UNKNOWN_ERROR)
+            await self.push_bridge_state(state_event, f"Error while polling Twitter: {evt.error}")
 
     async def on_error_resolved(self, evt: PollingErrorResolved) -> None:
         if self.config["bridge.temporary_disconnect_notices"]:
