@@ -439,14 +439,20 @@ class Portal(DBPortal, BasePortal):
             await reaction.delete()
             self.log.debug(f"Removed {reaction} after Twitter removal")
 
-    async def handle_twitter_receipt(self, sender: 'p.Puppet', read_up_to: int) -> None:
+    async def handle_twitter_receipt(
+        self, sender: 'p.Puppet', read_up_to: int, historical: bool = False
+    ) -> None:
         message = await DBMessage.get_by_twid(read_up_to, self.receiver)
         if not message:
-            self.log.debug(f"Ignoring read receipt from {sender.twid} "
-                           f"up to unknown message {read_up_to}")
+            self.log.debug(
+                f"Ignoring read receipt from {sender.twid} "
+                f"up to unknown message {read_up_to} ({historical=})"
+            )
             return
 
-        self.log.debug(f"{sender.twid} read messages up to {read_up_to} ({message.mxid})")
+        self.log.debug(
+            f"{sender.twid} read messages up to {read_up_to} ({message.mxid}, {historical=})"
+        )
         await sender.intent_for(self).mark_read(message.mx_room, message.mxid)
 
     # endregion
@@ -508,7 +514,9 @@ class Portal(DBPortal, BasePortal):
             puppet = await p.Puppet.get_by_twid(twid)
             await puppet.intent_for(self).ensure_joined(self.mxid, bot=self.main_intent)
             if participant.last_read_event_id:
-                await self.handle_twitter_receipt(puppet, int(participant.last_read_event_id))
+                await self.handle_twitter_receipt(
+                    puppet, int(participant.last_read_event_id), historical=True
+                )
 
         # Kick puppets who shouldn't be here
         for user_id in await self.main_intent.get_room_members(self.mxid):

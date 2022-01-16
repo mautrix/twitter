@@ -110,6 +110,11 @@ class User(DBUser, BaseUser):
                 self._is_logged_in = False
         return self.client and self._is_logged_in
 
+    async def get_puppet(self) -> Optional['pu.Puppet']:
+        if not self.twid:
+            return None
+        return await pu.Puppet.get_by_twid(self.twid)
+
     async def try_connect(self) -> None:
         try:
             await self.connect()
@@ -385,7 +390,7 @@ class User(DBUser, BaseUser):
         if not portal.mxid:
             return
         sender = await pu.Puppet.get_by_twid(self.twid)
-        await portal.handle_twitter_receipt(sender, int(evt.last_read_event_id))
+        await portal.handle_twitter_receipt(sender, int(evt.last_read_event_id), historical=False)
 
     # endregion
     # region Database getters
