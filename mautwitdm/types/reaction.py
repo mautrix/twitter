@@ -9,8 +9,8 @@ from attr import dataclass
 
 from mautrix.types import SerializableAttrs, SerializableEnum
 
-from .util import StringTimestamp
 from .conversation import Conversation
+from .util import StringTimestamp
 
 
 class ReactionKey(SerializableEnum):
@@ -27,7 +27,7 @@ class ReactionKey(SerializableEnum):
         return _key_to_emoji[self]
 
     @classmethod
-    def from_emoji(cls, emoji: str) -> 'ReactionKey':
+    def from_emoji(cls, emoji: str) -> "ReactionKey":
         try:
             return _emoji_to_key[emoji.rstrip("\uFE0F")]
         except KeyError:

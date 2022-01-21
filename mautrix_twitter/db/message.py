@@ -13,11 +13,11 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Optional, ClassVar, TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Optional
 
 from attr import dataclass
 
-from mautrix.types import RoomID, EventID
+from mautrix.types import EventID, RoomID
 from mautrix.util.async_db import Database
 
 fake_db = Database("") if TYPE_CHECKING else None
@@ -45,17 +45,23 @@ class Message:
         await cls.db.execute("DELETE FROM message WHERE mx_room=$1", room_id)
 
     @classmethod
-    async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Optional['Message']:
-        row = await cls.db.fetchrow("SELECT mxid, mx_room, twid, receiver "
-                                    "FROM message WHERE mxid=$1 AND mx_room=$2", mxid, mx_room)
+    async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Optional["Message"]:
+        row = await cls.db.fetchrow(
+            "SELECT mxid, mx_room, twid, receiver " "FROM message WHERE mxid=$1 AND mx_room=$2",
+            mxid,
+            mx_room,
+        )
         if not row:
             return None
         return cls(**row)
 
     @classmethod
-    async def get_by_twid(cls, twid: int, receiver: int = 0) -> Optional['Message']:
-        row = await cls.db.fetchrow("SELECT mxid, mx_room, twid, receiver "
-                                    "FROM message WHERE twid=$1 AND receiver=$2", twid, receiver)
+    async def get_by_twid(cls, twid: int, receiver: int = 0) -> Optional["Message"]:
+        row = await cls.db.fetchrow(
+            "SELECT mxid, mx_room, twid, receiver " "FROM message WHERE twid=$1 AND receiver=$2",
+            twid,
+            receiver,
+        )
         if not row:
             return None
         return cls(**row)

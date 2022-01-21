@@ -3,7 +3,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
 from attr import dataclass
 
@@ -46,5 +46,4 @@ class StreamEvent(SerializableAttrs):
     @property
     def all_types(self) -> List[StreamEventType]:
         items = (self.dm_typing, self.dm_update)
-        return [item for item in items
-                if item is not None]
+        return [item for item in items if item is not None]

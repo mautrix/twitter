@@ -13,20 +13,20 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Dict, Any
+from typing import Any, Dict
 
 from mautrix.bridge import Bridge
 from mautrix.types import RoomID, UserID
 
-from .version import version, linkified_version
+from . import commands
 from .config import Config
-from .db import upgrade_table, init as init_db
+from .db import init as init_db, upgrade_table
 from .matrix import MatrixHandler
-from .user import User
 from .portal import Portal
 from .puppet import Puppet
+from .user import User
+from .version import linkified_version, version
 from .web import ProvisioningAPI
-from . import commands
 
 
 class TwitterBridge(Bridge):

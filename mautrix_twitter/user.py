@@ -13,30 +13,46 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import (Dict, Optional, AsyncIterable, Awaitable, AsyncGenerator, Union, List,
-                    TYPE_CHECKING, cast)
+from typing import (
+    TYPE_CHECKING,
+    AsyncGenerator,
+    AsyncIterable,
+    Awaitable,
+    Dict,
+    List,
+    Optional,
+    Union,
+    cast,
+)
 import asyncio
 import logging
 
-from mautwitdm import TwitterAPI
-from mautwitdm.poller import PollingStopped, PollingStarted, PollingErrored, PollingErrorResolved
-from mautwitdm.types import (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry, Conversation,
-                             User as TwitterUser, ConversationReadEntry)
-from mautwitdm.errors import TwitterAuthError, TwitterError
 from mautrix.bridge import BaseUser, async_getter_lock
+from mautrix.types import EventID, MessageType, RoomID, TextMessageEventContent, UserID
 from mautrix.util.bridge_state import BridgeState, BridgeStateEvent
-from mautrix.types import UserID, RoomID, EventID, TextMessageEventContent, MessageType
-from mautrix.util.opt_prometheus import Summary, Gauge, async_time
+from mautrix.util.opt_prometheus import Gauge, Summary, async_time
+from mautwitdm import TwitterAPI
+from mautwitdm.errors import TwitterAuthError, TwitterError
+from mautwitdm.poller import PollingErrored, PollingErrorResolved, PollingStarted, PollingStopped
+from mautwitdm.types import (
+    Conversation,
+    ConversationReadEntry,
+    MessageEntry,
+    ReactionCreateEntry,
+    ReactionDeleteEntry,
+    User as TwitterUser,
+)
 
-from .db import User as DBUser, Portal as DBPortal
+from . import portal as po, puppet as pu
 from .config import Config
-from . import puppet as pu, portal as po
+from .db import Portal as DBPortal, User as DBUser
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
 
-METRIC_CONVERSATION_UPDATE = Summary("bridge_on_conversation_update",
-                                     "calls to handle_conversation_update")
+METRIC_CONVERSATION_UPDATE = Summary(
+    "bridge_on_conversation_update", "calls to handle_conversation_update"
+)
 METRIC_USER_UPDATE = Summary("bridge_on_user_update", "calls to handle_user_update")
 METRIC_MESSAGE = Summary("bridge_on_message", "calls to handle_message")
 METRIC_REACTION = Summary("bridge_on_reaction", "calls to handle_reaction")
@@ -44,17 +60,19 @@ METRIC_RECEIPT = Summary("bridge_on_receipt", "calls to handle_receipt")
 METRIC_LOGGED_IN = Gauge("bridge_logged_in", "Users logged into the bridge")
 METRIC_CONNECTED = Gauge("bridge_connected", "Bridged users connected to Twitter")
 
-BridgeState.human_readable_errors.update({
-    "logged-out": "You're not logged into Twitter",
-    "twitter-connection-failed": "Failed to connect to Twitter",
-    "twitter-not-connected": None,
-    "twitter-connection-error": "An error occurred while polling Twitter for new messages",
-})
+BridgeState.human_readable_errors.update(
+    {
+        "logged-out": "You're not logged into Twitter",
+        "twitter-connection-failed": "Failed to connect to Twitter",
+        "twitter-not-connected": None,
+        "twitter-connection-error": "An error occurred while polling Twitter for new messages",
+    }
+)
 
 
 class User(DBUser, BaseUser):
-    by_mxid: Dict[UserID, 'User'] = {}
-    by_twid: Dict[int, 'User'] = {}
+    by_mxid: Dict[UserID, "User"] = {}
+    by_twid: Dict[int, "User"] = {}
     config: Config
 
     client: Optional[TwitterAPI]
@@ -67,11 +85,23 @@ class User(DBUser, BaseUser):
     _is_logged_in: Optional[bool]
     _connected: bool
 
-    def __init__(self, mxid: UserID, twid: Optional[int] = None, auth_token: Optional[str] = None,
-                 csrf_token: Optional[str] = None, poll_cursor: Optional[str] = None,
-                 notice_room: Optional[RoomID] = None) -> None:
-        super().__init__(mxid=mxid, twid=twid, auth_token=auth_token, csrf_token=csrf_token,
-                         poll_cursor=poll_cursor, notice_room=notice_room)
+    def __init__(
+        self,
+        mxid: UserID,
+        twid: Optional[int] = None,
+        auth_token: Optional[str] = None,
+        csrf_token: Optional[str] = None,
+        poll_cursor: Optional[str] = None,
+        notice_room: Optional[RoomID] = None,
+    ) -> None:
+        super().__init__(
+            mxid=mxid,
+            twid=twid,
+            auth_token=auth_token,
+            csrf_token=csrf_token,
+            poll_cursor=poll_cursor,
+            notice_room=notice_room,
+        )
         BaseUser.__init__(self)
         self._notice_room_lock = asyncio.Lock()
         self._notice_send_lock = asyncio.Lock()
@@ -83,7 +113,7 @@ class User(DBUser, BaseUser):
         self._connected = False
 
     @classmethod
-    def init_cls(cls, bridge: 'TwitterBridge') -> AsyncIterable[Awaitable[None]]:
+    def init_cls(cls, bridge: "TwitterBridge") -> AsyncIterable[Awaitable[None]]:
         cls.bridge = bridge
         cls.config = bridge.config
         cls.az = bridge.az
@@ -110,7 +140,7 @@ class User(DBUser, BaseUser):
                 self._is_logged_in = False
         return self.client and self._is_logged_in
 
-    async def get_puppet(self) -> Optional['pu.Puppet']:
+    async def get_puppet(self) -> Optional["pu.Puppet"]:
         if not self.twid:
             return None
         return await pu.Puppet.get_by_twid(self.twid)
@@ -120,23 +150,32 @@ class User(DBUser, BaseUser):
             await self.connect()
         except TwitterAuthError as e:
             self.log.exception("Auth error while connecting to Twitter")
-            await self.push_bridge_state(BridgeStateEvent.BAD_CREDENTIALS,
-                                         error="twitter-auth-error",
-                                         message=e.message)
+            await self.push_bridge_state(
+                BridgeStateEvent.BAD_CREDENTIALS,
+                error="twitter-auth-error",
+                message=e.message,
+            )
         except TwitterError as e:
             self.log.exception("Error while connecting to Twitter")
-            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
-                                         error="twitter-unknown-error",
-                                         message=e.message)
+            await self.push_bridge_state(
+                BridgeStateEvent.UNKNOWN_ERROR,
+                error="twitter-unknown-error",
+                message=e.message,
+            )
         except Exception:
             self.log.exception("Unknown exception while connecting to Twitter")
-            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
-                                         error="twitter-connection-failed")
+            await self.push_bridge_state(
+                BridgeStateEvent.UNKNOWN_ERROR, error="twitter-connection-failed"
+            )
 
-    async def connect(self, auth_token: Optional[str] = None, csrf_token: Optional[str] = None
-                      ) -> None:
-        client = TwitterAPI(log=logging.getLogger("mau.twitter.api").getChild(self.mxid),
-                            loop=self.loop, node_id=hash(self.mxid) % (2 ** 48))
+    async def connect(
+        self, auth_token: Optional[str] = None, csrf_token: Optional[str] = None
+    ) -> None:
+        client = TwitterAPI(
+            log=logging.getLogger("mau.twitter.api").getChild(self.mxid),
+            loop=self.loop,
+            node_id=hash(self.mxid) % (2 ** 48),
+        )
         client.poll_cursor = self.poll_cursor
         client.set_tokens(auth_token or self.auth_token, csrf_token or self.csrf_token)
 
@@ -195,8 +234,9 @@ class User(DBUser, BaseUser):
         self._track_metric(METRIC_CONNECTED, False)
         self._connected = False
         if isinstance(evt, PollingStopped):
-            await self.push_bridge_state(BridgeStateEvent.UNKNOWN_ERROR,
-                                         error="twitter-not-connected")
+            await self.push_bridge_state(
+                BridgeStateEvent.UNKNOWN_ERROR, error="twitter-not-connected"
+            )
 
     # TODO this stuff could probably be moved to mautrix-python
     async def get_notice_room(self) -> RoomID:
@@ -218,9 +258,13 @@ class User(DBUser, BaseUser):
                 await self.update()
         return self.notice_room
 
-    async def send_bridge_notice(self, text: str, edit: Optional[EventID] = None,
-                                 state_event: Optional[BridgeStateEvent] = None,
-                                 important: bool = False) -> Optional[EventID]:
+    async def send_bridge_notice(
+        self,
+        text: str,
+        edit: Optional[EventID] = None,
+        state_event: Optional[BridgeStateEvent] = None,
+        important: bool = False,
+    ) -> Optional[EventID]:
         if state_event:
             await self.push_bridge_state(state_event, message=text)
         if self.config["bridge.disable_bridge_notices"]:
@@ -228,8 +272,10 @@ class User(DBUser, BaseUser):
         event_id = None
         try:
             self.log.debug("Sending bridge notice: %s", text)
-            content = TextMessageEventContent(body=text, msgtype=(MessageType.TEXT if important
-                                                                  else MessageType.NOTICE))
+            content = TextMessageEventContent(
+                body=text,
+                msgtype=(MessageType.TEXT if important else MessageType.NOTICE),
+            )
             if edit:
                 content.set_edit(edit)
             # This is locked to prevent notices going out in the wrong order
@@ -241,23 +287,29 @@ class User(DBUser, BaseUser):
 
     async def on_error(self, evt: PollingErrored) -> None:
         if evt.fatal:
-            await self.send_bridge_notice(f"Fatal error while polling Twitter: {evt.error}",
-                                          state_event=BridgeStateEvent.UNKNOWN_ERROR,
-                                          important=evt.fatal)
+            await self.send_bridge_notice(
+                f"Fatal error while polling Twitter: {evt.error}",
+                state_event=BridgeStateEvent.UNKNOWN_ERROR,
+                important=evt.fatal,
+            )
         elif evt.count == 1 and self.config["bridge.temporary_disconnect_notices"]:
             await self.send_bridge_notice(
                 f"Error while polling Twitter: {evt.error}\nThe bridge will keep retrying.",
                 state_event=BridgeStateEvent.TRANSIENT_DISCONNECT,
             )
         else:
-            state_event = (BridgeStateEvent.TRANSIENT_DISCONNECT if evt.count < 5
-                           else BridgeStateEvent.UNKNOWN_ERROR)
+            state_event = (
+                BridgeStateEvent.TRANSIENT_DISCONNECT
+                if evt.count < 5
+                else BridgeStateEvent.UNKNOWN_ERROR
+            )
             await self.push_bridge_state(state_event, f"Error while polling Twitter: {evt.error}")
 
     async def on_error_resolved(self, evt: PollingErrorResolved) -> None:
         if self.config["bridge.temporary_disconnect_notices"]:
-            await self.send_bridge_notice("Twitter polling error resolved",
-                                          state_event=BridgeStateEvent.CONNECTED)
+            await self.send_bridge_notice(
+                "Twitter polling error resolved", state_event=BridgeStateEvent.CONNECTED
+            )
 
     async def _try_sync_puppet(self, user_info: TwitterUser) -> None:
         puppet = await pu.Puppet.get_by_twid(self.twid)
@@ -342,10 +394,12 @@ class User(DBUser, BaseUser):
     # region Event handlers
 
     @async_time(METRIC_CONVERSATION_UPDATE)
-    async def handle_conversation_update(self, evt: Conversation, create_portal: bool = False
-                                         ) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
-                                             conv_type=evt.type)
+    async def handle_conversation_update(
+        self, evt: Conversation, create_portal: bool = False
+    ) -> None:
+        portal = await po.Portal.get_by_twid(
+            evt.conversation_id, receiver=self.twid, conv_type=evt.type
+        )
         if not portal.mxid:
             if create_portal:
                 await portal.create_matrix_room(self, evt)
@@ -361,8 +415,9 @@ class User(DBUser, BaseUser):
 
     @async_time(METRIC_MESSAGE)
     async def handle_message(self, evt: MessageEntry) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
-                                             conv_type=evt.conversation.type)
+        portal = await po.Portal.get_by_twid(
+            evt.conversation_id, receiver=self.twid, conv_type=evt.conversation.type
+        )
         if not portal.mxid:
             await portal.create_matrix_room(self, evt.conversation)
         sender = await pu.Puppet.get_by_twid(int(evt.message_data.sender_id))
@@ -370,23 +425,27 @@ class User(DBUser, BaseUser):
 
     @async_time(METRIC_REACTION)
     async def handle_reaction(self, evt: Union[ReactionCreateEntry, ReactionDeleteEntry]) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
-                                             conv_type=evt.conversation.type)
+        portal = await po.Portal.get_by_twid(
+            evt.conversation_id, receiver=self.twid, conv_type=evt.conversation.type
+        )
         if not portal.mxid:
             self.log.debug(f"Ignoring reaction in conversation {evt.conversation_id} with no room")
             return
         puppet = await pu.Puppet.get_by_twid(int(evt.sender_id))
         if isinstance(evt, ReactionCreateEntry):
-            await portal.handle_twitter_reaction_add(puppet, int(evt.message_id),
-                                                     evt.reaction_key, evt.time)
+            await portal.handle_twitter_reaction_add(
+                puppet, int(evt.message_id), evt.reaction_key, evt.time
+            )
         else:
-            await portal.handle_twitter_reaction_remove(puppet, int(evt.message_id),
-                                                        evt.reaction_key)
+            await portal.handle_twitter_reaction_remove(
+                puppet, int(evt.message_id), evt.reaction_key
+            )
 
     @async_time(METRIC_RECEIPT)
     async def handle_receipt(self, evt: ConversationReadEntry) -> None:
-        portal = await po.Portal.get_by_twid(evt.conversation_id, receiver=self.twid,
-                                             conv_type=evt.conversation.type)
+        portal = await po.Portal.get_by_twid(
+            evt.conversation_id, receiver=self.twid, conv_type=evt.conversation.type
+        )
         if not portal.mxid:
             return
         sender = await pu.Puppet.get_by_twid(self.twid)
@@ -402,7 +461,7 @@ class User(DBUser, BaseUser):
 
     @classmethod
     @async_getter_lock
-    async def get_by_mxid(cls, mxid: UserID, *, create: bool = True) -> Optional['User']:
+    async def get_by_mxid(cls, mxid: UserID, *, create: bool = True) -> Optional["User"]:
         # Never allow ghosts to be users
         if pu.Puppet.get_id_from_mxid(mxid):
             return None
@@ -426,7 +485,7 @@ class User(DBUser, BaseUser):
 
     @classmethod
     @async_getter_lock
-    async def get_by_twid(cls, twid: int) -> Optional['User']:
+    async def get_by_twid(cls, twid: int) -> Optional["User"]:
         try:
             return cls.by_twid[twid]
         except KeyError:
@@ -440,7 +499,7 @@ class User(DBUser, BaseUser):
         return None
 
     @classmethod
-    async def all_logged_in(cls) -> AsyncGenerator['User', None]:
+    async def all_logged_in(cls) -> AsyncGenerator["User", None]:
         users = await super().all_logged_in()
         user: cls
         for index, user in enumerate(users):

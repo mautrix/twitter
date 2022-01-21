@@ -41,6 +41,8 @@ class MessageEntities(SerializableAttrs):
     urls: List[MessageEntityURL]
 
     @property
-    def all(self) -> List[Union[MessageEntitySimple, MessageEntityUserMention, MessageEntityURL]]:
+    def all(
+        self,
+    ) -> List[Union[MessageEntitySimple, MessageEntityUserMention, MessageEntityURL]]:
         entities = self.hashtags + self.symbols + self.user_mentions + self.urls
         return sorted(entities, key=lambda entity: entity.indices[0])

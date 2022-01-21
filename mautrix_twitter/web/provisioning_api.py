@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import Awaitable, Dict
-import logging
 import json
+import logging
 
 from aiohttp import web
 
@@ -55,23 +55,27 @@ class ProvisioningAPI:
     async def login_options(self, _: web.Request) -> web.Response:
         return web.Response(status=200, headers=self._headers)
 
-    def check_token(self, request: web.Request) -> Awaitable['u.User']:
+    def check_token(self, request: web.Request) -> Awaitable["u.User"]:
         try:
             token = request.headers["Authorization"]
-            token = token[len("Bearer "):]
+            token = token[len("Bearer ") :]
         except KeyError:
-            raise web.HTTPBadRequest(body='{"error": "Missing Authorization header"}',
-                                     headers=self._headers)
+            raise web.HTTPBadRequest(
+                body='{"error": "Missing Authorization header"}', headers=self._headers
+            )
         except IndexError:
-            raise web.HTTPBadRequest(body='{"error": "Malformed Authorization header"}',
-                                     headers=self._headers)
+            raise web.HTTPBadRequest(
+                body='{"error": "Malformed Authorization header"}',
+                headers=self._headers,
+            )
         if token != self.shared_secret:
             raise web.HTTPForbidden(body='{"error": "Invalid token"}', headers=self._headers)
         try:
             user_id = request.query["user_id"]
         except KeyError:
-            raise web.HTTPBadRequest(body='{"error": "Missing user_id query param"}',
-                                     headers=self._headers)
+            raise web.HTTPBadRequest(
+                body='{"error": "Missing user_id query param"}', headers=self._headers
+            )
 
         return u.User.get_by_mxid(UserID(user_id))
 
@@ -104,9 +108,10 @@ class ProvisioningAPI:
             await user.connect(auth_token=auth_token, csrf_token=csrf_token)
         except Exception:
             self.log.debug("Failed to log in", exc_info=True)
-            raise web.HTTPUnauthorized(body='{"error": "Twitter authorization failed"}',
-                                       headers=self._headers)
-        return web.Response(body='{}', status=200, headers=self._headers)
+            raise web.HTTPUnauthorized(
+                body='{"error": "Twitter authorization failed"}', headers=self._headers
+            )
+        return web.Response(body="{}", status=200, headers=self._headers)
 
     async def logout(self, request: web.Request) -> web.Response:
         user = await self.check_token(request)

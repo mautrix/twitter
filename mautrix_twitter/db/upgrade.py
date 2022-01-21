@@ -23,7 +23,8 @@ upgrade_table = UpgradeTable()
 @upgrade_table.register(description="Initial revision")
 async def upgrade_v1(conn: Connection) -> None:
     await conn.execute("CREATE TYPE twitter_conv_type AS ENUM ('ONE_TO_ONE', 'GROUP_DM')")
-    await conn.execute("""CREATE TABLE portal (
+    await conn.execute(
+        """CREATE TABLE portal (
         twid        VARCHAR(255),
         receiver    BIGINT,
         conv_type   twitter_conv_type NOT NULL,
@@ -33,16 +34,20 @@ async def upgrade_v1(conn: Connection) -> None:
         encrypted   BOOLEAN NOT NULL DEFAULT false,
 
         PRIMARY KEY (twid, receiver)
-    )""")
-    await conn.execute("""CREATE TABLE "user" (
+    )"""
+    )
+    await conn.execute(
+        """CREATE TABLE "user" (
         mxid        VARCHAR(255) PRIMARY KEY,
         twid        BIGINT,
         auth_token  VARCHAR(255),
         csrf_token  VARCHAR(255),
         poll_cursor VARCHAR(255),
         notice_room VARCHAR(255)
-    )""")
-    await conn.execute("""CREATE TABLE puppet (
+    )"""
+    )
+    await conn.execute(
+        """CREATE TABLE puppet (
         twid      BIGINT PRIMARY KEY,
         name      VARCHAR(255),
         photo_url VARCHAR(255),
@@ -53,8 +58,10 @@ async def upgrade_v1(conn: Connection) -> None:
         custom_mxid  VARCHAR(255),
         access_token TEXT,
         next_batch   VARCHAR(255)
-    )""")
-    await conn.execute("""CREATE TABLE user_portal (
+    )"""
+    )
+    await conn.execute(
+        """CREATE TABLE user_portal (
         "user"          BIGINT,
         portal          VARCHAR(255),
         portal_receiver BIGINT,
@@ -62,8 +69,10 @@ async def upgrade_v1(conn: Connection) -> None:
 
         FOREIGN KEY (portal, portal_receiver) REFERENCES portal(twid, receiver)
             ON UPDATE CASCADE ON DELETE CASCADE
-    )""")
-    await conn.execute("""CREATE TABLE message (
+    )"""
+    )
+    await conn.execute(
+        """CREATE TABLE message (
         mxid     VARCHAR(255) NOT NULL,
         mx_room  VARCHAR(255) NOT NULL,
         twid     BIGINT,
@@ -71,11 +80,15 @@ async def upgrade_v1(conn: Connection) -> None:
 
         PRIMARY KEY (twid, receiver),
         UNIQUE (mxid, mx_room)
-    )""")
-    await conn.execute("CREATE TYPE twitter_reaction_key AS ENUM ('funny', 'surprised', 'sad',"
-                       "                                          'like', 'excited', 'agree',"
-                       "                                          'disagree')")
-    await conn.execute("""CREATE TABLE reaction (
+    )"""
+    )
+    await conn.execute(
+        "CREATE TYPE twitter_reaction_key AS ENUM ('funny', 'surprised', 'sad',"
+        "                                          'like', 'excited', 'agree',"
+        "                                          'disagree')"
+    )
+    await conn.execute(
+        """CREATE TABLE reaction (
         mxid        VARCHAR(255) NOT NULL,
         mx_room     VARCHAR(255) NOT NULL,
         tw_msgid    BIGINT,
@@ -87,7 +100,8 @@ async def upgrade_v1(conn: Connection) -> None:
         FOREIGN KEY (tw_msgid, tw_receiver) REFERENCES message(twid, receiver)
             ON DELETE CASCADE ON UPDATE CASCADE,
         UNIQUE (mxid, mx_room)
-    )""")
+    )"""
+    )
 
 
 @upgrade_table.register(description="Add double-puppeting base_url to puppet table")

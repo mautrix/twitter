@@ -3,14 +3,14 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Optional, List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from attr import dataclass
 
 from mautrix.types import SerializableAttrs
 
-from .user import User
 from .message_entity import MessageEntities
+from .user import User
 from .util import StringDateTime
 
 

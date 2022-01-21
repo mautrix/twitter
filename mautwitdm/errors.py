@@ -38,8 +38,11 @@ class RateLimitError(TwitterError):
         # self.remaining = int(headers["x-rate-limit-remaining"])
         self.reset = int(headers["x-rate-limit-reset"])
         time_till_reset = int(time.time() - self.reset)
-        Exception.__init__(self, f"Rate limit exceeded. Will reset in {time_till_reset} seconds "
-                                 f"(endpoint is limited to {self.limit} requests in 15 minutes)")
+        Exception.__init__(
+            self,
+            f"Rate limit exceeded. Will reset in {time_till_reset} seconds "
+            f"(endpoint is limited to {self.limit} requests in 15 minutes)",
+        )
 
 
 async def check_error(resp: ClientResponse) -> Any:

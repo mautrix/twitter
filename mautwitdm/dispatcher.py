@@ -3,11 +3,11 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.'
-from typing import Dict, Type, TypeVar, List, Callable, Awaitable, Any
+from typing import Any, Awaitable, Callable, Dict, List, Type, TypeVar
 
 from mautrix.util.logging import TraceLogger
 
-T = TypeVar('T')
+T = TypeVar("T")
 Handler = Callable[[T], Awaitable[Any]]
 HandlerMap = Dict[Type[T], List[Handler]]
 
@@ -17,6 +17,7 @@ class TwitterDispatcher:
     This class is used to dispatch events that :class:`TwitterPoller` and :class:`TwitterStreamer`
     get from Twitter.
     """
+
     log: TraceLogger
     _handlers: HandlerMap
 

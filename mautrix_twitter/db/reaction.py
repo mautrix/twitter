@@ -13,13 +13,13 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Optional, ClassVar, TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Optional
 
 from attr import dataclass
 
-from mautwitdm.types import ReactionKey
-from mautrix.types import RoomID, EventID
+from mautrix.types import EventID, RoomID
 from mautrix.util.async_db import Database
+from mautwitdm.types import ReactionKey
 
 fake_db = Database("") if TYPE_CHECKING else None
 
@@ -36,25 +36,42 @@ class Reaction:
     reaction: ReactionKey
 
     async def insert(self) -> None:
-        q = ("INSERT INTO reaction (mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction) "
-             "VALUES ($1, $2, $3, $4, $5, $6)")
-        await self.db.execute(q, self.mxid, self.mx_room, self.tw_msgid, self.tw_receiver,
-                              self.tw_sender, self.reaction.value)
+        q = (
+            "INSERT INTO reaction (mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction) "
+            "VALUES ($1, $2, $3, $4, $5, $6)"
+        )
+        await self.db.execute(
+            q,
+            self.mxid,
+            self.mx_room,
+            self.tw_msgid,
+            self.tw_receiver,
+            self.tw_sender,
+            self.reaction.value,
+        )
 
     async def edit(self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey) -> None:
-        await self.db.execute("UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3 "
-                              "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6",
-                              mxid, mx_room, reaction.value, self.tw_msgid, self.tw_receiver,
-                              self.tw_sender)
+        await self.db.execute(
+            "UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3 "
+            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6",
+            mxid,
+            mx_room,
+            reaction.value,
+            self.tw_msgid,
+            self.tw_receiver,
+            self.tw_sender,
+        )
 
     async def delete(self) -> None:
         q = "DELETE FROM reaction WHERE tw_msgid=$1 AND tw_receiver=$2 AND tw_sender=$3"
         await self.db.execute(q, self.tw_msgid, self.tw_receiver, self.tw_sender)
 
     @classmethod
-    async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Optional['Reaction']:
-        q = ("SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
-             "FROM reaction WHERE mxid=$1 AND mx_room=$2")
+    async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Optional["Reaction"]:
+        q = (
+            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
+            "FROM reaction WHERE mxid=$1 AND mx_room=$2"
+        )
         row = await cls.db.fetchrow(q, mxid, mx_room)
         if not row:
             return None
@@ -62,10 +79,16 @@ class Reaction:
         return cls(reaction=ReactionKey(data.pop("reaction")), **data)
 
     @classmethod
-    async def get_by_twid(cls, tw_msgid: int, tw_receiver: int, tw_sender: int,
-                          ) -> Optional['Reaction']:
-        q = ("SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
-             "FROM reaction WHERE tw_msgid=$1 AND tw_sender=$2 AND tw_receiver=$3")
+    async def get_by_twid(
+        cls,
+        tw_msgid: int,
+        tw_receiver: int,
+        tw_sender: int,
+    ) -> Optional["Reaction"]:
+        q = (
+            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
+            "FROM reaction WHERE tw_msgid=$1 AND tw_sender=$2 AND tw_receiver=$3"
+        )
         row = await cls.db.fetchrow(q, tw_msgid, tw_sender, tw_receiver)
         if not row:
             return None
