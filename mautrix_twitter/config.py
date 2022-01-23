@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Any, List, NamedTuple
+from __future__ import annotations
+
+from typing import Any, NamedTuple
 import os
 
 from mautrix.bridge.config import BaseBridgeConfig
@@ -32,7 +34,7 @@ class Config(BaseBridgeConfig):
             return super().__getitem__(key)
 
     @property
-    def forbidden_defaults(self) -> List[ForbiddenDefault]:
+    def forbidden_defaults(self) -> list[ForbiddenDefault]:
         return [
             *super().forbidden_defaults,
             ForbiddenDefault("appservice.database", "postgres://username:password@hostname/db"),
@@ -50,8 +52,6 @@ class Config(BaseBridgeConfig):
         copy("appservice.provisioning.shared_secret")
         if base["appservice.provisioning.shared_secret"] == "generate":
             base["appservice.provisioning.shared_secret"] = self._new_token()
-
-        copy("appservice.community_id")
 
         copy("metrics.enabled")
         copy("metrics.listen_port")

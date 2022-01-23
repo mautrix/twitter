@@ -1,9 +1,10 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar, Union
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -12,14 +13,10 @@ from aiohttp import ClientSession
 from attr import dataclass
 from yarl import URL
 
-from .conversation import Conversation
+from . import conversation as c
 from .dispatcher import TwitterDispatcher
 from .errors import RateLimitError, check_error
 from .types import InitialStateResponse, PollResponse
-
-T = TypeVar("T")
-Handler = Callable[[T], Awaitable[Any]]
-HandlerMap = Dict[Type[T], List[Handler]]
 
 
 class PollingStarted:
@@ -49,19 +46,19 @@ class TwitterPoller(TwitterDispatcher):
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
     http: ClientSession
-    headers: Dict[str, str]
+    headers: dict[str, str]
     skip_poll_wait: asyncio.Event
 
     poll_sleep: int = 3
     error_sleep: int = 5
     max_poll_errors: int = 12
-    poll_cursor: Optional[str]
+    poll_cursor: str | None
     dispatch_initial_resp: bool
-    _poll_task: Optional[asyncio.Task]
-    _typing_in: Optional[Conversation]
+    _poll_task: asyncio.Task | None
+    _typing_in: c.Conversation | None
 
     @property
-    def poll_params(self) -> Dict[str, str]:
+    def poll_params(self) -> dict[str, str]:
         return {
             "cards_platform": "Web-12",
             "include_cards": "1",
@@ -78,7 +75,7 @@ class TwitterPoller(TwitterDispatcher):
         }
 
     @property
-    def full_state_params(self) -> Dict[str, str]:
+    def full_state_params(self) -> dict[str, str]:
         return {
             "include_profile_interstitial_type": "1",
             "include_blocking": "1",
@@ -162,7 +159,7 @@ class TwitterPoller(TwitterDispatcher):
             if raise_exceptions:
                 raise
 
-    async def dispatch_all(self, resp: Union[PollResponse, InitialStateResponse]) -> None:
+    async def dispatch_all(self, resp: PollResponse | InitialStateResponse) -> None:
         for user in (resp.users or {}).values():
             await self.dispatch(user)
         for conversation in (resp.conversations or {}).values():

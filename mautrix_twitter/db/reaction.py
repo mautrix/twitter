@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,15 +13,18 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import TYPE_CHECKING, ClassVar, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, ClassVar
 
 from attr import dataclass
+import asyncpg
 
 from mautrix.types import EventID, RoomID
 from mautrix.util.async_db import Database
 from mautwitdm.types import ReactionKey
 
-fake_db = Database("") if TYPE_CHECKING else None
+fake_db = Database.create("") if TYPE_CHECKING else None
 
 
 @dataclass
@@ -51,9 +54,12 @@ class Reaction:
         )
 
     async def edit(self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey) -> None:
-        await self.db.execute(
+        q = (
             "UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3 "
-            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6",
+            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6"
+        )
+        await self.db.execute(
+            q,
             mxid,
             mx_room,
             reaction.value,
@@ -67,16 +73,20 @@ class Reaction:
         await self.db.execute(q, self.tw_msgid, self.tw_receiver, self.tw_sender)
 
     @classmethod
-    async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Optional["Reaction"]:
+    def _from_row(cls, row: asyncpg.Record) -> Reaction | None:
+        if not row:
+            return None
+        data = {**row}
+        reaction = ReactionKey(data.pop("reaction"))
+        return cls(reaction=reaction, **data)
+
+    @classmethod
+    async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Reaction | None:
         q = (
             "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
             "FROM reaction WHERE mxid=$1 AND mx_room=$2"
         )
-        row = await cls.db.fetchrow(q, mxid, mx_room)
-        if not row:
-            return None
-        data = {**row}
-        return cls(reaction=ReactionKey(data.pop("reaction")), **data)
+        return cls._from_row(await cls.db.fetchrow(q, mxid, mx_room))
 
     @classmethod
     async def get_by_twid(
@@ -84,13 +94,9 @@ class Reaction:
         tw_msgid: int,
         tw_receiver: int,
         tw_sender: int,
-    ) -> Optional["Reaction"]:
+    ) -> Reaction | None:
         q = (
             "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
             "FROM reaction WHERE tw_msgid=$1 AND tw_sender=$2 AND tw_receiver=$3"
         )
-        row = await cls.db.fetchrow(q, tw_msgid, tw_sender, tw_receiver)
-        if not row:
-            return None
-        data = {**row}
-        return cls(reaction=ReactionKey(data.pop("reaction")), **data)
+        return cls._from_row(await cls.db.fetchrow(q, tw_msgid, tw_sender, tw_receiver))

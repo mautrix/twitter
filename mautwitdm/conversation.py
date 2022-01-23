@@ -1,25 +1,24 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import TYPE_CHECKING, Optional, Union
+from __future__ import annotations
+
 from uuid import UUID
 
 from yarl import URL
 
+from . import twitter as tw
 from .errors import check_error
 from .types import FetchConversationResponse, ReactionKey, SendResponse
 
-if TYPE_CHECKING:
-    from .twitter import TwitterAPI
-
 
 class Conversation:
-    api: "TwitterAPI"
+    api: tw.TwitterAPI
     id: str
 
-    def __init__(self, api: "TwitterAPI", id: str) -> None:
+    def __init__(self, api: tw.TwitterAPI, id: str) -> None:
         self.api = api
         self.id = id
 
@@ -28,7 +27,7 @@ class Conversation:
         """The base URL for API requests related to this conversation."""
         return self.api.dm_url / "conversation" / self.id
 
-    async def mark_read(self, last_read_event_id: Union[int, str]) -> None:
+    async def mark_read(self, last_read_event_id: int | str) -> None:
         """Mark the conversation as read, up to the given event ID."""
         req = {"conversationId": self.id, "last_read_event_id": str(last_read_event_id)}
         url = self.api_url / "mark_read.json"
@@ -48,8 +47,8 @@ class Conversation:
     async def send(
         self,
         text: str,
-        media_id: Optional[Union[str, int]] = None,
-        request_id: Optional[Union[UUID, str]] = None,
+        media_id: str | int | None = None,
+        request_id: UUID | str | None = None,
     ) -> SendResponse:
         """
         Send a message to this conversation.
@@ -79,7 +78,7 @@ class Conversation:
             resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)
 
-    async def react(self, message_id: Union[str, int], key: ReactionKey) -> None:
+    async def react(self, message_id: str | int, key: ReactionKey) -> None:
         """
         React to a message. Reacting to the same message multiple times will override earlier
         reactions.
@@ -98,7 +97,7 @@ class Conversation:
         async with self.api.http.post(url, headers=self.api.headers) as resp:
             await check_error(resp)
 
-    async def delete_reaction(self, message_id: Union[str, int], key: ReactionKey) -> None:
+    async def delete_reaction(self, message_id: str | int, key: ReactionKey) -> None:
         """
         Delete an earlier reaction.
 
@@ -117,7 +116,7 @@ class Conversation:
             await check_error(resp)
 
     async def fetch(
-        self, max_id: Optional[str] = None, include_info: bool = True
+        self, max_id: str | None = None, include_info: bool = True
     ) -> FetchConversationResponse:
         """
         Fetch the conversation metadata and message history.

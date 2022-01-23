@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import TYPE_CHECKING, List, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from mautrix.bridge import BaseMatrixHandler
 from mautrix.types import (
@@ -48,14 +50,13 @@ class MatrixHandler(BaseMatrixHandler):
 
         super().__init__(bridge=bridge)
 
-    async def send_welcome_message(self, room_id: RoomID, inviter: "u.User") -> None:
+    async def send_welcome_message(self, room_id: RoomID, inviter: u.User) -> None:
         await super().send_welcome_message(room_id, inviter)
         if not inviter.notice_room:
             inviter.notice_room = room_id
             await inviter.update()
             await self.az.intent.send_notice(
-                room_id,
-                "This room has been marked as your " "Twitter DM bridge notice room.",
+                room_id, "This room has been marked as your Twitter DM bridge notice room."
             )
 
     async def handle_leave(self, room_id: RoomID, user_id: UserID, event_id: EventID) -> None:
@@ -110,11 +111,7 @@ class MatrixHandler(BaseMatrixHandler):
         )
 
     async def handle_read_receipt(
-        self,
-        user: "u.User",
-        portal: "po.Portal",
-        event_id: EventID,
-        data: SingleReceiptEventContent,
+        self, user: u.User, portal: po.Portal, event_id: EventID, data: SingleReceiptEventContent
     ) -> None:
         message = await DBMessage.get_by_mxid(event_id, portal.mxid)
         if not message:
@@ -123,7 +120,7 @@ class MatrixHandler(BaseMatrixHandler):
         await user.client.conversation(portal.twid).mark_read(message.twid)
 
     @staticmethod
-    async def handle_typing(room_id: RoomID, typing: List[UserID]) -> None:
+    async def handle_typing(room_id: RoomID, typing: list[UserID]) -> None:
         # TODO implement
         pass
 
@@ -136,7 +133,7 @@ class MatrixHandler(BaseMatrixHandler):
             await self.handle_reaction(evt.room_id, evt.sender, evt.event_id, evt.content)
 
     async def handle_ephemeral_event(
-        self, evt: Union[ReceiptEvent, PresenceEvent, TypingEvent]
+        self, evt: ReceiptEvent | PresenceEvent | TypingEvent
     ) -> None:
         if evt.type == EventType.TYPING:
             await self.handle_typing(evt.room_id, evt.content.user_ids)

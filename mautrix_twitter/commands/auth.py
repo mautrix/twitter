@@ -62,7 +62,7 @@ async def enter_login_cookies(evt: CommandEvent) -> None:
         return
     if len(evt.args) == 0:
         await evt.reply(
-            "Please enter the value of the `ct0` cookie, or use " "the `cancel` command to cancel."
+            "Please enter the value of the `ct0` cookie, or use the `cancel` command to cancel."
         )
         return
 
@@ -83,7 +83,7 @@ async def enter_login_cookies(evt: CommandEvent) -> None:
 @command_handler(
     needs_auth=True,
     help_section=SECTION_AUTH,
-    help_text="Disconnect the bridge from" "your Twitter account",
+    help_text="Disconnect the bridge from your Twitter account",
 )
 async def logout(evt: CommandEvent) -> None:
     await evt.sender.logout()

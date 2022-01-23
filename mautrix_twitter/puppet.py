@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterable, Awaitable, Dict, Optional, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterable, Awaitable, cast
 from os import path
 
 from aiohttp import ClientSession
@@ -34,8 +36,8 @@ if TYPE_CHECKING:
 
 
 class Puppet(DBPuppet, BasePuppet):
-    by_twid: Dict[int, "Puppet"] = {}
-    by_custom_mxid: Dict[UserID, "Puppet"] = {}
+    by_twid: dict[int, Puppet] = {}
+    by_custom_mxid: dict[UserID, Puppet] = {}
     hs_domain: str
     mxid_template: SimpleTemplate[int]
 
@@ -47,14 +49,14 @@ class Puppet(DBPuppet, BasePuppet):
     def __init__(
         self,
         twid: int,
-        name: Optional[str] = None,
-        photo_url: Optional[str] = None,
-        photo_mxc: Optional[ContentURI] = None,
+        name: str | None = None,
+        photo_url: str | None = None,
+        photo_mxc: ContentURI | None = None,
         is_registered: bool = False,
-        custom_mxid: Optional[UserID] = None,
-        access_token: Optional[str] = None,
-        next_batch: Optional[SyncToken] = None,
-        base_url: Optional[URL] = None,
+        custom_mxid: UserID | None = None,
+        access_token: str | None = None,
+        next_batch: SyncToken | None = None,
+        base_url: URL | None = None,
     ) -> None:
         super().__init__(
             twid=twid,
@@ -100,7 +102,7 @@ class Puppet(DBPuppet, BasePuppet):
         cls.login_device_name = "Twitter DM Bridge"
         return (puppet.try_start() async for puppet in cls.all_with_custom_mxid())
 
-    def intent_for(self, portal: "p.Portal") -> IntentAPI:
+    def intent_for(self, portal: p.Portal) -> IntentAPI:
         if portal.other_user == self.twid or (
             self.config["bridge.backfill.invite_own_puppet"] and portal.backfill_lock.locked
         ):
@@ -164,7 +166,7 @@ class Puppet(DBPuppet, BasePuppet):
         await self.update()
 
     @classmethod
-    async def get_by_mxid(cls, mxid: UserID, create: bool = True) -> Optional["Puppet"]:
+    async def get_by_mxid(cls, mxid: UserID, create: bool = True) -> Puppet | None:
         twid = cls.get_id_from_mxid(mxid)
         if twid:
             return await cls.get_by_twid(twid, create=create)
@@ -172,7 +174,7 @@ class Puppet(DBPuppet, BasePuppet):
 
     @classmethod
     @async_getter_lock
-    async def get_by_custom_mxid(cls, mxid: UserID) -> Optional["Puppet"]:
+    async def get_by_custom_mxid(cls, mxid: UserID) -> Puppet | None:
         try:
             return cls.by_custom_mxid[mxid]
         except KeyError:
@@ -186,7 +188,7 @@ class Puppet(DBPuppet, BasePuppet):
         return None
 
     @classmethod
-    def get_id_from_mxid(cls, mxid: UserID) -> Optional[int]:
+    def get_id_from_mxid(cls, mxid: UserID) -> int | None:
         return cls.mxid_template.parse(mxid)
 
     @classmethod
@@ -195,7 +197,7 @@ class Puppet(DBPuppet, BasePuppet):
 
     @classmethod
     @async_getter_lock
-    async def get_by_twid(cls, twid: int, *, create: bool = True) -> Optional["Puppet"]:
+    async def get_by_twid(cls, twid: int, *, create: bool = True) -> Puppet | None:
         try:
             return cls.by_twid[twid]
         except KeyError:
@@ -215,7 +217,7 @@ class Puppet(DBPuppet, BasePuppet):
         return None
 
     @classmethod
-    async def all_with_custom_mxid(cls) -> AsyncGenerator["Puppet", None]:
+    async def all_with_custom_mxid(cls) -> AsyncGenerator[Puppet, None]:
         puppets = await super().all_with_custom_mxid()
         puppet: cls
         for index, puppet in enumerate(puppets):

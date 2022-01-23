@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2021 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,15 +13,12 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Union
 import html
 
 from mautrix.types import Format, MessageType, TextMessageEventContent
 from mautwitdm.types import MessageData, MessageEntityURL, MessageEntityUserMention
 
 from . import puppet as pu
-
-MessageEntity = Union[MessageEntityURL, MessageEntityUserMention]
 
 
 async def twitter_to_matrix(message: MessageData) -> TextMessageEventContent:
@@ -54,7 +51,7 @@ async def twitter_to_matrix(message: MessageData) -> TextMessageEventContent:
             text = content.formatted_body[start:end][0] + entity.text
             content.formatted_body = (
                 f"{content.formatted_body[:start]}"
-                f'<font color="#0000ff">{text}</font>'
+                f'<font color="#3771bb">{text}</font>'
                 f"{content.formatted_body[end:]}"
             )
     if content.formatted_body == content.body:

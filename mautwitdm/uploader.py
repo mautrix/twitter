@@ -1,9 +1,10 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Dict
+from __future__ import annotations
+
 import asyncio
 import logging
 import math
@@ -20,7 +21,7 @@ class TwitterUploader:
 
     http: ClientSession
     log: logging.Logger
-    headers: Dict[str, str]
+    headers: dict[str, str]
 
     async def _wait_processing(self, media_id: str, wait_requests: int = 1) -> MediaUploadResponse:
         query_req = self.upload_url.with_query({"command": "STATUS", "media_id": media_id})

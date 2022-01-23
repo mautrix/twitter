@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,14 +13,16 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import TYPE_CHECKING, ClassVar, List, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, ClassVar
 
 from attr import dataclass
 
 from mautrix.types import RoomID, UserID
 from mautrix.util.async_db import Database
 
-fake_db = Database("") if TYPE_CHECKING else None
+fake_db = Database.create("") if TYPE_CHECKING else None
 
 
 @dataclass
@@ -28,42 +30,40 @@ class User:
     db: ClassVar[Database] = fake_db
 
     mxid: UserID
-    twid: Optional[int]
-    auth_token: Optional[str]
-    csrf_token: Optional[str]
-    poll_cursor: Optional[str]
-    notice_room: Optional[RoomID]
+    twid: int | None
+    auth_token: str | None
+    csrf_token: str | None
+    poll_cursor: str | None
+    notice_room: RoomID | None
+
+    @property
+    def _values(self):
+        return (
+            self.mxid,
+            self.twid,
+            self.auth_token,
+            self.csrf_token,
+            self.poll_cursor,
+            self.notice_room,
+        )
 
     async def insert(self) -> None:
         q = (
             'INSERT INTO "user" (mxid, twid, auth_token, csrf_token, poll_cursor, notice_room) '
             "VALUES ($1, $2, $3, $4, $5, $6)"
         )
-        await self.db.execute(
-            q,
-            self.mxid,
-            self.twid,
-            self.auth_token,
-            self.csrf_token,
-            self.poll_cursor,
-            self.notice_room,
-        )
+        await self.db.execute(q, *self._values)
 
     async def update(self) -> None:
-        await self.db.execute(
+        q = (
             'UPDATE "user" SET twid=$2, auth_token=$3, csrf_token=$4,'
             "                  poll_cursor=$5, notice_room=$6 "
-            "WHERE mxid=$1",
-            self.mxid,
-            self.twid,
-            self.auth_token,
-            self.csrf_token,
-            self.poll_cursor,
-            self.notice_room,
+            "WHERE mxid=$1"
         )
+        await self.db.execute(q, *self._values)
 
     @classmethod
-    async def get_by_mxid(cls, mxid: UserID) -> Optional["User"]:
+    async def get_by_mxid(cls, mxid: UserID) -> User | None:
         q = (
             "SELECT mxid, twid, auth_token, csrf_token, poll_cursor, notice_room "
             'FROM "user" WHERE mxid=$1'
@@ -74,7 +74,7 @@ class User:
         return cls(**row)
 
     @classmethod
-    async def get_by_twid(cls, twid: int) -> Optional["User"]:
+    async def get_by_twid(cls, twid: int) -> User | None:
         q = (
             "SELECT mxid, twid, auth_token, csrf_token, poll_cursor, notice_room "
             'FROM "user" WHERE twid=$1'
@@ -85,7 +85,7 @@ class User:
         return cls(**row)
 
     @classmethod
-    async def all_logged_in(cls) -> List["User"]:
+    async def all_logged_in(cls) -> list[User]:
         q = (
             "SELECT mxid, twid, auth_token, csrf_token, poll_cursor, notice_room "
             'FROM "user" WHERE twid IS NOT NULL AND auth_token IS NOT NULL'

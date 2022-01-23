@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,17 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import (
-    TYPE_CHECKING,
-    AsyncGenerator,
-    AsyncIterable,
-    Awaitable,
-    Dict,
-    List,
-    Optional,
-    Union,
-    cast,
-)
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterable, Awaitable, cast
 import asyncio
 import logging
 
@@ -71,28 +63,28 @@ BridgeState.human_readable_errors.update(
 
 
 class User(DBUser, BaseUser):
-    by_mxid: Dict[UserID, "User"] = {}
-    by_twid: Dict[int, "User"] = {}
+    by_mxid: dict[UserID, User] = {}
+    by_twid: dict[int, User] = {}
     config: Config
 
-    client: Optional[TwitterAPI]
+    client: TwitterAPI | None
 
     permission_level: str
-    username: Optional[str]
+    username: str | None
 
     _notice_room_lock: asyncio.Lock
     _notice_send_lock: asyncio.Lock
-    _is_logged_in: Optional[bool]
+    _is_logged_in: bool | None
     _connected: bool
 
     def __init__(
         self,
         mxid: UserID,
-        twid: Optional[int] = None,
-        auth_token: Optional[str] = None,
-        csrf_token: Optional[str] = None,
-        poll_cursor: Optional[str] = None,
-        notice_room: Optional[RoomID] = None,
+        twid: int | None = None,
+        auth_token: str | None = None,
+        csrf_token: str | None = None,
+        poll_cursor: str | None = None,
+        notice_room: RoomID | None = None,
     ) -> None:
         super().__init__(
             mxid=mxid,
@@ -140,7 +132,7 @@ class User(DBUser, BaseUser):
                 self._is_logged_in = False
         return self.client and self._is_logged_in
 
-    async def get_puppet(self) -> Optional["pu.Puppet"]:
+    async def get_puppet(self) -> pu.Puppet | None:
         if not self.twid:
             return None
         return await pu.Puppet.get_by_twid(self.twid)
@@ -168,9 +160,7 @@ class User(DBUser, BaseUser):
                 BridgeStateEvent.UNKNOWN_ERROR, error="twitter-connection-failed"
             )
 
-    async def connect(
-        self, auth_token: Optional[str] = None, csrf_token: Optional[str] = None
-    ) -> None:
+    async def connect(self, auth_token: str | None = None, csrf_token: str | None = None) -> None:
         client = TwitterAPI(
             log=logging.getLogger("mau.twitter.api").getChild(self.mxid),
             loop=self.loop,
@@ -217,7 +207,7 @@ class User(DBUser, BaseUser):
             puppet = await pu.Puppet.get_by_twid(self.twid)
             state.remote_name = puppet.name
 
-    async def get_bridge_states(self) -> List[BridgeState]:
+    async def get_bridge_states(self) -> list[BridgeState]:
         if not self.twid:
             return []
         state = BridgeState(state_event=BridgeStateEvent.UNKNOWN_ERROR)
@@ -225,12 +215,12 @@ class User(DBUser, BaseUser):
             state.state_event = BridgeStateEvent.CONNECTED
         return [state]
 
-    async def on_connect(self, evt: Union[PollingStarted, PollingErrorResolved]) -> None:
+    async def on_connect(self, evt: PollingStarted | PollingErrorResolved) -> None:
         self._track_metric(METRIC_CONNECTED, True)
         self._connected = True
         await self.push_bridge_state(BridgeStateEvent.CONNECTED)
 
-    async def on_disconnect(self, evt: Union[PollingStopped, PollingErrored]) -> None:
+    async def on_disconnect(self, evt: PollingStopped | PollingErrored) -> None:
         self._track_metric(METRIC_CONNECTED, False)
         self._connected = False
         if isinstance(evt, PollingStopped):
@@ -261,10 +251,10 @@ class User(DBUser, BaseUser):
     async def send_bridge_notice(
         self,
         text: str,
-        edit: Optional[EventID] = None,
-        state_event: Optional[BridgeStateEvent] = None,
+        edit: EventID | None = None,
+        state_event: BridgeStateEvent | None = None,
         important: bool = False,
-    ) -> Optional[EventID]:
+    ) -> EventID | None:
         if state_event:
             await self.push_bridge_state(state_event, message=text)
         if self.config["bridge.disable_bridge_notices"]:
@@ -332,7 +322,7 @@ class User(DBUser, BaseUser):
         self.log.debug("Initial sync completed, starting polling")
         self.client.start_polling()
 
-    async def get_direct_chats(self) -> Dict[UserID, List[RoomID]]:
+    async def get_direct_chats(self) -> dict[UserID, list[RoomID]]:
         return {
             pu.Puppet.get_mxid_from_id(portal.other_user): [portal.mxid]
             for portal in await DBPortal.find_private_chats_of(self.twid)
@@ -424,7 +414,7 @@ class User(DBUser, BaseUser):
         await portal.handle_twitter_message(self, sender, evt.message_data, evt.request_id)
 
     @async_time(METRIC_REACTION)
-    async def handle_reaction(self, evt: Union[ReactionCreateEntry, ReactionDeleteEntry]) -> None:
+    async def handle_reaction(self, evt: ReactionCreateEntry | ReactionDeleteEntry) -> None:
         portal = await po.Portal.get_by_twid(
             evt.conversation_id, receiver=self.twid, conv_type=evt.conversation.type
         )
@@ -461,7 +451,7 @@ class User(DBUser, BaseUser):
 
     @classmethod
     @async_getter_lock
-    async def get_by_mxid(cls, mxid: UserID, *, create: bool = True) -> Optional["User"]:
+    async def get_by_mxid(cls, mxid: UserID, *, create: bool = True) -> User | None:
         # Never allow ghosts to be users
         if pu.Puppet.get_id_from_mxid(mxid):
             return None
@@ -485,7 +475,7 @@ class User(DBUser, BaseUser):
 
     @classmethod
     @async_getter_lock
-    async def get_by_twid(cls, twid: int) -> Optional["User"]:
+    async def get_by_twid(cls, twid: int) -> User | None:
         try:
             return cls.by_twid[twid]
         except KeyError:
@@ -499,7 +489,7 @@ class User(DBUser, BaseUser):
         return None
 
     @classmethod
-    async def all_logged_in(cls) -> AsyncGenerator["User", None]:
+    async def all_logged_in(cls) -> AsyncGenerator[User, None]:
         users = await super().all_logged_in()
         user: cls
         for index, user in enumerate(users):

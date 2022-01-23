@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Awaitable, Dict
+from __future__ import annotations
+
+from typing import Awaitable
 import json
 import logging
 
@@ -38,7 +40,7 @@ class ProvisioningAPI:
         self.app.router.add_post("/api/logout", self.logout)
 
     @property
-    def _acao_headers(self) -> Dict[str, str]:
+    def _acao_headers(self) -> dict[str, str]:
         return {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Authorization, Content-Type",
@@ -46,7 +48,7 @@ class ProvisioningAPI:
         }
 
     @property
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return {
             **self._acao_headers,
             "Content-Type": "application/json",
@@ -55,7 +57,7 @@ class ProvisioningAPI:
     async def login_options(self, _: web.Request) -> web.Response:
         return web.Response(status=200, headers=self._headers)
 
-    def check_token(self, request: web.Request) -> Awaitable["u.User"]:
+    def check_token(self, request: web.Request) -> Awaitable[u.User]:
         try:
             token = request.headers["Authorization"]
             token = token[len("Bearer ") :]

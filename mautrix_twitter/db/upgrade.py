@@ -25,82 +25,82 @@ async def upgrade_v1(conn: Connection) -> None:
     await conn.execute("CREATE TYPE twitter_conv_type AS ENUM ('ONE_TO_ONE', 'GROUP_DM')")
     await conn.execute(
         """CREATE TABLE portal (
-        twid        VARCHAR(255),
-        receiver    BIGINT,
-        conv_type   twitter_conv_type NOT NULL,
-        other_user  BIGINT,
-        mxid        VARCHAR(255),
-        name        VARCHAR(255),
-        encrypted   BOOLEAN NOT NULL DEFAULT false,
+            twid        VARCHAR(255),
+            receiver    BIGINT,
+            conv_type   twitter_conv_type NOT NULL,
+            other_user  BIGINT,
+            mxid        VARCHAR(255),
+            name        VARCHAR(255),
+            encrypted   BOOLEAN NOT NULL DEFAULT false,
 
-        PRIMARY KEY (twid, receiver)
-    )"""
+            PRIMARY KEY (twid, receiver)
+        )"""
     )
     await conn.execute(
         """CREATE TABLE "user" (
-        mxid        VARCHAR(255) PRIMARY KEY,
-        twid        BIGINT,
-        auth_token  VARCHAR(255),
-        csrf_token  VARCHAR(255),
-        poll_cursor VARCHAR(255),
-        notice_room VARCHAR(255)
-    )"""
+            mxid        VARCHAR(255) PRIMARY KEY,
+            twid        BIGINT,
+            auth_token  VARCHAR(255),
+            csrf_token  VARCHAR(255),
+            poll_cursor VARCHAR(255),
+            notice_room VARCHAR(255)
+        )"""
     )
     await conn.execute(
         """CREATE TABLE puppet (
-        twid      BIGINT PRIMARY KEY,
-        name      VARCHAR(255),
-        photo_url VARCHAR(255),
-        photo_mxc VARCHAR(255),
+            twid      BIGINT PRIMARY KEY,
+            name      VARCHAR(255),
+            photo_url VARCHAR(255),
+            photo_mxc VARCHAR(255),
 
-        is_registered BOOLEAN NOT NULL DEFAULT false,
+            is_registered BOOLEAN NOT NULL DEFAULT false,
 
-        custom_mxid  VARCHAR(255),
-        access_token TEXT,
-        next_batch   VARCHAR(255)
-    )"""
+            custom_mxid  VARCHAR(255),
+            access_token TEXT,
+            next_batch   VARCHAR(255)
+        )"""
     )
     await conn.execute(
         """CREATE TABLE user_portal (
-        "user"          BIGINT,
-        portal          VARCHAR(255),
-        portal_receiver BIGINT,
-        in_community    BOOLEAN NOT NULL DEFAULT false,
+            "user"          BIGINT,
+            portal          VARCHAR(255),
+            portal_receiver BIGINT,
+            in_community    BOOLEAN NOT NULL DEFAULT false,
 
-        FOREIGN KEY (portal, portal_receiver) REFERENCES portal(twid, receiver)
-            ON UPDATE CASCADE ON DELETE CASCADE
-    )"""
+            FOREIGN KEY (portal, portal_receiver) REFERENCES portal(twid, receiver)
+                ON UPDATE CASCADE ON DELETE CASCADE
+        )"""
     )
     await conn.execute(
         """CREATE TABLE message (
-        mxid     VARCHAR(255) NOT NULL,
-        mx_room  VARCHAR(255) NOT NULL,
-        twid     BIGINT,
-        receiver BIGINT,
+            mxid     VARCHAR(255) NOT NULL,
+            mx_room  VARCHAR(255) NOT NULL,
+            twid     BIGINT,
+            receiver BIGINT,
 
-        PRIMARY KEY (twid, receiver),
-        UNIQUE (mxid, mx_room)
-    )"""
+            PRIMARY KEY (twid, receiver),
+            UNIQUE (mxid, mx_room)
+        )"""
     )
     await conn.execute(
-        "CREATE TYPE twitter_reaction_key AS ENUM ('funny', 'surprised', 'sad',"
-        "                                          'like', 'excited', 'agree',"
-        "                                          'disagree')"
+        """CREATE TYPE twitter_reaction_key AS ENUM (
+            'funny', 'surprised', 'sad', 'like', 'excited', 'agree', 'disagree'
+        )"""
     )
     await conn.execute(
         """CREATE TABLE reaction (
-        mxid        VARCHAR(255) NOT NULL,
-        mx_room     VARCHAR(255) NOT NULL,
-        tw_msgid    BIGINT,
-        tw_receiver BIGINT,
-        tw_sender   BIGINT,
-        reaction    twitter_reaction_key NOT NULL,
+            mxid        VARCHAR(255) NOT NULL,
+            mx_room     VARCHAR(255) NOT NULL,
+            tw_msgid    BIGINT,
+            tw_receiver BIGINT,
+            tw_sender   BIGINT,
+            reaction    twitter_reaction_key NOT NULL,
 
-        PRIMARY KEY (tw_msgid, tw_receiver, tw_sender),
-        FOREIGN KEY (tw_msgid, tw_receiver) REFERENCES message(twid, receiver)
-            ON DELETE CASCADE ON UPDATE CASCADE,
-        UNIQUE (mxid, mx_room)
-    )"""
+            PRIMARY KEY (tw_msgid, tw_receiver, tw_sender),
+            FOREIGN KEY (tw_msgid, tw_receiver) REFERENCES message(twid, receiver)
+                ON DELETE CASCADE ON UPDATE CASCADE,
+            UNIQUE (mxid, mx_room)
+        )"""
     )
 
 
