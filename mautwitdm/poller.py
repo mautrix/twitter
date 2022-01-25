@@ -1,25 +1,22 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Dict, Optional, Type, TypeVar, List, Callable, Awaitable, Any, Union
-import logging
+from __future__ import annotations
+
 import asyncio
+import logging
 import time
 
-from attr import dataclass
 from aiohttp import ClientSession
+from attr import dataclass
 from yarl import URL
 
-from .types import PollResponse, InitialStateResponse
-from .errors import check_error, RateLimitError
-from .conversation import Conversation
+from . import conversation as c
 from .dispatcher import TwitterDispatcher
-
-T = TypeVar('T')
-Handler = Callable[[T], Awaitable[Any]]
-HandlerMap = Dict[Type[T], List[Handler]]
+from .errors import RateLimitError, check_error
+from .types import InitialStateResponse, PollResponse
 
 
 class PollingStarted:
@@ -43,24 +40,25 @@ class PollingErrorResolved:
 
 class TwitterPoller(TwitterDispatcher):
     """This class handles polling for new messages using ``/dm/user_updates.json``."""
+
     dm_url: URL
 
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
     http: ClientSession
-    headers: Dict[str, str]
+    headers: dict[str, str]
     skip_poll_wait: asyncio.Event
 
     poll_sleep: int = 3
     error_sleep: int = 5
     max_poll_errors: int = 12
-    poll_cursor: Optional[str]
+    poll_cursor: str | None
     dispatch_initial_resp: bool
-    _poll_task: Optional[asyncio.Task]
-    _typing_in: Optional[Conversation]
+    _poll_task: asyncio.Task | None
+    _typing_in: c.Conversation | None
 
     @property
-    def poll_params(self) -> Dict[str, str]:
+    def poll_params(self) -> dict[str, str]:
         return {
             "cards_platform": "Web-12",
             "include_cards": "1",
@@ -77,7 +75,7 @@ class TwitterPoller(TwitterDispatcher):
         }
 
     @property
-    def full_state_params(self) -> Dict[str, str]:
+    def full_state_params(self) -> dict[str, str]:
         return {
             "include_profile_interstitial_type": "1",
             "include_blocking": "1",
@@ -100,11 +98,13 @@ class TwitterPoller(TwitterDispatcher):
         Returns:
             The response data from the server.
         """
-        url = (self.dm_url / "inbox_initial_state.json").with_query({
-            **self.full_state_params,
-            "filter_low_quality": "true",
-            "include_quality": "all",
-        })
+        url = (self.dm_url / "inbox_initial_state.json").with_query(
+            {
+                **self.full_state_params,
+                "filter_low_quality": "true",
+                "include_quality": "all",
+            }
+        )
         async with self.http.get(url, headers=self.headers) as resp:
             data = await check_error(resp)
             response = InitialStateResponse.deserialize(data["inbox_initial_state"])
@@ -115,12 +115,14 @@ class TwitterPoller(TwitterDispatcher):
     async def _poll_once(self) -> PollResponse:
         if not self.poll_cursor:
             raise RuntimeError("Cursor must be set to poll")
-        url = (self.dm_url / "user_updates.json").with_query({
-            **self.poll_params,
-            "cursor": self.poll_cursor,
-            "filter_low_quality": "true",
-            "include_quality": "all",
-        })
+        url = (self.dm_url / "user_updates.json").with_query(
+            {
+                **self.poll_params,
+                "cursor": self.poll_cursor,
+                "filter_low_quality": "true",
+                "include_quality": "all",
+            }
+        )
         async with self.http.get(url, headers=self.headers) as resp:
             data = await check_error(resp)
             try:
@@ -157,7 +159,7 @@ class TwitterPoller(TwitterDispatcher):
             if raise_exceptions:
                 raise
 
-    async def dispatch_all(self, resp: Union[PollResponse, InitialStateResponse]) -> None:
+    async def dispatch_all(self, resp: PollResponse | InitialStateResponse) -> None:
         for user in (resp.users or {}).values():
             await self.dispatch(user)
         for conversation in (resp.conversations or {}).values():
@@ -169,9 +171,11 @@ class TwitterPoller(TwitterDispatcher):
                 try:
                     entry_type.conversation = resp.conversations[entry_type.conversation_id]
                 except KeyError:
-                    msg = ("Poll response didn't contain conversation info "
-                           f"for {entry_type.conversation_id} "
-                           f"(entry type {type(entry_type)}, ID {entry_type.id}")
+                    msg = (
+                        "Poll response didn't contain conversation info "
+                        f"for {entry_type.conversation_id} "
+                        f"(entry type {type(entry_type)}, ID {entry_type.id}"
+                    )
                     if entry_type.conversation:
                         self.log.debug(f"{msg}, but the entry had its own conversation info")
                         await self.dispatch(entry_type)
@@ -195,8 +199,9 @@ class TwitterPoller(TwitterDispatcher):
                 resp = await self._poll_once()
             except RateLimitError as e:
                 sleep = e.reset - int(time.time())
-                self.log.warning(f"Got rate limit until {e.reset} while polling, "
-                                 f"waiting {sleep} seconds")
+                self.log.warning(
+                    f"Got rate limit until {e.reset} while polling, " f"waiting {sleep} seconds"
+                )
                 if self.poll_sleep < 8:
                     self.poll_sleep += 1
                     self.log.debug(f"Increased poll sleep to {self.poll_sleep}")
@@ -204,8 +209,9 @@ class TwitterPoller(TwitterDispatcher):
                 continue
             except Exception as e:
                 if errors > self.max_poll_errors > 0:
-                    self.log.debug(f"Error count ({errors}) exceeded maximum, "
-                                   f"raising error as fatal")
+                    self.log.debug(
+                        f"Error count ({errors}) exceeded maximum, " f"raising error as fatal"
+                    )
                     raise
                 errors += 1
                 sleep = min(15 * 60, self.error_sleep * errors)

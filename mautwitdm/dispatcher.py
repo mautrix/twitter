@@ -1,15 +1,16 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.'
-from typing import Dict, Type, TypeVar, List, Callable, Awaitable, Any
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+from __future__ import annotations
+
+from typing import Any, Awaitable, Callable, TypeVar
 
 from mautrix.util.logging import TraceLogger
 
-T = TypeVar('T')
+T = TypeVar("T")
 Handler = Callable[[T], Awaitable[Any]]
-HandlerMap = Dict[Type[T], List[Handler]]
 
 
 class TwitterDispatcher:
@@ -17,8 +18,9 @@ class TwitterDispatcher:
     This class is used to dispatch events that :class:`TwitterPoller` and :class:`TwitterStreamer`
     get from Twitter.
     """
+
     log: TraceLogger
-    _handlers: HandlerMap
+    _handlers: dict[type[T], list[Handler]]
 
     async def dispatch(self, event: T) -> None:
         """
@@ -34,7 +36,7 @@ class TwitterDispatcher:
             except Exception:
                 self.log.exception(f"Error while handling event of type {type(event)}")
 
-    def add_handler(self, event_type: Type[T], handler: Handler) -> None:
+    def add_handler(self, event_type: type[T], handler: Handler) -> None:
         """
         Add an event handler.
 
@@ -44,7 +46,7 @@ class TwitterDispatcher:
         """
         self._handlers[event_type].append(handler)
 
-    def remove_handler(self, event_type: Type[T], handler: Handler) -> None:
+    def remove_handler(self, event_type: type[T], handler: Handler) -> None:
         """
         Remove an event handler.
 

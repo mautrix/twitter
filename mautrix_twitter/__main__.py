@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2021 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,20 +13,22 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Dict, Any
+from __future__ import annotations
+
+from typing import Any
 
 from mautrix.bridge import Bridge
 from mautrix.types import RoomID, UserID
 
-from .version import version, linkified_version
+from . import commands
 from .config import Config
-from .db import upgrade_table, init as init_db
+from .db import init as init_db, upgrade_table
 from .matrix import MatrixHandler
-from .user import User
 from .portal import Portal
 from .puppet import Puppet
+from .user import User
+from .version import linkified_version, version
 from .web import ProvisioningAPI
-from . import commands
 
 
 class TwitterBridge(Bridge):
@@ -94,7 +96,7 @@ class TwitterBridge(Bridge):
     async def count_logged_in_users(self) -> int:
         return len([user for user in User.by_twid.values() if user.twid])
 
-    async def manhole_global_namespace(self, user_id: UserID) -> Dict[str, Any]:
+    async def manhole_global_namespace(self, user_id: UserID) -> dict[str, Any]:
         return {
             **await super().manhole_global_namespace(user_id),
             "User": User,

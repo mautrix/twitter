@@ -9,9 +9,9 @@ from attr import dataclass
 
 from mautrix.types import SerializableAttrs
 
-from .message_entity import MessageEntities
-from .message_attachment import MessageAttachment
 from .conversation import Conversation
+from .message_attachment import MessageAttachment
+from .message_entity import MessageEntities
 from .util import StringTimestamp
 
 

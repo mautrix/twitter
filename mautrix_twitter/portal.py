@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2021 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,8 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import (Dict, Tuple, Optional, List, Deque, Set, Any, Union, AsyncGenerator,
-                    Awaitable, NamedTuple, TYPE_CHECKING, cast)
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, cast
 from collections import deque
 from datetime import datetime
 import asyncio
@@ -22,61 +23,92 @@ import asyncio
 from yarl import URL
 import magic
 
-from mautwitdm.types import (ConversationType, Conversation, MessageData, Participant, ReactionKey,
-                             TimelineStatus, ReactionCreateEntry, ReactionDeleteEntry,
-                             MessageEntry, VideoVariant)
 from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
-from mautrix.types import (EventID, MessageEventContent, RoomID, EventType, MessageType,
-                           MediaMessageEventContent, ImageInfo, VideoInfo, ThumbnailInfo,
-                           ContentURI, EncryptedFile, TextMessageEventContent)
 from mautrix.errors import MatrixError, MForbidden
+from mautrix.types import (
+    ContentURI,
+    EncryptedFile,
+    EventID,
+    EventType,
+    ImageInfo,
+    MediaMessageEventContent,
+    MessageEventContent,
+    MessageType,
+    RoomID,
+    TextMessageEventContent,
+    ThumbnailInfo,
+    VideoInfo,
+)
 from mautrix.util.message_send_checkpoint import MessageSendCheckpointStatus
 from mautrix.util.simple_lock import SimpleLock
+from mautwitdm.types import (
+    Conversation,
+    ConversationType,
+    MessageData,
+    MessageEntry,
+    Participant,
+    ReactionCreateEntry,
+    ReactionDeleteEntry,
+    ReactionKey,
+    TimelineStatus,
+    VideoVariant,
+)
 
-from .db import Portal as DBPortal, Message as DBMessage, Reaction as DBReaction
+from . import matrix as m, puppet as p, user as u
 from .config import Config
+from .db import Message as DBMessage, Portal as DBPortal, Reaction as DBReaction
 from .formatter import twitter_to_matrix
-from . import user as u, puppet as p, matrix as m
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
 
 try:
-    from mautrix.crypto.attachments import encrypt_attachment, decrypt_attachment
+    from mautrix.crypto.attachments import decrypt_attachment, encrypt_attachment
 except ImportError:
     encrypt_attachment = decrypt_attachment = None
 
 StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
-BackfillEntryTypes = Union[MessageEntry, ReactionCreateEntry, ReactionDeleteEntry]
-ReuploadedMediaInfo = NamedTuple('ReuploadedMediaInfo', mxc=Optional[ContentURI],
-                                 decryption_info=Optional[EncryptedFile],
-                                 mime_type=str, file_name=str, size=int)
+
+
+class ReuploadedMediaInfo(NamedTuple):
+    mxc: ContentURI | None
+    decryption_info: EncryptedFile | None
+    mime_type: str
+    file_name: str
+    size: int
 
 
 class Portal(DBPortal, BasePortal):
-    by_mxid: Dict[RoomID, 'Portal'] = {}
-    by_twid: Dict[Tuple[str, int], 'Portal'] = {}
+    by_mxid: dict[RoomID, Portal] = {}
+    by_twid: dict[tuple[str, int], Portal] = {}
     config: Config
-    matrix: 'm.MatrixHandler'
+    matrix: "m.MatrixHandler"
     az: AppService
     private_chat_portal_meta: bool
 
-    _main_intent: Optional[IntentAPI]
+    _main_intent: IntentAPI | None
     _create_room_lock: asyncio.Lock
     backfill_lock: SimpleLock
-    _msgid_dedup: Deque[int]
-    _reqid_dedup: Set[str]
-    _reaction_dedup: Deque[Tuple[int, int, ReactionKey]]
+    _msgid_dedup: deque[int]
+    _reqid_dedup: set[str]
+    _reaction_dedup: deque[tuple[int, int, ReactionKey]]
 
     _main_intent: IntentAPI
-    _last_participant_update: Set[int]
+    _last_participant_update: set[int]
     _reaction_lock: asyncio.Lock
 
-    def __init__(self, twid: str, receiver: int, conv_type: ConversationType,
-                 other_user: Optional[int] = None, mxid: Optional[RoomID] = None,
-                 name: Optional[str] = None, encrypted: bool = False) -> None:
+    def __init__(
+        self,
+        twid: str,
+        receiver: int,
+        conv_type: ConversationType,
+        other_user: int | None = None,
+        mxid: RoomID | None = None,
+        name: str | None = None,
+        encrypted: bool = False,
+    ) -> None:
         super().__init__(twid, receiver, conv_type, other_user, mxid, name, encrypted)
         self._create_room_lock = asyncio.Lock()
         self.log = self.log.getChild(twid)
@@ -85,8 +117,9 @@ class Portal(DBPortal, BasePortal):
         self._reqid_dedup = set()
         self._last_participant_update = set()
 
-        self.backfill_lock = SimpleLock("Waiting for backfilling to finish before handling %s",
-                                        log=self.log)
+        self.backfill_lock = SimpleLock(
+            "Waiting for backfilling to finish before handling %s", log=self.log
+        )
         self._main_intent = None
         self._reaction_lock = asyncio.Lock()
 
@@ -101,7 +134,7 @@ class Portal(DBPortal, BasePortal):
         return self._main_intent
 
     @classmethod
-    def init_cls(cls, bridge: 'TwitterBridge') -> None:
+    def init_cls(cls, bridge: "TwitterBridge") -> None:
         cls.config = bridge.config
         cls.matrix = bridge.matrix
         cls.az = bridge.az
@@ -120,19 +153,32 @@ class Portal(DBPortal, BasePortal):
             except Exception:
                 self.log.exception("Failed to send delivery receipt for %s", event_id)
 
-    async def _upsert_reaction(self, existing: DBReaction, intent: IntentAPI, mxid: EventID,
-                               message: DBMessage, sender: Union['u.User', 'p.Puppet'],
-                               reaction: ReactionKey) -> None:
+    async def _upsert_reaction(
+        self,
+        existing: DBReaction,
+        intent: IntentAPI,
+        mxid: EventID,
+        message: DBMessage,
+        sender: u.User | p.Puppet,
+        reaction: ReactionKey,
+    ) -> None:
         if existing:
-            self.log.debug(f"_upsert_reaction redacting {existing.mxid} and inserting {mxid}"
-                           f" (message: {message.mxid})")
+            self.log.debug(
+                f"_upsert_reaction redacting {existing.mxid} and inserting {mxid}"
+                f" (message: {message.mxid})"
+            )
             await intent.redact(existing.mx_room, existing.mxid)
             await existing.edit(reaction=reaction, mxid=mxid, mx_room=message.mx_room)
         else:
             self.log.debug(f"_upsert_reaction inserting {mxid} (message: {message.mxid})")
-            await DBReaction(mxid=mxid, mx_room=message.mx_room, tw_msgid=message.twid,
-                             tw_receiver=self.receiver, tw_sender=sender.twid,
-                             reaction=reaction).insert()
+            await DBReaction(
+                mxid=mxid,
+                mx_room=message.mx_room,
+                tw_msgid=message.twid,
+                tw_receiver=self.receiver,
+                tw_sender=sender.twid,
+                reaction=reaction,
+            ).insert()
 
     # endregion
     # region Matrix event handling
@@ -148,8 +194,9 @@ class Portal(DBPortal, BasePortal):
             return MessageSendCheckpointStatus.UNSUPPORTED
         return MessageSendCheckpointStatus.PERM_FAILURE
 
-    async def handle_matrix_message(self, sender: 'u.User', message: MessageEventContent,
-                                    event_id: EventID) -> None:
+    async def handle_matrix_message(
+        self, sender: u.User, message: MessageEventContent, event_id: EventID
+    ) -> None:
         if not sender.client:
             self.log.debug(f"Ignoring message {event_id} as user is not connected")
             return
@@ -158,12 +205,18 @@ class Portal(DBPortal, BasePortal):
         except Exception as e:
             status = self._status_from_exception(e)
             sender.send_remote_checkpoint(
-                status, event_id, self.mxid, EventType.ROOM_MESSAGE, message.msgtype, error=e,
+                status,
+                event_id,
+                self.mxid,
+                EventType.ROOM_MESSAGE,
+                message.msgtype,
+                error=e,
             )
             await self._send_error_notice("Your message may not have been bridged", e)
 
-    async def _handle_matrix_message(self, sender: 'u.User', message: MessageEventContent,
-                                    event_id: EventID) -> None:
+    async def _handle_matrix_message(
+        self, sender: u.User, message: MessageEventContent, event_id: EventID
+    ) -> None:
         request_id = str(sender.client.new_request_id())
         self._reqid_dedup.add(request_id)
         text = message.body
@@ -173,16 +226,21 @@ class Portal(DBPortal, BasePortal):
         elif message.msgtype.is_media:
             if message.file and decrypt_attachment:
                 data = await self.main_intent.download_media(message.file.url)
-                data = decrypt_attachment(data, message.file.key.key,
-                                          message.file.hashes.get("sha256"), message.file.iv)
+                data = decrypt_attachment(
+                    data,
+                    message.file.key.key,
+                    message.file.hashes.get("sha256"),
+                    message.file.iv,
+                )
             else:
                 data = await self.main_intent.download_media(message.url)
             mime_type = message.info.mimetype or magic.from_buffer(data, mime=True)
             upload_resp = await sender.client.upload(data, mime_type=mime_type)
             media_id = upload_resp.media_id
             text = ""
-        resp = await sender.client.conversation(self.twid).send(text, media_id=media_id,
-                                                                request_id=request_id)
+        resp = await sender.client.conversation(self.twid).send(
+            text, media_id=media_id, request_id=request_id
+        )
         await self._send_delivery_receipt(event_id)
         sender.send_remote_checkpoint(
             status=MessageSendCheckpointStatus.SUCCESS,
@@ -198,20 +256,20 @@ class Portal(DBPortal, BasePortal):
         self._reqid_dedup.remove(request_id)
         self.log.debug(f"Handled Matrix message {event_id} -> {resp_msg_id}")
 
-    async def handle_matrix_reaction(self, sender: 'u.User', event_id: EventID,
-                                     reacting_to: EventID, reaction_val: str) -> None:
+    async def handle_matrix_reaction(
+        self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction_val: str
+    ) -> None:
         try:
             await self._handle_matrix_reaction(sender, event_id, reacting_to, reaction_val)
         except Exception as e:
             status = self._status_from_exception(e)
             self.log.exception(f"Failed to react to {event_id}")
-            sender.send_remote_checkpoint(
-                status, event_id, self.mxid, EventType.REACTION, error=e
-            )
+            sender.send_remote_checkpoint(status, event_id, self.mxid, EventType.REACTION, error=e)
             await self._send_error_notice(f"Failed to react to {event_id}", e)
 
-    async def _handle_matrix_reaction(self, sender: 'u.User', event_id: EventID,
-                                     reacting_to: EventID, reaction_val: str) -> None:
+    async def _handle_matrix_reaction(
+        self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction_val: str
+    ) -> None:
         reaction = ReactionKey.from_emoji(reaction_val)
         message = await DBMessage.get_by_mxid(reacting_to, self.mxid)
         if not message:
@@ -233,12 +291,14 @@ class Portal(DBPortal, BasePortal):
                 EventType.REACTION,
             )
             await self._send_delivery_receipt(event_id)
-            await self._upsert_reaction(existing, self.main_intent, event_id, message, sender,
-                                        reaction)
+            await self._upsert_reaction(
+                existing, self.main_intent, event_id, message, sender, reaction
+            )
             self.log.debug(f"{sender.mxid} reacted to {message.twid} with {reaction}")
 
-    async def handle_matrix_redaction(self, sender: 'u.User', event_id: EventID,
-                                      redaction_event_id: EventID) -> None:
+    async def handle_matrix_redaction(
+        self, sender: u.User, event_id: EventID, redaction_event_id: EventID
+    ) -> None:
         try:
             await self._handle_matrix_redaction(sender, event_id)
         except Exception as e:
@@ -256,7 +316,7 @@ class Portal(DBPortal, BasePortal):
             )
             await self._send_delivery_receipt(redaction_event_id)
 
-    async def _handle_matrix_redaction(self, sender: 'u.User', event_id: EventID) -> None:
+    async def _handle_matrix_redaction(self, sender: u.User, event_id: EventID) -> None:
         assert self.mxid, "MXID is None"
 
         async with self._reaction_lock:
@@ -264,8 +324,9 @@ class Portal(DBPortal, BasePortal):
             if reaction:
                 try:
                     await reaction.delete()
-                    await sender.client.conversation(self.twid).delete_reaction(reaction.tw_msgid,
-                                                                                reaction.reaction)
+                    await sender.client.conversation(self.twid).delete_reaction(
+                        reaction.tw_msgid, reaction.reaction
+                    )
                 except Exception:
                     self.log.exception("Removing reaction failed")
                     raise
@@ -276,12 +337,13 @@ class Portal(DBPortal, BasePortal):
 
         raise NotImplementedError("Message redactions are not supported.")
 
-    async def handle_matrix_leave(self, user: 'u.User') -> None:
+    async def handle_matrix_leave(self, user: u.User) -> None:
         if self.is_direct:
             self.log.info(f"{user.mxid} left private chat portal with {self.twid}")
             if user.twid == self.receiver:
-                self.log.info(f"{user.mxid} was the recipient of this portal. "
-                              "Cleaning up and deleting...")
+                self.log.info(
+                    f"{user.mxid} was the recipient of this portal. " "Cleaning up and deleting..."
+                )
                 await self.cleanup_and_delete()
         else:
             self.log.debug(f"{user.mxid} left portal to {self.twid}")
@@ -290,18 +352,25 @@ class Portal(DBPortal, BasePortal):
     # endregion
     # region Twitter event handling
 
-    async def handle_twitter_message(self, source: 'u.User', sender: 'p.Puppet',
-                                     message: MessageData, request_id: str) -> None:
+    async def handle_twitter_message(
+        self, source: u.User, sender: p.Puppet, message: MessageData, request_id: str
+    ) -> None:
         msg_id = int(message.id)
         if request_id in self._reqid_dedup:
-            self.log.debug(f"Ignoring message {message.id} by {message.sender_id}"
-                           " as it was sent by us (request_id in dedup queue)")
+            self.log.debug(
+                f"Ignoring message {message.id} by {message.sender_id}"
+                " as it was sent by us (request_id in dedup queue)"
+            )
         elif msg_id in self._msgid_dedup:
-            self.log.debug(f"Ignoring message {message.id} by {message.sender_id}"
-                           " as it was already handled (message.id in dedup queue)")
+            self.log.debug(
+                f"Ignoring message {message.id} by {message.sender_id}"
+                " as it was already handled (message.id in dedup queue)"
+            )
         elif await DBMessage.get_by_twid(msg_id, self.receiver) is not None:
-            self.log.debug(f"Ignoring message {message.id} by {message.sender_id}"
-                           " as it was already handled (message.id found in database)")
+            self.log.debug(
+                f"Ignoring message {message.id} by {message.sender_id}"
+                " as it was already handled (message.id found in database)"
+            )
         else:
             self._msgid_dedup.appendleft(msg_id)
             intent = sender.intent_for(self)
@@ -314,8 +383,12 @@ class Portal(DBPortal, BasePortal):
                 content = await twitter_to_matrix(message)
                 event_id = await self._send_message(intent, content, timestamp=message.time)
             if event_id:
-                msg = DBMessage(mxid=event_id, mx_room=self.mxid, twid=msg_id,
-                                receiver=self.receiver)
+                msg = DBMessage(
+                    mxid=event_id,
+                    mx_room=self.mxid,
+                    twid=msg_id,
+                    receiver=self.receiver,
+                )
                 await msg.insert()
                 await self._send_delivery_receipt(event_id)
                 self.log.debug(f"Handled Twitter message {msg_id} -> {event_id}")
@@ -333,49 +406,62 @@ class Portal(DBPortal, BasePortal):
             current_quality = -1
         return current_quality > best_quality
 
-    async def _handle_twitter_attachment(self, source: 'u.User', sender: 'p.Puppet',
-                                         message: MessageData
-                                         ) -> Optional[MediaMessageEventContent]:
+    async def _handle_twitter_attachment(
+        self, source: u.User, sender: p.Puppet, message: MessageData
+    ) -> MediaMessageEventContent | None:
         content = None
         intent = sender.intent_for(self)
         media = message.attachment.media
         if media:
-            reuploaded_info = await self._reupload_twitter_media(source, media.media_url_https,
-                                                                 intent)
+            reuploaded_info = await self._reupload_twitter_media(
+                source, media.media_url_https, intent
+            )
             thumbnail_info = None
             if media.video_info:
                 thumbnail_info = reuploaded_info
                 best_variant = None
                 for variant in media.video_info.variants:
-                    if ((not best_variant or (variant.bitrate or 0) > (best_variant.bitrate or 0)
-                         or self._is_better_mime(best_variant, variant))):
+                    if (
+                        not best_variant
+                        or (variant.bitrate or 0) > (best_variant.bitrate or 0)
+                        or self._is_better_mime(best_variant, variant)
+                    ):
                         best_variant = variant
-                reuploaded_info = await self._reupload_twitter_media(source, best_variant.url,
-                                                                     intent)
-            content = MediaMessageEventContent(body=reuploaded_info.file_name,
-                                               url=reuploaded_info.mxc,
-                                               file=reuploaded_info.decryption_info,
-                                               external_url=media.media_url_https)
+                reuploaded_info = await self._reupload_twitter_media(
+                    source, best_variant.url, intent
+                )
+            content = MediaMessageEventContent(
+                body=reuploaded_info.file_name,
+                url=reuploaded_info.mxc,
+                file=reuploaded_info.decryption_info,
+                external_url=media.media_url_https,
+            )
             if message.attachment.video:
                 content.msgtype = MessageType.VIDEO
-                content.info = VideoInfo(mimetype=reuploaded_info.mime_type,
-                                         size=reuploaded_info.size,
-                                         width=media.original_info.width,
-                                         height=media.original_info.height,
-                                         duration=media.video_info.duration_millis // 1000)
+                content.info = VideoInfo(
+                    mimetype=reuploaded_info.mime_type,
+                    size=reuploaded_info.size,
+                    width=media.original_info.width,
+                    height=media.original_info.height,
+                    duration=media.video_info.duration_millis // 1000,
+                )
             elif message.attachment.photo or message.attachment.animated_gif:
                 content.msgtype = MessageType.IMAGE
-                content.info = ImageInfo(mimetype=reuploaded_info.mime_type,
-                                         size=reuploaded_info.size,
-                                         width=media.original_info.width,
-                                         height=media.original_info.height)
+                content.info = ImageInfo(
+                    mimetype=reuploaded_info.mime_type,
+                    size=reuploaded_info.size,
+                    width=media.original_info.width,
+                    height=media.original_info.height,
+                )
             if thumbnail_info:
                 content.info.thumbnail_url = thumbnail_info.mxc
                 content.info.thumbnail_file = thumbnail_info.decryption_info
-                content.info.thumbnail_info = ThumbnailInfo(mimetype=thumbnail_info.mime_type,
-                                                            size=thumbnail_info.size,
-                                                            width=media.original_info.width,
-                                                            height=media.original_info.height)
+                content.info.thumbnail_info = ThumbnailInfo(
+                    mimetype=thumbnail_info.mime_type,
+                    size=thumbnail_info.size,
+                    width=media.original_info.width,
+                    height=media.original_info.height,
+                )
             # Remove the attachment link from message.text
             start, end = media.indices
             message.text = message.text[:start] + message.text[end:]
@@ -384,8 +470,9 @@ class Portal(DBPortal, BasePortal):
             pass
         return content
 
-    async def _reupload_twitter_media(self, source: 'u.User', url: str, intent: IntentAPI
-                                      ) -> ReuploadedMediaInfo:
+    async def _reupload_twitter_media(
+        self, source: u.User, url: str, intent: IntentAPI
+    ) -> ReuploadedMediaInfo:
         file_name = URL(url).name
         data, mime_type = await source.client.download_media(url)
 
@@ -397,8 +484,9 @@ class Portal(DBPortal, BasePortal):
             upload_mime_type = "application/octet-stream"
             upload_file_name = None
 
-        mxc = await intent.upload_media(data, mime_type=upload_mime_type,
-                                        filename=upload_file_name)
+        mxc = await intent.upload_media(
+            data, mime_type=upload_mime_type, filename=upload_file_name
+        )
 
         if decryption_info:
             decryption_info.url = mxc
@@ -406,8 +494,9 @@ class Portal(DBPortal, BasePortal):
 
         return ReuploadedMediaInfo(mxc, decryption_info, mime_type, file_name, len(data))
 
-    async def handle_twitter_reaction_add(self, sender: 'p.Puppet', msg_id: int,
-                                          reaction: ReactionKey, time: datetime) -> None:
+    async def handle_twitter_reaction_add(
+        self, sender: p.Puppet, msg_id: int, reaction: ReactionKey, time: datetime
+    ) -> None:
         async with self._reaction_lock:
             dedup_id = (msg_id, sender.twid, reaction)
             if dedup_id in self._reaction_dedup:
@@ -428,8 +517,9 @@ class Portal(DBPortal, BasePortal):
         self.log.debug(f"{sender.twid} reacted to {message.mxid} -> {mxid}")
         await self._upsert_reaction(existing, intent, mxid, message, sender, reaction)
 
-    async def handle_twitter_reaction_remove(self, sender: 'p.Puppet', msg_id: int,
-                                             key: ReactionKey) -> None:
+    async def handle_twitter_reaction_remove(
+        self, sender: p.Puppet, msg_id: int, key: ReactionKey
+    ) -> None:
         reaction = await DBReaction.get_by_twid(msg_id, self.receiver, sender.twid)
         if reaction and reaction.reaction == key:
             try:
@@ -440,7 +530,7 @@ class Portal(DBPortal, BasePortal):
             self.log.debug(f"Removed {reaction} after Twitter removal")
 
     async def handle_twitter_receipt(
-        self, sender: 'p.Puppet', read_up_to: int, historical: bool = False
+        self, sender: p.Puppet, read_up_to: int, historical: bool = False
     ) -> None:
         message = await DBMessage.get_by_twid(read_up_to, self.receiver)
         if not message:
@@ -461,8 +551,9 @@ class Portal(DBPortal, BasePortal):
     async def update_info(self, conv: Conversation) -> None:
         if self.conv_type == ConversationType.ONE_TO_ONE:
             if not self.other_user:
-                participant = next(pcp for pcp in conv.participants
-                                   if int(pcp.user_id) != self.receiver)
+                participant = next(
+                    pcp for pcp in conv.participants if int(pcp.user_id) != self.receiver
+                )
                 self.other_user = int(participant.user_id)
                 await self.update()
             puppet = await p.Puppet.get_by_twid(self.other_user)
@@ -497,7 +588,7 @@ class Portal(DBPortal, BasePortal):
             return True
         return False
 
-    async def _update_participants(self, participants: List[Participant]) -> None:
+    async def _update_participants(self, participants: list[Participant]) -> None:
         if not self.mxid:
             return
 
@@ -522,13 +613,16 @@ class Portal(DBPortal, BasePortal):
         for user_id in await self.main_intent.get_room_members(self.mxid):
             twid = p.Puppet.get_id_from_mxid(user_id)
             if twid and twid not in current_members:
-                await self.main_intent.kick_user(self.mxid, p.Puppet.get_mxid_from_id(twid),
-                                                 reason="User had left this Twitter chat")
+                await self.main_intent.kick_user(
+                    self.mxid,
+                    p.Puppet.get_mxid_from_id(twid),
+                    reason="User had left this Twitter chat",
+                )
 
     # endregion
     # region Backfilling
 
-    async def backfill(self, source: 'u.User', is_initial: bool = False) -> None:
+    async def backfill(self, source: u.User, is_initial: bool = False) -> None:
         if not is_initial:
             raise RuntimeError("Non-initial backfilling is not supported")
         limit = self.config["bridge.backfill.initial_limit"]
@@ -539,7 +633,7 @@ class Portal(DBPortal, BasePortal):
         with self.backfill_lock:
             await self._backfill(source, limit)
 
-    async def _backfill(self, source: 'u.User', limit: int) -> None:
+    async def _backfill(self, source: u.User, limit: int) -> None:
         self.log.debug("Backfilling history through %s", source.mxid)
 
         entries = await self._fetch_backfill_entries(source, limit)
@@ -558,8 +652,9 @@ class Portal(DBPortal, BasePortal):
             await intent.leave_room(self.mxid)
         self.log.info("Backfilled %d messages through %s", len(entries), source.mxid)
 
-    async def _fetch_backfill_entries(self, source: 'u.User', limit: int
-                                      ) -> List[BackfillEntryTypes]:
+    async def _fetch_backfill_entries(
+        self, source: u.User, limit: int
+    ) -> list[MessageEntry | ReactionCreateEntry | ReactionDeleteEntry]:
         conv = source.client.conversation(self.twid)
         entries = []
         self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
@@ -582,10 +677,13 @@ class Portal(DBPortal, BasePortal):
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
 
-        return [entry for entry in entries
-                if isinstance(entry, (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry))]
+        return [
+            entry
+            for entry in entries
+            if isinstance(entry, (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry))
+        ]
 
-    async def _invite_own_puppet_backfill(self, source: 'u.User') -> Set[IntentAPI]:
+    async def _invite_own_puppet_backfill(self, source: u.User) -> set[IntentAPI]:
         backfill_leave = set()
         # TODO we should probably only invite the puppet when needed
         if self.config["bridge.backfill.invite_own_puppet"]:
@@ -596,16 +694,20 @@ class Portal(DBPortal, BasePortal):
             backfill_leave.add(sender.default_mxid_intent)
         return backfill_leave
 
-    async def _handle_backfill_entry(self, source: 'u.User', entry: BackfillEntryTypes) -> None:
+    async def _handle_backfill_entry(
+        self, source: u.User, entry: MessageEntry | ReactionCreateEntry | ReactionDeleteEntry
+    ) -> None:
         sender = await p.Puppet.get_by_twid(int(entry.sender_id))
         if isinstance(entry, MessageEntry):
             await self.handle_twitter_message(source, sender, entry.message_data, entry.request_id)
         if isinstance(entry, ReactionCreateEntry):
-            await self.handle_twitter_reaction_add(sender, int(entry.message_id),
-                                                   entry.reaction_key, entry.time)
+            await self.handle_twitter_reaction_add(
+                sender, int(entry.message_id), entry.reaction_key, entry.time
+            )
         elif isinstance(entry, ReactionDeleteEntry):
-            await self.handle_twitter_reaction_remove(sender, int(entry.message_id),
-                                                      entry.reaction_key)
+            await self.handle_twitter_reaction_remove(
+                sender, int(entry.message_id), entry.reaction_key
+            )
 
     # endregion
     # region Bridge info state event
@@ -615,7 +717,7 @@ class Portal(DBPortal, BasePortal):
         return f"net.maunium.twitter://twitter/{self.twid}"
 
     @property
-    def bridge_info(self) -> Dict[str, Any]:
+    def bridge_info(self) -> dict[str, Any]:
         return {
             "bridgebot": self.az.bot_mxid,
             "creator": self.main_intent.mxid,
@@ -627,7 +729,7 @@ class Portal(DBPortal, BasePortal):
             "channel": {
                 "id": self.twid,
                 "displayname": self.name,
-            }
+            },
         }
 
     async def update_bridge_info(self) -> None:
@@ -636,18 +738,23 @@ class Portal(DBPortal, BasePortal):
             return
         try:
             self.log.debug("Updating bridge info...")
-            await self.main_intent.send_state_event(self.mxid, StateBridge,
-                                                    self.bridge_info, self.bridge_info_state_key)
+            await self.main_intent.send_state_event(
+                self.mxid, StateBridge, self.bridge_info, self.bridge_info_state_key
+            )
             # TODO remove this once https://github.com/matrix-org/matrix-doc/pull/2346 is in spec
-            await self.main_intent.send_state_event(self.mxid, StateHalfShotBridge,
-                                                    self.bridge_info, self.bridge_info_state_key)
+            await self.main_intent.send_state_event(
+                self.mxid,
+                StateHalfShotBridge,
+                self.bridge_info,
+                self.bridge_info_state_key,
+            )
         except Exception:
             self.log.warning("Failed to update bridge info", exc_info=True)
 
     # endregion
     # region Creating Matrix rooms
 
-    async def create_matrix_room(self, source: 'u.User', info: Conversation) -> Optional[RoomID]:
+    async def create_matrix_room(self, source: u.User, info: Conversation) -> RoomID | None:
         if self.mxid:
             try:
                 await self._update_matrix_room(source, info)
@@ -657,7 +764,7 @@ class Portal(DBPortal, BasePortal):
         async with self._create_room_lock:
             return await self._create_matrix_room(source, info)
 
-    def _get_invite_content(self, double_puppet: Optional['p.Puppet']) -> Dict[str, Any]:
+    def _get_invite_content(self, double_puppet: p.Puppet | None) -> dict[str, Any]:
         invite_content = {}
         if double_puppet:
             invite_content["fi.mau.will_auto_accept"] = True
@@ -665,62 +772,56 @@ class Portal(DBPortal, BasePortal):
             invite_content["is_direct"] = True
         return invite_content
 
-    async def _add_user(self, user: 'u.User') -> None:
+    async def _add_user(self, user: u.User) -> None:
         puppet = await p.Puppet.get_by_custom_mxid(user.mxid)
-        await self.main_intent.invite_user(self.mxid, user.mxid, check_cache=True,
-                                           extra_content=self._get_invite_content(puppet))
+        await self.main_intent.invite_user(
+            self.mxid,
+            user.mxid,
+            check_cache=True,
+            extra_content=self._get_invite_content(puppet),
+        )
         if puppet:
             did_join = await puppet.intent.ensure_joined(self.mxid)
             if did_join and self.is_direct:
                 await user.update_direct_chats({self.main_intent.mxid: [self.mxid]})
 
-    async def _update_matrix_room(self, source: 'u.User', info: Conversation) -> None:
+    async def _update_matrix_room(self, source: u.User, info: Conversation) -> None:
         await self._add_user(source)
         await self.update_info(info)
 
-        # TODO
-        # up = DBUserPortal.get(source.fbid, self.fbid, self.fb_receiver)
-        # if not up:
-        #     in_community = await source._community_helper.add_room(source._community_id, self.mxid)
-        #     DBUserPortal(user=source.fbid, portal=self.fbid, portal_receiver=self.fb_receiver,
-        #                  in_community=in_community).insert()
-        # elif not up.in_community:
-        #     in_community = await source._community_helper.add_room(source._community_id, self.mxid)
-        #     up.edit(in_community=in_community)
-
-    async def _create_matrix_room(self, source: 'u.User', info: Conversation) -> Optional[RoomID]:
+    async def _create_matrix_room(self, source: u.User, info: Conversation) -> RoomID | None:
         if self.mxid:
             await self._update_matrix_room(source, info)
             return self.mxid
         await self.update_info(info)
         self.log.debug("Creating Matrix room")
-        name: Optional[str] = None
-        initial_state = [{
-            "type": str(StateBridge),
-            "state_key": self.bridge_info_state_key,
-            "content": self.bridge_info,
-        }, {
-            # TODO remove this once https://github.com/matrix-org/matrix-doc/pull/2346 is in spec
-            "type": str(StateHalfShotBridge),
-            "state_key": self.bridge_info_state_key,
-            "content": self.bridge_info,
-        }]
+        name: str | None = None
+        initial_state = [
+            {
+                "type": str(StateBridge),
+                "state_key": self.bridge_info_state_key,
+                "content": self.bridge_info,
+            },
+            {
+                # TODO remove this once https://github.com/matrix-org/matrix-doc/pull/2346 is in spec
+                "type": str(StateHalfShotBridge),
+                "state_key": self.bridge_info_state_key,
+                "content": self.bridge_info,
+            },
+        ]
         invites = []
         if self.config["bridge.encryption.default"] and self.matrix.e2ee:
             self.encrypted = True
-            initial_state.append({
-                "type": "m.room.encryption",
-                "content": {"algorithm": "m.megolm.v1.aes-sha2"},
-            })
+            initial_state.append(
+                {
+                    "type": "m.room.encryption",
+                    "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+                }
+            )
             if self.is_direct:
                 invites.append(self.az.bot_mxid)
         if self.encrypted or self.private_chat_portal_meta or not self.is_direct:
             name = self.name
-        if self.config["appservice.community_id"]:
-            initial_state.append({
-                "type": "m.room.related_groups",
-                "content": {"groups": [self.config["appservice.community_id"]]},
-            })
 
         # We lock backfill lock here so any messages that come between the room being created
         # and the initial backfill finishing wouldn't be bridged before the backfill messages.
@@ -742,8 +843,7 @@ class Portal(DBPortal, BasePortal):
                 try:
                     await self.az.intent.ensure_joined(self.mxid)
                 except Exception:
-                    self.log.warning("Failed to add bridge bot "
-                                     f"to new private chat {self.mxid}")
+                    self.log.warning(f"Failed to add bridge bot to new private chat {self.mxid}")
 
             await self.update()
             self.log.debug(f"Matrix room created: {self.mxid}")
@@ -758,19 +858,15 @@ class Portal(DBPortal, BasePortal):
                     if self.is_direct:
                         await source.update_direct_chats({self.main_intent.mxid: [self.mxid]})
                 except MatrixError:
-                    self.log.debug("Failed to join custom puppet into newly created portal",
-                                   exc_info=True)
+                    self.log.debug(
+                        "Failed to join custom puppet into newly created portal", exc_info=True
+                    )
 
             if not info.trusted:
                 msg = "This is a message request. Replying here will accept the request."
                 if info.low_quality:
-                    msg += " Note: Twitter has marked this as a \"low quality\" message."
+                    msg += ' Note: Twitter has marked this as a "low quality" message.'
                 await self.main_intent.send_notice(self.mxid, msg)
-
-            # TODO
-            # in_community = await source._community_helper.add_room(source._community_id, self.mxid)
-            # DBUserPortal(user=source.fbid, portal=self.fbid, portal_receiver=self.fb_receiver,
-            #              in_community=in_community).upsert()
 
             try:
                 await self.backfill(source, is_initial=True)
@@ -806,15 +902,15 @@ class Portal(DBPortal, BasePortal):
         await self.update()
 
     @classmethod
-    def all_with_room(cls) -> AsyncGenerator['Portal', None]:
+    def all_with_room(cls) -> AsyncGenerator[Portal, None]:
         return cls._db_to_portals(super().all_with_room())
 
     @classmethod
-    def find_private_chats_with(cls, other_user: int) -> AsyncGenerator['Portal', None]:
+    def find_private_chats_with(cls, other_user: int) -> AsyncGenerator[Portal, None]:
         return cls._db_to_portals(super().find_private_chats_with(other_user))
 
     @classmethod
-    async def _db_to_portals(cls, query: Awaitable[List['Portal']]) -> AsyncGenerator['Portal', None]:
+    async def _db_to_portals(cls, query: Awaitable[list[Portal]]) -> AsyncGenerator[Portal, None]:
         portals = await query
         for index, portal in enumerate(portals):
             try:
@@ -825,7 +921,7 @@ class Portal(DBPortal, BasePortal):
 
     @classmethod
     @async_getter_lock
-    async def get_by_mxid(cls, mxid: RoomID) -> Optional['Portal']:
+    async def get_by_mxid(cls, mxid: RoomID) -> Portal | None:
         try:
             return cls.by_mxid[mxid]
         except KeyError:
@@ -840,8 +936,13 @@ class Portal(DBPortal, BasePortal):
 
     @classmethod
     @async_getter_lock
-    async def get_by_twid(cls, twid: str, *, receiver: int = 0,
-                          conv_type: Optional[ConversationType] = None) -> Optional['Portal']:
+    async def get_by_twid(
+        cls,
+        twid: str,
+        *,
+        receiver: int = 0,
+        conv_type: ConversationType | None = None,
+    ) -> Portal | None:
         if conv_type == ConversationType.GROUP_DM and receiver != 0:
             receiver = 0
         try:

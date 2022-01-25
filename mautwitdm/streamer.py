@@ -1,20 +1,22 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import AsyncGenerator, Set, Dict
-import logging
+from __future__ import annotations
+
+from typing import AsyncGenerator
 import asyncio
-import json
 import io
+import json
+import logging
 
 from aiohttp import ClientSession
 from yarl import URL
 
-from .types import StreamEvent
 from .dispatcher import TwitterDispatcher
 from .errors import check_error
+from .types import StreamEvent
 
 
 class TwitterStreamer(TwitterDispatcher):
@@ -22,16 +24,17 @@ class TwitterStreamer(TwitterDispatcher):
     This class handles receiving live events like typing notifications
     via ``/live_pipeline/events``.
     """
+
     pipeline_url = URL("https://api.twitter.com/live_pipeline/events")
     pipeline_update_url = URL("https://api.twitter.com/1.1/live_pipeline/update_subscriptions")
 
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
     http: ClientSession
-    headers: Dict[str, str]
+    headers: dict[str, str]
     user_agent: str
 
-    topics: Set[str]
+    topics: set[str]
     _stream_task: asyncio.Task
 
     async def _stream(self) -> AsyncGenerator[StreamEvent, None]:
@@ -67,10 +70,10 @@ class TwitterStreamer(TwitterDispatcher):
                 if chunk == empty_chunk:
                     continue
                 elif chunk.startswith(data_prefix):
-                    data = json.loads(chunk[len(data_prefix):-len(chunk_separator)])
+                    data = json.loads(chunk[len(data_prefix) : -len(chunk_separator)])
                     yield StreamEvent.deserialize(data["payload"])
 
-    async def update_topics(self, subscribe: Set[str], unsubscribe: Set[str]) -> None:
+    async def update_topics(self, subscribe: set[str], unsubscribe: set[str]) -> None:
         """
         Update the topics the client is subscribed to.
 

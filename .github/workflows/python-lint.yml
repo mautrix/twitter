@@ -1,0 +1,25 @@
+name: Python lint
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2
+      with:
+        python-version: "3.10"
+    - uses: isort/isort-action@master
+      with:
+        sortPaths: "./mautwitdm ./mautrix_twitter"
+    - uses: psf/black@21.12b0
+      with:
+        src: "./mautwitdm ./mautrix_twitter"
+    - name: pre-commit
+      run: |
+        pip install pre-commit
+        pre-commit run -av trailing-whitespace
+        pre-commit run -av end-of-file-fixer
+        pre-commit run -av check-yaml
+        pre-commit run -av check-added-large-files

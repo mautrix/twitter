@@ -1,5 +1,5 @@
 # mautrix-twitter - A Matrix-Twitter DM puppeting bridge
-# Copyright (C) 2020 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,9 +13,11 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Awaitable, Dict
-import logging
+from __future__ import annotations
+
+from typing import Awaitable
 import json
+import logging
 
 from aiohttp import web
 
@@ -38,7 +40,7 @@ class ProvisioningAPI:
         self.app.router.add_post("/api/logout", self.logout)
 
     @property
-    def _acao_headers(self) -> Dict[str, str]:
+    def _acao_headers(self) -> dict[str, str]:
         return {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Authorization, Content-Type",
@@ -46,7 +48,7 @@ class ProvisioningAPI:
         }
 
     @property
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return {
             **self._acao_headers,
             "Content-Type": "application/json",
@@ -55,23 +57,27 @@ class ProvisioningAPI:
     async def login_options(self, _: web.Request) -> web.Response:
         return web.Response(status=200, headers=self._headers)
 
-    def check_token(self, request: web.Request) -> Awaitable['u.User']:
+    def check_token(self, request: web.Request) -> Awaitable[u.User]:
         try:
             token = request.headers["Authorization"]
-            token = token[len("Bearer "):]
+            token = token[len("Bearer ") :]
         except KeyError:
-            raise web.HTTPBadRequest(body='{"error": "Missing Authorization header"}',
-                                     headers=self._headers)
+            raise web.HTTPBadRequest(
+                body='{"error": "Missing Authorization header"}', headers=self._headers
+            )
         except IndexError:
-            raise web.HTTPBadRequest(body='{"error": "Malformed Authorization header"}',
-                                     headers=self._headers)
+            raise web.HTTPBadRequest(
+                body='{"error": "Malformed Authorization header"}',
+                headers=self._headers,
+            )
         if token != self.shared_secret:
             raise web.HTTPForbidden(body='{"error": "Invalid token"}', headers=self._headers)
         try:
             user_id = request.query["user_id"]
         except KeyError:
-            raise web.HTTPBadRequest(body='{"error": "Missing user_id query param"}',
-                                     headers=self._headers)
+            raise web.HTTPBadRequest(
+                body='{"error": "Missing user_id query param"}', headers=self._headers
+            )
 
         return u.User.get_by_mxid(UserID(user_id))
 
@@ -104,9 +110,10 @@ class ProvisioningAPI:
             await user.connect(auth_token=auth_token, csrf_token=csrf_token)
         except Exception:
             self.log.debug("Failed to log in", exc_info=True)
-            raise web.HTTPUnauthorized(body='{"error": "Twitter authorization failed"}',
-                                       headers=self._headers)
-        return web.Response(body='{}', status=200, headers=self._headers)
+            raise web.HTTPUnauthorized(
+                body='{"error": "Twitter authorization failed"}', headers=self._headers
+            )
+        return web.Response(body="{}", status=200, headers=self._headers)
 
     async def logout(self, request: web.Request) -> web.Response:
         user = await self.check_token(request)

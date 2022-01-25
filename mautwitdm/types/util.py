@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from mautrix.types import deserializer, serializer
 
-StringTimestamp = NewType('StringTimestamp', datetime)
+StringTimestamp = NewType("StringTimestamp", datetime)
 
 
 @deserializer(StringTimestamp)
@@ -21,13 +21,14 @@ def serialize_str_timestamp(val: StringTimestamp) -> str:
     return str(val.timestamp() * 1000)
 
 
-StringDateTime = NewType('StringDateTime', datetime)
+StringDateTime = NewType("StringDateTime", datetime)
 
 
 @deserializer(StringDateTime)
 def deserialize_str_datetime(val: str) -> StringDateTime:
-    return StringDateTime(datetime.strptime(val, "%a %b %d %H:%M:%S +0000 %Y")
-                          .replace(tzinfo=timezone.utc))
+    return StringDateTime(
+        datetime.strptime(val, "%a %b %d %H:%M:%S +0000 %Y").replace(tzinfo=timezone.utc)
+    )
 
 
 @serializer(StringDateTime)

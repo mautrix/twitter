@@ -13,8 +13,12 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from mautrix.util.logging.color import (ColorFormatter as BaseColorFormatter, PREFIX, MXID_COLOR,
-                                        RESET)
+from mautrix.util.logging.color import (
+    MXID_COLOR,
+    PREFIX,
+    RESET,
+    ColorFormatter as BaseColorFormatter,
+)
 
 MAUTWITLIB_COLOR = PREFIX + "35;1m"  # magenta
 
@@ -22,6 +26,13 @@ MAUTWITLIB_COLOR = PREFIX + "35;1m"  # magenta
 class ColorFormatter(BaseColorFormatter):
     def _color_name(self, module: str) -> str:
         if module.startswith("mautwitlib"):
-            return (MAUTWITLIB_COLOR + "mautwitlib" + RESET
-                    + "." + MXID_COLOR + module[len("mautwitlib") + 1:] + RESET)
+            return (
+                MAUTWITLIB_COLOR
+                + "mautwitlib"
+                + RESET
+                + "."
+                + MXID_COLOR
+                + module[len("mautwitlib") + 1 :]
+                + RESET
+            )
         return super()._color_name(module)
