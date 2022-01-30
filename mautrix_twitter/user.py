@@ -164,7 +164,7 @@ class User(DBUser, BaseUser):
         client = TwitterAPI(
             log=logging.getLogger("mau.twitter.api").getChild(self.mxid),
             loop=self.loop,
-            node_id=hash(self.mxid) % (2 ** 48),
+            node_id=hash(self.mxid) % (2**48),
         )
         client.poll_cursor = self.poll_cursor
         client.set_tokens(auth_token or self.auth_token, csrf_token or self.csrf_token)

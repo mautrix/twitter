@@ -44,7 +44,7 @@ class TwitterUploader:
                 raise RuntimeError(f"Unknown state {state}")
 
     async def _upload_data(self, media_id: str, data: bytes) -> MediaUploadResponse:
-        max_size = 2 ** 17
+        max_size = 2**17
         base_upload_req = self.upload_url.with_query(
             {
                 "command": "APPEND",
