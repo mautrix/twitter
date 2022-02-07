@@ -355,43 +355,52 @@ class Portal(DBPortal, BasePortal):
     async def handle_twitter_message(
         self, source: u.User, sender: p.Puppet, message: MessageData, request_id: str
     ) -> None:
-        msg_id = int(message.id)
         if request_id in self._reqid_dedup:
             self.log.debug(
                 f"Ignoring message {message.id} by {message.sender_id}"
                 " as it was sent by us (request_id in dedup queue)"
             )
-        elif msg_id in self._msgid_dedup:
+            return
+        msg_id = int(message.id)
+        if msg_id in self._msgid_dedup:
             self.log.debug(
                 f"Ignoring message {message.id} by {message.sender_id}"
                 " as it was already handled (message.id in dedup queue)"
             )
-        elif await DBMessage.get_by_twid(msg_id, self.receiver) is not None:
+            return
+        self._msgid_dedup.appendleft(msg_id)
+
+        if await DBMessage.get_by_twid(msg_id, self.receiver) is not None:
             self.log.debug(
                 f"Ignoring message {message.id} by {message.sender_id}"
                 " as it was already handled (message.id found in database)"
             )
-        else:
-            self._msgid_dedup.appendleft(msg_id)
-            intent = sender.intent_for(self)
-            event_id = None
-            if message.attachment:
-                content = await self._handle_twitter_attachment(source, sender, message)
-                if content:
-                    event_id = await self._send_message(intent, content, timestamp=message.time)
-            if message.text and not message.text.isspace():
-                content = await twitter_to_matrix(message)
+            return
+
+        await self._handle_deduplicated_twitter_message(source, sender, message, msg_id)
+
+    async def _handle_deduplicated_twitter_message(
+        self, source: u.User, sender: p.Puppet, message: MessageData, msg_id: int
+    ) -> None:
+        intent = sender.intent_for(self)
+        event_id = None
+        if message.attachment:
+            content = await self._handle_twitter_attachment(source, sender, message)
+            if content:
                 event_id = await self._send_message(intent, content, timestamp=message.time)
-            if event_id:
-                msg = DBMessage(
-                    mxid=event_id,
-                    mx_room=self.mxid,
-                    twid=msg_id,
-                    receiver=self.receiver,
-                )
-                await msg.insert()
-                await self._send_delivery_receipt(event_id)
-                self.log.debug(f"Handled Twitter message {msg_id} -> {event_id}")
+        if message.text and not message.text.isspace():
+            content = await twitter_to_matrix(message)
+            event_id = await self._send_message(intent, content, timestamp=message.time)
+        if event_id:
+            msg = DBMessage(
+                mxid=event_id,
+                mx_room=self.mxid,
+                twid=msg_id,
+                receiver=self.receiver,
+            )
+            await msg.insert()
+            await self._send_delivery_receipt(event_id)
+            self.log.debug(f"Handled Twitter message {msg_id} -> {event_id}")
 
     @staticmethod
     def _is_better_mime(best: VideoVariant, current: VideoVariant) -> bool:
