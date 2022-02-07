@@ -76,6 +76,7 @@ class User(DBUser, BaseUser):
     _notice_send_lock: asyncio.Lock
     _is_logged_in: bool | None
     _connected: bool
+    _intentional_stop: bool
 
     def __init__(
         self,
@@ -103,6 +104,7 @@ class User(DBUser, BaseUser):
         self.username = None
         self._is_logged_in = None
         self._connected = False
+        self._intentional_stop = False
 
     @classmethod
     def init_cls(cls, bridge: "TwitterBridge") -> AsyncIterable[Awaitable[None]]:
@@ -193,6 +195,7 @@ class User(DBUser, BaseUser):
 
         await self.update()
 
+        self._intentional_stop = False
         if self.poll_cursor:
             self.log.debug("Poll cursor set, starting polling right away (not initial syncing)")
             self.client.start_polling()
@@ -223,10 +226,11 @@ class User(DBUser, BaseUser):
     async def on_disconnect(self, evt: PollingStopped | PollingErrored) -> None:
         self._track_metric(METRIC_CONNECTED, False)
         self._connected = False
-        if isinstance(evt, PollingStopped):
+        if isinstance(evt, PollingStopped) and not self._intentional_stop:
             await self.push_bridge_state(
                 BridgeStateEvent.UNKNOWN_ERROR, error="twitter-not-connected"
             )
+        self._intentional_stop = False
 
     # TODO this stuff could probably be moved to mautrix-python
     async def get_notice_room(self) -> RoomID:
@@ -356,12 +360,14 @@ class User(DBUser, BaseUser):
 
     async def stop(self) -> None:
         if self.client:
+            self._intentional_stop = True
             self.client.stop_polling()
         self._track_metric(METRIC_CONNECTED, False)
         await self.update()
 
     async def logout(self) -> None:
         if self.client:
+            self._intentional_stop = True
             self.client.stop_polling()
         self._track_metric(METRIC_CONNECTED, False)
         self._track_metric(METRIC_LOGGED_IN, False)
