@@ -55,6 +55,14 @@ class Message:
         return cls(**row)
 
     @classmethod
+    async def get_last(cls, mx_room: RoomID) -> Message | None:
+        q = "SELECT mxid, mx_room, twid, receiver FROM message WHERE mx_room=$1 ORDER BY twid DESC LIMIT 1"
+        row = await cls.db.fetchrow(q, mx_room)
+        if not row:
+            return None
+        return cls(**row)
+
+    @classmethod
     async def get_by_twid(cls, twid: int, receiver: int = 0) -> Message | None:
         q = "SELECT mxid, mx_room, twid, receiver FROM message WHERE twid=$1 AND receiver=$2"
         row = await cls.db.fetchrow(q, twid, receiver)

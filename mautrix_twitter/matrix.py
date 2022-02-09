@@ -115,6 +115,9 @@ class MatrixHandler(BaseMatrixHandler):
     ) -> None:
         message = await DBMessage.get_by_mxid(event_id, portal.mxid)
         if not message:
+            # Can't find this message, perhaps it's a reaction? Mark all as read
+            message = await DBMessage.get_last(portal.mxid)
+        if not message:
             return
         user.log.debug(f"Marking messages in {portal.twid} read up to {message.twid}")
         await user.client.conversation(portal.twid).mark_read(message.twid)
