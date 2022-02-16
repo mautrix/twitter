@@ -514,6 +514,7 @@ class Portal(DBPortal, BasePortal):
         reaction_id: int,
     ) -> None:
         async with self._reaction_lock:
+            # TODO update the database with the reaction_id of outgoing reactions
             dedup_id = (msg_id, sender.twid, reaction)
             if dedup_id in self._reaction_dedup:
                 return
