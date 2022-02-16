@@ -70,7 +70,7 @@ class Reaction:
             self.tw_msgid,
             self.tw_receiver,
             self.tw_sender,
-            self.tw_reaction_id,
+            tw_reaction_id,
         )
 
     async def delete(self) -> None:
