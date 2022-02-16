@@ -55,10 +55,12 @@ class Reaction:
             self.tw_reaction_id,
         )
 
-    async def edit(self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey) -> None:
+    async def edit(
+        self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey, tw_reaction_id: int | None
+    ) -> None:
         q = (
             "UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3 "
-            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6"
+            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6 AND tw_reaction_id=$7"
         )
         await self.db.execute(
             q,
@@ -68,6 +70,7 @@ class Reaction:
             self.tw_msgid,
             self.tw_receiver,
             self.tw_sender,
+            self.tw_reaction_id,
         )
 
     async def delete(self) -> None:

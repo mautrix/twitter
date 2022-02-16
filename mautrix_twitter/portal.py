@@ -169,7 +169,9 @@ class Portal(DBPortal, BasePortal):
                 f" (message: {message.mxid})"
             )
             await intent.redact(existing.mx_room, existing.mxid)
-            await existing.edit(reaction=reaction, mxid=mxid, mx_room=message.mx_room)
+            await existing.edit(
+                reaction=reaction, mxid=mxid, mx_room=message.mx_room, tw_reaction_id=reaction_id
+            )
         else:
             self.log.debug(f"_upsert_reaction inserting {mxid} (message: {message.mxid})")
             await DBReaction(
