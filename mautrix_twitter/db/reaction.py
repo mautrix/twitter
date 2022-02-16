@@ -37,11 +37,12 @@ class Reaction:
     tw_receiver: int
     tw_sender: int
     reaction: ReactionKey
+    tw_reaction_id: int
 
     async def insert(self) -> None:
         q = (
-            "INSERT INTO reaction (mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction) "
-            "VALUES ($1, $2, $3, $4, $5, $6)"
+            "INSERT INTO reaction (mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction, tw_reaction_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7)"
         )
         await self.db.execute(
             q,
@@ -51,6 +52,7 @@ class Reaction:
             self.tw_receiver,
             self.tw_sender,
             self.reaction.value,
+            self.tw_reaction_id,
         )
 
     async def edit(self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey) -> None:
@@ -83,10 +85,18 @@ class Reaction:
     @classmethod
     async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Reaction | None:
         q = (
-            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
+            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction, tw_reaction_id "
             "FROM reaction WHERE mxid=$1 AND mx_room=$2"
         )
         return cls._from_row(await cls.db.fetchrow(q, mxid, mx_room))
+
+    @classmethod
+    async def get_last(cls, mx_room: RoomID) -> Reaction | None:
+        q = (
+            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction, tw_reaction_id "
+            "FROM reaction WHERE mx_room=$1 and tw_reaction_id IS NOT NULL ORDER BY tw_reaction_id DESC LIMIT 1"
+        )
+        return cls._from_row(await cls.db.fetchrow(q, mx_room))
 
     @classmethod
     async def get_by_twid(
@@ -96,7 +106,7 @@ class Reaction:
         tw_sender: int,
     ) -> Reaction | None:
         q = (
-            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction "
+            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction, tw_reaction_id "
             "FROM reaction WHERE tw_msgid=$1 AND tw_sender=$2 AND tw_receiver=$3"
         )
         return cls._from_row(await cls.db.fetchrow(q, tw_msgid, tw_sender, tw_receiver))

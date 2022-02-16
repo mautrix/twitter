@@ -107,3 +107,8 @@ async def upgrade_v1(conn: Connection) -> None:
 @upgrade_table.register(description="Add double-puppeting base_url to puppet table")
 async def upgrade_v2(conn: Connection) -> None:
     await conn.execute("ALTER TABLE puppet ADD COLUMN base_url TEXT")
+
+
+@upgrade_table.register(description="Store Twitter reaction IDs for marking things read")
+async def upgrade_v3(conn: Connection) -> None:
+    await conn.execute("ALTER TABLE reaction ADD COLUMN tw_reaction_id BIGINT")

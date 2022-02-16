@@ -35,7 +35,7 @@ from mautrix.types import (
 )
 
 from . import portal as po, user as u
-from .db import Message as DBMessage
+from .db import Message as DBMessage, Reaction as DBReaction
 
 if TYPE_CHECKING:
     from .__main__ import TwitterBridge
@@ -114,13 +114,23 @@ class MatrixHandler(BaseMatrixHandler):
         self, user: u.User, portal: po.Portal, event_id: EventID, data: SingleReceiptEventContent
     ) -> None:
         message = await DBMessage.get_by_mxid(event_id, portal.mxid)
-        if not message:
-            # Can't find this message, perhaps it's a reaction? Mark all as read
+        read_twid = 0
+        if message:
+            read_twid = message.twid
+        else:
+            # Can't find this message, perhaps it's a reaction?
+            # Just grab the last thing we can find
+            reaction = await DBReaction.get_last(portal.mxid)
             message = await DBMessage.get_last(portal.mxid)
-        if not message:
+            if message:
+                read_twid = message.twid
+            if reaction:
+                read_twid = max(read_twid, reaction.tw_reaction_id)
+        if read_twid == 0:
+            user.log.debug(f"Unable to find message mxid:{event_id}, not marking as read")
             return
-        user.log.debug(f"Marking messages in {portal.twid} read up to {message.twid}")
-        await user.client.conversation(portal.twid).mark_read(message.twid)
+        user.log.debug(f"Marking messages in {portal.twid} read up to {read_twid}")
+        await user.client.conversation(portal.twid).mark_read(read_twid)
 
     @staticmethod
     async def handle_typing(room_id: RoomID, typing: list[UserID]) -> None:
