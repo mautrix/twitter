@@ -8,8 +8,12 @@ from .entry import (
 )
 from .message import MessageData, MessageEntry
 from .message_attachment import (
+    RGB,
     CardBindingValue,
     ExtendedMessageEntities,
+    ImageBindingValue,
+    ImageColor,
+    ImageColorBindingValue,
     MessageAttachment,
     MessageAttachmentCard,
     MessageAttachmentMedia,

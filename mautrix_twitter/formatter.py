@@ -34,7 +34,7 @@ async def twitter_to_matrix(message: MessageData) -> TextMessageEventContent:
             content.body = content.body[:start] + entity.expanded_url + content.body[end:]
             content.formatted_body = (
                 f"{content.formatted_body[:start]}"
-                f'<a href="{entity.expanded_url}">{entity.display_url}</a>'
+                f'<a href="{entity.expanded_url}">{entity.expanded_url}</a>'
                 f"{content.formatted_body[end:]}"
             )
         elif isinstance(entity, MessageEntityUserMention):

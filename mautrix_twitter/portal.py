@@ -45,6 +45,7 @@ from mautrix.util.simple_lock import SimpleLock
 from mautwitdm.types import (
     Conversation,
     ConversationType,
+    ImageBindingValue,
     MessageData,
     MessageEntry,
     Participant,
@@ -388,12 +389,15 @@ class Portal(DBPortal, BasePortal):
     ) -> None:
         intent = sender.intent_for(self)
         event_id = None
-        if message.attachment:
-            content = await self._handle_twitter_attachment(source, sender, message)
+        if message.attachment and message.attachment.media:
+            content = await self._handle_twitter_media(source, intent, message)
             if content:
                 event_id = await self._send_message(intent, content, timestamp=message.time)
         if message.text and not message.text.isspace():
             content = await twitter_to_matrix(message)
+            content["com.beeper.linkpreviews"] = await self._twitter_preview_to_beeper(
+                source, intent, message
+            )
             event_id = await self._send_message(intent, content, timestamp=message.time)
         if event_id:
             msg = DBMessage(
@@ -419,68 +423,157 @@ class Portal(DBPortal, BasePortal):
             current_quality = -1
         return current_quality > best_quality
 
-    async def _handle_twitter_attachment(
-        self, source: u.User, sender: p.Puppet, message: MessageData
-    ) -> MediaMessageEventContent | None:
-        content = None
-        intent = sender.intent_for(self)
-        media = message.attachment.media
-        if media:
-            reuploaded_info = await self._reupload_twitter_media(
-                source, media.media_url_https, intent
-            )
-            thumbnail_info = None
-            if media.video_info:
-                thumbnail_info = reuploaded_info
-                best_variant = None
-                for variant in media.video_info.variants:
-                    if (
-                        not best_variant
-                        or (variant.bitrate or 0) > (best_variant.bitrate or 0)
-                        or self._is_better_mime(best_variant, variant)
-                    ):
-                        best_variant = variant
-                reuploaded_info = await self._reupload_twitter_media(
-                    source, best_variant.url, intent
-                )
-            content = MediaMessageEventContent(
-                body=reuploaded_info.file_name,
-                url=reuploaded_info.mxc,
-                file=reuploaded_info.decryption_info,
-                external_url=media.media_url_https,
-            )
-            if message.attachment.video:
-                content.msgtype = MessageType.VIDEO
-                content.info = VideoInfo(
-                    mimetype=reuploaded_info.mime_type,
-                    size=reuploaded_info.size,
-                    width=media.original_info.width,
-                    height=media.original_info.height,
-                    duration=media.video_info.duration_millis // 1000,
-                )
-            elif message.attachment.photo or message.attachment.animated_gif:
-                content.msgtype = MessageType.IMAGE
-                content.info = ImageInfo(
-                    mimetype=reuploaded_info.mime_type,
-                    size=reuploaded_info.size,
-                    width=media.original_info.width,
-                    height=media.original_info.height,
-                )
-            if thumbnail_info:
-                content.info.thumbnail_url = thumbnail_info.mxc
-                content.info.thumbnail_file = thumbnail_info.decryption_info
-                content.info.thumbnail_info = ThumbnailInfo(
-                    mimetype=thumbnail_info.mime_type,
-                    size=thumbnail_info.size,
-                    width=media.original_info.width,
-                    height=media.original_info.height,
-                )
-            # Remove the attachment link from message.text
-            start, end = media.indices
-            message.text = message.text[:start] + message.text[end:]
+    async def _twitter_preview_to_beeper(
+        self, source: u.User, intent: IntentAPI, message: MessageData
+    ) -> list[dict[str, Any]]:
+        if not message.attachment or not message.attachment.url_preview:
+            return []
+        if message.attachment.card:
+            preview = await self._twitter_card_to_beeper(source, intent, message)
         elif message.attachment.tweet:
-            # TODO special handling for tweets?
-            pass
+            preview = await self._twitter_tweet_to_beeper(source, intent, message)
+        else:
+            return []
+        return [{k: v for k, v in preview.items() if v is not None}]
+
+    async def _twitter_card_to_beeper(
+        self, source: u.User, intent: IntentAPI, message: MessageData
+    ) -> dict[str, Any]:
+        card = message.attachment.card
+        card_url = card.string("card_url", "")
+        if card_url.startswith("https://t.co") and message.entities:
+            try:
+                # Try to find the actual expanded URL from the message entities
+                card_url = next(e for e in message.entities.urls if e.url == card_url).expanded_url
+            except StopIteration:
+                pass
+        preview = {
+            "matched_url": card_url,
+            "og:title": card.string("title"),
+            "og:description": card.string("description"),
+        }
+        image = (
+            card.image("photo_image_full_size_original")
+            or card.image("summary_photo_image_original")
+            or card.image("thumbnail_image_original")
+        )
+        if image:
+            preview.update(
+                {
+                    **await self._twitter_image_to_beeper(source, intent, image.url),
+                    "og:image:width": image.width,
+                    "og:image:height": image.height,
+                }
+            )
+        return preview
+
+    async def _twitter_tweet_to_beeper(
+        self, source: u.User, intent: IntentAPI, message: MessageData
+    ) -> dict[str, Any]:
+        tweet = message.attachment.tweet.status
+        preview = {
+            "matched_url": message.attachment.tweet.expanded_url,
+            "og:url": message.attachment.tweet.expanded_url,
+            "og:title": f"{tweet.user.name} on Twitter",
+            "og:description": tweet.full_text,
+        }
+        if tweet.extended_entities and tweet.extended_entities.media:
+            media = tweet.extended_entities.media[0]
+            if "medium" in media.sizes:
+                size_name = "medium"
+            else:
+                size_name = next(media.sizes.keys().__iter__())
+            url = str(URL(media.media_url_https).update_query({"name": size_name}))
+            preview.update(
+                {
+                    **await self._twitter_image_to_beeper(source, intent, url),
+                    "og:image:width": media.sizes[size_name].w,
+                    "og:image:height": media.sizes[size_name].h,
+                }
+            )
+        elif tweet.card:
+            image = (
+                tweet.card.image("photo_image_full_size_original")
+                or tweet.card.image("summary_photo_image_original")
+                or tweet.card.image("thumbnail_image_original")
+            )
+            if image:
+                preview.update(
+                    {
+                        **await self._twitter_image_to_beeper(source, intent, image.url),
+                        "og:image:width": image.width,
+                        "og:image:height": image.height,
+                    }
+                )
+
+        return preview
+
+    async def _twitter_image_to_beeper(
+        self, source: u.User, intent: IntentAPI, url: str
+    ) -> dict[str, Any]:
+        info = await self._reupload_twitter_media(source, url, intent)
+        output = {
+            "og:image:type": info.mime_type,
+            "matrix:image:size": info.size,
+        }
+        if info.decryption_info:
+            output["beeper:image:encryption"] = info.decryption_info.serialize()
+        else:
+            output["og:image"] = info.mxc
+        return output
+
+    async def _handle_twitter_media(
+        self, source: u.User, intent: IntentAPI, message: MessageData
+    ) -> MediaMessageEventContent | None:
+        media = message.attachment.media
+        reuploaded_info = await self._reupload_twitter_media(source, media.media_url_https, intent)
+        thumbnail_info = None
+        if media.video_info:
+            thumbnail_info = reuploaded_info
+            best_variant = None
+            for variant in media.video_info.variants:
+                if (
+                    not best_variant
+                    or (variant.bitrate or 0) > (best_variant.bitrate or 0)
+                    or self._is_better_mime(best_variant, variant)
+                ):
+                    best_variant = variant
+            reuploaded_info = await self._reupload_twitter_media(source, best_variant.url, intent)
+        content = MediaMessageEventContent(
+            body=reuploaded_info.file_name,
+            url=reuploaded_info.mxc,
+            file=reuploaded_info.decryption_info,
+            external_url=media.media_url_https,
+        )
+        if message.attachment.video:
+            content.msgtype = MessageType.VIDEO
+            content.info = VideoInfo(
+                mimetype=reuploaded_info.mime_type,
+                size=reuploaded_info.size,
+                width=media.original_info.width,
+                height=media.original_info.height,
+                duration=media.video_info.duration_millis // 1000,
+            )
+        elif message.attachment.photo or message.attachment.animated_gif:
+            content.msgtype = MessageType.IMAGE
+            content.info = ImageInfo(
+                mimetype=reuploaded_info.mime_type,
+                size=reuploaded_info.size,
+                width=media.original_info.width,
+                height=media.original_info.height,
+            )
+        if thumbnail_info:
+            content.info.thumbnail_url = thumbnail_info.mxc
+            content.info.thumbnail_file = thumbnail_info.decryption_info
+            content.info.thumbnail_info = ThumbnailInfo(
+                mimetype=thumbnail_info.mime_type,
+                size=thumbnail_info.size,
+                width=media.original_info.width,
+                height=media.original_info.height,
+            )
+        # Remove the attachment link from message.text
+        start, end = media.indices
+        message.text = message.text[:start] + message.text[end:]
         return content
 
     async def _reupload_twitter_media(
