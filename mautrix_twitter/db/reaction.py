@@ -59,8 +59,8 @@ class Reaction:
         self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey, tw_reaction_id: int | None
     ) -> None:
         q = (
-            "UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3 "
-            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6 AND tw_reaction_id=$7"
+            "UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3, tw_reaction_id=$7 "
+            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6"
         )
         await self.db.execute(
             q,
