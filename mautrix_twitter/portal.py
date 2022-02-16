@@ -155,12 +155,13 @@ class Portal(DBPortal, BasePortal):
 
     async def _upsert_reaction(
         self,
-        existing: DBReaction,
+        existing: DBReaction | None,
         intent: IntentAPI,
         mxid: EventID,
         message: DBMessage,
         sender: u.User | p.Puppet,
         reaction: ReactionKey,
+        reaction_id: int | None = None,
     ) -> None:
         if existing:
             self.log.debug(
@@ -168,7 +169,9 @@ class Portal(DBPortal, BasePortal):
                 f" (message: {message.mxid})"
             )
             await intent.redact(existing.mx_room, existing.mxid)
-            await existing.edit(reaction=reaction, mxid=mxid, mx_room=message.mx_room)
+            await existing.edit(
+                reaction=reaction, mxid=mxid, mx_room=message.mx_room, tw_reaction_id=reaction_id
+            )
         else:
             self.log.debug(f"_upsert_reaction inserting {mxid} (message: {message.mxid})")
             await DBReaction(
@@ -178,6 +181,7 @@ class Portal(DBPortal, BasePortal):
                 tw_receiver=self.receiver,
                 tw_sender=sender.twid,
                 reaction=reaction,
+                tw_reaction_id=reaction_id,
             ).insert()
 
     # endregion
@@ -504,9 +508,15 @@ class Portal(DBPortal, BasePortal):
         return ReuploadedMediaInfo(mxc, decryption_info, mime_type, file_name, len(data))
 
     async def handle_twitter_reaction_add(
-        self, sender: p.Puppet, msg_id: int, reaction: ReactionKey, time: datetime
+        self,
+        sender: p.Puppet,
+        msg_id: int,
+        reaction: ReactionKey,
+        time: datetime,
+        reaction_id: int,
     ) -> None:
         async with self._reaction_lock:
+            # TODO update the database with the reaction_id of outgoing reactions
             dedup_id = (msg_id, sender.twid, reaction)
             if dedup_id in self._reaction_dedup:
                 return
@@ -524,7 +534,7 @@ class Portal(DBPortal, BasePortal):
         intent = sender.intent_for(self)
         mxid = await intent.react(message.mx_room, message.mxid, reaction.emoji, timestamp=time)
         self.log.debug(f"{sender.twid} reacted to {message.mxid} -> {mxid}")
-        await self._upsert_reaction(existing, intent, mxid, message, sender, reaction)
+        await self._upsert_reaction(existing, intent, mxid, message, sender, reaction, reaction_id)
 
     async def handle_twitter_reaction_remove(
         self, sender: p.Puppet, msg_id: int, key: ReactionKey
