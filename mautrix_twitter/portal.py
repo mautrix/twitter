@@ -491,20 +491,6 @@ class Portal(DBPortal, BasePortal):
                     "og:image:height": media.sizes[size_name].h,
                 }
             )
-        elif tweet.card:
-            image = (
-                tweet.card.image("photo_image_full_size_original")
-                or tweet.card.image("summary_photo_image_original")
-                or tweet.card.image("thumbnail_image_original")
-            )
-            if image:
-                preview.update(
-                    {
-                        **await self._twitter_image_to_beeper(source, intent, image.url),
-                        "og:image:width": image.width,
-                        "og:image:height": image.height,
-                    }
-                )
 
         return preview
 
