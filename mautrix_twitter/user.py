@@ -340,7 +340,9 @@ class User(DBUser, BaseUser):
             self.poll_cursor = resp.cursor
         self.client.poll_cursor = self.poll_cursor
         limit = self.config["bridge.initial_conversation_sync"]
-        conversations = sorted(resp.conversations.values(), key=lambda conv: conv.sort_timestamp)
+        conversations = sorted(
+            resp.conversations.values(), key=lambda conv: conv.sort_timestamp, reverse=True
+        )
         if limit < 0:
             limit = len(conversations)
         for user in resp.users.values():
