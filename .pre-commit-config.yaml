@@ -15,9 +15,9 @@ repos:
         name: black
         entry: black --check
         language: system
-        files: ^(mautwitdm|mautrix_twitter)/.*$
+        files: ^(mautwitdm|mautrix_twitter)/.*\.py$
   - repo: https://github.com/PyCQA/isort
     rev: 5.10.1
     hooks:
       - id: isort
-        files: ^(mautwitdm|mautrix_twitter)/.*$
+        files: ^(mautwitdm|mautrix_twitter)/.*\.py$
