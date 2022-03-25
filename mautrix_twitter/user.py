@@ -335,13 +335,9 @@ class User(DBUser, BaseUser):
         }
 
     async def get_portal_with(self, puppet: pu.Puppet, create: bool = True) -> po.Portal | None:
-        if not self.twid:
-            return None
-        return await po.Portal.get_by_twid(
-            puppet.twid,
-            receiver=self.twid,
-            conv_type=ConversationType.ONE_TO_ONE if create else None,
-        )
+        # We should probably make this work eventually, but for now, creating chats will just not
+        # work.
+        return None
 
     async def sync(self) -> None:
         await self.push_bridge_state(BridgeStateEvent.BACKFILLING)
