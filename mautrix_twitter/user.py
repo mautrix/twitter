@@ -34,6 +34,7 @@ from mautwitdm.types import (
     ReactionDeleteEntry,
     User as TwitterUser,
 )
+from mautwitdm.types.conversation import ConversationType
 
 from . import portal as po, puppet as pu
 from .config import Config
@@ -332,6 +333,15 @@ class User(DBUser, BaseUser):
             for portal in await DBPortal.find_private_chats_of(self.twid)
             if portal.mxid
         }
+
+    async def get_portal_with(self, puppet: pu.Puppet, create: bool = True) -> po.Portal | None:
+        if not self.twid:
+            return None
+        return await po.Portal.get_by_twid(
+            puppet.twid,
+            receiver=self.twid,
+            conv_type=ConversationType.ONE_TO_ONE if create else None,
+        )
 
     async def sync(self) -> None:
         await self.push_bridge_state(BridgeStateEvent.BACKFILLING)

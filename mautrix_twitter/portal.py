@@ -1061,4 +1061,9 @@ class Portal(DBPortal, BasePortal):
 
         return None
 
+    async def get_dm_puppet(self) -> p.Puppet | None:
+        if not self.is_direct:
+            return None
+        return await p.Puppet.get_by_twid(self.twid)
+
     # endregion
