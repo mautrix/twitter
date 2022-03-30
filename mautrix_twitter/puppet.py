@@ -144,7 +144,10 @@ class Puppet(DBPuppet, BasePuppet):
                 content_type = resp.headers["Content-Type"]
                 resp_data = await resp.read()
             mxc = await self.default_mxid_intent.upload_media(
-                data=resp_data, filename=file_name, mime_type=content_type
+                data=resp_data,
+                filename=file_name,
+                mime_type=content_type,
+                async_upload=self.config["homeserver.async_media"],
             )
             self.photo_mxc = mxc
             await self.default_mxid_intent.set_avatar_url(mxc)
