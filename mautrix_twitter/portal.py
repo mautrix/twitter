@@ -755,21 +755,25 @@ class Portal(DBPortal, BasePortal):
 
     async def _fetch_backfill_entries(
         self, source: u.User, limit: int
-    ) -> list[MessageEntry | ReactionCreateEntry | ReactionDeleteEntry]:
+    ) -> list[MessageEntry | ReactionCreateEntry]:
         conv = source.client.conversation(self.twid)
-        entries = []
+        entries: list[MessageEntry | ReactionCreateEntry] = []
+        message_count = 0
         self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
         try:
             max_id = None
             while True:
-                resp = await conv.fetch(max_id=max_id, include_info=False)
+                resp = await conv.fetch(max_id=max_id)
                 max_id = resp.min_entry_id
                 for entry in resp.entries:
-                    if entry:
-                        entries += entry.all_types
-                    if len(entries) >= limit:
+                    if entry and entry.message:
+                        entries.append(entry.message)
+                        message_count += 1
+                        if entry.message.message_reactions:
+                            entries += entry.message.message_reactions
+                    if message_count >= limit:
                         break
-                if len(entries) >= limit:
+                if message_count >= limit:
                     self.log.debug("Got more messages than limit")
                     break
                 elif resp.status == TimelineStatus.AT_END:
@@ -777,12 +781,10 @@ class Portal(DBPortal, BasePortal):
                     break
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
-
-        return [
-            entry
-            for entry in entries
-            if isinstance(entry, (MessageEntry, ReactionCreateEntry, ReactionDeleteEntry))
-        ]
+        if message_count != len(entries):
+            # Needs sorting to get reactions into correct place
+            entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
+        return entries
 
     async def _invite_own_puppet_backfill(self, source: u.User) -> set[IntentAPI]:
         backfill_leave = set()
@@ -796,18 +798,14 @@ class Portal(DBPortal, BasePortal):
         return backfill_leave
 
     async def _handle_backfill_entry(
-        self, source: u.User, entry: MessageEntry | ReactionCreateEntry | ReactionDeleteEntry
+        self, source: u.User, entry: MessageEntry | ReactionCreateEntry
     ) -> None:
         sender = await p.Puppet.get_by_twid(int(entry.sender_id))
         if isinstance(entry, MessageEntry):
             await self.handle_twitter_message(source, sender, entry.message_data, entry.request_id)
         if isinstance(entry, ReactionCreateEntry):
             await self.handle_twitter_reaction_add(
-                sender, int(entry.message_id), entry.reaction_key, entry.time
-            )
-        elif isinstance(entry, ReactionDeleteEntry):
-            await self.handle_twitter_reaction_remove(
-                sender, int(entry.message_id), entry.reaction_key
+                sender, int(entry.message_id), entry.reaction_key, entry.time, int(entry.id)
             )
 
     # endregion

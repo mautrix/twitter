@@ -115,15 +115,12 @@ class Conversation:
         async with self.api.http.post(url, headers=self.api.headers) as resp:
             await check_error(resp)
 
-    async def fetch(
-        self, max_id: str | None = None, include_info: bool = True
-    ) -> FetchConversationResponse:
+    async def fetch(self, max_id: str | None = None) -> FetchConversationResponse:
         """
         Fetch the conversation metadata and message history.
 
         Args:
             max_id: The maximum message ID to fetch.
-            include_info: Whether or not to include conversation metadata in the response.
 
         Returns:
             The requested metadata and message history.
@@ -131,9 +128,8 @@ class Conversation:
         query = {
             **self.api.full_state_params,
             "context": "FETCH_DM_CONVERSATION",
+            "include_conversation_info": "true",
         }
-        if include_info:
-            query["include_conversation_info"] = "true"
         req = (self.api.dm_url / "conversation" / f"{self.id}.json").with_query(query)
         if max_id:
             req = req.update_query({"max_id": max_id})

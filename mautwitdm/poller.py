@@ -71,7 +71,18 @@ class TwitterPoller(TwitterDispatcher):
             "include_inbox_timelines": "true",
             "include_ext_media_color": "true",
             "supports_reactions": "true",
-            "ext": "mediaColor,altText,mediaStats,highlightedLabel",
+            "ext": ",".join(
+                [
+                    "mediaColor",
+                    "altText",
+                    "mediaStats",
+                    "highlightedLabel",
+                    "hasNftAvatar",
+                    "voiceInfo",
+                    "enrichments",
+                    "superFollowMetadata",
+                ]
+            ),
         }
 
     @property
@@ -85,6 +96,8 @@ class TwitterPoller(TwitterDispatcher):
             "include_mute_edge": "1",
             "include_can_dm": "1",
             "include_can_media_tag": "1",
+            "include_ext_alt_text": "1",
+            "include_ext_has_nft_avatar": "1",
             "skip_status": "1",
             **self.poll_params,
         }

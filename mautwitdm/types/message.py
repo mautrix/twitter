@@ -1,9 +1,9 @@
-# Copyright (c) 2020 Tulir Asokan
+# Copyright (c) 2022 Tulir Asokan
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Optional
+from typing import List, Optional
 
 from attr import dataclass
 
@@ -12,6 +12,7 @@ from mautrix.types import SerializableAttrs
 from .conversation import Conversation
 from .message_attachment import MessageAttachment
 from .message_entity import MessageEntities
+from .reaction import ReactionCreateEntry
 from .util import StringTimestamp
 
 
@@ -33,6 +34,7 @@ class MessageEntry(SerializableAttrs):
     time: StringTimestamp
     conversation_id: str
     message_data: MessageData
+    message_reactions: Optional[List[ReactionCreateEntry]] = None
     affects_sort: Optional[bool] = None
     request_id: Optional[str] = None
 

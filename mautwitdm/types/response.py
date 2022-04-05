@@ -29,7 +29,6 @@ class FetchConversationResponse(SerializableAttrs):
     max_entry_id: str
     entries: List[Entry]
     users: Dict[str, User]
-    # Only present if include_info=True
     conversations: Optional[Dict[str, Conversation]] = None
 
 
