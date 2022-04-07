@@ -284,7 +284,9 @@ class Portal(DBPortal, BasePortal):
             dedup_id = (message.twid, sender.twid, reaction)
             self._reaction_dedup.appendleft(dedup_id)
 
-            existing = await DBReaction.get_by_twid(message.twid, message.receiver, sender.twid)
+            existing = await DBReaction.get_by_message_twid(
+                message.twid, message.receiver, sender.twid
+            )
             if existing and existing.reaction == reaction:
                 return
 
@@ -347,7 +349,7 @@ class Portal(DBPortal, BasePortal):
             self.log.info(f"{user.mxid} left private chat portal with {self.twid}")
             if user.twid == self.receiver:
                 self.log.info(
-                    f"{user.mxid} was the recipient of this portal. " "Cleaning up and deleting..."
+                    f"{user.mxid} was the recipient of this portal. Cleaning up and deleting..."
                 )
                 await self.cleanup_and_delete()
         else:
@@ -604,8 +606,10 @@ class Portal(DBPortal, BasePortal):
                 return
             self._reaction_dedup.appendleft(dedup_id)
 
-        existing = await DBReaction.get_by_twid(msg_id, self.receiver, sender.twid)
+        existing = await DBReaction.get_by_message_twid(msg_id, self.receiver, sender.twid)
         if existing and existing.reaction == reaction:
+            if not existing.tw_reaction_id:
+                await existing.update_id(reaction_id)
             return
 
         message = await DBMessage.get_by_twid(msg_id, self.receiver)
@@ -621,7 +625,7 @@ class Portal(DBPortal, BasePortal):
     async def handle_twitter_reaction_remove(
         self, sender: p.Puppet, msg_id: int, key: ReactionKey
     ) -> None:
-        reaction = await DBReaction.get_by_twid(msg_id, self.receiver, sender.twid)
+        reaction = await DBReaction.get_by_message_twid(msg_id, self.receiver, sender.twid)
         if reaction and reaction.reaction == key:
             try:
                 await sender.intent_for(self).redact(reaction.mx_room, reaction.mxid)
@@ -635,11 +639,13 @@ class Portal(DBPortal, BasePortal):
     ) -> None:
         message = await DBMessage.get_by_twid(read_up_to, self.receiver)
         if not message:
-            self.log.debug(
-                f"Ignoring read receipt from {sender.twid} "
-                f"up to unknown message {read_up_to} ({historical=})"
-            )
-            return
+            message = await DBReaction.get_by_reaction_twid(read_up_to, self.receiver)
+            if not message:
+                self.log.debug(
+                    f"Ignoring read receipt from {sender.twid} "
+                    f"up to unknown message {read_up_to} ({historical=})"
+                )
+                return
 
         self.log.debug(
             f"{sender.twid} read messages up to {read_up_to} ({message.mxid}, {historical=})"

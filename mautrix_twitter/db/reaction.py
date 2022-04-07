@@ -55,6 +55,13 @@ class Reaction:
             self.tw_reaction_id,
         )
 
+    async def update_id(self, tw_reaction_id: int) -> None:
+        q = (
+            "UPDATE reaction SET tw_reaction_id=$1 "
+            "WHERE tw_msgid=$4 AND tw_receiver=$5 AND tw_sender=$6"
+        )
+        await self.db.execute(q, tw_reaction_id, self.tw_msgid, self.tw_receiver, self.tw_sender)
+
     async def edit(
         self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey, tw_reaction_id: int | None
     ) -> None:
@@ -102,7 +109,7 @@ class Reaction:
         return cls._from_row(await cls.db.fetchrow(q, mx_room))
 
     @classmethod
-    async def get_by_twid(
+    async def get_by_message_twid(
         cls,
         tw_msgid: int,
         tw_receiver: int,
@@ -113,3 +120,11 @@ class Reaction:
             "FROM reaction WHERE tw_msgid=$1 AND tw_sender=$2 AND tw_receiver=$3"
         )
         return cls._from_row(await cls.db.fetchrow(q, tw_msgid, tw_sender, tw_receiver))
+
+    @classmethod
+    async def get_by_reaction_twid(cls, tw_reaction_id: int, tw_receiver: int) -> Reaction | None:
+        q = (
+            "SELECT mxid, mx_room, tw_msgid, tw_receiver, tw_sender, reaction, tw_reaction_id "
+            "FROM reaction WHERE tw_reaction_id=$1 AND tw_receiver=$2"
+        )
+        return cls._from_row(await cls.db.fetchrow(q, tw_reaction_id, tw_receiver))
