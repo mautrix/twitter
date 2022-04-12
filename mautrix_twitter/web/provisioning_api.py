@@ -107,7 +107,7 @@ class ProvisioningAPI:
             raise web.HTTPBadRequest(body='{"error": "Missing keys"}', headers=self._headers)
 
         try:
-            await user.connect(auth_token=auth_token, csrf_token=csrf_token)
+            await user.locked_connect(auth_token=auth_token, csrf_token=csrf_token)
         except Exception:
             self.log.debug("Failed to log in", exc_info=True)
             raise web.HTTPUnauthorized(

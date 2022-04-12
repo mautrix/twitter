@@ -34,7 +34,6 @@ from mautwitdm.types import (
     ReactionDeleteEntry,
     User as TwitterUser,
 )
-from mautwitdm.types.conversation import ConversationType
 
 from . import portal as po, puppet as pu
 from .config import Config
@@ -78,6 +77,7 @@ class User(DBUser, BaseUser):
     _is_logged_in: bool | None
     _connected: bool
     _intentional_stop: bool
+    _connect_task: asyncio.Task | None
 
     def __init__(
         self,
@@ -106,6 +106,7 @@ class User(DBUser, BaseUser):
         self._is_logged_in = None
         self._connected = False
         self._intentional_stop = False
+        self._connect_task = None
 
     @classmethod
     def init_cls(cls, bridge: "TwitterBridge") -> AsyncIterable[Awaitable[None]]:
@@ -142,7 +143,7 @@ class User(DBUser, BaseUser):
 
     async def try_connect(self) -> None:
         try:
-            await self.connect()
+            await self._connect()
         except TwitterAuthError as e:
             self.log.exception("Auth error while connecting to Twitter")
             await self.push_bridge_state(
@@ -163,7 +164,20 @@ class User(DBUser, BaseUser):
                 BridgeStateEvent.UNKNOWN_ERROR, error="twitter-connection-failed"
             )
 
-    async def connect(self, auth_token: str | None = None, csrf_token: str | None = None) -> None:
+    async def locked_connect(self, auth_token: str, csrf_token: str) -> None:
+        if self._connect_task and not self._connect_task.done():
+            self.log.warning("locked_connect() called when another call was already running")
+            await self._connect_task
+        elif self.auth_token == auth_token and self.csrf_token == csrf_token:
+            self.log.warning("locked_connect() called with the credentials already in use")
+        else:
+            self._connect_task = asyncio.create_task(self._connect(auth_token, csrf_token))
+            try:
+                await self._connect_task
+            finally:
+                self._connect_task = None
+
+    async def _connect(self, auth_token: str | None = None, csrf_token: str | None = None) -> None:
         client = TwitterAPI(
             log=logging.getLogger("mau.twitter.api").getChild(self.mxid),
             loop=self.loop,

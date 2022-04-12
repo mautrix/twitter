@@ -67,7 +67,7 @@ async def enter_login_cookies(evt: CommandEvent) -> None:
         return
 
     try:
-        await evt.sender.connect(
+        await evt.sender.locked_connect(
             auth_token=evt.sender.command_status["auth_token"], csrf_token=evt.args[0]
         )
     except Exception as e:
