@@ -549,7 +549,7 @@ class Portal(DBPortal, BasePortal):
                 content.info["fi.mau.autoplay"] = True
                 content.info["fi.mau.hide_controls"] = True
                 content.info["fi.mau.no_audio"] = True
-        elif message.attachment.photo:
+        elif message.attachment.photo or message.attachment.animated_gif:
             content.msgtype = MessageType.IMAGE
             content.info = ImageInfo(
                 mimetype=reuploaded_info.mime_type,
