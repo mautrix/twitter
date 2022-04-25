@@ -533,16 +533,23 @@ class Portal(DBPortal, BasePortal):
             file=reuploaded_info.decryption_info,
             external_url=media.media_url_https,
         )
-        if message.attachment.video:
+        if message.attachment.video or (
+            message.attachment.animated_gif and reuploaded_info.mime_type.startswith("video/")
+        ):
             content.msgtype = MessageType.VIDEO
             content.info = VideoInfo(
                 mimetype=reuploaded_info.mime_type,
                 size=reuploaded_info.size,
                 width=media.original_info.width,
                 height=media.original_info.height,
-                duration=media.video_info.duration_millis // 1000,
+                duration=media.video_info.duration_millis or None,
             )
-        elif message.attachment.photo or message.attachment.animated_gif:
+            if message.attachment.animated_gif:
+                content.info["fi.mau.loop"] = True
+                content.info["fi.mau.autoplay"] = True
+                content.info["fi.mau.hide_controls"] = True
+                content.info["fi.mau.no_audio"] = True
+        elif message.attachment.photo:
             content.msgtype = MessageType.IMAGE
             content.info = ImageInfo(
                 mimetype=reuploaded_info.mime_type,
