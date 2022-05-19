@@ -145,8 +145,9 @@ bridge:
         # If using double puppeting, should notifications be disabled
         # while the initial backfill is in progress?
         disable_notifications: false
-    # End-to-bridge encryption support options. You must install the e2be optional dependency for
-    # this to work. See https://github.com/tulir/mautrix-telegram/wiki/End‐to‐bridge-encryption
+    # End-to-bridge encryption support options.
+    #
+    # See https://docs.mau.fi/bridges/general/end-to-bridge-encryption.html for more info.
     encryption:
         # Allow encryption, work in group chat rooms with e2ee enabled
         allow: false
