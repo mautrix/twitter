@@ -208,6 +208,7 @@ class Portal(DBPortal, BasePortal):
         try:
             await self._handle_matrix_message(sender, message, event_id)
         except Exception as e:
+            self.log.exception(f"Failed to bridge {event_id}")
             status = self._status_from_exception(e)
             sender.send_remote_checkpoint(
                 status,
