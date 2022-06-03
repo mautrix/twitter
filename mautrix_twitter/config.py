@@ -84,6 +84,7 @@ class Config(BaseBridgeConfig):
         copy("bridge.private_chat_portal_meta")
         copy("bridge.delivery_receipts")
         copy("bridge.delivery_error_reports")
+        copy("bridge.message_status_events")
         copy("bridge.temporary_disconnect_notices")
         copy("bridge.disable_bridge_notices")
         copy("bridge.error_sleep")

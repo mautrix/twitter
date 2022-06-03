@@ -27,6 +27,7 @@ from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.types import (
+    BeeperMessageStatusEventContent,
     ContentURI,
     EncryptedFile,
     EventID,
@@ -34,7 +35,10 @@ from mautrix.types import (
     ImageInfo,
     MediaMessageEventContent,
     MessageEventContent,
+    MessageStatusReason,
     MessageType,
+    RelatesTo,
+    RelationType,
     RoomID,
     TextMessageEventContent,
     ThumbnailInfo,
@@ -188,13 +192,84 @@ class Portal(DBPortal, BasePortal):
     # endregion
     # region Matrix event handling
 
-    async def _send_error_notice(self, body: str, err: Exception):
-        await self._send_message(
-            self.main_intent,
-            TextMessageEventContent(msgtype=MessageType.NOTICE, body=f"\u26a0 {body}: {err}"),
+    async def _send_bridge_success(
+        self,
+        sender: u.User,
+        event_id: EventID,
+        event_type: EventType,
+        msgtype: MessageType | None = None,
+    ) -> None:
+        sender.send_remote_checkpoint(
+            status=MessageSendCheckpointStatus.SUCCESS,
+            event_id=event_id,
+            room_id=self.mxid,
+            event_type=event_type,
+            message_type=msgtype,
+        )
+        asyncio.create_task(self._send_message_status(event_id, err=None))
+        await self._send_delivery_receipt(event_id)
+
+    async def _send_bridge_error(
+        self,
+        sender: u.User,
+        err: Exception,
+        event_id: EventID,
+        event_type: EventType,
+        message_type: MessageType | None = None,
+    ) -> None:
+        sender.send_remote_checkpoint(
+            self._status_from_exception(err),
+            event_id,
+            self.mxid,
+            event_type,
+            message_type=message_type,
+            error=err,
         )
 
-    def _status_from_exception(self, e: Exception) -> MessageSendCheckpointStatus:
+        send_notice = not isinstance(err, NotImplementedError)
+        if self.config["bridge.delivery_error_reports"] and send_notice:
+            event_type_str = {
+                EventType.REACTION: "reaction",
+                EventType.ROOM_REDACTION: "redaction",
+            }.get(event_type, "message")
+            await self._send_message(
+                self.main_intent,
+                TextMessageEventContent(
+                    msgtype=MessageType.NOTICE,
+                    body=f"\u26a0 Your {event_type_str} may not have been bridged: {str(err)}",
+                ),
+            )
+        asyncio.create_task(self._send_message_status(event_id, err))
+
+    async def _send_message_status(self, event_id: EventID, err: Exception | None) -> None:
+        if not self.config["bridge.message_status_events"]:
+            return
+        intent = self.az.intent if self.encrypted else self.main_intent
+        status = BeeperMessageStatusEventContent(
+            network=self.bridge_info_state_key,
+            relates_to=RelatesTo(
+                rel_type=RelationType.REFERENCE,
+                event_id=event_id,
+            ),
+            success=err is None,
+        )
+        if err:
+            status.reason = MessageStatusReason.GENERIC_ERROR
+            status.error = str(err)
+            status.is_certain = True
+            status.can_retry = True
+            if isinstance(err, NotImplementedError):
+                status.can_retry = False
+                status.reason = MessageStatusReason.UNSUPPORTED
+
+        await intent.send_message_event(
+            room_id=self.mxid,
+            event_type=EventType.BEEPER_MESSAGE_STATUS,
+            content=status,
+        )
+
+    @staticmethod
+    def _status_from_exception(e: Exception) -> MessageSendCheckpointStatus:
         if isinstance(e, NotImplementedError):
             return MessageSendCheckpointStatus.UNSUPPORTED
         return MessageSendCheckpointStatus.PERM_FAILURE
@@ -202,33 +277,30 @@ class Portal(DBPortal, BasePortal):
     async def handle_matrix_message(
         self, sender: u.User, message: MessageEventContent, event_id: EventID
     ) -> None:
-        if not sender.client:
-            self.log.debug(f"Ignoring message {event_id} as user is not connected")
-            return
         try:
             await self._handle_matrix_message(sender, message, event_id)
         except Exception as e:
-            self.log.exception(f"Failed to bridge {event_id}")
-            status = self._status_from_exception(e)
-            sender.send_remote_checkpoint(
-                status,
-                event_id,
-                self.mxid,
-                EventType.ROOM_MESSAGE,
-                message.msgtype,
-                error=e,
+            self.log.exception(f"Error handling Matrix event {event_id}")
+            await self._send_bridge_error(
+                sender, e, event_id, EventType.ROOM_MESSAGE, message.msgtype
             )
-            await self._send_error_notice("Your message may not have been bridged", e)
+        else:
+            await self._send_bridge_success(
+                sender, event_id, EventType.ROOM_MESSAGE, message.msgtype
+            )
 
     async def _handle_matrix_message(
         self, sender: u.User, message: MessageEventContent, event_id: EventID
     ) -> None:
+        if not sender.client:
+            raise NotImplementedError("user is not connected")
         request_id = str(sender.client.new_request_id())
         self._reqid_dedup.add(request_id)
-        text = message.body
         media_id = None
-        if message.msgtype == MessageType.EMOTE:
-            text = f"/me {text}"
+        if message.msgtype == MessageType.TEXT:
+            text = message.body
+        elif message.msgtype == MessageType.EMOTE:
+            text = f"/me {message.body}"
         elif message.msgtype.is_media:
             if message.file and decrypt_attachment:
                 data = await self.main_intent.download_media(message.file.url)
@@ -244,16 +316,10 @@ class Portal(DBPortal, BasePortal):
             upload_resp = await sender.client.upload(data, mime_type=mime_type)
             media_id = upload_resp.media_id
             text = ""
+        else:
+            raise NotImplementedError(f"unsupported msgtype '{message.msgtype.value}'")
         resp = await sender.client.conversation(self.twid).send(
             text, media_id=media_id, request_id=request_id
-        )
-        await self._send_delivery_receipt(event_id)
-        sender.send_remote_checkpoint(
-            status=MessageSendCheckpointStatus.SUCCESS,
-            event_id=event_id,
-            room_id=self.mxid,
-            event_type=EventType.ROOM_MESSAGE,
-            message_type=message.msgtype,
         )
         resp_msg_id = int(resp.entries[0].message.id)
         self._msgid_dedup.appendleft(resp_msg_id)
@@ -268,10 +334,10 @@ class Portal(DBPortal, BasePortal):
         try:
             await self._handle_matrix_reaction(sender, event_id, reacting_to, reaction_val)
         except Exception as e:
-            status = self._status_from_exception(e)
             self.log.exception(f"Failed to react to {event_id}")
-            sender.send_remote_checkpoint(status, event_id, self.mxid, EventType.REACTION, error=e)
-            await self._send_error_notice(f"Failed to react to {event_id}", e)
+            await self._send_bridge_error(sender, e, event_id, EventType.REACTION)
+        else:
+            await self._send_bridge_success(sender, event_id, EventType.REACTION)
 
     async def _handle_matrix_reaction(
         self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction_val: str
@@ -279,7 +345,7 @@ class Portal(DBPortal, BasePortal):
         reaction = ReactionKey.from_emoji(reaction_val)
         message = await DBMessage.get_by_mxid(reacting_to, self.mxid)
         if not message:
-            raise ValueError(f"Ignoring reaction to unknown event {reacting_to}")
+            raise NotImplementedError(f"Unknown reaction target event")
 
         async with self._reaction_lock:
             dedup_id = (message.twid, sender.twid, reaction)
@@ -292,13 +358,6 @@ class Portal(DBPortal, BasePortal):
                 return
 
             await sender.client.conversation(self.twid).react(message.twid, reaction)
-            sender.send_remote_checkpoint(
-                MessageSendCheckpointStatus.SUCCESS,
-                event_id,
-                self.mxid,
-                EventType.REACTION,
-            )
-            await self._send_delivery_receipt(event_id)
             await self._upsert_reaction(
                 existing, self.main_intent, event_id, message, sender, reaction
             )
@@ -310,40 +369,23 @@ class Portal(DBPortal, BasePortal):
         try:
             await self._handle_matrix_redaction(sender, event_id)
         except Exception as e:
-            status = self._status_from_exception(e)
-            sender.send_remote_checkpoint(
-                status, event_id, self.mxid, EventType.ROOM_REDACTION, error=e
-            )
-            await self._send_error_notice(f"Failed to redact {event_id}", e)
+            self.log.exception(f"Error handling redaction of {event_id}")
+            await self._send_bridge_error(sender, e, redaction_event_id, EventType.ROOM_REDACTION)
         else:
-            sender.send_remote_checkpoint(
-                MessageSendCheckpointStatus.SUCCESS,
-                redaction_event_id,
-                self.mxid,
-                EventType.ROOM_REDACTION,
-            )
-            await self._send_delivery_receipt(redaction_event_id)
+            await self._send_bridge_success(sender, redaction_event_id, EventType.ROOM_REDACTION)
 
     async def _handle_matrix_redaction(self, sender: u.User, event_id: EventID) -> None:
-        assert self.mxid, "MXID is None"
-
         async with self._reaction_lock:
             reaction = await DBReaction.get_by_mxid(event_id, self.mxid)
             if reaction:
-                try:
-                    await reaction.delete()
-                    await sender.client.conversation(self.twid).delete_reaction(
-                        reaction.tw_msgid, reaction.reaction
-                    )
-                except Exception:
-                    self.log.exception("Removing reaction failed")
-                    raise
-                else:
-                    self.log.trace(f"Removed {reaction} after Matrix redaction")
-
+                await reaction.delete()
+                await sender.client.conversation(self.twid).delete_reaction(
+                    reaction.tw_msgid, reaction.reaction
+                )
+                self.log.trace(f"Removed {reaction} after Matrix redaction")
                 return
 
-        raise NotImplementedError("Message redactions are not supported.")
+        raise NotImplementedError("Message redactions are not supported")
 
     async def handle_matrix_leave(self, user: u.User) -> None:
         if self.is_direct:
