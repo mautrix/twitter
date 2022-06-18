@@ -18,39 +18,7 @@ build amd64:
   - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA-amd64
   - docker rmi $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA-amd64
   after_script:
-  - |
-    if [[ "$CI_COMMIT_BRANCH" == "master" && "$CI_JOB_STATUS" == "success" ]]; then
-      apk add --update curl jq
-      rm -rf /var/cache/apk/*
-
-      jq -n '
-         {
-           password:  env.BEEPER_DEV_ADMIN_NIGHTLY_PASS,
-           bridge:    env.BEEPER_BRIDGE_TYPE,
-           image:     "\(env.CI_REGISTRY_IMAGE):\(env.CI_COMMIT_SHA)-amd64",
-           channel:   "STABLE"
-         }
-        ' | curl "$BEEPER_DEV_ADMIN_API_URL" -H "Content-Type: application/json" -d @-
-
-      jq -n '
-         {
-           password:  env.BEEPER_DEV_ADMIN_NIGHTLY_PASS,
-           bridge:    env.BEEPER_BRIDGE_TYPE,
-           image:     "\(env.CI_REGISTRY_IMAGE):\(env.CI_COMMIT_SHA)-amd64",
-           channel:   "NIGHTLY"
-         }
-        ' | curl "$BEEPER_DEV_ADMIN_API_URL" -H "Content-Type: application/json" -d @-
-
-      jq -n '
-         {
-           password:    env.BEEPER_PROD_ADMIN_NIGHTLY_PASS,
-           bridge:      env.BEEPER_BRIDGE_TYPE,
-           image:       "\(env.CI_REGISTRY_IMAGE):\(env.CI_COMMIT_SHA)-amd64",
-           channel:     "INTERNAL",
-           deployNext:  true
-         }
-         ' | curl "$BEEPER_PROD_ADMIN_API_URL" -H "Content-Type: application/json" -d @-
-    fi
+  - wget "$BEEPER_CD_TOOL_URL" -O bridge-cd-tool && chmod +x bridge-cd-tool && ./bridge-cd-tool
 
 build arm64:
   stage: build
