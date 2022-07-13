@@ -35,6 +35,7 @@ from mautrix.types import (
     ImageInfo,
     MediaMessageEventContent,
     MessageEventContent,
+    MessageStatus,
     MessageStatusReason,
     MessageType,
     RelatesTo,
@@ -251,16 +252,17 @@ class Portal(DBPortal, BasePortal):
                 rel_type=RelationType.REFERENCE,
                 event_id=event_id,
             ),
-            success=err is None,
         )
         if err:
+            status.status = MessageStatus.RETRIABLE
             status.reason = MessageStatusReason.GENERIC_ERROR
             status.error = str(err)
-            status.is_certain = True
-            status.can_retry = True
             if isinstance(err, NotImplementedError):
-                status.can_retry = False
+                status.status = MessageStatus.FAIL
                 status.reason = MessageStatusReason.UNSUPPORTED
+        else:
+            status.status = MessageStatus.SUCCESS
+        status.fill_legacy_booleans()
 
         await intent.send_message_event(
             room_id=self.mxid,
