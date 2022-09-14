@@ -15,22 +15,28 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from asyncpg import Connection
 
-from mautrix.util.async_db import UpgradeTable
+from mautrix.util.async_db import Scheme, UpgradeTable
 
 upgrade_table = UpgradeTable()
 
 
-@upgrade_table.register(description="Initial revision")
-async def upgrade_v1(conn: Connection) -> None:
-    await conn.execute("CREATE TYPE twitter_conv_type AS ENUM ('ONE_TO_ONE', 'GROUP_DM')")
+@upgrade_table.register(description="Latest revision", upgrades_to=4)
+async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
+    if scheme in (Scheme.POSTGRES, Scheme.COCKROACH):
+        await conn.execute("CREATE TYPE twitter_conv_type AS ENUM ('ONE_TO_ONE', 'GROUP_DM')")
+        await conn.execute(
+            """CREATE TYPE twitter_reaction_key AS ENUM (
+                'funny', 'surprised', 'sad', 'like', 'excited', 'agree', 'disagree'
+            )"""
+        )
     await conn.execute(
         """CREATE TABLE portal (
-            twid        VARCHAR(255),
+            twid        TEXT,
             receiver    BIGINT,
             conv_type   twitter_conv_type NOT NULL,
             other_user  BIGINT,
-            mxid        VARCHAR(255),
-            name        VARCHAR(255),
+            mxid        TEXT,
+            name        TEXT,
             encrypted   BOOLEAN NOT NULL DEFAULT false,
 
             PRIMARY KEY (twid, receiver)
@@ -38,43 +44,33 @@ async def upgrade_v1(conn: Connection) -> None:
     )
     await conn.execute(
         """CREATE TABLE "user" (
-            mxid        VARCHAR(255) PRIMARY KEY,
+            mxid        TEXT PRIMARY KEY,
             twid        BIGINT,
-            auth_token  VARCHAR(255),
-            csrf_token  VARCHAR(255),
-            poll_cursor VARCHAR(255),
-            notice_room VARCHAR(255)
+            auth_token  TEXT,
+            csrf_token  TEXT,
+            poll_cursor TEXT,
+            notice_room TEXT
         )"""
     )
     await conn.execute(
         """CREATE TABLE puppet (
             twid      BIGINT PRIMARY KEY,
-            name      VARCHAR(255),
-            photo_url VARCHAR(255),
-            photo_mxc VARCHAR(255),
+            name      TEXT,
+            photo_url TEXT,
+            photo_mxc TEXT,
 
             is_registered BOOLEAN NOT NULL DEFAULT false,
 
-            custom_mxid  VARCHAR(255),
+            custom_mxid  TEXT,
             access_token TEXT,
-            next_batch   VARCHAR(255)
-        )"""
-    )
-    await conn.execute(
-        """CREATE TABLE user_portal (
-            "user"          BIGINT,
-            portal          VARCHAR(255),
-            portal_receiver BIGINT,
-            in_community    BOOLEAN NOT NULL DEFAULT false,
-
-            FOREIGN KEY (portal, portal_receiver) REFERENCES portal(twid, receiver)
-                ON UPDATE CASCADE ON DELETE CASCADE
+            next_batch   TEXT,
+            base_url     TEXT
         )"""
     )
     await conn.execute(
         """CREATE TABLE message (
-            mxid     VARCHAR(255) NOT NULL,
-            mx_room  VARCHAR(255) NOT NULL,
+            mxid     TEXT NOT NULL,
+            mx_room  TEXT NOT NULL,
             twid     BIGINT,
             receiver BIGINT,
 
@@ -83,18 +79,15 @@ async def upgrade_v1(conn: Connection) -> None:
         )"""
     )
     await conn.execute(
-        """CREATE TYPE twitter_reaction_key AS ENUM (
-            'funny', 'surprised', 'sad', 'like', 'excited', 'agree', 'disagree'
-        )"""
-    )
-    await conn.execute(
         """CREATE TABLE reaction (
-            mxid        VARCHAR(255) NOT NULL,
-            mx_room     VARCHAR(255) NOT NULL,
+            mxid        TEXT NOT NULL,
+            mx_room     TEXT NOT NULL,
             tw_msgid    BIGINT,
             tw_receiver BIGINT,
             tw_sender   BIGINT,
             reaction    twitter_reaction_key NOT NULL,
+
+            tw_reaction_id BIGINT,
 
             PRIMARY KEY (tw_msgid, tw_receiver, tw_sender),
             FOREIGN KEY (tw_msgid, tw_receiver) REFERENCES message(twid, receiver)
@@ -112,3 +105,18 @@ async def upgrade_v2(conn: Connection) -> None:
 @upgrade_table.register(description="Store Twitter reaction IDs for marking things read")
 async def upgrade_v3(conn: Connection) -> None:
     await conn.execute("ALTER TABLE reaction ADD COLUMN tw_reaction_id BIGINT")
+
+
+@upgrade_table.register(description="Replace VARCHAR(255) with TEXT")
+async def upgrade_v4(conn: Connection) -> None:
+    tables = {
+        "portal": ("twid", "mxid", "name"),
+        "user": ("mxid", "auth_token", "csrf_token", "poll_cursor", "notice_room"),
+        "puppet": ("name", "photo_url", "photo_mxc", "custom_mxid", "next_batch"),
+        "message": ("mxid", "mx_room"),
+        "reaction": ("mxid", "mx_room"),
+    }
+    for table, columns in tables.items():
+        for column in columns:
+            await conn.execute(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE TEXT')
+    await conn.execute("DROP TABLE user_portal")
