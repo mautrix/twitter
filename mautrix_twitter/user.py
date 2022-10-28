@@ -439,6 +439,7 @@ class User(DBUser, BaseUser):
         if not portal.mxid:
             await portal.create_matrix_room(self, evt.conversation)
         sender = await pu.Puppet.get_by_twid(int(evt.message_data.sender_id))
+        await portal.backfill_lock.wait(f"{evt.message_data.sender_id}/{evt.message_data.id}")
         await portal.handle_twitter_message(self, sender, evt.message_data, evt.request_id)
 
     @async_time(METRIC_REACTION)
