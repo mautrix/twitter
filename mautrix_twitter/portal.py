@@ -78,6 +78,10 @@ StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
 
 
+class UnsupportedAttachmentError(NotImplementedError):
+    pass
+
+
 class ReuploadedMediaInfo(NamedTuple):
     mxc: ContentURI | None
     decryption_info: EncryptedFile | None
@@ -258,6 +262,8 @@ class Portal(DBPortal, BasePortal):
             status.reason = MessageStatusReason.GENERIC_ERROR
             status.error = str(err)
             if isinstance(err, NotImplementedError):
+                if isinstance(err, UnsupportedAttachmentError):
+                    status.message = str(err)
                 status.status = MessageStatus.FAIL
                 status.reason = MessageStatusReason.UNSUPPORTED
         else:
@@ -304,6 +310,10 @@ class Portal(DBPortal, BasePortal):
         elif message.msgtype == MessageType.EMOTE:
             text = f"/me {message.body}"
         elif message.msgtype.is_media:
+            if message.msgtype != MessageType.IMAGE and message.msgtype != MessageType.VIDEO:
+                raise UnsupportedAttachmentError(
+                    "Non-image/video files are not supported by Twitter"
+                )
             if message.file and decrypt_attachment:
                 data = await self.main_intent.download_media(message.file.url)
                 data = decrypt_attachment(
