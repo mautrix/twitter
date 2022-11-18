@@ -6,7 +6,7 @@
 
 A Matrix-Twitter DM puppeting bridge.
 
-### Documentation
+## Documentation
 All setup and usage instructions are located on
 [docs.mau.fi](https://docs.mau.fi/bridges/python/twitter/index.html).
 Some quick links:
