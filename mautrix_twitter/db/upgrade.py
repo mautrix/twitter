@@ -120,3 +120,21 @@ async def upgrade_v4(conn: Connection) -> None:
         for column in columns:
             await conn.execute(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE TEXT')
     await conn.execute("DROP TABLE user_portal")
+
+
+@upgrade_table.register(description="Add table for backfill status")
+async def upgrade_v5(conn: Connection) -> None:
+    await conn.execute(
+        """
+        CREATE TABLE backfill_status (
+         twid TEXT,
+         receiver BIGINT,
+         dispatched BOOLEAN,
+         message_count INTEGER,
+         state INTEGER,
+         PRIMARY KEY (twid, receiver),
+         FOREIGN KEY (twid, receiver) REFERENCES portal(twid, receiver)
+             ON DELETE CASCADE,
+        )
+    """
+    )
