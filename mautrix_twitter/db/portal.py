@@ -38,6 +38,8 @@ class Portal:
     mxid: RoomID | None
     name: str | None
     encrypted: bool
+    earliest_message_twid: int | None
+    next_batch_id: str | None
 
     @property
     def _values(self):
@@ -49,18 +51,20 @@ class Portal:
             self.mxid,
             self.name,
             self.encrypted,
+            self.earliest_message_twid,
+            self.next_batch_id,
         )
 
     async def insert(self) -> None:
         q = (
-            "INSERT INTO portal (twid, receiver, conv_type, other_user, mxid, name, encrypted) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7)"
+            "INSERT INTO portal (twid, receiver, conv_type, other_user, mxid, name, encrypted, earliest_message_twid, next_batch_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
         )
         await self.db.execute(q, *self._values)
 
     async def update(self) -> None:
         q = (
-            "UPDATE portal SET conv_type=$3, other_user=$4, mxid=$5, name=$6, encrypted=$7 "
+            "UPDATE portal SET conv_type=$3, other_user=$4, mxid=$5, name=$6, encrypted=$7, earliest_message_twid=$8, next_batch_id=$9 "
             "WHERE twid=$1 AND receiver=$2"
         )
         await self.db.execute(q, *self._values)
@@ -73,7 +77,7 @@ class Portal:
     @classmethod
     async def get_by_mxid(cls, mxid: RoomID) -> Portal | None:
         q = (
-            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted "
+            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted, earliest_message_twid, next_batch_id "
             "FROM portal WHERE mxid=$1"
         )
         row = await cls.db.fetchrow(q, mxid)
@@ -84,7 +88,7 @@ class Portal:
     @classmethod
     async def get_by_twid(cls, twid: str, receiver: int = 0) -> Portal | None:
         q = (
-            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted "
+            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted, earliest_message_twid, next_batch_id "
             "FROM portal WHERE twid=$1 AND receiver=$2"
         )
         row = await cls.db.fetchrow(q, twid, receiver)
@@ -95,7 +99,7 @@ class Portal:
     @classmethod
     async def find_private_chats_of(cls, receiver: int) -> list[Portal]:
         q = (
-            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
+            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted, earliest_message_twid, next_batch_id FROM portal "
             "WHERE receiver=$1 AND conv_type='ONE_TO_ONE'"
         )
         rows = await cls.db.fetch(q, receiver)
@@ -104,7 +108,7 @@ class Portal:
     @classmethod
     async def find_private_chats_with(cls, other_user: int) -> list[Portal]:
         q = (
-            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
+            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted, earliest_message_twid, next_batch_id FROM portal "
             "WHERE other_user=$1 AND conv_type='ONE_TO_ONE'"
         )
         rows = await cls.db.fetch(q, other_user)
@@ -113,7 +117,7 @@ class Portal:
     @classmethod
     async def all_with_room(cls) -> list[Portal]:
         q = (
-            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted FROM portal "
+            "SELECT twid, receiver, conv_type, other_user, mxid, name, encrypted, earliest_message_twid, next_batch_id FROM portal "
             "WHERE mxid IS NOT NULL"
         )
         rows = await cls.db.fetch(q)

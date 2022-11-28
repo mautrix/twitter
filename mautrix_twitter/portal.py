@@ -118,8 +118,20 @@ class Portal(DBPortal, BasePortal):
         mxid: RoomID | None = None,
         name: str | None = None,
         encrypted: bool = False,
+        earliest_message_twid: int | None = None,
+        next_batch_id: str | None = None,
     ) -> None:
-        super().__init__(twid, receiver, conv_type, other_user, mxid, name, encrypted)
+        super().__init__(
+            twid,
+            receiver,
+            conv_type,
+            other_user,
+            mxid,
+            name,
+            encrypted,
+            earliest_message_twid,
+            next_batch_id,
+        )
         self._create_room_lock = asyncio.Lock()
         self.log = self.log.getChild(twid)
         self._msgid_dedup = deque(maxlen=100)
@@ -792,20 +804,26 @@ class Portal(DBPortal, BasePortal):
     # region Backfilling
 
     async def backfill(self, source: u.User, is_initial: bool = False) -> None:
-        if not is_initial:
-            raise RuntimeError("Non-initial backfilling is not supported")
         limit = self.config["bridge.backfill.initial_limit"]
         if limit == 0:
             return
         elif limit < 0:
             limit = None
         with self.backfill_lock:
-            await self._backfill(source, limit)
+            await self._backfill(source, limit, is_initial)
 
-    async def _backfill(self, source: u.User, limit: int) -> None:
-        self.log.debug("Backfilling history through %s", source.mxid)
+    async def _backfill(self, source: u.User, limit: int, is_initial: bool = False) -> None:
+        if is_initial:
+            self.log.debug("Backfilling initial batch through %s", source.mxid)
+        else:
+            self.log.debug("Backfilling history through %s", source.mxid)
+            if self.earliest_message_twid == None:
+                self.log.warn("Can't backfill backwards without an earliest bridged message ID")
+                return
 
-        entries = await self._fetch_backfill_entries(source, limit)
+        max_id = None if is_initial else self.earliest_message_twid
+
+        entries = await self._fetch_backfill_entries(source, limit, max_id)
         if not entries:
             self.log.debug("Didn't get any entries from server")
             return
@@ -814,22 +832,25 @@ class Portal(DBPortal, BasePortal):
 
         backfill_leave = await self._invite_own_puppet_backfill(source)
         async with NotificationDisabler(self.mxid, source):
-            for entry in reversed(entries):
-                await self._handle_backfill_entry(source, entry)
+            if is_initial:
+                for entry in reversed(entries):
+                    await self._handle_backfill_entry(source, entry)
+            else:
+                await self._batch_handle_backfill(source, reversed(entries))
         for intent in backfill_leave:
             self.log.trace("Leaving room with %s post-backfill", intent.mxid)
             await intent.leave_room(self.mxid)
         self.log.info("Backfilled %d messages through %s", len(entries), source.mxid)
 
     async def _fetch_backfill_entries(
-        self, source: u.User, limit: int
+        self, source: u.User, limit: int, max_id: int | None = None
     ) -> list[MessageEntry | ReactionCreateEntry]:
         conv = source.client.conversation(self.twid)
         entries: list[MessageEntry | ReactionCreateEntry] = []
         message_count = 0
         self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
         try:
-            max_id = None
+            max_id = max_id
             while True:
                 resp = await conv.fetch(max_id=max_id)
                 max_id = resp.min_entry_id
@@ -875,6 +896,11 @@ class Portal(DBPortal, BasePortal):
             await self.handle_twitter_reaction_add(
                 sender, int(entry.message_id), entry.reaction_key, entry.time, int(entry.id)
             )
+
+    async def _batch_handle_backfill(
+        self, source: u.User, entries: list[MessageEntry | ReactionCreateEntry]
+    ) -> None:
+        pass
 
     # endregion
     # region Bridge info state event

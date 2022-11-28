@@ -124,6 +124,9 @@ async def upgrade_v4(conn: Connection) -> None:
 
 @upgrade_table.register(description="Add table for backfill status")
 async def upgrade_v5(conn: Connection) -> None:
+    await conn.execute("""ALTER TABLE portal ADD COLUMN earliest_message_twid BIGINT""")
+    await conn.execute("""ALTER TABLE portal ADD COLUMN next_batch_id TEXT""")
+
     await conn.execute(
         """
         CREATE TABLE backfill_status (
@@ -137,4 +140,13 @@ async def upgrade_v5(conn: Connection) -> None:
              ON DELETE CASCADE,
         )
     """
+    )
+
+    # For any existing portals, don't backfill.
+    # This inserts rows that say those portals are already completed.
+    await conn.execute(
+        """
+        INSERT INTO backfill_status (twid, receiver, dispatched, message_count, state)
+        SELECT twid, receiver, FALSE, 0, 3 FROM portal
+        """
     )

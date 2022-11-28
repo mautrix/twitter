@@ -59,7 +59,7 @@ class BackfillStatus:
         return cls(**row)
 
     @classmethod
-    async def get_next_unfinished_state(cls) -> BackfillStatus | None:
+    async def get_next_unfinished_status(cls) -> BackfillStatus | None:
         q = """SELECT twid, receiver, dispatched, message_count, state FROM backfill_status
         WHERE dispatched IS FALSE
         AND state < 2
