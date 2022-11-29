@@ -29,28 +29,36 @@ class BackfillStatus:
     db: ClassVar[Database] = fake_db
 
     twid: str
-    receiver: int
+    receiver: int | None
+    backfill_user: int
     dispatched: bool
     message_count: int
     state: int
 
     @property
     def _values(self):
-        return (self.twid, self.receiver, self.dispatched, self.message_count, self.state)
+        return (
+            self.twid,
+            self.receiver,
+            self.backfill_user,
+            self.dispatched,
+            self.message_count,
+            self.state,
+        )
 
     async def insert(self) -> None:
-        q = """INSERT INTO backfill_status (twid, receiver, dispatched, message_count, state)
-            VALUES ($1, $2, $3, $4, $5)"""
+        q = """INSERT INTO backfill_status (twid, receiver, backfill_user, dispatched, message_count, state)
+            VALUES ($1, $2, $3, $4, $5, $6)"""
         await self.db.execute(q, *self._values)
 
     async def update(self) -> None:
-        q = """UPDATE backfill_status SET dispatched=$3, message_count=$4, self.state=$5
+        q = """UPDATE backfill_status SET backfill_user=$3 dispatched=$4, message_count=$5, self.state=$6
             WHERE twid=$1 AND receiver=$2"""
         await self.db.execute(q, *self._values)
 
     @classmethod
     async def get_by_twid(cls, twid: int, receiver: int = 0) -> BackfillStatus | None:
-        q = """SELECT twid, receiver, dispatched, message_count, state FROM backfill_status
+        q = """SELECT twid, receiver, backfill_user, dispatched, message_count, state FROM backfill_status
         WHERE twid =$1 AND receiver =$2"""
 
         row = await cls.db.fetchrow(q, twid, receiver)
@@ -60,7 +68,7 @@ class BackfillStatus:
 
     @classmethod
     async def get_next_unfinished_status(cls) -> BackfillStatus | None:
-        q = """SELECT twid, receiver, dispatched, message_count, state FROM backfill_status
+        q = """SELECT twid, receiver, backfill_user, dispatched, message_count, state FROM backfill_status
         WHERE dispatched IS FALSE
         AND state < 2
         ORDER BY state ASC, message_count ASC

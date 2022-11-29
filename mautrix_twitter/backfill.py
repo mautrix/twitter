@@ -15,11 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 import asyncio
-
-if TYPE_CHECKING:
-    from .__main__ import TwitterBridge
 
 # from .config import Config
 from .db import BackfillStatus as DBBackfillStatus
@@ -52,5 +48,17 @@ class BackfillStatus(DBBackfillStatus):
         while True:
             state = await cls.get_next_backfill_status(recheck_queue)
             portal = await Portal.get_by_twid(twid=state.twid, receiver=state.receiver)
-            source = await User.get_by_twid(state.receiver)
-            await portal.backfill(source, is_initial=False)
+            source = await User.get_by_twid(state.backfill_user)
+            try:
+                num_filled = await portal.backfill(
+                    source, is_initial=True if state.state == 0 else False
+                )
+                state.message_count += num_filled
+                if state.state == 0:
+                    state.state = 1
+                elif state.message_count >= 1000:  # TODO: don't hardcode message limit
+                    state.state = 2
+                await state.update()
+            except Exception:
+                # TODO: handle and log error, and don't get stuck in backfill loops
+                pass

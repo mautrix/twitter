@@ -27,6 +27,8 @@ from mautrix.appservice import AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.types import (
+    BatchSendEvent,
+    BatchSendStateEvent,
     BeeperMessageStatusEventContent,
     ContentURI,
     EncryptedFile,
@@ -34,6 +36,8 @@ from mautrix.types import (
     EventType,
     ImageInfo,
     MediaMessageEventContent,
+    Membership,
+    MemberStateEventContent,
     MessageEventContent,
     MessageStatus,
     MessageStatusReason,
@@ -61,9 +65,14 @@ from mautwitdm.types import (
     VideoVariant,
 )
 
-from . import matrix as m, puppet as p, user as u
+from . import backfill as b, matrix as m, puppet as p, user as u
 from .config import Config
-from .db import Message as DBMessage, Portal as DBPortal, Reaction as DBReaction
+from .db import (
+    BackfillStatus as DBBackfillStatus,
+    Message as DBMessage,
+    Portal as DBPortal,
+    Reaction as DBReaction,
+)
 from .formatter import twitter_to_matrix
 
 if TYPE_CHECKING:
@@ -429,44 +438,59 @@ class Portal(DBPortal, BasePortal):
     async def handle_twitter_message(
         self, source: u.User, sender: p.Puppet, message: MessageData, request_id: str
     ) -> None:
+        if await self._twitter_message_dedupe(request_id, int(message.id), message.sender_id):
+            await self._handle_deduplicated_twitter_message(
+                source, sender, message, int(message.id)
+            )
+
+    async def _twitter_message_dedupe(self, request_id: str, msg_id: int, sender_id: str) -> bool:
         if request_id in self._reqid_dedup:
             self.log.debug(
-                f"Ignoring message {message.id} by {message.sender_id}"
+                f"Ignoring message {msg_id} by {sender_id}"
                 " as it was sent by us (request_id in dedup queue)"
             )
-            return
-        msg_id = int(message.id)
+            return False
         if msg_id in self._msgid_dedup:
             self.log.debug(
-                f"Ignoring message {message.id} by {message.sender_id}"
+                f"Ignoring message {msg_id} by {sender_id}"
                 " as it was already handled (message.id in dedup queue)"
             )
-            return
+            return False
         self._msgid_dedup.appendleft(msg_id)
 
         if await DBMessage.get_by_twid(msg_id, self.receiver) is not None:
             self.log.debug(
-                f"Ignoring message {message.id} by {message.sender_id}"
+                f"Ignoring message {msg_id} by {sender_id}"
                 " as it was already handled (message.id found in database)"
             )
-            return
+            return False
 
-        await self._handle_deduplicated_twitter_message(source, sender, message, msg_id)
+        return True
+
+    async def _convert_twitter_message(
+        self, source: u.User, sender: p.Puppet, message: MessageData
+    ) -> list[MessageEventContent]:
+        converted = []
+        intent = sender.intent_for(self)
+        if message.attachment and message.attachment.media:
+            content = await self._handle_twitter_media(source, intent, message)
+            if content:
+                converted.append(content)
+        if message.text and not message.text.isspace():
+            content = await twitter_to_matrix(message)
+            content["com.beeper.linkpreviews"] = await self._twitter_preview_to_beeper(
+                source, intent, message
+            )
+            converted.append(content)
+        return converted
 
     async def _handle_deduplicated_twitter_message(
         self, source: u.User, sender: p.Puppet, message: MessageData, msg_id: int
     ) -> None:
         intent = sender.intent_for(self)
         event_id = None
-        if message.attachment and message.attachment.media:
-            content = await self._handle_twitter_media(source, intent, message)
-            if content:
-                event_id = await self._send_message(intent, content, timestamp=message.time)
-        if message.text and not message.text.isspace():
-            content = await twitter_to_matrix(message)
-            content["com.beeper.linkpreviews"] = await self._twitter_preview_to_beeper(
-                source, intent, message
-            )
+        converted = self._convert_twitter_message(source, sender, message)
+        for content in converted:
             event_id = await self._send_message(intent, content, timestamp=message.time)
         if event_id:
             msg = DBMessage(
@@ -803,44 +827,45 @@ class Portal(DBPortal, BasePortal):
     # endregion
     # region Backfilling
 
-    async def backfill(self, source: u.User, is_initial: bool = False) -> None:
+    async def backfill(self, source: u.User, is_initial: bool = False) -> int:
         limit = self.config["bridge.backfill.initial_limit"]
         if limit == 0:
-            return
+            return 0
         elif limit < 0:
             limit = None
         with self.backfill_lock:
-            await self._backfill(source, limit, is_initial)
+            return self._backfill(source, limit, is_initial)
 
-    async def _backfill(self, source: u.User, limit: int, is_initial: bool = False) -> None:
+    async def _backfill(self, source: u.User, limit: int, is_initial: bool = False) -> int:
         if is_initial:
             self.log.debug("Backfilling initial batch through %s", source.mxid)
         else:
             self.log.debug("Backfilling history through %s", source.mxid)
-            if self.earliest_message_twid == None:
-                self.log.warn("Can't backfill backwards without an earliest bridged message ID")
-                return
 
-        max_id = None if is_initial else self.earliest_message_twid
+        first_message = await DBMessage.get_first(self.mxid)
+        max_id = None
+        if not is_initial:
+            if first_message is not None:
+                max_id = first_message.twid
+            else:
+                self.log.warn("Can't backfill without a first bridged message!")
+                return 0
 
         entries = await self._fetch_backfill_entries(source, limit, max_id)
         if not entries:
             self.log.debug("Didn't get any entries from server")
-            return
+            return 0
 
         self.log.debug("Got %d entries from server", len(entries))
 
         backfill_leave = await self._invite_own_puppet_backfill(source)
         async with NotificationDisabler(self.mxid, source):
-            if is_initial:
-                for entry in reversed(entries):
-                    await self._handle_backfill_entry(source, entry)
-            else:
-                await self._batch_handle_backfill(source, reversed(entries))
+            await self._batch_handle_backfill(source, reversed(entries), is_initial)
         for intent in backfill_leave:
             self.log.trace("Leaving room with %s post-backfill", intent.mxid)
             await intent.leave_room(self.mxid)
         self.log.info("Backfilled %d messages through %s", len(entries), source.mxid)
+        return len(entries)
 
     async def _fetch_backfill_entries(
         self, source: u.User, limit: int, max_id: int | None = None
@@ -898,9 +923,85 @@ class Portal(DBPortal, BasePortal):
             )
 
     async def _batch_handle_backfill(
-        self, source: u.User, entries: list[MessageEntry | ReactionCreateEntry]
+        self, source: u.User, entries: list[MessageEntry | ReactionCreateEntry], is_forward: bool
     ) -> None:
-        pass
+        events = []
+        users_in_batch = set()
+        for entry in entries:
+            sender = await p.Puppet.get_by_twid(int(entry.sender_id))
+            users_in_batch.add(sender.mxid)
+            if isinstance(entry, MessageEntry):
+                msg_id = int(entry.message_data.id)
+                if await self._twitter_message_dedupe(
+                    entry.request_id, msg_id, entry.message_data.sender_id
+                ):
+                    converted = await self._convert_twitter_message(
+                        source, sender, entry.message_data
+                    )
+                    for content in converted:
+                        event_type = EventType.ROOM_MESSAGE
+                        if self.encrypted and self.matrix.e2ee:
+                            event_type, content = await self.matrix.e2ee.encrypt(
+                                self.mxid, event_type, content
+                            )
+                        # TODO: deterministic event ID
+                        events.append(
+                            BatchSendEvent(
+                                event_type,
+                                content,
+                                sender.mxid,
+                                entry.message_data.time.timestamp() * 1000,
+                            )
+                        )
+            elif isinstance(entry, ReactionCreateEntry):
+                pass  # TODO: no reactions in batches yet
+
+        if len(events) == 0:
+            self.log.warn("No bridgeable messages in backfill batch")
+            return
+
+        intent = self.main_intent
+
+        before_first_message_timestamp = events[0].timestamp - 1
+        state_events_at_start = []
+        for u in users_in_batch:
+            puppet = await self.bridge.get_puppet(u)
+            if puppet is None:
+                self.log.warn("No puppet found for user %s while backfilling!", u)
+                continue
+            state_events_at_start.append(
+                BatchSendStateEvent(
+                    EventType.ROOM_MEMBER,
+                    content=MemberStateEventContent(
+                        Membership.INVITE, avatar_url=puppet.photo_mxc, displayname=puppet.name
+                    ),
+                    sender=intent.mxid,
+                    timestamp=before_first_message_timestamp,
+                )
+            )
+            state_events_at_start.append(
+                BatchSendStateEvent(
+                    EventType.ROOM_MEMBER,
+                    content=MemberStateEventContent(
+                        Membership.JOIN, avatar_url=puppet.photo_mxc, displayname=puppet.name
+                    ),
+                    sender=u,
+                    timestamp=before_first_message_timestamp,
+                )
+            )
+
+        first_event = await DBMessage.get_first(self.mxid)
+        resp = await intent.batch_send(
+            self.mxid,
+            first_event.mxid,
+            None if is_forward else self.next_batch_id,
+            events,
+            state_events_at_start,
+            beeper_new_messages=is_forward,
+        )
+
+        self.next_batch_id = resp.next_batch_id
+        await self.update()
 
     # endregion
     # region Bridge info state event
@@ -1062,7 +1163,7 @@ class Portal(DBPortal, BasePortal):
                 await self.main_intent.send_notice(self.mxid, msg)
 
             try:
-                await self.backfill(source, is_initial=True)
+                await self._enqueue_backfills(source)
             except Exception:
                 self.log.exception("Failed to backfill new portal")
 
@@ -1071,6 +1172,11 @@ class Portal(DBPortal, BasePortal):
             await self._update_participants(info.participants)
 
         return self.mxid
+
+    async def _enqueue_backfills(self, source: u.User) -> None:
+        state = DBBackfillStatus(self.twid, self.receiver, source.twid, False, 0, 0)
+        await state.insert()
+        await b.BackfillStatus.recheck()
 
     # endregion
     # region Database getters
