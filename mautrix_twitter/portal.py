@@ -926,6 +926,7 @@ class Portal(DBPortal, BasePortal):
         self, source: u.User, entries: list[MessageEntry | ReactionCreateEntry], is_forward: bool
     ) -> None:
         events = []
+        twids = []
         users_in_batch = set()
         for entry in entries:
             sender = await p.Puppet.get_by_twid(int(entry.sender_id))
@@ -953,6 +954,7 @@ class Portal(DBPortal, BasePortal):
                                 entry.message_data.time.timestamp() * 1000,
                             )
                         )
+                        twids.append(msg_id)
             elif isinstance(entry, ReactionCreateEntry):
                 pass  # TODO: no reactions in batches yet
 
@@ -1000,6 +1002,9 @@ class Portal(DBPortal, BasePortal):
             beeper_new_messages=is_forward,
         )
 
+        for i, event_id in enumerate(resp.event_id):
+            msg = DBMessage(event_id, self.mxid, twids[i], self.receiver)
+            await msg.upsert()
         self.next_batch_id = resp.next_batch_id
         await self.update()
 
