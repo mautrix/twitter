@@ -137,7 +137,7 @@ async def upgrade_v5(conn: Connection) -> None:
          state INTEGER,
          PRIMARY KEY (twid, receiver),
          FOREIGN KEY (twid, receiver) REFERENCES portal(twid, receiver)
-             ON DELETE CASCADE,
+             ON DELETE CASCADE
         )
     """
     )

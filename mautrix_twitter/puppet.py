@@ -112,7 +112,10 @@ class Puppet(DBPuppet, BasePuppet):
     async def update_info(self, info: User) -> None:
         update = False
         update = await self._update_name(info) or update
-        update = await self._update_avatar(info.profile_image_url_https) or update
+        try:
+            update = await self._update_avatar(info.profile_image_url_https) or update
+        except:
+            pass
         if update:
             await self.update()
 

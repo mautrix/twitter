@@ -16,11 +16,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import traceback
 
 # from .config import Config
 from .db import BackfillStatus as DBBackfillStatus
 from .portal import Portal
 from .user import User
+
+
+class NoFirstMessageException(BaseException):
+    pass
 
 
 class BackfillStatus(DBBackfillStatus):
@@ -38,7 +44,10 @@ class BackfillStatus(DBBackfillStatus):
             if status != None:
                 return status
 
-            asyncio.wait_for(recheck_queue, 60.0)
+            try:
+                await asyncio.wait_for(recheck_queue.get(), 10)
+            except asyncio.exceptions.TimeoutError:
+                pass
 
     @classmethod
     async def backfill_loop(cls) -> None:
@@ -50,15 +59,22 @@ class BackfillStatus(DBBackfillStatus):
             portal = await Portal.get_by_twid(twid=state.twid, receiver=state.receiver)
             source = await User.get_by_twid(state.backfill_user)
             try:
-                num_filled = await portal.backfill(
-                    source, is_initial=True if state.state == 0 else False
-                )
-                state.message_count += num_filled
-                if state.state == 0:
-                    state.state = 1
-                elif state.message_count >= 1000:  # TODO: don't hardcode message limit
-                    state.state = 2
+                state.dispatched = True
                 await state.update()
-            except Exception:
+                num_filled = await portal.backfill(source, is_initial=state.state == 0)
+
+                state.message_count += num_filled
+                # TODO: don't hardcode message limit
+                if num_filled == 0 or state.message_count >= 1000:
+                    state.state = 2
+                elif state.state == 0:
+                    state.state = 1
+            except NoFirstMessageException:
+                logging.error("No first message found to do backfill!")
+                state.state = 0
+            except Exception as e:
                 # TODO: handle and log error, and don't get stuck in backfill loops
-                pass
+                logging.error(traceback.format_exc())
+            finally:
+                state.dispatched = False
+                await state.update()

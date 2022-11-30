@@ -52,7 +52,7 @@ class BackfillStatus:
         await self.db.execute(q, *self._values)
 
     async def update(self) -> None:
-        q = """UPDATE backfill_status SET backfill_user=$3 dispatched=$4, message_count=$5, self.state=$6
+        q = """UPDATE backfill_status SET backfill_user=$3, dispatched=$4, message_count=$5, state=$6
             WHERE twid=$1 AND receiver=$2"""
         await self.db.execute(q, *self._values)
 

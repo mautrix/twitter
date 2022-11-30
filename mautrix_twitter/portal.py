@@ -828,13 +828,13 @@ class Portal(DBPortal, BasePortal):
     # region Backfilling
 
     async def backfill(self, source: u.User, is_initial: bool = False) -> int:
-        limit = self.config["bridge.backfill.initial_limit"]
+        limit = 100  # self.config["bridge.backfill.initial_limit"]
         if limit == 0:
             return 0
         elif limit < 0:
             limit = None
         with self.backfill_lock:
-            return self._backfill(source, limit, is_initial)
+            return await self._backfill(source, limit, is_initial)
 
     async def _backfill(self, source: u.User, limit: int, is_initial: bool = False) -> int:
         if is_initial:
@@ -849,7 +849,7 @@ class Portal(DBPortal, BasePortal):
                 max_id = first_message.twid
             else:
                 self.log.warn("Can't backfill without a first bridged message!")
-                return 0
+                raise b.NoFirstMessageException()
 
         entries = await self._fetch_backfill_entries(source, limit, max_id)
         if not entries:
@@ -858,12 +858,12 @@ class Portal(DBPortal, BasePortal):
 
         self.log.debug("Got %d entries from server", len(entries))
 
-        backfill_leave = await self._invite_own_puppet_backfill(source)
+        # backfill_leave = await self._invite_own_puppet_backfill(source)
         async with NotificationDisabler(self.mxid, source):
             await self._batch_handle_backfill(source, reversed(entries), is_initial)
-        for intent in backfill_leave:
-            self.log.trace("Leaving room with %s post-backfill", intent.mxid)
-            await intent.leave_room(self.mxid)
+        # for intent in backfill_leave:
+        #     self.log.trace("Leaving room with %s post-backfill", intent.mxid)
+        #     await intent.leave_room(self.mxid)
         self.log.info("Backfilled %d messages through %s", len(entries), source.mxid)
         return len(entries)
 
@@ -928,6 +928,7 @@ class Portal(DBPortal, BasePortal):
         events = []
         twids = []
         users_in_batch = set()
+        self.log.debug("Converting Twitter messages in batch")
         for entry in entries:
             sender = await p.Puppet.get_by_twid(int(entry.sender_id))
             users_in_batch.add(sender.mxid)
@@ -948,10 +949,10 @@ class Portal(DBPortal, BasePortal):
                         # TODO: deterministic event ID
                         events.append(
                             BatchSendEvent(
-                                event_type,
-                                content,
-                                sender.mxid,
-                                entry.message_data.time.timestamp() * 1000,
+                                type=event_type,
+                                content=content,
+                                sender=sender.mxid,
+                                timestamp=entry.message_data.time.timestamp() * 1000,
                             )
                         )
                         twids.append(msg_id)
@@ -966,39 +967,49 @@ class Portal(DBPortal, BasePortal):
 
         before_first_message_timestamp = events[0].timestamp - 1
         state_events_at_start = []
-        for u in users_in_batch:
-            puppet = await self.bridge.get_puppet(u)
-            if puppet is None:
-                self.log.warn("No puppet found for user %s while backfilling!", u)
-                continue
-            state_events_at_start.append(
-                BatchSendStateEvent(
-                    EventType.ROOM_MEMBER,
-                    content=MemberStateEventContent(
-                        Membership.INVITE, avatar_url=puppet.photo_mxc, displayname=puppet.name
-                    ),
-                    sender=intent.mxid,
-                    timestamp=before_first_message_timestamp,
-                )
-            )
-            state_events_at_start.append(
-                BatchSendStateEvent(
-                    EventType.ROOM_MEMBER,
-                    content=MemberStateEventContent(
-                        Membership.JOIN, avatar_url=puppet.photo_mxc, displayname=puppet.name
-                    ),
-                    sender=u,
-                    timestamp=before_first_message_timestamp,
-                )
-            )
+        # self.log.debug("Adding member state events to batch")
+        # for u in users_in_batch:
+        #     puppet = await self.bridge.get_puppet(u)
+        #     if puppet is None:
+        #         self.log.warn("No puppet found for user %s while backfilling!", u)
+        #         continue
+        #     state_events_at_start.append(
+        #         BatchSendStateEvent(
+        #             type=EventType.ROOM_MEMBER,
+        #             content=MemberStateEventContent(
+        #                 Membership.INVITE, avatar_url=puppet.photo_mxc, displayname=puppet.name
+        #             ),
+        #             sender=intent.mxid,
+        #             timestamp=before_first_message_timestamp,
+        #             state_key=u,
+        #         )
+        #     )
+        #     state_events_at_start.append(
+        #         BatchSendStateEvent(
+        #             type=EventType.ROOM_MEMBER,
+        #             content=MemberStateEventContent(
+        #                 Membership.JOIN, avatar_url=puppet.photo_mxc, displayname=puppet.name
+        #             ),
+        #             sender=u,
+        #             timestamp=before_first_message_timestamp,
+        #             state_key=u,
+        #         )
+        #     )
 
-        first_event = await DBMessage.get_first(self.mxid)
+        first_event = None
+        if not is_forward:
+            first_event = await DBMessage.get_first(self.mxid)
+            if first_event is None:
+                raise b.NoFirstMessageException
+            else:
+                first_event = first_event.mxid
+        self.log.debug("Sending batch send request")
         resp = await intent.batch_send(
             self.mxid,
-            first_event.mxid,
-            None if is_forward else self.next_batch_id,
-            events,
-            state_events_at_start,
+            first_event,
+            batch_id=None if is_forward else self.next_batch_id,
+            events=events,
+            state_events_at_start=state_events_at_start,
             beeper_new_messages=is_forward,
         )
 
