@@ -29,6 +29,10 @@ class NoFirstMessageException(BaseException):
     pass
 
 
+class NoBridgeableMessagesException(BaseException):
+    pass
+
+
 class BackfillStatus(DBBackfillStatus):
     recheck_queues: set[asyncio.Queue] = set()
 

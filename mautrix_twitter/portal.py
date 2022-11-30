@@ -952,7 +952,7 @@ class Portal(DBPortal, BasePortal):
                                 type=event_type,
                                 content=content,
                                 sender=sender.mxid,
-                                timestamp=entry.message_data.time.timestamp() * 1000,
+                                timestamp=int(entry.message_data.time.timestamp() * 1000),
                             )
                         )
                         twids.append(msg_id)
@@ -961,7 +961,7 @@ class Portal(DBPortal, BasePortal):
 
         if len(events) == 0:
             self.log.warn("No bridgeable messages in backfill batch")
-            return
+            raise b.NoBridgeableMessagesException
 
         intent = self.main_intent
 
@@ -1009,11 +1009,11 @@ class Portal(DBPortal, BasePortal):
             first_event,
             batch_id=None if is_forward else self.next_batch_id,
             events=events,
-            state_events_at_start=state_events_at_start,
+            # state_events_at_start=state_events_at_start,
             beeper_new_messages=is_forward,
         )
 
-        for i, event_id in enumerate(resp.event_id):
+        for i, event_id in enumerate(resp.event_ids):
             msg = DBMessage(event_id, self.mxid, twids[i], self.receiver)
             await msg.upsert()
         self.next_batch_id = resp.next_batch_id
