@@ -33,6 +33,10 @@ class NoBridgeableMessagesException(BaseException):
     pass
 
 
+class AtEndException(BaseException):
+    pass
+
+
 class BackfillStatus(DBBackfillStatus):
     recheck_queues: set[asyncio.Queue] = set()
 
@@ -73,6 +77,9 @@ class BackfillStatus(DBBackfillStatus):
                     state.state = 2
                 elif state.state == 0:
                     state.state = 1
+            except AtEndException:
+                logging.info("At end of Twitter backfill, finishing")
+                state.state = 3
             except NoFirstMessageException:
                 logging.error("No first message found to do backfill!")
                 state.state = 0

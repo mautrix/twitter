@@ -25,9 +25,9 @@ class SendResponse(SerializableAttrs):
 @dataclass
 class FetchConversationResponse(SerializableAttrs):
     status: TimelineStatus
-    min_entry_id: str
-    max_entry_id: str
-    entries: List[Entry]
+    min_entry_id: Optional[str]
+    max_entry_id: Optional[str]
+    entries: Optional[List[Entry]]
     users: Dict[str, User]
     conversations: Optional[Dict[str, Conversation]] = None
 

@@ -875,10 +875,10 @@ class Portal(DBPortal, BasePortal):
         message_count = 0
         self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
         try:
-            max_id = max_id
             while True:
                 resp = await conv.fetch(max_id=max_id)
-                max_id = resp.min_entry_id
+                if resp.status == TimelineStatus.AT_END or resp.entries is None:
+                    raise b.AtEndException()
                 for entry in resp.entries:
                     if entry and entry.message:
                         entries.append(entry.message)
@@ -889,9 +889,6 @@ class Portal(DBPortal, BasePortal):
                         break
                 if message_count >= limit:
                     self.log.debug("Got more messages than limit")
-                    break
-                elif resp.status == TimelineStatus.AT_END:
-                    self.log.debug("Got all messages in conversation")
                     break
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
