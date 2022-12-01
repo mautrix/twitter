@@ -135,4 +135,11 @@ class Conversation:
             req = req.update_query({"max_id": max_id})
         async with self.api.http.get(req, headers=self.api.headers) as resp:
             resp_data = await check_error(resp)
-        return FetchConversationResponse.deserialize(resp_data["conversation_timeline"])
+        data = resp_data["conversation_timeline"]
+        if "entries" not in data:
+            data["entries"] = None
+        if "min_entry_id" not in data:
+            data["min_entry_id"] = None
+        if "max_entry_id" not in data:
+            data["max_entry_id"] = None
+        return FetchConversationResponse.deserialize(data)

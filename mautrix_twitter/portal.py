@@ -858,14 +858,17 @@ class Portal(DBPortal, BasePortal):
 
         self.log.debug("Got %d entries from server", len(entries))
 
+        filled = 0
         # backfill_leave = await self._invite_own_puppet_backfill(source)
         async with NotificationDisabler(self.mxid, source):
-            await self._batch_handle_backfill(source, reversed(entries), is_initial)
+            filled = await self._batch_handle_backfill(source, reversed(entries), is_initial)
         # for intent in backfill_leave:
         #     self.log.trace("Leaving room with %s post-backfill", intent.mxid)
         #     await intent.leave_room(self.mxid)
-        self.log.info("Backfilled %d messages through %s", len(entries), source.mxid)
-        return len(entries)
+        self.log.info(
+            "Backfilled %d messages (%d events) through %s", len(entries), filled, source.mxid
+        )
+        return filled
 
     async def _fetch_backfill_entries(
         self, source: u.User, limit: int, max_id: int | None = None
@@ -877,8 +880,8 @@ class Portal(DBPortal, BasePortal):
         try:
             while True:
                 resp = await conv.fetch(max_id=max_id)
-                if resp.status == TimelineStatus.AT_END or resp.entries is None:
-                    raise b.AtEndException()
+                if resp.entries is None:
+                    return None
                 for entry in resp.entries:
                     if entry and entry.message:
                         entries.append(entry.message)
@@ -892,9 +895,7 @@ class Portal(DBPortal, BasePortal):
                     break
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
-        if message_count != len(entries):
-            # Needs sorting to get reactions into correct place
-            entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
+        entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
         return entries
 
     async def _invite_own_puppet_backfill(self, source: u.User) -> set[IntentAPI]:
@@ -921,7 +922,7 @@ class Portal(DBPortal, BasePortal):
 
     async def _batch_handle_backfill(
         self, source: u.User, entries: list[MessageEntry | ReactionCreateEntry], is_forward: bool
-    ) -> None:
+    ) -> int:
         events = []
         twids = []
         users_in_batch = set()
@@ -958,12 +959,12 @@ class Portal(DBPortal, BasePortal):
 
         if len(events) == 0:
             self.log.warn("No bridgeable messages in backfill batch")
-            raise b.NoBridgeableMessagesException
+            return 0
 
         intent = self.main_intent
 
-        before_first_message_timestamp = events[0].timestamp - 1
-        state_events_at_start = []
+        # before_first_message_timestamp = events[0].timestamp - 1
+        # state_events_at_start = []
         # self.log.debug("Adding member state events to batch")
         # for u in users_in_batch:
         #     puppet = await self.bridge.get_puppet(u)
@@ -1015,6 +1016,7 @@ class Portal(DBPortal, BasePortal):
             await msg.upsert()
         self.next_batch_id = resp.next_batch_id
         await self.update()
+        return len(events)
 
     # endregion
     # region Bridge info state event
