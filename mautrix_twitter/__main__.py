@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from typing import Any
+import asyncio
 
 from mautrix.bridge import Bridge
 from mautrix.types import RoomID, UserID
@@ -64,7 +65,7 @@ class TwitterBridge(Bridge):
         Portal.init_cls(self)
         if self.config["bridge.resend_bridge_info"]:
             self.add_startup_actions(self.resend_bridge_info())
-        self.add_startup_actions(BackfillStatus.backfill_loop())
+        asyncio.create_task(BackfillStatus.backfill_loop())
         await super().start()
 
     def prepare_stop(self) -> None:
