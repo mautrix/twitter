@@ -489,7 +489,7 @@ class Portal(DBPortal, BasePortal):
     ) -> None:
         intent = sender.intent_for(self)
         event_id = None
-        converted = self._convert_twitter_message(source, sender, message)
+        converted = await self._convert_twitter_message(source, sender, message)
         for content in converted:
             event_id = await self._send_message(intent, content, timestamp=message.time)
         if event_id:
