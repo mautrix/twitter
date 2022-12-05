@@ -41,7 +41,7 @@ class Message:
     async def upsert(self) -> None:
         q = """
             INSERT INTO message(mxid, mx_room, twid, receiver) VALUES($1, $2, $3, $4)
-            ON CONFLICT(mxid, mx_room) DO UPDATE SET twid=excluded.twid
+            ON CONFLICT(twid, receiver) DO UPDATE SET twid=excluded.twid, receiver=excluded.receiver
         """
         await self.db.execute(q, self.mxid, self.mx_room, self.twid, self.receiver)
 
