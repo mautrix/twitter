@@ -23,7 +23,7 @@ import asyncio
 from yarl import URL
 import magic
 
-from mautrix.appservice import AppService, IntentAPI
+from mautrix.appservice import DOUBLE_PUPPET_SOURCE_KEY, AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.types import (
@@ -944,6 +944,7 @@ class Portal(DBPortal, BasePortal):
                             event_type, content = await self.matrix.e2ee.encrypt(
                                 self.mxid, event_type, content
                             )
+                        content[DOUBLE_PUPPET_SOURCE_KEY] = self.bridge.name
                         # TODO: deterministic event ID
                         events.append(
                             BatchSendEvent(
