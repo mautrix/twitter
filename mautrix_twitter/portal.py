@@ -878,7 +878,7 @@ class Portal(DBPortal, BasePortal):
 
     async def _fetch_backfill_entries(
         self, source: u.User, limit: int, max_id: int | None = None
-    ) -> tuple[bool, list[MessageEntry | ReactionCreateEntry]] | None:
+    ) -> tuple[bool, list[MessageEntry | ReactionCreateEntry]]:
         conv = source.client.conversation(self.twid)
         entries: list[MessageEntry | ReactionCreateEntry] = []
         message_count = 0
@@ -889,14 +889,14 @@ class Portal(DBPortal, BasePortal):
             if (
                 resp.entries is not None
                 and len(resp.entries) != 0
-                and int(resp.conversations[0].last_read_event_id)
+                and int(resp.conversations[self.twid].last_read_event_id)
                 >= int(resp.entries[0].message.id)
             ):
                 mark_read = True
 
             while True:
                 if resp.entries is None:
-                    return None
+                    break
                 for entry in resp.entries:
                     if entry and entry.message:
                         entries.append(entry.message)
@@ -913,12 +913,12 @@ class Portal(DBPortal, BasePortal):
                 resp = await conv.fetch(max_id=max_id)
 
             if len(entries) == 0:
-                return None
+                return None, None
             entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
             return mark_read, entries
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
-            return None
+            return None, None
 
     async def _invite_own_puppet_backfill(self, source: u.User) -> set[IntentAPI]:
         backfill_leave = set()
