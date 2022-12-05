@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, ca
 from collections import deque
 from datetime import datetime
 import asyncio
+import time
 
 from yarl import URL
 import magic
@@ -85,6 +86,7 @@ except ImportError:
 
 StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
+StateMarker = EventType.find("org.matrix.msc2716.marker", EventType.Class.STATE)
 
 
 class UnsupportedAttachmentError(NotImplementedError):
@@ -1020,6 +1022,18 @@ class Portal(DBPortal, BasePortal):
             await msg.upsert()
         self.next_batch_id = resp.next_batch_id
         await self.update()
+
+        if resp.base_insertion_event_id:
+            await self.main_intent.send_state_event(
+                self.mxid,
+                StateMarker,
+                {
+                    "org.matrix.msc2716.marker.insertion": resp.base_insertion_event_id,
+                    "com.beeper.timestamp": int(time.time() * 1000),
+                },
+                state_key=resp.base_insertion_event_id,
+            )
+
         return len(events)
 
     # endregion
