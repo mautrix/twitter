@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, Tuple, cast
 from collections import deque
 from datetime import datetime
 import asyncio
@@ -856,7 +856,7 @@ class Portal(DBPortal, BasePortal):
                 self.log.warn("Can't backfill without a first bridged message!")
                 raise b.NoFirstMessageException()
 
-        entries = await self._fetch_backfill_entries(source, limit, max_id)
+        mark_read, entries = await self._fetch_backfill_entries(source, limit, max_id)
         if not entries:
             self.log.debug("Didn't get any entries from server")
             return 0
@@ -865,8 +865,9 @@ class Portal(DBPortal, BasePortal):
 
         filled = 0
         # backfill_leave = await self._invite_own_puppet_backfill(source)
-        async with NotificationDisabler(self.mxid, source):
-            filled = await self._batch_handle_backfill(source, reversed(entries), is_initial)
+        filled = await self._batch_handle_backfill(
+            source, reversed(entries), is_initial, mark_read
+        )
         # for intent in backfill_leave:
         #     self.log.trace("Leaving room with %s post-backfill", intent.mxid)
         #     await intent.leave_room(self.mxid)
@@ -877,14 +878,23 @@ class Portal(DBPortal, BasePortal):
 
     async def _fetch_backfill_entries(
         self, source: u.User, limit: int, max_id: int | None = None
-    ) -> list[MessageEntry | ReactionCreateEntry]:
+    ) -> tuple[bool, list[MessageEntry | ReactionCreateEntry]] | None:
         conv = source.client.conversation(self.twid)
         entries: list[MessageEntry | ReactionCreateEntry] = []
         message_count = 0
         self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
         try:
+            mark_read = False
+            resp = await conv.fetch(max_id=max_id)
+            if (
+                resp.entries is not None
+                and len(resp.entries) != 0
+                and int(resp.conversations[0].last_read_event_id)
+                >= int(resp.entries[0].message.id)
+            ):
+                mark_read = True
+
             while True:
-                resp = await conv.fetch(max_id=max_id)
                 if resp.entries is None:
                     return None
                 for entry in resp.entries:
@@ -898,10 +908,17 @@ class Portal(DBPortal, BasePortal):
                 if message_count >= limit:
                     self.log.debug("Got more messages than limit")
                     break
+
+                max_id = int(resp.entries[-1].message.id)
+                resp = await conv.fetch(max_id=max_id)
+
+            if len(entries) == 0:
+                return None
+            entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
+            return mark_read, entries
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
-        entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
-        return entries
+            return None
 
     async def _invite_own_puppet_backfill(self, source: u.User) -> set[IntentAPI]:
         backfill_leave = set()
@@ -926,7 +943,11 @@ class Portal(DBPortal, BasePortal):
             )
 
     async def _batch_handle_backfill(
-        self, source: u.User, entries: list[MessageEntry | ReactionCreateEntry], is_forward: bool
+        self,
+        source: u.User,
+        entries: list[MessageEntry | ReactionCreateEntry],
+        is_forward: bool,
+        mark_read: bool,
     ) -> int:
         events = []
         twids = []
@@ -1015,6 +1036,7 @@ class Portal(DBPortal, BasePortal):
             events=events,
             # state_events_at_start=state_events_at_start,
             beeper_new_messages=is_forward,
+            beeper_mark_read_by=source.mxid if mark_read else None,
         )
 
         for i, event_id in enumerate(resp.event_ids):
