@@ -828,7 +828,7 @@ class Portal(DBPortal, BasePortal):
     # region Backfilling
 
     async def backfill(self, source: u.User, is_initial: bool = False) -> int:
-        limit = 100  # self.config["bridge.backfill.initial_limit"]
+        limit = self.config["bridge.backfill.initial_limit"]
         if limit == 0:
             return 0
         elif limit < 0:
@@ -839,6 +839,9 @@ class Portal(DBPortal, BasePortal):
     async def _backfill(self, source: u.User, limit: int, is_initial: bool = False) -> int:
         if is_initial:
             self.log.debug("Backfilling initial batch through %s", source.mxid)
+        elif not self.config["bridge.backfill.backwards"]:
+            self.log.debug("Not backfilling history, disabled in config")
+            return 0
         else:
             self.log.debug("Backfilling history through %s", source.mxid)
 

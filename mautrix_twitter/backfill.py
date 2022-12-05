@@ -64,8 +64,7 @@ class BackfillStatus(DBBackfillStatus):
                 num_filled = await portal.backfill(source, is_initial=state.state == 0)
 
                 state.message_count += num_filled
-                # TODO: don't hardcode message limit
-                if num_filled == 0 or state.message_count >= 1000:
+                if num_filled == 0:
                     state.state = 2
                 elif state.state == 0:
                     state.state = 1
