@@ -886,16 +886,19 @@ class Portal(DBPortal, BasePortal):
         try:
             mark_read = False
             resp = await conv.fetch(max_id=max_id)
-            if (
-                resp.entries is not None
-                and len(resp.entries) != 0
-                and int(resp.conversations[self.twid].last_read_event_id)
-                >= int(resp.entries[0].message.id)
-            ):
-                mark_read = True
+            try:
+                if (
+                    resp.entries is not None
+                    and len(resp.entries) != 0
+                    and int(resp.conversations[self.twid].last_read_event_id)
+                    >= int(resp.entries[0].message.id)
+                ):
+                    mark_read = True
+            except:
+                pass  # mark_read is false
 
             while True:
-                if resp.entries is None:
+                if resp.entries is None or len(resp.entries) == 0:
                     break
                 for entry in resp.entries:
                     if entry and entry.message:
