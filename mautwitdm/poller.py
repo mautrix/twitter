@@ -5,6 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 from __future__ import annotations
 
+from typing import Dict
 import asyncio
 import logging
 import time
@@ -16,7 +17,7 @@ from yarl import URL
 from . import conversation as c
 from .dispatcher import TwitterDispatcher
 from .errors import RateLimitError, check_error
-from .types import InitialStateResponse, PollResponse
+from .types import InboxTimeline, InitialStateResponse, PollResponse, TimelineStatus
 
 
 class PollingStarted:
@@ -101,6 +102,50 @@ class TwitterPoller(TwitterDispatcher):
             "skip_status": "1",
             **self.poll_params,
         }
+
+    async def all_trusted_conversations(self) -> Dict[str, c.Conversation]:
+        """
+        Get all trusted conversations from the inbox (using pagination).
+
+        Returns:
+            Dictionary containing all conversations, keyed by their ID.
+        """
+        initial_state = await self.inbox_initial_state(set_poll_cursor=False)
+        conversations = initial_state.conversations
+
+        if initial_state.inbox_timelines.trusted.status == TimelineStatus.AT_END:
+            return conversations
+
+        min_entry_id = initial_state.inbox_timelines.trusted.min_entry_id
+
+        while True:
+            inbox_timeline = await self.inbox_timeline("trusted", min_entry_id)
+
+            if inbox_timeline.conversations is not None:
+                conversations |= inbox_timeline.conversations
+
+            if inbox_timeline.status == TimelineStatus.AT_END:
+                return conversations
+
+            if inbox_timeline.min_entry_id is not None:
+                min_entry_id = inbox_timeline.min_entry_id
+            else:
+                return conversations
+
+    async def inbox_timeline(self, inbox: str, max_id: str) -> InboxTimeline:
+        """
+        Gets a page of DMs from one of the possible inbox timelines.
+
+        Returns:
+            The response data from the server.
+        """
+        url = (self.dm_url / "inbox_timeline" / f"{inbox}.json").with_query(
+            {**self.full_state_params, "max_id": max_id}
+        )
+        async with self.http.get(url, headers=self.headers) as resp:
+            data = await check_error(resp)
+            response = InboxTimeline.deserialize(data["inbox_timeline"])
+            return response
 
     async def inbox_initial_state(self, set_poll_cursor: bool = True) -> InitialStateResponse:
         """

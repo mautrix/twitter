@@ -16,11 +16,13 @@
 from __future__ import annotations
 
 from typing import Any
+import asyncio
 
 from mautrix.bridge import Bridge
 from mautrix.types import RoomID, UserID
 
 from . import commands
+from .backfill import BackfillStatus
 from .config import Config
 from .db import init as init_db, upgrade_table
 from .matrix import MatrixHandler
@@ -63,6 +65,7 @@ class TwitterBridge(Bridge):
         Portal.init_cls(self)
         if self.config["bridge.resend_bridge_info"]:
             self.add_startup_actions(self.resend_bridge_info())
+        asyncio.create_task(BackfillStatus.backfill_loop())
         await super().start()
 
     def prepare_stop(self) -> None:

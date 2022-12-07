@@ -25,10 +25,10 @@ class SendResponse(SerializableAttrs):
 @dataclass
 class FetchConversationResponse(SerializableAttrs):
     status: TimelineStatus
-    min_entry_id: str
-    max_entry_id: str
-    entries: List[Entry]
     users: Dict[str, User]
+    min_entry_id: Optional[str] = None
+    max_entry_id: Optional[str] = None
+    entries: Optional[List[Entry]] = None
     conversations: Optional[Dict[str, Conversation]] = None
 
 
@@ -50,6 +50,9 @@ class PollResponse(SerializableAttrs):
 class InboxTimeline(SerializableAttrs):
     status: TimelineStatus
     min_entry_id: Optional[str] = None
+    entries: Optional[List[Entry]] = None
+    users: Optional[Dict[str, User]] = None
+    conversations: Optional[Dict[str, Conversation]] = None
 
 
 @dataclass

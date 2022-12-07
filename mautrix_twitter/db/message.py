@@ -38,6 +38,13 @@ class Message:
         q = "INSERT INTO message (mxid, mx_room, twid, receiver) VALUES ($1, $2, $3, $4)"
         await self.db.execute(q, self.mxid, self.mx_room, self.twid, self.receiver)
 
+    async def upsert(self) -> None:
+        q = """
+            INSERT INTO message(mxid, mx_room, twid, receiver) VALUES($1, $2, $3, $4)
+            ON CONFLICT(twid, receiver) DO UPDATE SET twid=excluded.twid, receiver=excluded.receiver
+        """
+        await self.db.execute(q, self.mxid, self.mx_room, self.twid, self.receiver)
+
     async def delete(self) -> None:
         q = "DELETE FROM message WHERE twid=$1 AND receiver=$2"
         await self.db.execute(q, self.twid, self.receiver)
@@ -57,6 +64,14 @@ class Message:
     @classmethod
     async def get_last(cls, mx_room: RoomID) -> Message | None:
         q = "SELECT mxid, mx_room, twid, receiver FROM message WHERE mx_room=$1 ORDER BY twid DESC LIMIT 1"
+        row = await cls.db.fetchrow(q, mx_room)
+        if not row:
+            return None
+        return cls(**row)
+
+    @classmethod
+    async def get_first(cls, mx_room: RoomID) -> Message | None:
+        q = "SELECT mxid, mx_room, twid, receiver FROM message WHERE mx_room=$1 ORDER BY twid ASC LIMIT 1"
         row = await cls.db.fetchrow(q, mx_room)
         if not row:
             return None

@@ -153,6 +153,8 @@ bridge:
         # If using double puppeting, should notifications be disabled
         # while the initial backfill is in progress?
         disable_notifications: false
+        # Backfill backwards after the initial batch (requires MSC2716 support on homeserver)
+        backwards: false
     # End-to-bridge encryption support options.
     #
     # See https://docs.mau.fi/bridges/general/end-to-bridge-encryption.html for more info.

@@ -68,6 +68,7 @@ class Config(BaseBridgeConfig):
         copy("bridge.backfill.invite_own_puppet")
         copy("bridge.backfill.initial_limit")
         copy("bridge.backfill.disable_notifications")
+        copy("bridge.backfill.backwards")
         copy("bridge.private_chat_portal_meta")
         copy("bridge.delivery_receipts")
         copy("bridge.delivery_error_reports")

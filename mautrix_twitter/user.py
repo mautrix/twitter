@@ -359,16 +359,22 @@ class User(DBUser, BaseUser):
         if not self.poll_cursor:
             self.poll_cursor = resp.cursor
         self.client.poll_cursor = self.poll_cursor
+        self.log.debug("Fetching all trusted conversations...")
+        conversations = await self.client.all_trusted_conversations()
         limit = self.config["bridge.initial_conversation_sync"]
         conversations = sorted(
-            resp.conversations.values(), key=lambda conv: conv.sort_timestamp, reverse=True
+            conversations.values(), key=lambda conv: conv.sort_timestamp, reverse=True
         )
+        self.log.info("Got %d conversations (sync limit %d)", len(conversations), limit)
         if limit < 0:
             limit = len(conversations)
         for user in resp.users.values():
             await self.handle_user_update(user)
         index = 0
         for conversation in conversations:
+            self.log.info(
+                "Syncing conversation %s (%d of %d)", conversation.conversation_id, index, limit
+            )
             create_portal = index < limit and conversation.trusted
             if create_portal:
                 index += 1
@@ -419,7 +425,9 @@ class User(DBUser, BaseUser):
             evt.conversation_id, receiver=self.twid, conv_type=evt.type
         )
         if not portal.mxid:
+            self.log.debug("Conversation %s doesn't have MXID!", evt.conversation_id)
             if create_portal:
+                self.log.debug("Creating Matrix room...")
                 await portal.create_matrix_room(self, evt)
         else:
             # We don't want to do the invite_user and such things each time conversation info
