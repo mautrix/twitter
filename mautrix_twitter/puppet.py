@@ -114,8 +114,8 @@ class Puppet(DBPuppet, BasePuppet):
         update = await self._update_name(info) or update
         try:
             update = await self._update_avatar(info.profile_image_url_https) or update
-        except:
-            pass
+        except Exception:
+            self.log.exception("Error updating avatar from {info.profile_image_url_https}")
         if update:
             await self.update()
 
