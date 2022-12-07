@@ -38,7 +38,6 @@ class Portal:
     mxid: RoomID | None
     name: str | None
     encrypted: bool
-    earliest_message_twid: int | None
     next_batch_id: str | None
 
     @property
