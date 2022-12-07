@@ -129,7 +129,6 @@ class Portal(DBPortal, BasePortal):
         mxid: RoomID | None = None,
         name: str | None = None,
         encrypted: bool = False,
-        earliest_message_twid: int | None = None,
         next_batch_id: str | None = None,
     ) -> None:
         super().__init__(
@@ -140,7 +139,6 @@ class Portal(DBPortal, BasePortal):
             mxid,
             name,
             encrypted,
-            earliest_message_twid,
             next_batch_id,
         )
         self._create_room_lock = asyncio.Lock()
