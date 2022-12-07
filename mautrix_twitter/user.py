@@ -359,9 +359,11 @@ class User(DBUser, BaseUser):
         if not self.poll_cursor:
             self.poll_cursor = resp.cursor
         self.client.poll_cursor = self.poll_cursor
+        self.log.debug("Fetching all trusted conversations...")
+        conversations = await self.client.all_trusted_conversations()
         limit = self.config["bridge.initial_conversation_sync"]
         conversations = sorted(
-            resp.conversations.values(), key=lambda conv: conv.sort_timestamp, reverse=True
+            conversations.values(), key=lambda conv: conv.sort_timestamp, reverse=True
         )
         self.log.info("Got %d conversations (sync limit %d)", len(conversations), limit)
         if limit < 0:

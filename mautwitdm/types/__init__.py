@@ -32,6 +32,7 @@ from .message_entity import (
 from .reaction import ReactionCreateEntry, ReactionDeleteEntry, ReactionKey
 from .response import (
     FetchConversationResponse,
+    InboxTimeline,
     InitialStateResponse,
     MediaUploadResponse,
     PollResponse,
