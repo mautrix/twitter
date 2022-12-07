@@ -864,13 +864,19 @@ class Portal(DBPortal, BasePortal):
         self.log.debug("Got %d entries from server", len(entries))
 
         filled = 0
-        # backfill_leave = await self._invite_own_puppet_backfill(source)
-        filled = await self._batch_handle_backfill(
-            source, reversed(entries), is_initial, mark_read
-        )
-        # for intent in backfill_leave:
-        #     self.log.trace("Leaving room with %s post-backfill", intent.mxid)
-        #     await intent.leave_room(self.mxid)
+        if self.config["bridge.backfill.backwards"]:
+            filled = await self._batch_handle_backfill(
+                source, reversed(entries), is_initial, mark_read
+            )
+        else:
+            backfill_leave = await self._invite_own_puppet_backfill(source)
+            async with NotificationDisabler(self.mxid, source):
+                for entry in reversed(entries):
+                    await self._handle_backfill_entry(source, entry)
+                    filled += 1
+            for intent in backfill_leave:
+                self.log.trace("Leaving room with %s post-backfill", intent.mxid)
+                await intent.leave_room(self.mxid)
         self.log.info(
             "Backfilled %d messages (%d events) through %s", len(entries), filled, source.mxid
         )
@@ -895,7 +901,7 @@ class Portal(DBPortal, BasePortal):
                 ):
                     mark_read = True
             except:
-                pass  # mark_read is false
+                mark_read = True
 
             while True:
                 if resp.entries is None or len(resp.entries) == 0:
