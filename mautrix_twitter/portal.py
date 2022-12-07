@@ -997,36 +997,37 @@ class Portal(DBPortal, BasePortal):
 
         intent = self.main_intent
 
-        # before_first_message_timestamp = events[0].timestamp - 1
-        # state_events_at_start = []
-        # self.log.debug("Adding member state events to batch")
-        # for u in users_in_batch:
-        #     puppet = await self.bridge.get_puppet(u)
-        #     if puppet is None:
-        #         self.log.warn("No puppet found for user %s while backfilling!", u)
-        #         continue
-        #     state_events_at_start.append(
-        #         BatchSendStateEvent(
-        #             type=EventType.ROOM_MEMBER,
-        #             content=MemberStateEventContent(
-        #                 Membership.INVITE, avatar_url=puppet.photo_mxc, displayname=puppet.name
-        #             ),
-        #             sender=intent.mxid,
-        #             timestamp=before_first_message_timestamp,
-        #             state_key=u,
-        #         )
-        #     )
-        #     state_events_at_start.append(
-        #         BatchSendStateEvent(
-        #             type=EventType.ROOM_MEMBER,
-        #             content=MemberStateEventContent(
-        #                 Membership.JOIN, avatar_url=puppet.photo_mxc, displayname=puppet.name
-        #             ),
-        #             sender=u,
-        #             timestamp=before_first_message_timestamp,
-        #             state_key=u,
-        #         )
-        #     )
+        if not self.bridge.homeserver_software.is_hungry:
+            before_first_message_timestamp = events[0].timestamp - 1
+            state_events_at_start = []
+            self.log.debug("Adding member state events to batch")
+            for u in users_in_batch:
+                puppet = await self.bridge.get_puppet(u)
+                if puppet is None:
+                    self.log.warn("No puppet found for user %s while backfilling!", u)
+                    continue
+                state_events_at_start.append(
+                    BatchSendStateEvent(
+                        type=EventType.ROOM_MEMBER,
+                        content=MemberStateEventContent(
+                            Membership.INVITE, avatar_url=puppet.photo_mxc, displayname=puppet.name
+                        ),
+                        sender=intent.mxid,
+                        timestamp=before_first_message_timestamp,
+                        state_key=u,
+                    )
+                )
+                state_events_at_start.append(
+                    BatchSendStateEvent(
+                        type=EventType.ROOM_MEMBER,
+                        content=MemberStateEventContent(
+                            Membership.JOIN, avatar_url=puppet.photo_mxc, displayname=puppet.name
+                        ),
+                        sender=u,
+                        timestamp=before_first_message_timestamp,
+                        state_key=u,
+                    )
+                )
 
         first_event = None
         if not is_forward:
