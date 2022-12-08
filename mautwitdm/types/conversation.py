@@ -43,8 +43,8 @@ class Conversation(SerializableAttrs):
     participants: List[Participant]
     notifications_disabled: bool
     mention_notifications_disabled: bool
-    trusted: bool
-    low_quality: bool
+    trusted: Optional[bool] = None
+    low_quality: Optional[bool] = None
 
     sort_event_id: Optional[str] = None
     sort_timestamp: StringTimestamp = datetime.fromtimestamp(0)
