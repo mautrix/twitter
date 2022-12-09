@@ -103,7 +103,9 @@ class TwitterPoller(TwitterDispatcher):
             **self.poll_params,
         }
 
-    async def all_trusted_conversations(self) -> Dict[str, c.Conversation]:
+    async def all_trusted_conversations(
+        self,
+    ) -> tuple[Dict[str, c.Conversation], Dict[str, c.User]]:
         """
         Get all trusted conversations from the inbox (using pagination).
 
@@ -112,9 +114,10 @@ class TwitterPoller(TwitterDispatcher):
         """
         initial_state = await self.inbox_initial_state(set_poll_cursor=False)
         conversations = initial_state.conversations
+        users = initial_state.users
 
         if initial_state.inbox_timelines.trusted.status == TimelineStatus.AT_END:
-            return conversations
+            return conversations, users
 
         min_entry_id = initial_state.inbox_timelines.trusted.min_entry_id
 
@@ -125,13 +128,16 @@ class TwitterPoller(TwitterDispatcher):
             if inbox_timeline.conversations is not None:
                 conversations = {**conversations, **inbox_timeline.conversations}
 
+            if inbox_timeline.users is not None:
+                users = {**users, **inbox_timeline.users}
+
             if inbox_timeline.status == TimelineStatus.AT_END:
-                return conversations
+                return conversations, users
 
             if inbox_timeline.min_entry_id is not None:
                 min_entry_id = inbox_timeline.min_entry_id
             else:
-                return conversations
+                return conversations, users
 
     async def inbox_timeline(self, inbox: str, max_id: str) -> InboxTimeline:
         """
