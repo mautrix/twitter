@@ -55,6 +55,7 @@ class BackfillStatus(DBBackfillStatus):
         cls.recheck_queues.add(recheck_queue)
 
         while True:
+            await asyncio.sleep(2)
             state = await cls.get_next_backfill_status(recheck_queue)
             portal = await Portal.get_by_twid(twid=state.twid, receiver=state.receiver)
             source = await User.get_by_twid(state.backfill_user)

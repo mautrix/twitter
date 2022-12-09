@@ -119,10 +119,11 @@ class TwitterPoller(TwitterDispatcher):
         min_entry_id = initial_state.inbox_timelines.trusted.min_entry_id
 
         while True:
+            self.log.debug("Not at end, fetching more conversations with max_id %s", min_entry_id)
             inbox_timeline = await self.inbox_timeline("trusted", min_entry_id)
 
             if inbox_timeline.conversations is not None:
-                conversations |= inbox_timeline.conversations
+                conversations = {**conversations, **inbox_timeline.conversations}
 
             if inbox_timeline.status == TimelineStatus.AT_END:
                 return conversations
