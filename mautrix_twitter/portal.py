@@ -921,7 +921,7 @@ class Portal(DBPortal, BasePortal):
                     self.log.debug("Got more messages than limit")
                     break
 
-                max_id = int(resp.entries[-1].all_types()[0].id)
+                max_id = int(resp.entries[-1].all_types[0].id)
                 resp = await conv.fetch(max_id=max_id)
 
             if len(entries) == 0:
