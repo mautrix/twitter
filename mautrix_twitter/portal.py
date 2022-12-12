@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, Tuple, cast
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import time
 
@@ -756,10 +756,13 @@ class Portal(DBPortal, BasePortal):
     async def update_info(self, conv: Conversation) -> None:
         if self.conv_type == ConversationType.ONE_TO_ONE:
             if not self.other_user:
-                participant = next(
-                    pcp for pcp in conv.participants if int(pcp.user_id) != self.receiver
-                )
-                self.other_user = int(participant.user_id)
+                if len(conv.participants) == 1:
+                    self.other_user = conv.participants[0].user_id
+                else:
+                    participant = next(
+                        pcp for pcp in conv.participants if int(pcp.user_id) != self.receiver
+                    )
+                    self.other_user = int(participant.user_id)
                 await self.update()
             puppet = await p.Puppet.get_by_twid(self.other_user)
             if not self._main_intent:
@@ -891,7 +894,9 @@ class Portal(DBPortal, BasePortal):
             mark_read = False
             resp = await conv.fetch(max_id=max_id)
             try:
-                if (
+                if datetime.now() - timedelta(days=30) > datetime.fromtimestamp(
+                    resp.conversations[self.twid].sort_timestamp
+                ) or (
                     resp.entries is not None
                     and len(resp.entries) != 0
                     and int(resp.conversations[self.twid].last_read_event_id)
@@ -916,7 +921,7 @@ class Portal(DBPortal, BasePortal):
                     self.log.debug("Got more messages than limit")
                     break
 
-                max_id = int(resp.entries[-1].message.id)
+                max_id = int(resp.entries[-1].all_types()[0].id)
                 resp = await conv.fetch(max_id=max_id)
 
             if len(entries) == 0:
