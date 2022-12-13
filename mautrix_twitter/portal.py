@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, Tu
 from collections import deque
 from datetime import datetime, timedelta
 import asyncio
+import base64
+import hashlib
 import time
 
 from yarl import URL
@@ -43,6 +45,7 @@ from mautrix.types import (
     MessageStatus,
     MessageStatusReason,
     MessageType,
+    ReactionEventContent,
     RelatesTo,
     RelationType,
     RoomID,
@@ -466,6 +469,12 @@ class Portal(DBPortal, BasePortal):
             return False
 
         return True
+
+    def deterministic_event_id(self, msg_id: str, part: str) -> EventID:
+        hash_content = f"{self.mxid}/twitter/{msg_id}/{part}"
+        hashed = hashlib.sha256(hash_content.encode("utf-8")).digest()
+        b64hash = base64.urlsafe_b64encode(hashed).decode("utf-8").rstrip("=")
+        return EventID(f"${b64hash}:twitter.com")
 
     async def _convert_twitter_message(
         self, source: u.User, sender: p.Puppet, message: MessageData
@@ -976,35 +985,55 @@ class Portal(DBPortal, BasePortal):
                     converted = await self._convert_twitter_message(
                         source, sender, entry.message_data
                     )
-                    for content in converted:
+                    for i, content in enumerate(converted):
                         event_type = EventType.ROOM_MESSAGE
                         if self.encrypted and self.matrix.e2ee:
                             event_type, content = await self.matrix.e2ee.encrypt(
                                 self.mxid, event_type, content
                             )
                         content[DOUBLE_PUPPET_SOURCE_KEY] = self.bridge.name
-                        # TODO: deterministic event ID
-                        events.append(
-                            BatchSendEvent(
-                                type=event_type,
-                                content=content,
-                                sender=sender.mxid,
-                                timestamp=int(entry.message_data.time.timestamp() * 1000),
-                            )
+                        e = BatchSendEvent(
+                            type=event_type,
+                            content=content,
+                            sender=sender.mxid,
+                            timestamp=int(entry.message_data.time.timestamp() * 1000),
                         )
-                        twids.append(msg_id)
-            elif isinstance(entry, ReactionCreateEntry):
-                pass  # TODO: no reactions in batches yet
-
+                        if self.bridge.homeserver_software.is_hungry:
+                            e.event_id = self.deterministic_event_id(
+                                entry.id, "main" if i + 1 == len(converted) else str(i)
+                            )
+                        events.append(e)
+                        twids.append((msg_id, "message"))
+            elif (
+                isinstance(entry, ReactionCreateEntry)
+                and self.bridge.homeserver_software.is_hungry
+            ):
+                e = BatchSendEvent(
+                    type=EventType.REACTION,
+                    content=ReactionEventContent(
+                        relates_to=RelatesTo(
+                            rel_type=RelationType.ANNOTATION,
+                            event_id=self.deterministic_event_id(entry.message_id, "main"),
+                            key=entry.reaction_key.emoji,
+                        )
+                    ),
+                    sender=sender.mxid,
+                    event_id=self.deterministic_event_id(entry.id, "reaction"),
+                    timestamp=int(entry.time.timestamp() * 1000),
+                )
+                events.append(e)
+                twids.append(
+                    (entry.id, "reaction", entry.message_id, entry.sender_id, entry.reaction_key)
+                )
         if len(events) == 0:
             self.log.warn("No bridgeable messages in backfill batch")
             return 0
 
         intent = self.main_intent
 
+        state_events_at_start = []
         if not self.bridge.homeserver_software.is_hungry:
             before_first_message_timestamp = events[0].timestamp - 1
-            state_events_at_start = []
             self.log.debug("Adding member state events to batch")
             for u in users_in_batch:
                 puppet = await self.bridge.get_puppet(u)
@@ -1047,14 +1076,26 @@ class Portal(DBPortal, BasePortal):
             first_event,
             batch_id=None if is_forward else self.next_batch_id,
             events=events,
-            # state_events_at_start=state_events_at_start,
+            state_events_at_start=state_events_at_start,
             beeper_new_messages=is_forward,
             beeper_mark_read_by=source.mxid if mark_read else None,
         )
 
         for i, event_id in enumerate(resp.event_ids):
-            msg = DBMessage(event_id, self.mxid, twids[i], self.receiver)
-            await msg.upsert()
+            if twids[i][1] == "message":
+                msg = DBMessage(event_id, self.mxid, twids[i][0], self.receiver)
+                await msg.upsert()
+            elif twids[i][1] == "reaction" and self.bridge.homeserver_software.is_hungry:
+                reaction = DBReaction(
+                    mxid=event_id,
+                    mx_room=self.mxid,
+                    tw_msgid=twids[i][2],
+                    tw_receiver=self.receiver,
+                    tw_sender=twids[i][3],
+                    reaction=twids[i][4],
+                    tw_reaction_id=twids[i][0],
+                )
+                await reaction.insert()
         self.next_batch_id = resp.next_batch_id
         await self.update()
 

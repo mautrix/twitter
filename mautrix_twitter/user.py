@@ -375,10 +375,15 @@ class User(DBUser, BaseUser):
             self.log.info(
                 "Syncing conversation %s (%d of %d)", conversation.conversation_id, index, limit
             )
-            create_portal = index < limit and conversation.trusted
-            if create_portal:
-                index += 1
-            await self.handle_conversation_update(conversation, create_portal=create_portal)
+            try:
+                create_portal = index < limit and conversation.trusted
+                if create_portal:
+                    index += 1
+                await self.handle_conversation_update(conversation, create_portal=create_portal)
+            except Exception:
+                self.log.exception(
+                    "Error while syncing conversation %s!", conversation.conversation_id
+                )
         await self.update_direct_chats()
 
     async def get_info(self) -> TwitterUser:
