@@ -901,24 +901,30 @@ class Portal(DBPortal, BasePortal):
         self.log.debug("Fetching up to %d messages through %s", limit, source.twid)
         try:
             mark_read = False
+            self.log.debug("Fetching with max_id %s", max_id)
             resp = await conv.fetch(max_id=max_id)
+            resp_entries = (
+                list(filter(lambda x: x is not None, resp.entries))
+                if resp.entries is not None
+                else None
+            )
             try:
                 if datetime.now() - timedelta(days=30) > datetime.fromtimestamp(
                     resp.conversations[self.twid].sort_timestamp
                 ) or (
-                    resp.entries is not None
-                    and len(resp.entries) != 0
+                    resp_entries is not None
+                    and len(resp_entries) != 0
                     and int(resp.conversations[self.twid].last_read_event_id)
-                    >= int(resp.entries[0].message.id)
+                    >= int(resp_entries[0].message.id)
                 ):
                     mark_read = True
             except:
                 mark_read = True
 
             while True:
-                if resp.entries is None or len(resp.entries) == 0:
+                if resp_entries is None or len(resp_entries) == 0:
                     break
-                for entry in resp.entries:
+                for entry in resp_entries:
                     if entry and entry.message:
                         entries.append(entry.message)
                         message_count += 1
@@ -930,12 +936,16 @@ class Portal(DBPortal, BasePortal):
                     self.log.debug("Got more messages than limit")
                     break
 
-                max_id = int(resp.entries[-1].all_types[0].id)
+                if resp.min_entry_id is None or resp.min_entry_id == max_id:
+                    break
+                max_id = resp.min_entry_id
+                self.log.debug("Fetching more entries with max_id %s", max_id)
                 resp = await conv.fetch(max_id=max_id)
 
             if len(entries) == 0:
                 return None, None
             entries.sort(key=lambda ent: (ent.time, ent.id), reverse=True)
+            self.log.debug("Finished fetching entries")
             return mark_read, entries
         except Exception:
             self.log.warning("Exception while fetching messages", exc_info=True)
@@ -974,7 +984,7 @@ class Portal(DBPortal, BasePortal):
         twids = []
         users_in_batch = set()
         self.log.debug("Converting Twitter messages in batch")
-        for entry in entries:
+        for i, entry in enumerate(entries):
             sender = await p.Puppet.get_by_twid(int(entry.sender_id))
             users_in_batch.add(sender.mxid)
             if isinstance(entry, MessageEntry):
@@ -1008,17 +1018,19 @@ class Portal(DBPortal, BasePortal):
                 isinstance(entry, ReactionCreateEntry)
                 and self.bridge.homeserver_software.is_hungry
             ):
+                content = ReactionEventContent(
+                    relates_to=RelatesTo(
+                        rel_type=RelationType.ANNOTATION,
+                        event_id=self.deterministic_event_id(entry.message_id, "main"),
+                        key=entry.reaction_key.emoji,
+                    )
+                )
+                content[DOUBLE_PUPPET_SOURCE_KEY] = self.bridge.name
                 e = BatchSendEvent(
                     type=EventType.REACTION,
-                    content=ReactionEventContent(
-                        relates_to=RelatesTo(
-                            rel_type=RelationType.ANNOTATION,
-                            event_id=self.deterministic_event_id(entry.message_id, "main"),
-                            key=entry.reaction_key.emoji,
-                        )
-                    ),
+                    content=content,
                     sender=sender.mxid,
-                    event_id=self.deterministic_event_id(entry.id, "reaction"),
+                    event_id=self.deterministic_event_id(entry.id, f"reaction{i}"),
                     timestamp=int(entry.time.timestamp() * 1000),
                 )
                 events.append(e)
