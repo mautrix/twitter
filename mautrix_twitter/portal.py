@@ -1092,6 +1092,17 @@ class Portal(DBPortal, BasePortal):
             beeper_new_messages=is_forward,
             beeper_mark_read_by=source.mxid if mark_read else None,
         )
+        if resp.base_insertion_event_id is not None:
+            self.log.debug("Sending msc2716 insertion marker event")
+            await self.main_intent.send_state_event(
+                self.mxid,
+                StateMarker,
+                {
+                    "org.matrix.msc2716.marker.insertion": resp.base_insertion_event_id,
+                    "com.beeper.timestamp": int(time.time() * 1000),
+                },
+                state_key=resp.base_insertion_event_id,
+            )
 
         for i, event_id in enumerate(resp.event_ids):
             if twids[i][1] == "message":
@@ -1110,17 +1121,6 @@ class Portal(DBPortal, BasePortal):
                 await reaction.insert()
         self.next_batch_id = resp.next_batch_id
         await self.update()
-
-        if resp.base_insertion_event_id:
-            await self.main_intent.send_state_event(
-                self.mxid,
-                StateMarker,
-                {
-                    "org.matrix.msc2716.marker.insertion": resp.base_insertion_event_id,
-                    "com.beeper.timestamp": int(time.time() * 1000),
-                },
-                state_key=resp.base_insertion_event_id,
-            )
 
         return len(events)
 
