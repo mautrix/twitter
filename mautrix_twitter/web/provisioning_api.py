@@ -23,6 +23,7 @@ from aiohttp import web
 
 from mautrix.types import UserID
 from mautrix.util.logging import TraceLogger
+from mautwitdm.errors import TwitterError
 
 from .. import user as u
 
@@ -108,8 +109,11 @@ class ProvisioningAPI:
 
         try:
             await user.locked_connect(auth_token=auth_token, csrf_token=csrf_token)
+        except TwitterError as e:
+            self.log.debug("Failed to log in with TwitterError", exc_info=True)
+            raise web.HTTPUnauthorized(body=f'{{"error": "{e.message}"}}', headers=self._headers)
         except Exception:
-            self.log.debug("Failed to log in", exc_info=True)
+            self.log.debug("Failed to log in with generic Exception", exc_info=True)
             raise web.HTTPUnauthorized(
                 body='{"error": "Twitter authorization failed"}', headers=self._headers
             )
