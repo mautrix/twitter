@@ -111,7 +111,9 @@ class ProvisioningAPI:
             await user.locked_connect(auth_token=auth_token, csrf_token=csrf_token)
         except TwitterError as e:
             self.log.debug("Failed to log in with TwitterError", exc_info=True)
-            raise web.HTTPUnauthorized(body=json.dumps({"error": e.message}), headers=self._headers)
+            raise web.HTTPUnauthorized(
+                body=json.dumps({"error": e.message}), headers=self._headers
+            )
         except Exception:
             self.log.debug("Failed to log in with generic Exception", exc_info=True)
             raise web.HTTPUnauthorized(
