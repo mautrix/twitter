@@ -292,7 +292,6 @@ class Portal(DBPortal, BasePortal):
                 status.reason = MessageStatusReason.UNSUPPORTED
         else:
             status.status = MessageStatus.SUCCESS
-        status.fill_legacy_booleans()
 
         await intent.send_message_event(
             room_id=self.mxid,
