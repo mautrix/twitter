@@ -53,6 +53,7 @@ from mautrix.types import (
     ThumbnailInfo,
     VideoInfo,
 )
+from mautrix.util import background_task
 from mautrix.util.message_send_checkpoint import MessageSendCheckpointStatus
 from mautrix.util.simple_lock import SimpleLock
 from mautwitdm.types import (
@@ -235,7 +236,7 @@ class Portal(DBPortal, BasePortal):
             event_type=event_type,
             message_type=msgtype,
         )
-        asyncio.create_task(self._send_message_status(event_id, err=None))
+        background_task.create(self._send_message_status(event_id, err=None))
         await self._send_delivery_receipt(event_id)
 
     async def _send_bridge_error(
@@ -268,7 +269,7 @@ class Portal(DBPortal, BasePortal):
                     body=f"\u26a0 Your {event_type_str} may not have been bridged: {str(err)}",
                 ),
             )
-        asyncio.create_task(self._send_message_status(event_id, err))
+        background_task.create(self._send_message_status(event_id, err))
 
     async def _send_message_status(self, event_id: EventID, err: Exception | None) -> None:
         if not self.config["bridge.message_status_events"]:

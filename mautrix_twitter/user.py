@@ -21,6 +21,7 @@ import logging
 
 from mautrix.bridge import BaseUser, async_getter_lock
 from mautrix.types import EventID, MessageType, RoomID, TextMessageEventContent, UserID
+from mautrix.util import background_task
 from mautrix.util.bridge_state import BridgeState, BridgeStateEvent
 from mautrix.util.opt_prometheus import Gauge, Summary, async_time
 from mautwitdm import TwitterAPI
@@ -215,8 +216,8 @@ class User(DBUser, BaseUser):
             self.log.debug("Poll cursor set, starting polling right away (not initial syncing)")
             self.client.start_polling()
         else:
-            asyncio.create_task(self._try_initial_sync())
-        asyncio.create_task(self._try_sync_puppet(user_info))
+            background_task.create(self._try_initial_sync())
+        background_task.create(self._try_sync_puppet(user_info))
 
     async def fill_bridge_state(self, state: BridgeState) -> None:
         await super().fill_bridge_state(state)

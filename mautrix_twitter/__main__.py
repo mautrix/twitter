@@ -20,6 +20,7 @@ import asyncio
 
 from mautrix.bridge import Bridge
 from mautrix.types import RoomID, UserID
+from mautrix.util import background_task
 
 from . import commands
 from .backfill import BackfillStatus
@@ -65,7 +66,7 @@ class TwitterBridge(Bridge):
         Portal.init_cls(self)
         if self.config["bridge.resend_bridge_info"]:
             self.add_startup_actions(self.resend_bridge_info())
-        asyncio.create_task(BackfillStatus.backfill_loop())
+        background_task.create(BackfillStatus.backfill_loop())
         await super().start()
 
     def prepare_stop(self) -> None:
