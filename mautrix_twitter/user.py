@@ -297,11 +297,21 @@ class User(DBUser, BaseUser):
 
     async def on_error(self, evt: PollingErrored) -> None:
         if evt.fatal:
-            await self.send_bridge_notice(
-                f"Fatal error while polling Twitter: {evt.error}",
-                state_event=BridgeStateEvent.UNKNOWN_ERROR,
-                important=evt.fatal,
-            )
+            if isinstance(evt.error, TwitterAuthError):
+                await self.push_bridge_state(
+                    BridgeStateEvent.BAD_CREDENTIALS,
+                    error="twitter-auth-error",
+                    message=evt.error.message,
+                )
+                await self.send_bridge_notice(
+                    f"Auth error while polling Twitter: {evt.error}", important=True
+                )
+            else:
+                await self.send_bridge_notice(
+                    f"Fatal error while polling Twitter: {evt.error}",
+                    state_event=BridgeStateEvent.UNKNOWN_ERROR,
+                    important=evt.fatal,
+                )
         elif evt.count == 1 and self.config["bridge.temporary_disconnect_notices"]:
             await self.send_bridge_notice(
                 f"Error while polling Twitter: {evt.error}\nThe bridge will keep retrying.",

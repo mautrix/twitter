@@ -16,8 +16,15 @@ from yarl import URL
 
 from . import conversation as c
 from .dispatcher import TwitterDispatcher
-from .errors import RateLimitError, check_error
-from .types import InboxTimeline, InitialStateResponse, PollResponse, TimelineStatus
+from .errors import RateLimitError, TwitterAuthError, check_error
+from .types import (
+    Conversation,
+    InboxTimeline,
+    InitialStateResponse,
+    PollResponse,
+    TimelineStatus,
+    User,
+)
 
 
 class PollingStarted:
@@ -105,7 +112,7 @@ class TwitterPoller(TwitterDispatcher):
 
     async def all_trusted_conversations(
         self,
-    ) -> tuple[Dict[str, c.Conversation], Dict[str, c.User]]:
+    ) -> tuple[Dict[str, Conversation], Dict[str, User]]:
         """
         Get all trusted conversations from the inbox (using pagination).
 
@@ -218,6 +225,9 @@ class TwitterPoller(TwitterDispatcher):
         except asyncio.CancelledError:
             self.log.debug("Polling stopped")
             await self.dispatch(PollingStopped())
+        except TwitterAuthError as e:
+            self.log.exception("Auth error while polling")
+            await self.dispatch(PollingErrored(e, fatal=True, count=0))
         except Exception as e:
             await self.dispatch(PollingErrored(e, fatal=True, count=0))
             self.log.exception("Fatal error while polling")
@@ -265,17 +275,19 @@ class TwitterPoller(TwitterDispatcher):
             except RateLimitError as e:
                 sleep = e.reset - int(time.time())
                 self.log.warning(
-                    f"Got rate limit until {e.reset} while polling, " f"waiting {sleep} seconds"
+                    f"Got rate limit until {e.reset} while polling, waiting {sleep} seconds"
                 )
                 if self.poll_sleep < 8:
                     self.poll_sleep += 1
                     self.log.debug(f"Increased poll sleep to {self.poll_sleep}")
                 await asyncio.sleep(sleep)
                 continue
+            except TwitterAuthError:
+                raise
             except Exception as e:
                 if errors > self.max_poll_errors > 0:
                     self.log.debug(
-                        f"Error count ({errors}) exceeded maximum, " f"raising error as fatal"
+                        f"Error count ({errors}) exceeded maximum, raising error as fatal"
                     )
                     raise
                 errors += 1
