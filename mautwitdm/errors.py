@@ -68,6 +68,6 @@ async def check_error(resp: ClientResponse) -> Any:
         raise
     if code == 88:
         raise RateLimitError(code, message, resp.headers)
-    elif code == 32:
+    elif code in (32, 63, 64, 326):
         raise TwitterAuthError(code, message)
     raise TwitterError(code, message)
