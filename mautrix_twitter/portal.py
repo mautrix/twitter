@@ -770,7 +770,7 @@ class Portal(DBPortal, BasePortal):
         if self.conv_type == ConversationType.ONE_TO_ONE:
             if not self.other_user:
                 if len(conv.participants) == 1:
-                    self.other_user = conv.participants[0].user_id
+                    self.other_user = int(conv.participants[0].user_id)
                 else:
                     participant = next(
                         pcp for pcp in conv.participants if int(pcp.user_id) != self.receiver
