@@ -710,6 +710,9 @@ class Portal(DBPortal, BasePortal):
             # TODO update the database with the reaction_id of outgoing reactions
             dedup_id = (msg_id, sender.twid, reaction)
             if dedup_id in self._reaction_dedup:
+                self.log.debug(
+                    f"Ignoring duplicate reaction from {sender.twid} to {msg_id} (dedup queue)"
+                )
                 return
             self._reaction_dedup.appendleft(dedup_id)
 
@@ -717,6 +720,9 @@ class Portal(DBPortal, BasePortal):
         if existing and existing.reaction == reaction:
             if not existing.tw_reaction_id:
                 await existing.update_id(reaction_id)
+            self.log.debug(
+                f"Ignoring duplicate reaction from {sender.twid} to {msg_id} (database)"
+            )
             return
 
         message = await DBMessage.get_by_twid(msg_id, self.receiver)
@@ -726,7 +732,7 @@ class Portal(DBPortal, BasePortal):
 
         intent = sender.intent_for(self)
         mxid = await intent.react(message.mx_room, message.mxid, reaction.emoji, timestamp=time)
-        self.log.debug(f"{sender.twid} reacted to {message.mxid} -> {mxid}")
+        self.log.debug(f"{sender.twid} reacted to {msg_id}/{message.mxid} -> {mxid}")
         await self._upsert_reaction(existing, intent, mxid, message, sender, reaction, reaction_id)
 
     async def handle_twitter_reaction_remove(
