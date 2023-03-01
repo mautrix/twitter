@@ -735,6 +735,10 @@ class Portal(DBPortal, BasePortal):
         reaction = await DBReaction.get_by_message_twid(msg_id, self.receiver, sender.twid)
         if reaction and reaction.reaction == key:
             try:
+                self._reaction_dedup.remove((msg_id, sender.twid, key))
+            except ValueError:
+                pass
+            try:
                 await sender.intent_for(self).redact(reaction.mx_room, reaction.mxid)
             except MForbidden:
                 await self.main_intent.redact(reaction.mx_room, reaction.mxid)
