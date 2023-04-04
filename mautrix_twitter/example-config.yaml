@@ -112,7 +112,7 @@ bridge:
 
     # Number of conversations to sync (and create portals for) on login.
     # Set 0 to disable automatic syncing.
-    initial_conversation_sync: -1
+    initial_conversation_sync: 10
     # Whether or not to use /sync to get read receipts and typing notifications
     # when double puppeting is enabled
     sync_with_custom_puppets: false
@@ -152,12 +152,12 @@ bridge:
         invite_own_puppet: true
         # Maximum number of messages to backfill initially.
         # Set to 0 to disable backfilling when creating portal.
-        initial_limit: 100
+        initial_limit: 0
         # If using double puppeting, should notifications be disabled
         # while the initial backfill is in progress?
         disable_notifications: false
         # Backfill backwards after the initial batch (requires MSC2716 support on homeserver)
-        backwards: true
+        backwards: false
     # End-to-bridge encryption support options.
     #
     # See https://docs.mau.fi/bridges/general/end-to-bridge-encryption.html for more info.
