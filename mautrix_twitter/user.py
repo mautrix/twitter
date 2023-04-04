@@ -472,6 +472,15 @@ class User(DBUser, BaseUser):
             # We don't want to do the invite_user and such things each time conversation info
             # comes down polling, so if the room already exists, only call .update_info()
             await portal.update_info(evt)
+            puppet = await pu.Puppet.get_by_custom_mxid(self.mxid)
+            if puppet and self.config["bridge.low_quality_tag"]:
+                self.log.debug("Tagging room if low-quality")
+                await self.tag_room(
+                    puppet,
+                    portal,
+                    self.config["bridge.low_quality_tag"],
+                    evt.low_quality == True,
+                )
 
     @async_time(METRIC_USER_UPDATE)
     async def handle_user_update(self, user: TwitterUser) -> None:
