@@ -1282,6 +1282,13 @@ class Portal(DBPortal, BasePortal):
                     await puppet.intent.join_room_by_id(self.mxid)
                     if self.is_direct:
                         await source.update_direct_chats({self.main_intent.mxid: [self.mxid]})
+                    if self.config["bridge.low_quality_tag"]:
+                        await source.tag_room(
+                            puppet,
+                            self,
+                            self.config["bridge.low_quality_tag"],
+                            info.low_quality == True,
+                        )
                 except MatrixError:
                     self.log.debug(
                         "Failed to join custom puppet into newly created portal", exc_info=True

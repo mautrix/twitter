@@ -112,7 +112,7 @@ bridge:
 
     # Number of conversations to sync (and create portals for) on login.
     # Set 0 to disable automatic syncing.
-    initial_conversation_sync: 10
+    initial_conversation_sync: -1
     # Whether or not to use /sync to get read receipts and typing notifications
     # when double puppeting is enabled
     sync_with_custom_puppets: false
@@ -120,6 +120,9 @@ bridge:
     # Note that updating the m.direct event is not atomic (except with mautrix-asmux)
     # and is therefore prone to race conditions.
     sync_direct_chat_list: false
+    # When using double puppeting, should low quality DMs be moved to a specific tag in Matrix?
+    # The low priority tag is `m.lowpriority`.
+    low_quality_tag: null
     # Allow using double puppeting from any server with a valid client .well-known file.
     double_puppet_allow_discovery: false
     # Servers to allow double puppeting from, even if double_puppet_allow_discovery is false.
@@ -149,12 +152,12 @@ bridge:
         invite_own_puppet: true
         # Maximum number of messages to backfill initially.
         # Set to 0 to disable backfilling when creating portal.
-        initial_limit: 0
+        initial_limit: 100
         # If using double puppeting, should notifications be disabled
         # while the initial backfill is in progress?
         disable_notifications: false
         # Backfill backwards after the initial batch (requires MSC2716 support on homeserver)
-        backwards: false
+        backwards: true
     # End-to-bridge encryption support options.
     #
     # See https://docs.mau.fi/bridges/general/end-to-bridge-encryption.html for more info.

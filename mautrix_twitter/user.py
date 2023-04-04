@@ -19,8 +19,16 @@ from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterable, Awaitable, cast
 import asyncio
 import logging
 
+from mautrix.appservice import DOUBLE_PUPPET_SOURCE_KEY
 from mautrix.bridge import BaseUser, async_getter_lock
-from mautrix.types import EventID, MessageType, RoomID, TextMessageEventContent, UserID
+from mautrix.types import (
+    EventID,
+    MessageType,
+    RoomID,
+    RoomTagInfo,
+    TextMessageEventContent,
+    UserID,
+)
 from mautrix.util import background_task
 from mautrix.util.bridge_state import BridgeState, BridgeStateEvent
 from mautrix.util.opt_prometheus import Gauge, Summary, async_time
@@ -396,6 +404,21 @@ class User(DBUser, BaseUser):
                     "Error while syncing conversation %s!", conversation.conversation_id
                 )
         await self.update_direct_chats()
+
+    async def tag_room(self, puppet: pu.Puppet, portal: po.Portal, tag: str, active: bool) -> None:
+        if not tag or not portal or not portal.mxid:
+            return
+        tag_info = await puppet.intent.get_room_tag(portal.mxid, tag)
+        if active and tag_info is None:
+            tag_info = RoomTagInfo(order=0.5)
+            tag_info[DOUBLE_PUPPET_SOURCE_KEY] = self.bridge.name
+            self.log.debug(f"Adding tag {tag} to {portal.mxid}/{portal.twid}")
+            await puppet.intent.set_room_tag(portal.mxid, tag, tag_info)
+        elif (
+            not active and tag_info and tag_info.get(DOUBLE_PUPPET_SOURCE_KEY) == self.bridge.name
+        ):
+            self.log.debug(f"Removing tag {tag} from {portal.mxid}/{portal.twid}")
+            await puppet.intent.remove_room_tag(portal.mxid, tag)
 
     async def get_info(self) -> TwitterUser:
         settings = await self.client.get_settings()
