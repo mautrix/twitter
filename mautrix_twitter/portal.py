@@ -1289,6 +1289,8 @@ class Portal(DBPortal, BasePortal):
                             self.config["bridge.low_quality_tag"],
                             info.low_quality == True,
                         )
+                    if self.config["bridge.low_quality_mute"]:
+                        await source.set_muted(puppet, self, info.low_quality == True)
                 except MatrixError:
                     self.log.debug(
                         "Failed to join custom puppet into newly created portal", exc_info=True

@@ -21,9 +21,13 @@ import logging
 
 from mautrix.appservice import DOUBLE_PUPPET_SOURCE_KEY
 from mautrix.bridge import BaseUser, async_getter_lock
+from mautrix.errors import MNotFound
 from mautrix.types import (
     EventID,
     MessageType,
+    PushActionType,
+    PushRuleKind,
+    PushRuleScope,
     RoomID,
     RoomTagInfo,
     TextMessageEventContent,
@@ -420,6 +424,26 @@ class User(DBUser, BaseUser):
             self.log.debug(f"Removing tag {tag} from {portal.mxid}/{portal.twid}")
             await puppet.intent.remove_room_tag(portal.mxid, tag)
 
+    async def set_muted(self, puppet: pu.Puppet, portal: po.Portal, muted: bool) -> None:
+        if not portal or not portal.mxid:
+            return
+        if muted:
+            self.log.debug(f"Muting {portal.mxid}/{portal.twid}")
+            await puppet.intent.set_push_rule(
+                PushRuleScope.GLOBAL,
+                PushRuleKind.ROOM,
+                portal.mxid,
+                actions=[PushActionType.DONT_NOTIFY],
+            )
+        else:
+            try:
+                await puppet.intent.remove_push_rule(
+                    PushRuleScope.GLOBAL, PushRuleKind.ROOM, portal.mxid
+                )
+                self.log.debug(f"Unmuted {portal.mxid}/{portal.twid}")
+            except MNotFound:
+                pass
+
     async def get_info(self) -> TwitterUser:
         settings = await self.client.get_settings()
         self.username = settings["screen_name"]
@@ -473,14 +497,17 @@ class User(DBUser, BaseUser):
             # comes down polling, so if the room already exists, only call .update_info()
             await portal.update_info(evt)
             puppet = await pu.Puppet.get_by_custom_mxid(self.mxid)
-            if puppet and self.config["bridge.low_quality_tag"]:
-                self.log.debug("Tagging room if low-quality")
-                await self.tag_room(
-                    puppet,
-                    portal,
-                    self.config["bridge.low_quality_tag"],
-                    evt.low_quality == True,
-                )
+            if puppet:
+                if self.config["bridge.low_quality_tag"]:
+                    self.log.debug("Tagging room if low-quality")
+                    await self.tag_room(
+                        puppet,
+                        portal,
+                        self.config["bridge.low_quality_tag"],
+                        evt.low_quality == True,
+                    )
+                if self.config["bridge.low_quality_mute"] and evt.low_quality:
+                    await self.set_muted(puppet, portal, True)
 
     @async_time(METRIC_USER_UPDATE)
     async def handle_user_update(self, user: TwitterUser) -> None:

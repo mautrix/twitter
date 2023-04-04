@@ -57,6 +57,7 @@ class Config(BaseBridgeConfig):
         copy("bridge.sync_with_custom_puppets")
         copy("bridge.sync_direct_chat_list")
         copy("bridge.low_quality_tag")
+        copy("bridge.low_quality_mute")
         copy("bridge.double_puppet_server_map")
         copy("bridge.double_puppet_allow_discovery")
         if self["bridge.login_shared_secret"]:

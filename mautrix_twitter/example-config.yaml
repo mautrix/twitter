@@ -123,6 +123,8 @@ bridge:
     # When using double puppeting, should low quality DMs be moved to a specific tag in Matrix?
     # The low priority tag is `m.lowpriority`.
     low_quality_tag: null
+    # When using double puppeting, mute low quality DMs (by changing the user's push rules)?
+    low_quality_mute: false
     # Allow using double puppeting from any server with a valid client .well-known file.
     double_puppet_allow_discovery: false
     # Servers to allow double puppeting from, even if double_puppet_allow_discovery is false.
