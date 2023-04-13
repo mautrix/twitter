@@ -21,6 +21,7 @@ class ReactionKey(SerializableEnum):
     EXCITED = "excited"  # 🔥
     AGREE = "agree"  # 👍
     DISAGREE = "disagree"  # 👎
+    EMOJI = "emoji"  # arbitrary emoji?
 
     @property
     def emoji(self) -> str:
@@ -42,6 +43,7 @@ _key_to_emoji: Dict[ReactionKey, str] = {
     ReactionKey.EXCITED: "\U0001F525",
     ReactionKey.AGREE: "\U0001F44D\uFE0F",
     ReactionKey.DISAGREE: "\U0001F44E\uFE0F",
+    ReactionKey.EMOJI: "unsupported reaction",
 }
 
 _emoji_to_key: Dict[str, ReactionKey] = {
