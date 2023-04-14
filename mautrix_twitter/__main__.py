@@ -37,6 +37,8 @@ from .web import ProvisioningAPI
 class TwitterBridge(Bridge):
     module = "mautrix_twitter"
     name = "mautrix-twitter"
+    beeper_service_name = "twitter"
+    beeper_network_name = "twitter"
     command = "python -m mautrix-twitter"
     description = "A Matrix-Twitter DM puppeting bridge."
     repo_url = "https://github.com/mautrix/twitter"
