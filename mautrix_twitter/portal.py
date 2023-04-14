@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, NamedTuple, Tuple, cast
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Literal, NamedTuple, Tuple, cast
 from collections import deque
 from datetime import datetime, timedelta
 import asyncio
@@ -111,7 +111,7 @@ class Portal(DBPortal, BasePortal):
     config: Config
     matrix: "m.MatrixHandler"
     az: AppService
-    private_chat_portal_meta: bool
+    private_chat_portal_meta: Literal["default", "always", "never"]
 
     _main_intent: IntentAPI | None
     _create_room_lock: asyncio.Lock
@@ -161,6 +161,14 @@ class Portal(DBPortal, BasePortal):
     @property
     def is_direct(self) -> bool:
         return self.conv_type == ConversationType.ONE_TO_ONE
+
+    @property
+    def set_dm_room_metadata(self) -> bool:
+        return (
+            not self.is_direct
+            or self.private_chat_portal_meta == "always"
+            or (self.encrypted and self.private_chat_portal_meta != "never")
+        )
 
     @property
     def main_intent(self) -> IntentAPI:
@@ -786,10 +794,7 @@ class Portal(DBPortal, BasePortal):
             puppet = await p.Puppet.get_by_twid(self.other_user)
             if not self._main_intent:
                 self._main_intent = puppet.default_mxid_intent
-            if self.encrypted or self.private_chat_portal_meta:
-                changed = await self._update_name(puppet.name)
-            else:
-                changed = False
+            changed = await self._update_name(puppet.name)
         else:
             changed = await self._update_name(conv.name)
         if changed:
@@ -798,9 +803,6 @@ class Portal(DBPortal, BasePortal):
         await self._update_participants(conv.participants)
 
     async def update_name(self, name: str) -> None:
-        if not self.encrypted and not self.private_chat_portal_meta:
-            return
-
         changed = await self._update_name(name)
 
         if changed:
@@ -810,7 +812,7 @@ class Portal(DBPortal, BasePortal):
     async def _update_name(self, name: str) -> bool:
         if self.name != name:
             self.name = name
-            if self.mxid:
+            if self.mxid and self.set_dm_room_metadata:
                 await self.main_intent.set_room_name(self.mxid, name)
             return True
         return False
@@ -1220,7 +1222,6 @@ class Portal(DBPortal, BasePortal):
             return self.mxid
         await self.update_info(info)
         self.log.debug("Creating Matrix room")
-        name: str | None = None
         initial_state = [
             {
                 "type": str(StateBridge),
@@ -1245,8 +1246,6 @@ class Portal(DBPortal, BasePortal):
             )
             if self.is_direct:
                 invites.append(self.az.bot_mxid)
-        if self.encrypted or self.private_chat_portal_meta or not self.is_direct:
-            name = self.name
 
         # We lock backfill lock here so any messages that come between the room being created
         # and the initial backfill finishing wouldn't be bridged before the backfill messages.
@@ -1255,7 +1254,7 @@ class Portal(DBPortal, BasePortal):
             if not self.config["bridge.federate_rooms"]:
                 creation_content["m.federate"] = False
             self.mxid = await self.main_intent.create_room(
-                name=name,
+                name=self.name if self.set_dm_room_metadata else None,
                 is_direct=self.is_direct,
                 initial_state=initial_state,
                 invitees=invites,

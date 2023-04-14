@@ -71,7 +71,14 @@ class Config(BaseBridgeConfig):
         copy("bridge.backfill.initial_limit")
         copy("bridge.backfill.disable_notifications")
         copy("bridge.backfill.backwards")
-        copy("bridge.private_chat_portal_meta")
+        if isinstance(self.get("bridge.private_chat_portal_meta", "default"), bool):
+            base["bridge.private_chat_portal_meta"] = (
+                "always" if self["bridge.private_chat_portal_meta"] else "default"
+            )
+        else:
+            copy("bridge.private_chat_portal_meta")
+            if base["bridge.private_chat_portal_meta"] not in ("default", "always", "never"):
+                base["bridge.private_chat_portal_meta"] = "default"
         copy("bridge.delivery_receipts")
         copy("bridge.delivery_error_reports")
         copy("bridge.message_status_events")
