@@ -157,3 +157,8 @@ async def upgrade_v6(conn: Connection) -> None:
     await conn.execute(
         "ALTER TABLE puppet ADD COLUMN contact_info_set BOOLEAN NOT NULL DEFAULT false"
     )
+
+
+@upgrade_table.register(description="Reset the poll_cursor to force contact info sync")
+async def upgrade_v7(conn: Connection) -> None:
+    await conn.execute("UPDATE user SET poll_cursor = NULL")
