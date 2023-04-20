@@ -41,6 +41,7 @@ class Puppet(DBPuppet, BasePuppet):
     hs_domain: str
     mxid_template: SimpleTemplate[int]
 
+    bridge: TwitterBridge
     config: Config
 
     default_mxid_intent: IntentAPI
@@ -79,6 +80,7 @@ class Puppet(DBPuppet, BasePuppet):
 
     @classmethod
     def init_cls(cls, bridge: "TwitterBridge") -> AsyncIterable[Awaitable[None]]:
+        cls.bridge = bridge
         cls.config = bridge.config
         cls.loop = bridge.loop
         cls.mx = bridge.matrix
@@ -112,7 +114,7 @@ class Puppet(DBPuppet, BasePuppet):
         return self.intent
 
     async def update_info(self, info: User) -> None:
-        update = False
+        update = await self._update_contact_info(info)
         update = await self._update_name(info) or update
         try:
             update = await self._update_avatar(info.profile_image_url_https) or update
@@ -120,6 +122,28 @@ class Puppet(DBPuppet, BasePuppet):
             self.log.exception("Error updating avatar from {info.profile_image_url_https}")
         if update:
             await self.update()
+
+    async def _update_contact_info(self, info: User) -> bool:
+        if not self.bridge.homeserver_software.is_hungry:
+            return False
+
+        if self.contact_info_set:
+            return False
+
+        try:
+            await self.default_mxid_intent.beeper_update_profile(
+                {
+                    "com.beeper.bridge.identifiers": [f"twitter:{info.screen_name}"],
+                    "com.beeper.bridge.remote_id": str(info.id),
+                    "com.beeper.bridge.service": self.bridge.beeper_service_name,
+                    "com.beeper.bridge.network": self.bridge.beeper_network_name,
+                }
+            )
+            self.contact_info_set = True
+        except Exception:
+            self.log.exception("Error updating contact info")
+            self.contact_info_set = False
+        return True
 
     @classmethod
     def _get_displayname(cls, info: User) -> str:
