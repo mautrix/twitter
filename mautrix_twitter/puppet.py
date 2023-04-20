@@ -57,6 +57,7 @@ class Puppet(DBPuppet, BasePuppet):
         access_token: str | None = None,
         next_batch: SyncToken | None = None,
         base_url: URL | None = None,
+        contact_info_set: bool = False,
     ) -> None:
         super().__init__(
             twid=twid,
@@ -68,6 +69,7 @@ class Puppet(DBPuppet, BasePuppet):
             access_token=access_token,
             next_batch=next_batch,
             base_url=base_url,
+            contact_info_set=contact_info_set,
         )
         self.log = self.log.getChild(str(twid))
 

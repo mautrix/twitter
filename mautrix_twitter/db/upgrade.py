@@ -150,3 +150,10 @@ async def upgrade_v5(conn: Connection) -> None:
         SELECT twid, receiver, 0, FALSE, 0, 3 FROM portal
         """
     )
+
+
+@upgrade_table.register(description="Add contact_info_set column to puppet table")
+async def upgrade_v6(conn: Connection) -> None:
+    await conn.execute(
+        "ALTER TABLE puppet ADD COLUMN contact_info_set BOOLEAN NOT NULL DEFAULT false"
+    )

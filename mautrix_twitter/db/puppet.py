@@ -43,6 +43,8 @@ class Puppet:
     next_batch: SyncToken | None
     base_url: URL | None
 
+    contact_info_set: bool
+
     @property
     def _values(self):
         return (
@@ -55,22 +57,28 @@ class Puppet:
             self.access_token,
             self.next_batch,
             str(self.base_url) if self.base_url else None,
+            self.contact_info_set,
         )
 
+    columns: ClassVar[str] = (
+        "twid, name, photo_url, photo_mxc, is_registered, custom_mxid, access_token, next_batch, "
+        "base_url, contact_info_set"
+    )
+
     async def insert(self) -> None:
-        q = (
-            "INSERT INTO puppet (twid, name, photo_url, photo_mxc, is_registered, custom_mxid,"
-            "                    access_token, next_batch, base_url) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
-        )
+        q = f"""
+            INSERT INTO puppet ({self.columns})
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        """
         await self.db.execute(q, *self._values)
 
     async def update(self) -> None:
-        q = (
-            "UPDATE puppet SET name=$2, photo_url=$3, photo_mxc=$4, is_registered=$5,"
-            "                  custom_mxid=$6, access_token=$7, next_batch=$8, base_url=$9 "
-            "WHERE twid=$1"
-        )
+        q = """
+            UPDATE puppet
+            SET name=$2, photo_url=$3, photo_mxc=$4, is_registered=$5, custom_mxid=$6,
+                access_token=$7, next_batch=$8, base_url=$9, contact_info_set=$10
+            WHERE twid=$1
+        """
         await self.db.execute(q, *self._values)
 
     @classmethod
@@ -84,27 +92,15 @@ class Puppet:
 
     @classmethod
     async def get_by_twid(cls, twid: int) -> Puppet | None:
-        q = (
-            "SELECT twid, name, photo_url, photo_mxc, is_registered,"
-            "       custom_mxid, access_token, next_batch, base_url "
-            "FROM puppet WHERE twid=$1"
-        )
+        q = f"SELECT {cls.columns} FROM puppet WHERE twid=$1"
         return cls._from_row(await cls.db.fetchrow(q, twid))
 
     @classmethod
     async def get_by_custom_mxid(cls, mxid: UserID) -> Puppet | None:
-        q = (
-            "SELECT twid, name, photo_url, photo_mxc, is_registered,"
-            "       custom_mxid, access_token, next_batch, base_url "
-            "FROM puppet WHERE custom_mxid=$1"
-        )
+        q = f"SELECT {cls.columns} FROM puppet WHERE custom_mxid=$1"
         return cls._from_row(await cls.db.fetchrow(q, mxid))
 
     @classmethod
     async def all_with_custom_mxid(cls) -> list[Puppet]:
-        q = (
-            "SELECT twid, name, photo_url, photo_mxc, is_registered,"
-            "       custom_mxid, access_token, next_batch, base_url "
-            "FROM puppet WHERE custom_mxid IS NOT NULL"
-        )
+        q = f"SELECT {cls.columns} FROM puppet WHERE custom_mxid IS NOT NULL"
         return [cls._from_row(row) for row in await cls.db.fetch(q)]
