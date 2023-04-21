@@ -161,4 +161,4 @@ async def upgrade_v6(conn: Connection) -> None:
 
 @upgrade_table.register(description="Reset the poll_cursor to force contact info sync")
 async def upgrade_v7(conn: Connection) -> None:
-    await conn.execute("UPDATE user SET poll_cursor = NULL")
+    await conn.execute('UPDATE "user" SET poll_cursor = NULL')
