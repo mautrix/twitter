@@ -85,7 +85,7 @@ class ImageColorBindingValue(SerializableAttrs):
 
 @dataclass
 class CardBindingValue(SerializableAttrs):
-    type: str
+    type: Optional[str] = None
     string_value: Optional[str] = None
     image_value: Optional[ImageBindingValue] = None
     image_color_value: Optional[ImageColorBindingValue] = None
