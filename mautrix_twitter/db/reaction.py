@@ -36,7 +36,7 @@ class Reaction:
     tw_msgid: int
     tw_receiver: int
     tw_sender: int
-    reaction: ReactionKey
+    reaction: str
     tw_reaction_id: int
 
     async def insert(self) -> None:
@@ -51,7 +51,7 @@ class Reaction:
             self.tw_msgid,
             self.tw_receiver,
             self.tw_sender,
-            self.reaction.value,
+            self.reaction,
             self.tw_reaction_id,
         )
 
@@ -63,7 +63,7 @@ class Reaction:
         await self.db.execute(q, tw_reaction_id, self.tw_msgid, self.tw_receiver, self.tw_sender)
 
     async def edit(
-        self, mx_room: RoomID, mxid: EventID, reaction: ReactionKey, tw_reaction_id: int | None
+        self, mx_room: RoomID, mxid: EventID, reaction: str, tw_reaction_id: int | None
     ) -> None:
         q = (
             "UPDATE reaction SET mxid=$1, mx_room=$2, reaction=$3, tw_reaction_id=$7 "
@@ -73,7 +73,7 @@ class Reaction:
             q,
             mxid,
             mx_room,
-            reaction.value,
+            reaction,
             self.tw_msgid,
             self.tw_receiver,
             self.tw_sender,
@@ -88,9 +88,7 @@ class Reaction:
     def _from_row(cls, row: asyncpg.Record) -> Reaction | None:
         if not row:
             return None
-        data = {**row}
-        reaction = ReactionKey(data.pop("reaction"))
-        return cls(reaction=reaction, **data)
+        return cls(**row)
 
     @classmethod
     async def get_by_mxid(cls, mxid: EventID, mx_room: RoomID) -> Reaction | None:

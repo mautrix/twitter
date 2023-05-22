@@ -20,15 +20,10 @@ from mautrix.util.async_db import Scheme, UpgradeTable
 upgrade_table = UpgradeTable()
 
 
-@upgrade_table.register(description="Latest revision", upgrades_to=4)
+@upgrade_table.register(description="Latest revision", upgrades_to=8)
 async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
     if scheme in (Scheme.POSTGRES, Scheme.COCKROACH):
         await conn.execute("CREATE TYPE twitter_conv_type AS ENUM ('ONE_TO_ONE', 'GROUP_DM')")
-        await conn.execute(
-            """CREATE TYPE twitter_reaction_key AS ENUM (
-                'funny', 'surprised', 'sad', 'like', 'excited', 'agree', 'disagree'
-            )"""
-        )
     await conn.execute(
         """CREATE TABLE portal (
             twid        TEXT,
@@ -38,6 +33,8 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             mxid        TEXT,
             name        TEXT,
             encrypted   BOOLEAN NOT NULL DEFAULT false,
+
+            next_batch_id TEXT,
 
             PRIMARY KEY (twid, receiver)
         )"""
@@ -60,6 +57,7 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             photo_mxc TEXT,
 
             is_registered BOOLEAN NOT NULL DEFAULT false,
+            contact_info_set BOOLEAN NOT NULL DEFAULT false,
 
             custom_mxid  TEXT,
             access_token TEXT,
@@ -85,7 +83,7 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             tw_msgid    BIGINT,
             tw_receiver BIGINT,
             tw_sender   BIGINT,
-            reaction    twitter_reaction_key NOT NULL,
+            reaction    TEXT NOT NULL,
 
             tw_reaction_id BIGINT,
 
@@ -93,6 +91,19 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             FOREIGN KEY (tw_msgid, tw_receiver) REFERENCES message(twid, receiver)
                 ON DELETE CASCADE ON UPDATE CASCADE,
             UNIQUE (mxid, mx_room)
+        )"""
+    )
+    await conn.execute(
+        """CREATE TABLE backfill_status (
+             twid TEXT,
+             receiver BIGINT,
+             backfill_user BIGINT,
+             dispatched BOOLEAN,
+             message_count INTEGER,
+             state INTEGER,
+             PRIMARY KEY (twid, receiver),
+             FOREIGN KEY (twid, receiver) REFERENCES portal(twid, receiver)
+                 ON DELETE CASCADE
         )"""
     )
 
@@ -127,19 +138,17 @@ async def upgrade_v5(conn: Connection) -> None:
     await conn.execute("""ALTER TABLE portal ADD COLUMN next_batch_id TEXT""")
 
     await conn.execute(
-        """
-        CREATE TABLE backfill_status (
-         twid TEXT,
-         receiver BIGINT,
-         backfill_user BIGINT,
-         dispatched BOOLEAN,
-         message_count INTEGER,
-         state INTEGER,
-         PRIMARY KEY (twid, receiver),
-         FOREIGN KEY (twid, receiver) REFERENCES portal(twid, receiver)
-             ON DELETE CASCADE
-        )
-    """
+        """CREATE TABLE backfill_status (
+             twid TEXT,
+             receiver BIGINT,
+             backfill_user BIGINT,
+             dispatched BOOLEAN,
+             message_count INTEGER,
+             state INTEGER,
+             PRIMARY KEY (twid, receiver),
+             FOREIGN KEY (twid, receiver) REFERENCES portal(twid, receiver)
+                 ON DELETE CASCADE
+        )"""
     )
 
     # For any existing portals, don't backfill.
@@ -162,3 +171,22 @@ async def upgrade_v6(conn: Connection) -> None:
 @upgrade_table.register(description="Reset the poll_cursor to force contact info sync")
 async def upgrade_v7(conn: Connection) -> None:
     await conn.execute('UPDATE "user" SET poll_cursor = NULL')
+
+
+@upgrade_table.register(description="Remove emoji type enum")
+async def upgrade_v8(conn: Connection, scheme: Scheme) -> None:
+    if scheme in (Scheme.COCKROACH, Scheme.POSTGRES):
+        await conn.execute("ALTER TABLE reaction ALTER COLUMN reaction TYPE TEXT")
+        await conn.execute("DROP TYPE twitter_reaction_key")
+    await conn.execute("""
+        UPDATE reaction SET reaction=CASE
+            WHEN reaction='funny' THEN '😂'
+            WHEN reaction='surprised' THEN '😲'
+            WHEN reaction='sad' THEN '😢'
+            WHEN reaction='like' THEN '❤'
+            WHEN reaction='excited' THEN '🔥'
+            WHEN reaction='agree' THEN '👍'
+            WHEN reaction='disagree' THEN '👎'
+            WHEN reaction='emoji' THEN ''
+        END
+    """)

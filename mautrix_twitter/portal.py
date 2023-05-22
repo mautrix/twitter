@@ -53,20 +53,17 @@ from mautrix.types import (
     ThumbnailInfo,
     VideoInfo,
 )
-from mautrix.util import background_task
+from mautrix.util import background_task, variation_selector
 from mautrix.util.message_send_checkpoint import MessageSendCheckpointStatus
 from mautrix.util.simple_lock import SimpleLock
 from mautwitdm.types import (
     Conversation,
     ConversationType,
-    ImageBindingValue,
     MessageData,
     MessageEntry,
     Participant,
     ReactionCreateEntry,
-    ReactionDeleteEntry,
     ReactionKey,
-    TimelineStatus,
     VideoVariant,
 )
 
@@ -118,7 +115,7 @@ class Portal(DBPortal, BasePortal):
     backfill_lock: SimpleLock
     _msgid_dedup: deque[int]
     _reqid_dedup: set[str]
-    _reaction_dedup: deque[tuple[int, int, ReactionKey]]
+    _reaction_dedup: deque[tuple[int, int, str]]
 
     _main_intent: IntentAPI
     _last_participant_update: set[int]
@@ -203,7 +200,7 @@ class Portal(DBPortal, BasePortal):
         mxid: EventID,
         message: DBMessage,
         sender: u.User | p.Puppet,
-        reaction: ReactionKey,
+        reaction: str,
         reaction_id: int | None = None,
     ) -> None:
         if existing:
@@ -373,10 +370,10 @@ class Portal(DBPortal, BasePortal):
         self.log.debug(f"Handled Matrix message {event_id} -> {resp_msg_id}")
 
     async def handle_matrix_reaction(
-        self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction_val: str
+        self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction: str
     ) -> None:
         try:
-            await self._handle_matrix_reaction(sender, event_id, reacting_to, reaction_val)
+            await self._handle_matrix_reaction(sender, event_id, reacting_to, reaction)
         except Exception as e:
             self.log.exception(f"Failed to react to {event_id}")
             await self._send_bridge_error(sender, e, event_id, EventType.REACTION)
@@ -384,9 +381,9 @@ class Portal(DBPortal, BasePortal):
             await self._send_bridge_success(sender, event_id, EventType.REACTION)
 
     async def _handle_matrix_reaction(
-        self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction_val: str
+        self, sender: u.User, event_id: EventID, reacting_to: EventID, reaction: str
     ) -> None:
-        reaction = ReactionKey.from_emoji(reaction_val)
+        reaction = variation_selector.remove(reaction)
         message = await DBMessage.get_by_mxid(reacting_to, self.mxid)
         if not message:
             raise NotImplementedError(f"Unknown reaction target event")
@@ -710,13 +707,13 @@ class Portal(DBPortal, BasePortal):
         self,
         sender: p.Puppet,
         msg_id: int,
-        reaction: ReactionKey,
+        emoji: str,
         time: datetime,
         reaction_id: int,
     ) -> None:
         async with self._reaction_lock:
             # TODO update the database with the reaction_id of outgoing reactions
-            dedup_id = (msg_id, sender.twid, reaction)
+            dedup_id = (msg_id, sender.twid, emoji)
             if dedup_id in self._reaction_dedup:
                 self.log.debug(
                     f"Ignoring duplicate reaction from {sender.twid} to {msg_id} (dedup queue)"
@@ -725,7 +722,7 @@ class Portal(DBPortal, BasePortal):
             self._reaction_dedup.appendleft(dedup_id)
 
         existing = await DBReaction.get_by_message_twid(msg_id, self.receiver, sender.twid)
-        if existing and existing.reaction == reaction:
+        if existing and existing.reaction == emoji:
             if not existing.tw_reaction_id:
                 await existing.update_id(reaction_id)
             self.log.debug(
@@ -739,17 +736,17 @@ class Portal(DBPortal, BasePortal):
             return
 
         intent = sender.intent_for(self)
-        mxid = await intent.react(message.mx_room, message.mxid, reaction.emoji, timestamp=time)
+        mxid = await intent.react(message.mx_room, message.mxid, emoji, timestamp=time)
         self.log.debug(f"{sender.twid} reacted to {msg_id}/{message.mxid} -> {mxid}")
-        await self._upsert_reaction(existing, intent, mxid, message, sender, reaction, reaction_id)
+        await self._upsert_reaction(existing, intent, mxid, message, sender, emoji, reaction_id)
 
     async def handle_twitter_reaction_remove(
-        self, sender: p.Puppet, msg_id: int, key: ReactionKey
+        self, sender: p.Puppet, msg_id: int, emoji: str
     ) -> None:
         reaction = await DBReaction.get_by_message_twid(msg_id, self.receiver, sender.twid)
-        if reaction and reaction.reaction == key:
+        if reaction and reaction.reaction == emoji:
             try:
-                self._reaction_dedup.remove((msg_id, sender.twid, key))
+                self._reaction_dedup.remove((msg_id, sender.twid, emoji))
             except ValueError:
                 pass
             try:
@@ -982,7 +979,7 @@ class Portal(DBPortal, BasePortal):
             await self.handle_twitter_message(source, sender, entry.message_data, entry.request_id)
         if isinstance(entry, ReactionCreateEntry):
             await self.handle_twitter_reaction_add(
-                sender, int(entry.message_id), entry.reaction_key, entry.time, int(entry.id)
+                sender, int(entry.message_id), entry.reaction_emoji, entry.time, int(entry.id)
             )
 
     async def _batch_handle_backfill(
@@ -1034,7 +1031,7 @@ class Portal(DBPortal, BasePortal):
                     relates_to=RelatesTo(
                         rel_type=RelationType.ANNOTATION,
                         event_id=self.deterministic_event_id(entry.message_id, "main"),
-                        key=entry.reaction_key.emoji,
+                        key=entry.reaction_emoji,
                     )
                 )
                 content[DOUBLE_PUPPET_SOURCE_KEY] = self.bridge.name
@@ -1047,7 +1044,7 @@ class Portal(DBPortal, BasePortal):
                 )
                 events.append(e)
                 twids.append(
-                    (entry.id, "reaction", entry.message_id, entry.sender_id, entry.reaction_key)
+                    (entry.id, "reaction", entry.message_id, entry.sender_id, entry.reaction_emoji)
                 )
         if len(events) == 0:
             self.log.warn("No bridgeable messages in backfill batch")

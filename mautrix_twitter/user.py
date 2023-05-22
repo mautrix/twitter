@@ -536,11 +536,11 @@ class User(DBUser, BaseUser):
         puppet = await pu.Puppet.get_by_twid(int(evt.sender_id))
         if isinstance(evt, ReactionCreateEntry):
             await portal.handle_twitter_reaction_add(
-                puppet, int(evt.message_id), evt.reaction_key, evt.time, int(evt.id)
+                puppet, int(evt.message_id), evt.reaction_emoji, evt.time, int(evt.id)
             )
         else:
             await portal.handle_twitter_reaction_remove(
-                puppet, int(evt.message_id), evt.reaction_key
+                puppet, int(evt.message_id), evt.reaction_emoji
             )
 
     @async_time(METRIC_RECEIPT)

@@ -78,38 +78,50 @@ class Conversation:
             resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)
 
-    async def react(self, message_id: str | int, key: ReactionKey) -> None:
+    @staticmethod
+    def _reaction_key_to_params(emoji: str) -> dict[str, str]:
+        key = ReactionKey.from_emoji(emoji)
+        if key == ReactionKey.EMOJI:
+            return {
+                "emoji_reaction": emoji,
+                "reaction_key": str(key),
+            }
+        else:
+            return {
+                "reaction_key": str(key),
+            }
+
+    async def react(self, message_id: str | int, emoji: str) -> None:
         """
         React to a message. Reacting to the same message multiple times will override earlier
         reactions.
 
         Args:
             message_id: The message ID to react to.
-            key: The reaction itself.
+            emoji: The reaction itself.
         """
-        url = (self.api.dm_url / "reaction" / "new.json").with_query(
-            {
-                "reaction_key": str(key),
-                "conversation_id": self.id,
-                "dm_id": str(message_id),
-            }
-        )
+        query = {
+            "conversation_id": self.id,
+            "dm_id": str(message_id),
+            **self._reaction_key_to_params(emoji),
+        }
+        url = (self.api.dm_url / "reaction" / "new.json").with_query(query)
         async with self.api.http.post(url, headers=self.api.headers) as resp:
             await check_error(resp)
 
-    async def delete_reaction(self, message_id: str | int, key: ReactionKey) -> None:
+    async def delete_reaction(self, message_id: str | int, emoji: str) -> None:
         """
         Delete an earlier reaction.
 
         Args:
             message_id: The message ID to react to.
-            key: The reaction itself.
+            emoji: The reaction itself.
         """
         url = (self.api.dm_url / "reaction" / "delete.json").with_query(
             {
-                "reaction_key": str(key),
                 "conversation_id": self.id,
                 "dm_id": str(message_id),
+                **self._reaction_key_to_params(emoji),
             }
         )
         async with self.api.http.post(url, headers=self.api.headers) as resp:

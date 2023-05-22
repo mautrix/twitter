@@ -3,7 +3,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 from attr import dataclass
 
@@ -21,18 +21,18 @@ class ReactionKey(SerializableEnum):
     EXCITED = "excited"  # 🔥
     AGREE = "agree"  # 👍
     DISAGREE = "disagree"  # 👎
-    EMOJI = "emoji"  # arbitrary emoji?
+    EMOJI = "emoji"  # arbitrary emoji
 
     @property
     def emoji(self) -> str:
         return _key_to_emoji[self]
 
     @classmethod
-    def from_emoji(cls, emoji: str) -> "ReactionKey":
+    def from_emoji(cls, emoji: str) -> Union["ReactionKey", str]:
         try:
             return _emoji_to_key[emoji.rstrip("\uFE0F")]
         except KeyError:
-            raise NotImplementedError(f"Unsupported reaction emoji {emoji}")
+            return ReactionKey.EMOJI
 
 
 _key_to_emoji: Dict[ReactionKey, str] = {
@@ -43,7 +43,6 @@ _key_to_emoji: Dict[ReactionKey, str] = {
     ReactionKey.EXCITED: "\U0001F525",
     ReactionKey.AGREE: "\U0001F44D\uFE0F",
     ReactionKey.DISAGREE: "\U0001F44E\uFE0F",
-    ReactionKey.EMOJI: "unsupported reaction",
 }
 
 _emoji_to_key: Dict[str, ReactionKey] = {
@@ -66,9 +65,17 @@ class ReactionCreateEntry(SerializableAttrs):
     message_id: str
     reaction_key: ReactionKey
     sender_id: str
+    emoji_reaction: Optional[str] = None
     affects_sort: Optional[bool] = None
+    request_id: Optional[str] = None
 
     conversation: Optional[Conversation] = None
+
+    @property
+    def reaction_emoji(self) -> str:
+        if self.reaction_key == ReactionKey.EMOJI:
+            return self.emoji_reaction
+        return self.reaction_key.emoji
 
 
 @dataclass
@@ -78,7 +85,14 @@ class ReactionDeleteEntry(SerializableAttrs):
     conversation_id: str
     message_id: str
     reaction_key: ReactionKey
+    emoji_reaction: str
     sender_id: str
     affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
+
+    @property
+    def reaction_emoji(self) -> str:
+        if self.reaction_key == ReactionKey.EMOJI:
+            return self.emoji_reaction
+        return self.reaction_key.emoji
