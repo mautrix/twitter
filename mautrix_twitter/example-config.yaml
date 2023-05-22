@@ -253,6 +253,9 @@ bridge:
     # This field will automatically be changed back to false after it,
     # except if the config file is not writable.
     resend_bridge_info: false
+    # Send captions in the same message as images. This will send data compatible with MSC2530.
+    # This is currently not supported in most clients.
+    caption_in_message: false
 
     # The prefix for commands. Only required in non-management rooms.
     command_prefix: "!tw"

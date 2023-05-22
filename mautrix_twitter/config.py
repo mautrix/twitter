@@ -87,6 +87,7 @@ class Config(BaseBridgeConfig):
         copy("bridge.error_sleep")
         copy("bridge.max_poll_errors")
         copy("bridge.resend_bridge_info")
+        copy("bridge.caption_in_message")
 
         copy("bridge.command_prefix")
 

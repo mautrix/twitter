@@ -356,7 +356,11 @@ class Portal(DBPortal, BasePortal):
             mime_type = message.info.mimetype or magic.from_buffer(data, mime=True)
             upload_resp = await sender.client.upload(data, mime_type=mime_type)
             media_id = upload_resp.media_id
-            text = ""
+            filename = message.get("filename", None)
+            if filename and filename != message.body:
+                text = message.body
+            else:
+                text = ""
         else:
             raise NotImplementedError(f"unsupported msgtype '{message.msgtype.value}'")
         reply_to = None
@@ -495,20 +499,28 @@ class Portal(DBPortal, BasePortal):
             reply_to_msg = await DBMessage.get_by_twid(int(message.reply_data.id), self.receiver)
         else:
             reply_to_msg = None
+        media_content = None
         if message.attachment and message.attachment.media:
-            content = await self._handle_twitter_media(source, intent, message)
-            if content:
+            media_content = await self._handle_twitter_media(source, intent, message)
+            if media_content:
                 if reply_to_msg:
-                    content.set_reply(reply_to_msg.mxid)
-                converted.append(content)
+                    media_content.set_reply(reply_to_msg.mxid)
+                converted.append(media_content)
         if message.text and not message.text.isspace():
-            content = await twitter_to_matrix(message)
-            content["com.beeper.linkpreviews"] = await self._twitter_preview_to_beeper(
+            text_content = await twitter_to_matrix(message)
+            text_content["com.beeper.linkpreviews"] = await self._twitter_preview_to_beeper(
                 source, intent, message
             )
             if reply_to_msg:
-                content.set_reply(reply_to_msg.mxid)
-            converted.append(content)
+                text_content.set_reply(reply_to_msg.mxid)
+            if media_content and self.config["bridge.caption_in_message"]:
+                media_content["filename"] = media_content.body
+                media_content.body = text_content.body
+                if text_content.formatted_body:
+                    media_content["format"] = str(text_content.format)
+                    media_content["formatted_body"] = text_content.formatted_body
+            else:
+                converted.append(text_content)
         return converted
 
     async def _handle_deduplicated_twitter_message(
@@ -704,6 +716,8 @@ class Portal(DBPortal, BasePortal):
         # Remove the attachment link from message.text
         start, end = media.indices
         message.text = message.text[:start] + message.text[end:]
+        if message.entities and message.entities.urls:
+            message.entities.urls = [u for u in message.entities.urls if u.url != media.url]
         return content
 
     async def _reupload_twitter_media(
