@@ -76,7 +76,7 @@ class TwitterUploader:
         return MediaUploadResponse.deserialize(resp_data)
 
     async def upload(
-        self, data: bytes = None, url: str = None, mime_type: str = None
+        self, data: bytes = None, url: str = None, mime_type: str = None, is_audio: bool = False
     ) -> MediaUploadResponse:
         if mime_type == "image/gif":
             category = "dm_gif"
@@ -86,6 +86,8 @@ class TwitterUploader:
             size_limit = 5 * 1024 * 1024
         elif mime_type.startswith("video/"):
             category = "dm_video"
+            if is_audio:
+                category = "dm_audio_video"
             size_limit = 15 * 1024 * 1024
         else:
             raise NotImplementedError(f"Unsupported mime type {mime_type}")

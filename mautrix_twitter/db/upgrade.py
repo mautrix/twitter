@@ -178,8 +178,8 @@ async def upgrade_v8(conn: Connection, scheme: Scheme) -> None:
     if scheme in (Scheme.COCKROACH, Scheme.POSTGRES):
         await conn.execute("ALTER TABLE reaction ALTER COLUMN reaction TYPE TEXT")
         await conn.execute("DROP TYPE twitter_reaction_key")
-    await conn.execute("""
-        UPDATE reaction SET reaction=CASE
+    await conn.execute(
+        """UPDATE reaction SET reaction=CASE
             WHEN reaction='funny' THEN '😂'
             WHEN reaction='surprised' THEN '😲'
             WHEN reaction='sad' THEN '😢'
@@ -188,5 +188,5 @@ async def upgrade_v8(conn: Connection, scheme: Scheme) -> None:
             WHEN reaction='agree' THEN '👍'
             WHEN reaction='disagree' THEN '👎'
             WHEN reaction='emoji' THEN ''
-        END
-    """)
+        END"""
+    )

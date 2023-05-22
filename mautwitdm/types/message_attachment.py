@@ -55,6 +55,7 @@ class MessageAttachmentMedia(SerializableAttrs):
     sizes: Dict[str, ImageSizeInfo]
     original_info: OriginalImageSizeInfo
     video_info: Optional[VideoInfo] = None
+    audio_only: Optional[bool] = None
 
 
 @dataclass

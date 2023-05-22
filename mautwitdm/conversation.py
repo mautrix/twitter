@@ -48,6 +48,7 @@ class Conversation:
         self,
         text: str,
         media_id: str | int | None = None,
+        voice_message: bool = False,
         reply_to_id: str | int | None = None,
         request_id: UUID | str | None = None,
     ) -> SendResponse:
@@ -58,6 +59,7 @@ class Conversation:
             text: The text to send. May be an empty string if only sending media.
             media_id: The media ID to send. Use :meth:`TwitterUploader.upload` to upload media and
                 get a media ID.
+            voice_message: Whether the media message is a voice message.
             reply_to_id: ID of message to reply to.
             request_id: The transaction ID for this request. It will be included in the message
                 when polling and can be used for deduplication. If not provided, one will be
@@ -78,6 +80,8 @@ class Conversation:
             data["reply_to_dm_id"] = reply_to_id
         if media_id:
             data["media_id"] = str(media_id)
+            if voice_message:
+                data["audio_only_media_attachment"] = True
         async with self.api.http.post(url, data=data, headers=self.api.headers) as resp:
             resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)

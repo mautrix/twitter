@@ -30,6 +30,7 @@ from mautrix.appservice import DOUBLE_PUPPET_SOURCE_KEY, AppService, IntentAPI
 from mautrix.bridge import BasePortal, NotificationDisabler, async_getter_lock
 from mautrix.errors import MatrixError, MForbidden
 from mautrix.types import (
+    AudioInfo,
     BatchSendEvent,
     BatchSendStateEvent,
     BeeperMessageStatusEventContent,
@@ -53,7 +54,7 @@ from mautrix.types import (
     ThumbnailInfo,
     VideoInfo,
 )
-from mautrix.util import background_task, variation_selector
+from mautrix.util import background_task, ffmpeg, variation_selector
 from mautrix.util.message_send_checkpoint import MessageSendCheckpointStatus
 from mautrix.util.simple_lock import SimpleLock
 from mautwitdm.types import (
@@ -63,7 +64,6 @@ from mautwitdm.types import (
     MessageEntry,
     Participant,
     ReactionCreateEntry,
-    ReactionKey,
     VideoVariant,
 )
 
@@ -644,14 +644,31 @@ class Portal(DBPortal, BasePortal):
                     or self._is_better_mime(best_variant, variant)
                 ):
                     best_variant = variant
-            reuploaded_info = await self._reupload_twitter_media(source, best_variant.url, intent)
+            reuploaded_info = await self._reupload_twitter_media(
+                source, best_variant.url, intent, convert_to_audio=media.audio_only
+            )
         content = MediaMessageEventContent(
             body=reuploaded_info.file_name,
             url=reuploaded_info.mxc,
             file=reuploaded_info.decryption_info,
             external_url=media.media_url_https,
         )
-        if message.attachment.video or (
+        if message.attachment.video and message.attachment.video.audio_only:
+            content.msgtype = MessageType.AUDIO
+            content.info = AudioInfo(
+                mimetype=reuploaded_info.mime_type,
+                size=reuploaded_info.size,
+                duration=media.video_info.duration_millis or None,
+            )
+            content["org.matrix.msc1767.audio"] = (
+                {
+                    "duration": content.info.duration,
+                }
+                if content.info.duration
+                else {}
+            )
+            content["org.matrix.msc3245.voice"] = {}
+        elif message.attachment.video or (
             message.attachment.animated_gif and reuploaded_info.mime_type.startswith("video/")
         ):
             content.msgtype = MessageType.VIDEO
@@ -690,10 +707,20 @@ class Portal(DBPortal, BasePortal):
         return content
 
     async def _reupload_twitter_media(
-        self, source: u.User, url: str, intent: IntentAPI
+        self, source: u.User, url: str, intent: IntentAPI, convert_to_audio: bool = False
     ) -> ReuploadedMediaInfo:
         file_name = URL(url).name
         data, mime_type = await source.client.download_media(url)
+
+        if convert_to_audio and (mime_type.startswith("video/") or mime_type.startswith("audio/")):
+            data = await ffmpeg.convert_bytes(
+                data,
+                ".ogg",
+                output_args=("-c:a", "libopus"),
+                input_mime=mime_type,
+            )
+            mime_type = "audio/ogg"
+            file_name += ".ogg"
 
         upload_mime_type = mime_type
         upload_file_name = file_name

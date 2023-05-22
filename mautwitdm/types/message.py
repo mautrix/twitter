@@ -27,7 +27,7 @@ class MessageData(SerializableAttrs):
     conversation_id: Optional[str] = None
     entities: Optional[MessageEntities] = None
     attachment: Optional[MessageAttachment] = None
-    reply_data: Optional['MessageData'] = None
+    reply_data: Optional["MessageData"] = None
 
 
 # Resolve reply_data field
