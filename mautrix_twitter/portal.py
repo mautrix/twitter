@@ -790,7 +790,9 @@ class Portal(DBPortal, BasePortal):
             return
 
         intent = sender.intent_for(self)
-        mxid = await intent.react(message.mx_room, message.mxid, emoji, timestamp=time)
+        mxid = await intent.react(
+            message.mx_room, message.mxid, variation_selector.add(emoji), timestamp=time
+        )
         self.log.debug(f"{sender.twid} reacted to {msg_id}/{message.mxid} -> {mxid}")
         await self._upsert_reaction(existing, intent, mxid, message, sender, emoji, reaction_id)
 

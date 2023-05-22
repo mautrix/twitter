@@ -8,6 +8,7 @@ from typing import Dict, Optional, Union
 from attr import dataclass
 
 from mautrix.types import SerializableAttrs, SerializableEnum
+from mautrix.util import variation_selector
 
 from .conversation import Conversation
 from .util import StringTimestamp
@@ -94,5 +95,7 @@ class ReactionDeleteEntry(SerializableAttrs):
     @property
     def reaction_emoji(self) -> str:
         if self.reaction_key == ReactionKey.EMOJI:
-            return self.emoji_reaction
-        return self.reaction_key.emoji
+            emoji = self.emoji_reaction
+        else:
+            emoji = self.reaction_key.emoji
+        return variation_selector.remove(emoji)
