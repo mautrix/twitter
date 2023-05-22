@@ -48,6 +48,7 @@ class Conversation:
         self,
         text: str,
         media_id: str | int | None = None,
+        reply_to_id: str | int | None = None,
         request_id: UUID | str | None = None,
     ) -> SendResponse:
         """
@@ -57,6 +58,7 @@ class Conversation:
             text: The text to send. May be an empty string if only sending media.
             media_id: The media ID to send. Use :meth:`TwitterUploader.upload` to upload media and
                 get a media ID.
+            reply_to_id: ID of message to reply to.
             request_id: The transaction ID for this request. It will be included in the message
                 when polling and can be used for deduplication. If not provided, one will be
                 automatically created using :meth:`TwitterAPI.new_request_id`
@@ -72,6 +74,8 @@ class Conversation:
             "request_id": str(request_id or self.api.new_request_id()),
         }
         url = self.api.dm_url / "new.json"
+        if reply_to_id:
+            data["reply_to_dm_id"] = reply_to_id
         if media_id:
             data["media_id"] = str(media_id)
         async with self.api.http.post(url, data=data, headers=self.api.headers) as resp:

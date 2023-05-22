@@ -359,8 +359,13 @@ class Portal(DBPortal, BasePortal):
             text = ""
         else:
             raise NotImplementedError(f"unsupported msgtype '{message.msgtype.value}'")
+        reply_to = None
+        if message.get_reply_to():
+            reply_to_msg = await DBMessage.get_by_mxid(message.get_reply_to(), self.mxid)
+            if reply_to_msg:
+                reply_to = reply_to_msg.twid
         resp = await sender.client.conversation(self.twid).send(
-            text, media_id=media_id, request_id=request_id
+            text, media_id=media_id, request_id=request_id, reply_to_id=reply_to
         )
         resp_msg_id = int(resp.entries[0].message.id)
         self._msgid_dedup.appendleft(resp_msg_id)
@@ -486,15 +491,23 @@ class Portal(DBPortal, BasePortal):
     ) -> list[MessageEventContent]:
         converted = []
         intent = sender.intent_for(self)
+        if message.reply_data:
+            reply_to_msg = await DBMessage.get_by_twid(int(message.reply_data.id), self.receiver)
+        else:
+            reply_to_msg = None
         if message.attachment and message.attachment.media:
             content = await self._handle_twitter_media(source, intent, message)
             if content:
+                if reply_to_msg:
+                    content.set_reply(reply_to_msg.mxid)
                 converted.append(content)
         if message.text and not message.text.isspace():
             content = await twitter_to_matrix(message)
             content["com.beeper.linkpreviews"] = await self._twitter_preview_to_beeper(
                 source, intent, message
             )
+            if reply_to_msg:
+                content.set_reply(reply_to_msg.mxid)
             converted.append(content)
         return converted
 

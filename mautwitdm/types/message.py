@@ -6,6 +6,7 @@
 from typing import List, Optional
 
 from attr import dataclass
+import attr
 
 from mautrix.types import SerializableAttrs
 
@@ -26,6 +27,11 @@ class MessageData(SerializableAttrs):
     conversation_id: Optional[str] = None
     entities: Optional[MessageEntities] = None
     attachment: Optional[MessageAttachment] = None
+    reply_data: Optional['MessageData'] = None
+
+
+# Resolve reply_data field
+attr.resolve_types(MessageData)
 
 
 @dataclass
