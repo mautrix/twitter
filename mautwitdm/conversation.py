@@ -69,20 +69,23 @@ class Conversation:
             The send response from the server.
         """
         data = {
-            **self.api.poll_params,
-            "text": text,
+            "cards_platform": "Web-12",
             "conversation_id": self.id,
-            "recipient_ids": "false",
+            "dm_users": False,
+            "include_cards": 1,
+            "include_quote_count": True,
+            "recipient_ids": False,
             "request_id": str(request_id or self.api.new_request_id()),
+            "text": text,
         }
-        url = self.api.dm_url / "new.json"
+        url = (self.api.dm_url / "new2.json").with_query(self.api.poll_query_params)
         if reply_to_id:
-            data["reply_to_dm_id"] = reply_to_id
+            data["reply_to_dm_id"] = str(reply_to_id)
         if media_id:
             data["media_id"] = str(media_id)
             if voice_message:
                 data["audio_only_media_attachment"] = True
-        async with self.api.http.post(url, data=data, headers=self.api.headers) as resp:
+        async with self.api.http.post(url, json=data, headers=self.api.headers) as resp:
             resp_data = await check_error(resp)
             return SendResponse.deserialize(resp_data)
 

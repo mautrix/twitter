@@ -66,19 +66,16 @@ class TwitterPoller(TwitterDispatcher):
     _typing_in: c.Conversation | None
 
     @property
-    def poll_params(self) -> dict[str, str]:
+    def poll_query_params(self) -> dict[str, str]:
         return {
-            "cards_platform": "Web-12",
-            "include_cards": "1",
             "include_ext_alt_text": "true",
-            "include_quote_count": "true",
             "include_reply_count": "1",
             "tweet_mode": "extended",
-            "dm_users": "false",
             "include_groups": "true",
             "include_inbox_timelines": "true",
             "include_ext_media_color": "true",
             "supports_reactions": "true",
+            "include_ext_limited_action_results": "false",
             "ext": ",".join(
                 [
                     "mediaColor",
@@ -87,10 +84,28 @@ class TwitterPoller(TwitterDispatcher):
                     "highlightedLabel",
                     "hasNftAvatar",
                     "voiceInfo",
+                    "birdwatchPivot",
                     "enrichments",
                     "superFollowMetadata",
+                    "unmentionInfo",
+                    "editControl",
+                    "vibe",
                 ]
             ),
+        }
+
+    @property
+    def poll_params(self) -> dict[str, str]:
+        return {
+            "cards_platform": "Web-12",
+            "include_cards": "1",
+            "include_quote_count": "true",
+            "dm_users": "false",
+            "include_ext_edit_control": "true",
+            "nsfw_filtering_enabled": "false",
+            "dm_secret_conversations_enabled": "false",
+            "include_ext_views": "true",
+            **self.poll_query_params,
         }
 
     @property
