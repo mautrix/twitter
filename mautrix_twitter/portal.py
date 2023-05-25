@@ -800,7 +800,7 @@ class Portal(DBPortal, BasePortal):
         self, sender: p.Puppet, msg_id: int, emoji: str
     ) -> None:
         reaction = await DBReaction.get_by_message_twid(msg_id, self.receiver, sender.twid)
-        if reaction and reaction.reaction == emoji:
+        if reaction and (reaction.reaction == emoji or not emoji):
             try:
                 self._reaction_dedup.remove((msg_id, sender.twid, emoji))
             except ValueError:

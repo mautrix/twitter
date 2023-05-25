@@ -86,8 +86,8 @@ class ReactionDeleteEntry(SerializableAttrs):
     conversation_id: str
     message_id: str
     reaction_key: ReactionKey
-    emoji_reaction: str
     sender_id: str
+    emoji_reaction: Optional[str] = None
     affects_sort: Optional[bool] = None
 
     conversation: Optional[Conversation] = None
