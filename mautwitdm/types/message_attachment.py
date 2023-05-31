@@ -143,9 +143,9 @@ class TweetAttachmentStatus(SerializableAttrs):
     retweet_count: int
     favorite_count: int
     reply_count: int
-    quote_count: int
     favorited: bool
     retweeted: bool
+    quote_count: Optional[int] = None
     lang: Optional[str] = None
     supplemental_language: Optional[str] = None
     possibly_sensitive: Optional[bool] = None
