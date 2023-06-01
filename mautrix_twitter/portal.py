@@ -1103,7 +1103,7 @@ class Portal(DBPortal, BasePortal):
                     (entry.id, "reaction", entry.message_id, entry.sender_id, entry.reaction_emoji)
                 )
         if len(events) == 0:
-            self.log.warn("No bridgeable messages in backfill batch")
+            self.log.warning("No bridgeable messages in backfill batch")
             return 0
 
         intent = self.main_intent
