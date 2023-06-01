@@ -29,6 +29,9 @@ class NoFirstMessageException(BaseException):
     pass
 
 
+log = logging.getLogger("mau.backfill_loop")
+
+
 class BackfillStatus(DBBackfillStatus):
     recheck_queues: set[asyncio.Queue] = set()
 
@@ -70,12 +73,11 @@ class BackfillStatus(DBBackfillStatus):
                 elif state.state == 0:
                     state.state = 1
             except NoFirstMessageException:
-                logging.error("No first message found to do backfill!")
+                log.error(f"No first message found to do backfill for {state.twid}")
                 state.state = 0
             except Exception:
-                # TODO: handle and log error, and be smarter about backfill loops
+                log.exception(f"Error handling backfill task for {state.twid}")
                 state.state = 3
-                logging.error(traceback.format_exc())
             finally:
                 state.dispatched = False
                 await state.update()

@@ -405,7 +405,7 @@ class User(DBUser, BaseUser):
                 await self.handle_conversation_update(conversation, create_portal=create_portal)
             except Exception:
                 self.log.exception(
-                    "Error while syncing conversation %s!", conversation.conversation_id
+                    "Error while syncing conversation %s", conversation.conversation_id
                 )
         await self.update_direct_chats()
 
@@ -487,27 +487,14 @@ class User(DBUser, BaseUser):
         portal = await po.Portal.get_by_twid(
             evt.conversation_id, receiver=self.twid, conv_type=evt.type
         )
-        if not portal.mxid:
-            self.log.debug("Conversation %s doesn't have MXID!", evt.conversation_id)
-            if create_portal:
-                self.log.debug("Creating Matrix room...")
-                await portal.create_matrix_room(self, evt)
-        else:
+        if portal.mxid:
             # We don't want to do the invite_user and such things each time conversation info
             # comes down polling, so if the room already exists, only call .update_info()
             await portal.update_info(evt)
-            puppet = await pu.Puppet.get_by_custom_mxid(self.mxid)
-            if puppet:
-                if self.config["bridge.low_quality_tag"]:
-                    self.log.debug("Tagging room if low-quality")
-                    await self.tag_room(
-                        puppet,
-                        portal,
-                        self.config["bridge.low_quality_tag"],
-                        evt.low_quality == True,
-                    )
-                if self.config["bridge.low_quality_mute"] and evt.low_quality:
-                    await self.set_muted(puppet, portal, True)
+        elif create_portal:
+            await portal.create_matrix_room(self, evt)
+        else:
+            self.log.debug(f"Ignoring conversation update for {evt.conversation_id}")
 
     @async_time(METRIC_USER_UPDATE)
     async def handle_user_update(self, user: TwitterUser) -> None:

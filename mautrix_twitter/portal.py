@@ -928,7 +928,7 @@ class Portal(DBPortal, BasePortal):
             if first_message is not None:
                 max_id = first_message.twid
             else:
-                self.log.warn("Can't backfill without a first bridged message!")
+                self.log.warning("Can't backfill without a first bridged message")
                 raise b.NoFirstMessageException()
 
         mark_read, entries = await self._fetch_backfill_entries(source, limit, max_id)
@@ -1112,10 +1112,10 @@ class Portal(DBPortal, BasePortal):
         if not self.bridge.homeserver_software.is_hungry:
             before_first_message_timestamp = events[0].timestamp - 1
             self.log.debug("Adding member state events to batch")
-            for u in users_in_batch:
-                puppet = await self.bridge.get_puppet(u)
+            for mxid in users_in_batch:
+                puppet = await p.Puppet.get_by_mxid(mxid)
                 if puppet is None:
-                    self.log.warn("No puppet found for user %s while backfilling!", u)
+                    self.log.warning(f"No puppet found for user {mxid} while backfilling")
                     continue
                 state_events_at_start.append(
                     BatchSendStateEvent(
@@ -1125,7 +1125,7 @@ class Portal(DBPortal, BasePortal):
                         ),
                         sender=intent.mxid,
                         timestamp=before_first_message_timestamp,
-                        state_key=u,
+                        state_key=mxid,
                     )
                 )
                 state_events_at_start.append(
@@ -1134,9 +1134,9 @@ class Portal(DBPortal, BasePortal):
                         content=MemberStateEventContent(
                             Membership.JOIN, avatar_url=puppet.photo_mxc, displayname=puppet.name
                         ),
-                        sender=u,
+                        sender=mxid,
                         timestamp=before_first_message_timestamp,
-                        state_key=u,
+                        state_key=mxid,
                     )
                 )
 
