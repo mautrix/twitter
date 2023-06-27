@@ -57,6 +57,7 @@ from mautrix.types import (
 from mautrix.util import background_task, ffmpeg, variation_selector
 from mautrix.util.message_send_checkpoint import MessageSendCheckpointStatus
 from mautrix.util.simple_lock import SimpleLock
+from mautwitdm.errors import UnsupportedAttachmentError
 from mautwitdm.types import (
     Conversation,
     ConversationType,
@@ -88,10 +89,6 @@ except ImportError:
 StateBridge = EventType.find("m.bridge", EventType.Class.STATE)
 StateHalfShotBridge = EventType.find("uk.half-shot.bridge", EventType.Class.STATE)
 StateMarker = EventType.find("org.matrix.msc2716.marker", EventType.Class.STATE)
-
-
-class UnsupportedAttachmentError(NotImplementedError):
-    pass
 
 
 class ReuploadedMediaInfo(NamedTuple):

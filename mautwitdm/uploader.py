@@ -12,7 +12,7 @@ import math
 from aiohttp import ClientSession, MultipartWriter
 from yarl import URL
 
-from .errors import check_error
+from .errors import UnsupportedAttachmentError, check_error
 from .types import MediaUploadResponse
 
 
@@ -90,9 +90,9 @@ class TwitterUploader:
                 category = "dm_audio_video"
             size_limit = 15 * 1024 * 1024
         else:
-            raise NotImplementedError(f"Unsupported mime type {mime_type}")
+            raise UnsupportedAttachmentError(f"Unsupported mime type {mime_type}")
         if len(data) > size_limit:
-            raise NotImplementedError("File too big")
+            raise UnsupportedAttachmentError("File too big")
         init_req = {
             "command": "INIT",
             "media_type": mime_type,

@@ -45,6 +45,10 @@ class RateLimitError(TwitterError):
         )
 
 
+class UnsupportedAttachmentError(NotImplementedError):
+    pass
+
+
 async def check_error(resp: ClientResponse) -> Any:
     try:
         resp_data = await resp.json()
