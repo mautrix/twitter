@@ -660,7 +660,6 @@ class Portal(DBPortal, BasePortal):
             body=reuploaded_info.file_name,
             url=reuploaded_info.mxc,
             file=reuploaded_info.decryption_info,
-            external_url=media.media_url_https,
         )
         if message.attachment.video and message.attachment.video.audio_only:
             content.msgtype = MessageType.AUDIO
