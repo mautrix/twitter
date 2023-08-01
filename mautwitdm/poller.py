@@ -60,6 +60,7 @@ class TwitterPoller(TwitterDispatcher):
     poll_sleep: int = 3
     error_sleep: int = 5
     max_poll_errors: int = 12
+    max_poll_auth_errors: int = 4
     poll_cursor: str | None
     dispatch_initial_resp: bool
     _poll_task: asyncio.Task | None
@@ -297,10 +298,13 @@ class TwitterPoller(TwitterDispatcher):
                     self.log.debug(f"Increased poll sleep to {self.poll_sleep}")
                 await asyncio.sleep(sleep)
                 continue
-            except TwitterAuthError:
-                raise
             except Exception as e:
-                if errors > self.max_poll_errors > 0:
+                max_errors = (
+                    self.max_poll_auth_errors
+                    if isinstance(e, TwitterAuthError)
+                    else self.max_poll_errors
+                )
+                if errors > max_errors > 0:
                     self.log.debug(
                         f"Error count ({errors}) exceeded maximum, raising error as fatal"
                     )
