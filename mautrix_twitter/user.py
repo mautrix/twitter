@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterable, Awaitable, cast
 import asyncio
 import logging
 
+import aiohttp
+
 from mautrix.appservice import DOUBLE_PUPPET_SOURCE_KEY
 from mautrix.bridge import BaseUser, async_getter_lock
 from mautrix.errors import MNotFound
@@ -200,7 +202,20 @@ class User(DBUser, BaseUser):
         client.set_tokens(auth_token or self.auth_token, csrf_token or self.csrf_token)
 
         # Initial ping to make sure auth works
-        await client.get_user_identifier()
+        initial_ping_retry = 0
+        while True:
+            try:
+                await client.get_user_identifier()
+                break
+            except aiohttp.ClientResponseError as e:
+                if e.status == 403 and initial_ping_retry < 5:
+                    initial_ping_retry += 1
+                    self.log.warning(
+                        "Unexpected 403 in initial ping, retrying in 5 seconds", exc_info=True
+                    )
+                    await asyncio.sleep(5)
+                else:
+                    raise
 
         self.client = client
         self.client.add_handler(Conversation, self.handle_conversation_update)
