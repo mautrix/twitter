@@ -345,7 +345,10 @@ class User(DBUser, BaseUser):
                     state_event=BridgeStateEvent.UNKNOWN_ERROR,
                     important=evt.fatal,
                 )
-        elif evt.count == 1 and self.config["bridge.temporary_disconnect_notices"]:
+        elif evt.count == 1:
+            # Ignore first error, Twitter spams them way too often nowadays
+            return
+        elif evt.count == 2 and self.config["bridge.temporary_disconnect_notices"]:
             await self.send_bridge_notice(
                 f"Error while polling Twitter: {evt.error}\nThe bridge will keep retrying.",
                 state_event=BridgeStateEvent.TRANSIENT_DISCONNECT,
