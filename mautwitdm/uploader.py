@@ -17,7 +17,7 @@ from .types import MediaUploadResponse
 
 
 class TwitterUploader:
-    upload_url: URL = URL("https://upload.twitter.com/i/media/upload.json")
+    upload_url: URL = URL("https://upload.x.com/i/media/upload.json")
 
     http: ClientSession
     log: logging.Logger

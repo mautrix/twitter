@@ -45,7 +45,7 @@ async def ping(evt: CommandEvent) -> None:
     user_info = await evt.sender.get_info()
     await evt.reply(
         f"You're logged in as {user_info.name} "
-        f"([@{evt.sender.username}](https://twitter.com/{evt.sender.username}), "
+        f"([@{evt.sender.username}](https://x.com/{evt.sender.username}), "
         f"user ID: {evt.sender.twid})"
     )
 

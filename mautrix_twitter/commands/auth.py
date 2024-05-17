@@ -37,10 +37,10 @@ async def login_cookie(evt: CommandEvent) -> None:
         "auth_token": None,
     }
     await evt.reply(
-        "1. Log in to [Twitter](https://www.twitter.com/) in a private/incognito window.\n"
+        "1. Log in to [Twitter](https://www.x.com/) in a private/incognito window.\n"
         "2. Press `F12` to open developer tools.\n"
         '3. Select the "Application" (Chrome) or "Storage" (Firefox) tab.\n'
-        '4. In the sidebar, expand "Cookies" and select `https://twitter.com`.\n'
+        '4. In the sidebar, expand "Cookies" and select `https://x.com`.\n'
         "5. In the cookie list, find the `auth_token` row and double click on the value"
         r", then copy the value and send it here."
     )

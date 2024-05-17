@@ -25,8 +25,8 @@ class TwitterStreamer(TwitterDispatcher):
     via ``/live_pipeline/events``.
     """
 
-    pipeline_url = URL("https://api.twitter.com/live_pipeline/events")
-    pipeline_update_url = URL("https://api.twitter.com/1.1/live_pipeline/update_subscriptions")
+    pipeline_url = URL("https://api.x.com/live_pipeline/events")
+    pipeline_update_url = URL("https://api.x.com/1.1/live_pipeline/update_subscriptions")
 
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
@@ -44,8 +44,8 @@ class TwitterStreamer(TwitterDispatcher):
             "Accept": "text/event-stream",
             "Accept-Language": "en-US,en;q=0.5",
             "DNT": "1",
-            "Origin": "https://twitter.com",
-            "Referer": "https://twitter.com/messages",
+            "Origin": "https://x.com",
+            "Referer": "https://x.com/messages",
             "Pragma": "no-cache",
         }
         empty_bytes = b""

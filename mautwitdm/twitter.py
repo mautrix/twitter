@@ -25,13 +25,13 @@ from .uploader import TwitterUploader
 Tokens = NamedTuple("Tokens", auth_token=str, csrf_token=str)
 DownloadResp = NamedTuple("DownloadResp", data=bytes, mime_type=str)
 
-twitter_com = URL("https://twitter.com/")
+twitter_com = URL("https://x.com/")
 
 
 class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
     """The main entrypoint for using the internal Twitter DM API."""
 
-    base_url: URL = URL("https://api.twitter.com/1.1")
+    base_url: URL = URL("https://api.x.com/1.1")
     dm_url: URL = base_url / "dm"
 
     loop: asyncio.AbstractEventLoop
@@ -76,9 +76,9 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
         """
         cookie = SimpleCookie()
         cookie["auth_token"] = auth_token
-        cookie["auth_token"].update({"domain": "twitter.com", "path": "/"})
+        cookie["auth_token"].update({"domain": "x.com", "path": "/"})
         cookie["ct0"] = csrf_token
-        cookie["ct0"].update({"domain": "twitter.com", "path": "/"})
+        cookie["ct0"].update({"domain": "x.com", "path": "/"})
         self.http.cookie_jar.update_cookies(cookie, twitter_com)
 
     def mark_typing(self, conversation_id: str | None) -> None:
@@ -93,7 +93,7 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
 
     @property
     def tokens(self) -> Tokens | None:
-        cookies = self.http.cookie_jar.filter_cookies(URL("https://twitter.com/"))
+        cookies = self.http.cookie_jar.filter_cookies(URL("https://x.com/"))
         try:
             return Tokens(auth_token=cookies["auth_token"].value, csrf_token=cookies["ct0"].value)
         except KeyError:
@@ -118,8 +118,8 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.5",
             "DNT": "1",
-            "Origin": "https://twitter.com",
-            "Referer": "https://twitter.com/messages",
+            "Origin": "https://x.com",
+            "Referer": "https://x.com/messages",
             "x-twitter-auth-type": "OAuth2Session",
             "x-twitter-client-language": "en",
             "x-twitter-active-user": "yes",
@@ -130,7 +130,7 @@ class TwitterAPI(TwitterUploader, TwitterStreamer, TwitterPoller):
         headers = {
             "Accept": "*/*",
             "DNT": "1",
-            "Referer": "https://twitter.com/messages",
+            "Referer": "https://x.com/messages",
             "User-Agent": self.user_agent,
         }
         async with self.http.get(url, headers=headers) as resp:

@@ -485,7 +485,7 @@ class Portal(DBPortal, BasePortal):
         hash_content = f"{self.mxid}/twitter/{msg_id}/{part}"
         hashed = hashlib.sha256(hash_content.encode("utf-8")).digest()
         b64hash = base64.urlsafe_b64encode(hashed).decode("utf-8").rstrip("=")
-        return EventID(f"${b64hash}:twitter.com")
+        return EventID(f"${b64hash}:x.com")
 
     async def _convert_twitter_message(
         self, source: u.User, sender: p.Puppet, message: MessageData
