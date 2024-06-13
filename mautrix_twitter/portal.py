@@ -641,6 +641,8 @@ class Portal(DBPortal, BasePortal):
         self, source: u.User, intent: IntentAPI, message: MessageData
     ) -> MediaMessageEventContent | None:
         media = message.attachment.media
+        # Fix for new media URLs
+        media.media_url_https = media.media_url_https.replace("ton.twitter.com/1.1", "ton.x.com/i")
         reuploaded_info = await self._reupload_twitter_media(source, media.media_url_https, intent)
         thumbnail_info = None
         if media.video_info:
