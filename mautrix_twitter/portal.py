@@ -353,8 +353,7 @@ class Portal(DBPortal, BasePortal):
             mime_type = message.info.mimetype or magic.from_buffer(data, mime=True)
             upload_resp = await sender.client.upload(data, mime_type=mime_type)
             media_id = upload_resp.media_id
-            filename = message.get("filename", None)
-            if filename and filename != message.body:
+            if message.filename and message.filename != message.body:
                 text = message.body
             else:
                 text = ""
@@ -511,11 +510,11 @@ class Portal(DBPortal, BasePortal):
             if reply_to_msg:
                 text_content.set_reply(reply_to_msg.mxid)
             if media_content and self.config["bridge.caption_in_message"]:
-                media_content["filename"] = media_content.body
+                media_content.filename = media_content.body
                 media_content.body = text_content.body
                 if text_content.formatted_body:
-                    media_content["format"] = str(text_content.format)
-                    media_content["formatted_body"] = text_content.formatted_body
+                    media_content.format = text_content.format
+                    media_content.formatted_body = text_content.formatted_body
             else:
                 converted.append(text_content)
         return converted
