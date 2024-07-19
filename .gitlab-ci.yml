@@ -1,3 +1,6 @@
 include:
 - project: 'mautrix/ci'
-  file: '/python.yml'
+  file: '/gov2.yml'
+
+variables:
+  BINARY_NAME_V2: mautrix-twitter
