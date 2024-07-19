@@ -66,6 +66,7 @@ func (pc *PollingClient) SetCurrentCursor(cursor string) {
 	pc.currentCursor = cursor
 }
 
+//lint:ignore U1000 TODO fix unused method
 func (pc *PollingClient) stopPolling() error {
 	if pc.ticker == nil {
 		return ErrNotPollingUpdates

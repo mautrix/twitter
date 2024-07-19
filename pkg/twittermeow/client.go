@@ -153,6 +153,7 @@ func (c *Client) SetProxy(proxyAddr string) error {
 		if err != nil {
 			return err
 		}
+		//lint:ignore SA1019 TODO fix deprecated method
 		c.http.Transport.(*http.Transport).Dial = c.socksProxy.Dial
 		contextDialer, ok := c.socksProxy.(proxy.ContextDialer)
 		if ok {

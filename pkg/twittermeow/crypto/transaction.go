@@ -85,6 +85,7 @@ func encodeXOR(plainArr []byte) []byte {
 	return encodedArr
 }
 
+//lint:ignore U1000 TODO fix unused method
 func decodeSVGStr(svgStr string) [][]int {
 	segmentStrings := strings.Split(strings.TrimSpace(svgStr), "C")[1:]
 	byteArrays := [][]int{}
@@ -115,6 +116,7 @@ func decodeSVGStr(svgStr string) [][]int {
 	return byteArrays
 }
 
+//lint:ignore U1000 TODO fix unused method
 func buildColorStr(arr []int) []string {
 	colors := []string{}
 	s := ""
@@ -136,6 +138,7 @@ func buildColorStr(arr []int) []string {
 	return colors
 }
 
+//lint:ignore U1000 TODO fix unused method
 func buildEasingStr(arr []int) []float64 {
 	nums := []float64{}
 	t := 1.0

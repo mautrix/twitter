@@ -1,3 +1,5 @@
+//lint:file-ignore U1000 -
+
 package twittermeow_test
 
 import (

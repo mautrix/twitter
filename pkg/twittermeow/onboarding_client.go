@@ -5,11 +5,13 @@ import (
 )
 
 type OnboardingClient struct {
+	//lint:ignore U1000 TODO fix unused field
 	client       *Client
 	flowToken    string
 	currentTasks *types.TaskResponse
 }
 
+//lint:ignore U1000 TODO fix unused method
 func (c *Client) newOnboardingClient() *OnboardingClient {
 	return &OnboardingClient{
 		client:       c,
