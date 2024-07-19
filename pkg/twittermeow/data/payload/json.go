@@ -1,0 +1,46 @@
+package payload
+
+import "encoding/json"
+
+type SendDirectMessagePayload struct {
+	ConversationID    string `json:"conversation_id,omitempty"`
+	MediaID           string `json:"media_id,omitempty"`
+	ReplyToDmID       string `json:"reply_to_dm_id,omitempty"`
+	RecipientIds      bool   `json:"recipient_ids"`
+	RequestID         string `json:"request_id,omitempty"`
+	Text              string `json:"text"`
+	CardsPlatform     string `json:"cards_platform,omitempty"`
+	IncludeCards      int    `json:"include_cards,omitempty"`
+	IncludeQuoteCount bool   `json:"include_quote_count"`
+	DmUsers           bool   `json:"dm_users"`
+}
+
+func (p *SendDirectMessagePayload) Encode() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+type GraphQLPayload struct {
+	Variables interface{} `json:"variables,omitempty"`
+	QueryID   string      `json:"queryId,omitempty"`
+}
+
+func (p *GraphQLPayload) Encode() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+type DMMessageDeleteMutationVariables struct {
+	MessageID string `json:"messageId,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+}
+
+type LabelType string
+
+const (
+	LABEL_TYPE_PINNED LabelType = "Pinned"
+)
+
+type PinAndUnpinConversationVariables struct {
+	ConversationID string    `json:"conversation_id,omitempty"`
+	LabelType      LabelType `json:"label_type,omitempty"`
+	Label          LabelType `json:"label,omitempty"`
+}
