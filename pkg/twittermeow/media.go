@@ -6,12 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"time"
-
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
@@ -88,7 +86,6 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		}
 
 		url = fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
-		log.Println("url", url)
 		headers.Del("content-type")
 		resp, respBody, err = c.MakeRequest(url, "POST", headers, nil, types.NONE)
 		if err != nil {

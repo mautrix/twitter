@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,7 +28,7 @@ type ClientOpts struct {
 	EventHandler    EventHandler
 	WithJOTClient   bool
 }
-type EventHandler func(evt interface{})
+type EventHandler func(evt any)
 type Client struct {
 	Logger       zerolog.Logger
 	cookies      *cookies.Cookies
@@ -68,7 +69,7 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 	if opts.Cookies != nil {
 		cli.cookies = opts.Cookies
 	} else {
-		cli.cookies = cookies.NewCookies()
+		cli.cookies = cookies.NewCookies(nil)
 	}
 
 	if opts.Session != nil {
@@ -78,6 +79,10 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 	}
 
 	return &cli
+}
+
+func (c *Client) GetCookieString() string {
+	return c.cookies.String()
 }
 
 func (c *Client) Connect() error {
@@ -136,7 +141,7 @@ func (c *Client) GetCurrentUser() *response.AccountSettingsResponse {
 
 func (c *Client) GetCurrentUserID() string {
 	twid := c.cookies.Get(cookies.XTwid)
-	return strings.Replace(twid, "u%3D", "", -1)
+	return strings.Replace(strings.Replace(twid, "u%3D", "", -1), "u=", "", -1)
 }
 
 func (c *Client) SetProxy(proxyAddr string) error {
@@ -169,7 +174,9 @@ func (c *Client) SetProxy(proxyAddr string) error {
 }
 
 func (c *Client) isLoggedIn() bool {
-	return !c.cookies.IsCookieEmpty(cookies.XAuthToken)
+	isLoggedIn := !c.cookies.IsCookieEmpty(cookies.XAuthToken)
+	log.Println("is logged in:", isLoggedIn)
+	return isLoggedIn
 }
 
 func (c *Client) isAuthenticated() bool {
@@ -222,7 +229,7 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {
-		if c.cookies.IsCookieEmpty(cookies.XGuestToken) || !c.isLoggedIn() {
+		if c.cookies.IsCookieEmpty(cookies.XGuestToken) && !c.isLoggedIn() {
 			// most likely means your cookies are invalid / expired
 			return fmt.Errorf("failed to find guest token by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
 		}

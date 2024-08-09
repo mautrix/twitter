@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"errors"
 	"fmt"
+	"log"
 	neturl "net/url"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -79,6 +80,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 	mainPageHTML := string(mainPageRespBody)
 	migrationUrl, migrationRequired := methods.ParseMigrateURL(mainPageHTML)
 	if migrationRequired {
+		log.Println("migration is required...")
 		extraHeaders = map[string]string{
 			"upgrade-insecure-requests": "1",
 			"sec-fetch-site":            "cross-site",

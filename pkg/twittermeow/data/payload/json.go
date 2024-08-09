@@ -44,3 +44,14 @@ type PinAndUnpinConversationVariables struct {
 	LabelType      LabelType `json:"label_type,omitempty"`
 	Label          LabelType `json:"label,omitempty"`
 }
+
+type ReactionActionPayload struct {
+	ConversationID string   `json:"conversationId"`
+	MessageID      string   `json:"messageId"`
+	ReactionTypes  []string `json:"reactionTypes"`
+	EmojiReactions []string `json:"emojiReactions"`
+}
+
+func (p *ReactionActionPayload) Encode() ([]byte, error) {
+	return json.Marshal(p)
+}

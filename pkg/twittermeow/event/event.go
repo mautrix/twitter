@@ -2,7 +2,6 @@ package event
 
 import (
 	"time"
-
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -11,6 +10,8 @@ type XEventType string
 const (
 	XMessageEvent                    XEventType = "message"
 	XMessageDeleteEvent              XEventType = "message_delete"
+	XReactionCreatedEvent			 XEventType = "reaction_create"
+	XReactionDeletedEvent			 XEventType = "reaction_delete"
 	XConversationReadEvent           XEventType = "conversation_read"
 	XConversationMetadataUpdateEvent XEventType = "conversation_metadata_update"
 	XConversationCreateEvent         XEventType = "conversation_create"
@@ -25,21 +26,23 @@ type XEventMessage struct {
 	Text         string
 	CreatedAt    time.Time
 	AffectsSort  bool
-	Entities     types.Entities
-	Attachment   types.Attachment
+	Entities     *types.Entities
+	Attachment   *types.Attachment
+	ReplyData	 types.ReplyData
+	Reactions    []types.MessageReaction
 }
 
 type XEventConversationRead struct {
-	EventID         string
 	Conversation    types.Conversation
+	EventID         string
 	ReadAt          time.Time
 	AffectsSort     bool
 	LastReadEventID string
 }
 
 type XEventConversationCreated struct {
-	EventID      string
 	Conversation types.Conversation
+	EventID      string
 	CreatedAt    time.Time
 	AffectsSort  bool
 	RequestID    string
@@ -59,4 +62,17 @@ type XEventMessageDeleted struct {
 	DeletedAt    time.Time
 	AffectsSort  bool
 	Messages     []types.MessagesDeleted
+}
+
+type XEventReaction struct {
+	Conversation   types.Conversation
+	Action         types.MessageReactionAction
+	ID             string
+	Time           time.Time
+	MessageID      string
+	ReactionKey    string
+	EmojiReaction  string
+	SenderID       string
+	RecipientID	   string // empty for group chats
+	AffectsSort    bool
 }

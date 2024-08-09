@@ -25,19 +25,22 @@ const (
 )
 
 type Cookies struct {
-	store map[XCookieName]string
+	store map[string]string
 	lock  sync.RWMutex
 }
 
-func NewCookies() *Cookies {
+func NewCookies(store map[string]string) *Cookies {
+	if store == nil {
+		store = make(map[string]string)
+	}
 	return &Cookies{
-		store: make(map[XCookieName]string),
+		store: store,
 		lock:  sync.RWMutex{},
 	}
 }
 
 func NewCookiesFromString(cookieStr string) *Cookies {
-	c := NewCookies()
+	c := NewCookies(nil)
 	cookieStrings := strings.Split(cookieStr, ";")
 	fakeHeader := http.Header{}
 	for _, cookieStr := range cookieStrings {
@@ -49,7 +52,7 @@ func NewCookiesFromString(cookieStr string) *Cookies {
 	fakeResponse := &http.Response{Header: fakeHeader}
 
 	for _, cookie := range fakeResponse.Cookies() {
-		c.store[XCookieName(cookie.Name)] = cookie.Value
+		c.store[cookie.Name] = cookie.Value
 	}
 
 	return c
@@ -72,13 +75,13 @@ func (c *Cookies) IsCookieEmpty(key XCookieName) bool {
 func (c *Cookies) Get(key XCookieName) string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	return c.store[key]
+	return c.store[string(key)]
 }
 
 func (c *Cookies) Set(key XCookieName, value string) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.store[key] = value
+	c.store[string(key)] = value
 }
 
 func (c *Cookies) UpdateFromResponse(r *http.Response) {
@@ -86,10 +89,10 @@ func (c *Cookies) UpdateFromResponse(r *http.Response) {
 	defer c.lock.Unlock()
 	for _, cookie := range r.Cookies() {
 		if cookie.MaxAge == 0 || cookie.Expires.Before(time.Now()) {
-			delete(c.store, XCookieName(cookie.Name))
+			delete(c.store, cookie.Name)
 		} else {
 			//log.Println(fmt.Sprintf("updated cookie %s to value %s", cookie.Name, cookie.Value))
-			c.store[XCookieName(cookie.Name)] = cookie.Value
+			c.store[cookie.Name] = cookie.Value
 		}
 	}
 }

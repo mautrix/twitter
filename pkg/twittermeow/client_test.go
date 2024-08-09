@@ -379,7 +379,6 @@ func logAllTrustedConversations(initialInboxData *response.XInboxData) {
 
 	for i, c := range conversations {
 		conv := c.Conversation
-		log.Println()
 		mostRecentMessage := c.Messages[0]
 		cli.Logger.Info().
 			Int("conversation_inbox_position", i).

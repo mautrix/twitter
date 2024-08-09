@@ -5,3 +5,4 @@ logs/
 !example-config.yaml
 !.pre-commit-config.yaml
 /start
+/pkg/mautrix

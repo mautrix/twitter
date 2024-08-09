@@ -1,4 +1,4 @@
-// mautrix-twitter - A Matrix-Slack puppeting bridge.
+// mautrix-twitter - A Matrix-Twitter puppeting bridge.
 // Copyright (C) 2024 Tulir Asokan
 //
 // This program is free software: you can redistribute it and/or modify
@@ -16,5 +16,27 @@
 
 package main
 
+import (
+	"go.mau.fi/mautrix-twitter/pkg/connector"
+	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
+)
+
+// Information to find out exactly which commit the bridge was built from.
+// These are filled at build time with the -X linker flag.
+var (
+	Tag       = "unknown"
+	Commit    = "unknown"
+	BuildTime = "unknown"
+)
+
 func main() {
+	m := mxmain.BridgeMain{
+		Name:        "mautrix-twitter",
+		URL:         "https://github.com/mautrix/twitter",
+		Description: "A Matrix-Twitter puppeting bridge.",
+		Version:     "0.16.0",
+		Connector: connector.NewConnector(),
+	}
+	m.InitVersion(Tag, Commit, BuildTime)
+	m.Run()
 }

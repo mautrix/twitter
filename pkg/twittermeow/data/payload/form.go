@@ -51,6 +51,7 @@ const (
 type DmRequestQuery struct {
 	ActiveConversationId                string      `url:"active_conversation_id,omitempty"`
 	Cursor                              string      `url:"cursor,omitempty"`
+	Count                               int      	`url:"count,omitempty"`
 	Context                             ContextInfo `url:"context,omitempty"`
 	MaxID                               string      `url:"max_id,omitempty"` // when fetching messages, this is the message id
 	NSFWFilteringEnabled                bool        `url:"nsfw_filtering_enabled"`

@@ -1,5 +1,12 @@
 package types
 
+import "fmt"
+
+type Attachment struct {
+	Video *AttachmentInfo `json:"video,omitempty"`
+	AnimatedGif *AttachmentInfo `json:"animated_gif,omitempty"`
+	Photo *AttachmentInfo `json:"photo,omitempty"`
+}
 type Urls struct {
 	URL         string `json:"url,omitempty"`
 	ExpandedURL string `json:"expanded_url,omitempty"`
@@ -13,8 +20,9 @@ type Entities struct {
 	Urls         []Urls `json:"urls,omitempty"`
 }
 type OriginalInfo struct {
-	Width  int `json:"width,omitempty"`
-	Height int `json:"height,omitempty"`
+	URL    string 	`json:"url,omitempty"`
+	Width  int 		`json:"width,omitempty"`
+	Height int 		`json:"height,omitempty"`
 }
 type Thumb struct {
 	W      int    `json:"w,omitempty"`
@@ -42,15 +50,32 @@ type Sizes struct {
 	Large  Large  `json:"large,omitempty"`
 	Medium Medium `json:"medium,omitempty"`
 }
-type Variants struct {
+type Variant struct {
 	Bitrate     int    `json:"bitrate,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
 	URL         string `json:"url,omitempty"`
 }
 type VideoInfo struct {
-	AspectRatio []int      `json:"aspect_ratio,omitempty"`
-	Variants    []Variants `json:"variants,omitempty"`
+	AspectRatio    []int      `json:"aspect_ratio,omitempty"`
+	DurationMillis int        `json:"duration_millis,omitempty"`
+	Variants       []Variant `json:"variants,omitempty"`
 }
+
+func (v *VideoInfo) GetHighestBitrateVariant() (Variant, error) {
+	if len(v.Variants) == 0 {
+		return Variant{}, fmt.Errorf("no variants available")
+	}
+
+	maxVariant := v.Variants[0]
+	for _, variant := range v.Variants[1:] {
+		if variant.Bitrate > maxVariant.Bitrate {
+			maxVariant = variant
+		}
+	}
+
+	return maxVariant, nil
+}
+
 type Features struct {
 }
 type Rgb struct {
@@ -71,12 +96,13 @@ type MediaStats struct {
 }
 type Ok struct {
 	Palette []Palette `json:"palette,omitempty"`
+	ViewCount string `json:"view_count,omitempty"`
 }
 type R struct {
-	Ok Ok `json:"ok,omitempty"`
+	Ok any `json:"ok,omitempty"`
 }
 type MediaColor struct {
-	R   R   `json:"r,omitempty"`
+	R   any   `json:"r,omitempty"`
 	TTL int `json:"ttl,omitempty"`
 }
 type AltTextR struct {
@@ -84,15 +110,16 @@ type AltTextR struct {
 }
 type AltText struct {
 	// this is weird, it can be both string or AltTextR struct object
-	R   interface{} `json:"r,omitempty"`
+	R   any `json:"r,omitempty"`
 	TTL int         `json:"ttl,omitempty"`
 }
+// different for video/image/gif
 type Ext struct {
-	MediaStats MediaStats `json:"mediaStats,omitempty"`
+	MediaStats any `json:"mediaStats,omitempty"`
 	MediaColor MediaColor `json:"mediaColor,omitempty"`
 	AltText    AltText    `json:"altText,omitempty"`
 }
-type AnimatedGif struct {
+type AttachmentInfo struct {
 	ID            int64         `json:"id,omitempty"`
 	IDStr         string        `json:"id_str,omitempty"`
 	Indices       []int         `json:"indices,omitempty"`
@@ -110,7 +137,4 @@ type AnimatedGif struct {
 	ExtAltText    string        `json:"ext_alt_text,omitempty"`
 	Ext           Ext           `json:"ext,omitempty"`
 	AudioOnly     bool          `json:"audio_only,omitempty"`
-}
-type Attachment struct {
-	AnimatedGif AnimatedGif `json:"animated_gif,omitempty"`
 }

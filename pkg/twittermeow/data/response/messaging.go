@@ -64,3 +64,14 @@ type UnpinConversationResponse struct {
 		DmConversationLabelDelete string `json:"dm_conversation_label_delete,omitempty"`
 	} `json:"data,omitempty"`
 }
+
+type ReactionResponse struct {
+	Data struct {
+		DeleteDmReaction struct {
+			Typename string `json:"__typename,omitempty"`
+		} `json:"delete_dm_reaction,omitempty"`
+		CreateDmReaction struct {
+			Typename string `json:"__typename,omitempty"`
+		} `json:"create_dm_reaction,omitempty"`
+	} `json:"data,omitempty"`
+}

@@ -61,8 +61,9 @@ type PrettifiedMessage struct {
 	SentAt         time.Time
 	AffectsSort    bool
 	Text           string
-	Attachment     types.Attachment
+	Attachment     *types.Attachment
 	Entities       types.Entities
+	Reactions      []types.MessageReaction
 }
 
 func (data *XInboxData) PrettifyMessages(conversationId string) ([]PrettifiedMessage, error) {
@@ -89,6 +90,7 @@ func (data *XInboxData) PrettifyMessages(conversationId string) ([]PrettifiedMes
 			Attachment:     msg.MessageData.Attachment,
 			Entities:       msg.MessageData.Entities,
 			AffectsSort:    msg.AffectsSort,
+			Reactions:      msg.MessageReactions,
 		}
 		prettifiedMessages = append(prettifiedMessages, prettifiedMessage)
 	}
@@ -96,7 +98,7 @@ func (data *XInboxData) PrettifyMessages(conversationId string) ([]PrettifiedMes
 	return prettifiedMessages, nil
 }
 
-func (data *XInboxData) GetParticipantUsers(participants []types.Participants) []types.User {
+func (data *XInboxData) GetParticipantUsers(participants []types.Participant) []types.User {
 	result := make([]types.User, 0)
 	for _, participant := range participants {
 		result = append(result, data.GetUserByID(participant.UserID))
@@ -129,5 +131,6 @@ func (data *XInboxData) GetMessageEntriesByConversationID(conversationId string,
 	if sortByTimestamp {
 		methods.SortMessagesByTime(messages)
 	}
+	
 	return messages, nil
 }

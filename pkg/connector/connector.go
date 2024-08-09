@@ -1,4 +1,4 @@
-// mautrix-twitter - A Matrix-Slack puppeting bridge.
+// mautrix-twitter - A Matrix-Twitter puppeting bridge.
 // Copyright (C) 2024 Tulir Asokan
 //
 // This program is free software: you can redistribute it and/or modify
@@ -18,24 +18,35 @@ package connector
 
 import (
 	"context"
-
-	"go.mau.fi/util/configupgrade"
+	"fmt"
+	"log"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 )
 
-type TwitterConnector struct{}
+type TwitterConnector struct{
+	br *bridgev2.Bridge
+	
+	Config *TwitterConfig
+}
 
 var _ bridgev2.NetworkConnector = (*TwitterConnector)(nil)
 
+func NewConnector() *TwitterConnector {
+	return &TwitterConnector{}
+}
+
 func (tc *TwitterConnector) Init(bridge *bridgev2.Bridge) {
-	//TODO implement me
-	panic("implement me")
+	tc.br = bridge
 }
 
 func (tc *TwitterConnector) Start(ctx context.Context) error {
-	//TODO implement me
-	panic("implement me")
+
+	log.Println("starting....")
+	return nil
 }
 
 func (tc *TwitterConnector) GetName() bridgev2.BridgeName {
@@ -50,21 +61,47 @@ func (tc *TwitterConnector) GetName() bridgev2.BridgeName {
 }
 
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
-	//TODO implement me
-	panic("implement me")
+	return database.MetaTypes{
+		Reaction: nil,
+		Portal: nil,
+		Message: nil,
+		Ghost: nil,
+		UserLogin: func () any {
+			return &UserLoginMetadata{}
+		},
+	}
 }
 
 func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
-	//TODO implement me
-	panic("implement me")
+	return &bridgev2.NetworkGeneralCapabilities{}
 }
 
-func (tc *TwitterConnector) GetConfig() (example string, data any, upgrader configupgrade.Upgrader) {
-	//TODO implement me
-	panic("implement me")
+type UserLoginMetadata struct {
+	Cookies string
 }
 
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	//TODO implement me
-	panic("implement me")
+	meta := login.Metadata.(*UserLoginMetadata)
+	clientOpts := &twittermeow.ClientOpts{
+		Cookies: twitCookies.NewCookiesFromString(meta.Cookies),
+		WithJOTClient: true,
+	}
+	twitClient := &TwitterClient{
+		connector: tc,
+		userLogin: login,
+		client: twittermeow.NewClient(clientOpts, login.Log),
+		userCache: make(map[string]types.User),
+	}
+	twitClient.client.SetEventHandler(twitClient.HandleTwitterEvent)
+
+	_, currentUser, err := twitClient.client.LoadMessagesPage()
+	if err != nil {
+		return fmt.Errorf("failed to load messages page")
+	}
+
+
+	login.RemoteName = currentUser.ScreenName
+	login.Client = twitClient
+	
+	return nil
 }

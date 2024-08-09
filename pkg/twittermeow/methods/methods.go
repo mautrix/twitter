@@ -60,7 +60,7 @@ func SortMessagesByTime(messages []types.Message) {
 			return errI == nil
 		}
 
-		return timeI < timeJ
+		return timeJ < timeI
 	})
 }
 

@@ -280,3 +280,37 @@ func (c *Client) UnpinConversation(conversationId string) (*response.UnpinConver
 	data := response.UnpinConversationResponse{}
 	return &data, json.Unmarshal(respBody, &data)
 }
+
+func (c *Client) React(reactionPayload *payload.ReactionActionPayload, remove bool) (*response.ReactionResponse, error) {
+	graphQlPayload := payload.GraphQLPayload{
+		Variables: reactionPayload,
+		QueryID: "VyDyV9pC2oZEj6g52hgnhA",
+	}
+
+	url := endpoints.ADD_REACTION_URL
+	if remove {
+		url = endpoints.REMOVE_REACTION_URL
+		graphQlPayload.QueryID = "bV_Nim3RYHsaJwMkTXJ6ew"
+	}
+
+	jsonBody, err := graphQlPayload.Encode()
+	if err != nil {
+		return nil, err
+	}
+	
+	apiRequestOpts := apiRequestOpts{
+		Url:            url,
+		Method:         "POST",
+		WithClientUUID: true,
+		Body:           jsonBody,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.JSON,
+	}
+	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.ReactionResponse{}
+	return &data, json.Unmarshal(respBody, &data)
+}

@@ -40,7 +40,6 @@ func (data *XInboxData) GetConversationByID(conversationId string) types.Convers
 }
 
 func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
-	// entries := make([]map[event.XEventType]interface{}, 0)
 	entries := make([]interface{}, 0)
 	if len(data.Entries) <= 0 {
 		return entries, nil
@@ -54,6 +53,37 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 				return nil, err
 			}
 			switch entryType {
+			case event.XReactionCreatedEvent, event.XReactionDeletedEvent:
+				var reactionEventData types.MessageReaction
+				err = json.Unmarshal(jsonEvData, &reactionEventData)
+				if err != nil {
+					return nil, err
+				}
+
+				reactionActionAt, err := methods.UnixStringMilliToTime(reactionEventData.Time)
+				if err != nil {
+					return nil, err
+				}
+				
+				updatedReactionEventData := event.XEventReaction{
+					Conversation: data.GetConversationByID(reactionEventData.ConversationID),
+					Time: reactionActionAt,
+					ID: reactionEventData.ID,
+					ReactionKey: reactionEventData.ReactionKey,
+					EmojiReaction: reactionEventData.EmojiReaction,
+					AffectsSort: reactionEventData.AffectsSort,
+					SenderID: reactionEventData.SenderID,
+					MessageID: reactionEventData.MessageID,
+				}
+				switch entryType {
+				case event.XReactionCreatedEvent:
+					updatedReactionEventData.Action = types.MessageReactionAdd
+				case event.XReactionDeletedEvent:
+					updatedReactionEventData.Action = types.MessageReactionRemove
+				default:
+					break
+				}
+				updatedEntry = updatedReactionEventData
 			case event.XMessageEvent:
 				var messageEventData types.Message
 				err = json.Unmarshal(jsonEvData, &messageEventData)
@@ -73,9 +103,11 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					MessageID:    messageEventData.MessageData.ID,
 					CreatedAt:    createdAt,
 					Text:         messageEventData.MessageData.Text,
-					Entities:     messageEventData.MessageData.Entities,
+					Entities:     &messageEventData.MessageData.Entities,
 					Attachment:   messageEventData.MessageData.Attachment,
+					ReplyData: 	  messageEventData.MessageData.ReplyData,
 					AffectsSort:  messageEventData.AffectsSort,
+					Reactions: 	  messageEventData.MessageReactions,
 				}
 			case event.XMessageDeleteEvent:
 				var messageDeletedEventData types.MessageDeleted
