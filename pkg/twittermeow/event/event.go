@@ -14,7 +14,9 @@ const (
 	XReactionDeletedEvent			 XEventType = "reaction_delete"
 	XConversationReadEvent           XEventType = "conversation_read"
 	XConversationMetadataUpdateEvent XEventType = "conversation_metadata_update"
+	XConversationNameUpdate 		 XEventType = "conversation_name_update"
 	XConversationCreateEvent         XEventType = "conversation_create"
+	XConversationDeleteEvent         XEventType = "remove_conversation"
 	XDisableNotificationsEvent       XEventType = "disable_notifications"
 )
 
@@ -48,10 +50,27 @@ type XEventConversationCreated struct {
 	RequestID    string
 }
 
+type XEventConversationDelete struct {
+	ConversationID 	string
+	EventID      	string
+	DeletedAt    	time.Time
+	AffectsSort  	bool
+	LastEventID 	string
+}
+
 type XEventConversationMetadataUpdate struct {
 	Conversation types.Conversation
 	EventID      string
 	UpdatedAt    time.Time
+	AffectsSort  bool
+}
+
+type XEventConversationNameUpdate struct {
+	Conversation types.Conversation
+	EventID		 string
+	UpdatedAt	 time.Time
+	Name         string
+    Executor	 types.User
 	AffectsSort  bool
 }
 

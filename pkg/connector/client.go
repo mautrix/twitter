@@ -44,6 +44,7 @@ type TwitterClient struct {
 var (
 	_ bridgev2.NetworkAPI = (*TwitterClient)(nil)
 	_ bridgev2.ReactionHandlingNetworkAPI = (*TwitterClient)(nil)
+	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
 )
 
 func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2.UserLogin) (*TwitterClient, error) {

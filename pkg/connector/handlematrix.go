@@ -117,3 +117,21 @@ func (tc *TwitterClient) doHandleMatrixReaction(remove bool, conversationId, mes
 	tc.client.Logger.Debug().Any("reactionResponse", reactionResponse).Any("payload", reactionPayload).Msg("Reaction response")
 	return nil
 }
+
+func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
+	params := &payload.MarkConversationReadQuery{
+		ConversationID: string(msg.Portal.ID),
+	}
+
+	if msg.ExactMessage != nil {
+		params.LastReadEventID = string(msg.ExactMessage.ID)
+	} else {
+		lastMessage, err := tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, msg.ReadUpTo)
+		if err != nil {
+			return err
+		}
+		params.LastReadEventID = string(lastMessage.ID)
+	}
+
+	return tc.client.MarkConversationRead(params)
+}

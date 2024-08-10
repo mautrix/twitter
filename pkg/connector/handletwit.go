@@ -38,22 +38,9 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 			reactionRemoteEvent := tc.wrapReaction(evtData)
 			tc.connector.br.QueueRemoteEvent(tc.userLogin, reactionRemoteEvent)
 		case event.XEventConversationRead:
-			/*
-			eventData := &simplevent.Receipt{
-				EventMeta: simplevent.EventMeta{
-					Type: bridgev2.RemoteEventReadReceipt,
-					LogContext: func(c zerolog.Context) zerolog.Context {
-						return c.
-							Str("conversation_id", evtData.Conversation.ConversationID).
-							Str("last_read_event_id", evtData.LastReadEventID).
-							Str("read_at", evtData.ReadAt.String())
-					},
-					PortalKey: tc.MakePortalKey(evtData.Conversation),
-				},
-				LastTarget: networkid.MessageID(evtData.LastReadEventID),
-				Targets: []networkid.MessageID{networkid.MessageID(evtData.LastReadEventID)},
-			}
-			*/
+			// conversation read events are only fired by yourself??
+			// if another user reads your message this is never fired
+			// they use user_updates and last_read_event_id to figure that out with the polling client
 			tc.client.Logger.Info().
 				Str("conversation_id", evtData.Conversation.ConversationID).
 				Str("last_read_event_id", evtData.LastReadEventID).
@@ -78,6 +65,10 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 				}
 				tc.connector.br.QueueRemoteEvent(tc.userLogin, messageDeleteRemoteEvent)
 			}
+		case event.XEventConversationNameUpdate:
+			tc.client.Logger.Info().Str("new_name", evtData.Name).Any("conversation_id", evtData.Conversation.ConversationID).Any("executor", evtData.Executor).Msg("XEventConversationNameUpdate")
+		case event.XEventConversationDelete:
+			tc.client.Logger.Info().Any("data", evtData).Msg("Deleted conversation")
 		default:
 			tc.client.Logger.Warn().Any("event_data", evtData).Msg("Received unhandled event case from twitter library")
 		}

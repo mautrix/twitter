@@ -109,6 +109,26 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					AffectsSort:  messageEventData.AffectsSort,
 					Reactions: 	  messageEventData.MessageReactions,
 				}
+			case event.XConversationNameUpdate:
+				var convNameUpdateEventData types.ConversationNameUpdateData
+				err = json.Unmarshal(jsonEvData, &convNameUpdateEventData)
+				if err != nil {
+					return nil, err
+				}
+
+				updatedAt, err := methods.UnixStringMilliToTime(convNameUpdateEventData.Time)
+				if err != nil {
+					return nil, err
+				}
+
+				updatedEntry = event.XEventConversationNameUpdate{
+					Conversation: data.GetConversationByID(convNameUpdateEventData.ConversationID),
+					Name: convNameUpdateEventData.ConversationName,
+					Executor: data.GetUserByID(convNameUpdateEventData.ByUserID),
+					EventID: convNameUpdateEventData.ID,
+					AffectsSort: convNameUpdateEventData.AffectsSort,
+					UpdatedAt: updatedAt,
+				}
 			case event.XMessageDeleteEvent:
 				var messageDeletedEventData types.MessageDeleted
 				err = json.Unmarshal(jsonEvData, &messageDeletedEventData)
@@ -148,6 +168,25 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					AffectsSort:     convReadEventData.AffectsSort,
 					LastReadEventID: convReadEventData.LastReadEventID,
 				}
+			case event.XConversationDeleteEvent:
+				var convDeletedEventData types.ConversationDeletedData
+				err = json.Unmarshal(jsonEvData, &convDeletedEventData)
+				if err != nil {
+					return nil, err
+				}
+
+				deletedAt, err := methods.UnixStringMilliToTime(convDeletedEventData.Time)
+				if err != nil {
+					return nil, err
+				}
+
+				updatedEntry = event.XEventConversationDelete{
+					ConversationID:  convDeletedEventData.ConversationID,
+					EventID:         convDeletedEventData.ID,
+					DeletedAt: 		 deletedAt,
+					AffectsSort:     convDeletedEventData.AffectsSort,
+					LastEventID: 	 convDeletedEventData.LastEventID,
+				}
 			case event.XConversationCreateEvent:
 				var convCreatedEventData types.ConversationCreatedData
 				err = json.Unmarshal(jsonEvData, &convCreatedEventData)
@@ -167,6 +206,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					AffectsSort:  convCreatedEventData.AffectsSort,
 					RequestID:    convCreatedEventData.RequestID,
 				}
+				
 			case event.XConversationMetadataUpdateEvent:
 				var convMetadataUpdateEventData types.ConversationMetadataUpdate
 				err = json.Unmarshal(jsonEvData, &convMetadataUpdateEventData)

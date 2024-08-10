@@ -69,6 +69,23 @@ type ConversationCreatedData struct {
 	RequestID      string `json:"request_id,omitempty"`
 }
 
+type ConversationDeletedData struct {
+	ID             string `json:"id,omitempty"`
+	Time           string `json:"time,omitempty"`
+	AffectsSort    bool   `json:"affects_sort,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	LastEventID    string `json:"last_event_id,omitempty"`
+}
+
+type ConversationNameUpdateData struct {
+	ID               string `json:"id,omitempty"`
+	Time             string `json:"time,omitempty"`
+	ConversationID   string `json:"conversation_id,omitempty"`
+	ConversationName string `json:"conversation_name,omitempty"`
+	ByUserID         string `json:"by_user_id,omitempty"`
+	AffectsSort      bool   `json:"affects_sort,omitempty"`
+}
+
 type ConversationType string
 
 const (
