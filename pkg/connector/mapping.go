@@ -74,7 +74,10 @@ func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message t
 		parts = append(parts, convertedAttachmentPart)
 	}
 
-	parts = append(parts, textPart)
+	if len(textPart.Content.Body) > 0 {
+		parts = append(parts, textPart)
+	}
+
 	return &bridgev2.BackfillMessage{
 		ConvertedMessage: &bridgev2.ConvertedMessage{
 			ReplyTo: replyTo,
@@ -90,10 +93,9 @@ func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message t
 	}, nil
 }
 
-// bugged, displays an empty message
 func RemoveEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
     start, end := indices[0], indices[1]
-	msgPart.Content.Body = msgPart.Content.Body[:start] + msgPart.Content.Body[end:]
+	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
 }
 
 func (tc *TwitterClient) MessageReactionsToBackfillReactions(reactions []types.MessageReaction, selfUserId string) ([]*bridgev2.BackfillReaction, error) {
@@ -141,6 +143,20 @@ func (tc *TwitterClient) ConversationTypeToRoomType(convType types.ConversationT
 	return &roomType
 }
 
+func (tc *TwitterClient) UsersToMemberList(users []types.User) *bridgev2.ChatMemberList {
+	selfUserId := tc.client.GetCurrentUserID()
+	chatMembers := make([]bridgev2.ChatMember, len(users)-1)
+	for _, user := range users {
+		chatMembers = append(chatMembers, tc.UserToChatMember(user, user.IDStr == selfUserId))
+	}
+
+	return &bridgev2.ChatMemberList{
+		IsFull: true,
+		TotalMemberCount: len(users),
+		Members: chatMembers,
+	}
+}
+
 func (tc *TwitterClient) ParticipantsToMemberList(participants []types.Participant) *bridgev2.ChatMemberList {
 	selfUserId := tc.client.GetCurrentUserID()
 	chatMembers := make([]bridgev2.ChatMember, len(participants)-1)
@@ -152,6 +168,19 @@ func (tc *TwitterClient) ParticipantsToMemberList(participants []types.Participa
 		IsFull: true,
 		TotalMemberCount: len(participants),
 		Members: chatMembers,
+	}
+}
+
+func (tc *TwitterClient) UserToChatMember(user types.User, isFromMe bool) bridgev2.ChatMember {
+	return bridgev2.ChatMember{
+		EventSender: bridgev2.EventSender{
+			IsFromMe: isFromMe,
+			Sender: networkid.UserID(user.IDStr),
+		},
+		UserInfo: &bridgev2.UserInfo{
+			Name: &user.Name,
+			Avatar: MakeAvatar(user.ProfileImageURL),
+		},
 	}
 }
 

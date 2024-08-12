@@ -129,6 +129,26 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					AffectsSort: convNameUpdateEventData.AffectsSort,
 					UpdatedAt: updatedAt,
 				}
+			case event.XParticipantsJoinedEvent:
+				var participantsJoinedEventData types.ParticipantsJoinedData
+				err = json.Unmarshal(jsonEvData, &participantsJoinedEventData)
+				if err != nil {
+					return nil, err
+				}
+
+				eventTime, err := methods.UnixStringMilliToTime(participantsJoinedEventData.Time)
+				if err != nil {
+					return nil, err
+				}
+
+				updatedEntry = event.XEventParticipantsJoined{
+					EventID: participantsJoinedEventData.ID,
+					EventTime: eventTime,
+					AffectsSort: participantsJoinedEventData.AffectsSort,
+					Conversation: data.GetConversationByID(participantsJoinedEventData.ConversationID),
+					Sender: data.GetUserByID(participantsJoinedEventData.SenderID),
+					NewParticipants: data.GetParticipantUsers(participantsJoinedEventData.Participants),
+				}
 			case event.XMessageDeleteEvent:
 				var messageDeletedEventData types.MessageDeleted
 				err = json.Unmarshal(jsonEvData, &messageDeletedEventData)

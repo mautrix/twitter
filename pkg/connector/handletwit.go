@@ -6,6 +6,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/event"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/bridgev2/simplevent"
 )
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
@@ -66,8 +67,61 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 				tc.connector.br.QueueRemoteEvent(tc.userLogin, messageDeleteRemoteEvent)
 			}
 		case event.XEventConversationNameUpdate:
-			tc.client.Logger.Info().Str("new_name", evtData.Name).Any("conversation_id", evtData.Conversation.ConversationID).Any("executor", evtData.Executor).Msg("XEventConversationNameUpdate")
+			portalUpdateRemoteEvent := &simplevent.ChatInfoChange{
+				EventMeta: simplevent.EventMeta{
+					Type: bridgev2.RemoteEventChatInfoChange,
+					Sender: bridgev2.EventSender{
+						IsFromMe: evtData.Executor.IDStr == string(tc.userLogin.ID),
+						SenderLogin: networkid.UserLoginID(evtData.Executor.IDStr),
+						Sender: networkid.UserID(evtData.Executor.IDStr),
+					},
+					LogContext: func(c zerolog.Context) zerolog.Context {
+						return c.
+							Str("conversation_id", evtData.Conversation.ConversationID).
+							Str("new_name", evtData.Name).
+							Str("changed_by_user_id", evtData.Executor.IDStr)
+					},
+					PortalKey: tc.MakePortalKey(evtData.Conversation),
+					Timestamp: evtData.UpdatedAt,
+				},
+				ChatInfoChange: &bridgev2.ChatInfoChange{
+					ChatInfo: &bridgev2.ChatInfo{
+						Name: &evtData.Name,
+					},
+				},
+			}
+			tc.connector.br.QueueRemoteEvent(tc.userLogin, portalUpdateRemoteEvent)
+		case event.XEventParticipantsJoined:
+			portalMembersAddedRemoteEvent := &simplevent.ChatInfoChange{
+				EventMeta: simplevent.EventMeta{
+					Type: bridgev2.RemoteEventChatInfoChange,
+					LogContext: func(c zerolog.Context) zerolog.Context {
+						return c.
+							Str("conversation_id", evtData.Conversation.ConversationID).
+							Int("total_new_members", len(evtData.NewParticipants))
+					},
+					PortalKey: tc.MakePortalKey(evtData.Conversation),
+					Timestamp: evtData.EventTime,
+				},
+				ChatInfoChange: &bridgev2.ChatInfoChange{
+					MemberChanges: tc.UsersToMemberList(evtData.NewParticipants),
+				},
+			}
+			tc.connector.br.QueueRemoteEvent(tc.userLogin, portalMembersAddedRemoteEvent)
 		case event.XEventConversationDelete:
+			portalDeleteRemoteEvent := &simplevent.ChatDelete{
+				EventMeta: simplevent.EventMeta{
+					Type: bridgev2.RemoteEventChatDelete,
+					PortalKey: tc.MakePortalKeyFromID(evtData.ConversationID),
+					LogContext: func(c zerolog.Context) zerolog.Context {
+						return c.
+							Str("conversation_id", evtData.ConversationID)
+					},
+					Timestamp: evtData.DeletedAt,
+				},
+				OnlyForMe: true,
+			}
+			tc.connector.br.QueueRemoteEvent(tc.userLogin, portalDeleteRemoteEvent)
 			tc.client.Logger.Info().Any("data", evtData).Msg("Deleted conversation")
 		default:
 			tc.client.Logger.Warn().Any("event_data", evtData).Msg("Received unhandled event case from twitter library")

@@ -86,6 +86,16 @@ type ConversationNameUpdateData struct {
 	AffectsSort      bool   `json:"affects_sort,omitempty"`
 }
 
+
+type ParticipantsJoinedData struct {
+	ID             string         `json:"id,omitempty"`
+	Time           string         `json:"time,omitempty"`
+	AffectsSort    bool           `json:"affects_sort,omitempty"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	SenderID       string         `json:"sender_id,omitempty"`
+	Participants   []Participant `json:"participants,omitempty"`
+}
+
 type ConversationType string
 
 const (

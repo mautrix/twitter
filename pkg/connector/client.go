@@ -19,6 +19,8 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/rs/zerolog"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -173,7 +175,9 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		RemoveEntityLinkFromText(textPart, indices)
 	}
 
-	parts = append(parts, textPart)
+	if len(textPart.Content.Body) > 0 {
+		parts = append(parts, textPart)
+	}
 
 	cm := &bridgev2.ConvertedMessage{
 		ReplyTo: MessageOptionalPartID,
@@ -190,6 +194,17 @@ func (tc *TwitterClient) MakePortalKey(conv types.Conversation) networkid.Portal
 	}
 	return networkid.PortalKey{
 		ID: networkid.PortalID(conv.ConversationID),
+		Receiver: receiver,
+	}
+}
+
+func (tc *TwitterClient) MakePortalKeyFromID(conversationId string) networkid.PortalKey {
+	var receiver networkid.UserLoginID
+	if strings.Contains(conversationId, "-") {
+		receiver = tc.userLogin.ID
+	}
+	return networkid.PortalKey{
+		ID: networkid.PortalID(conversationId),
 		Receiver: receiver,
 	}
 }
