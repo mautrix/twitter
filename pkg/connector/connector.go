@@ -19,14 +19,9 @@ package connector
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
-	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 type TwitterConnector struct {
@@ -46,8 +41,6 @@ func (tc *TwitterConnector) Init(bridge *bridgev2.Bridge) {
 }
 
 func (tc *TwitterConnector) Start(_ context.Context) error {
-
-	log.Println("starting....")
 	return nil
 }
 
@@ -82,19 +75,8 @@ type UserLoginMetadata struct {
 	Cookies string
 }
 
-func (tc *TwitterConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
-	meta := login.Metadata.(*UserLoginMetadata)
-	clientOpts := &twittermeow.ClientOpts{
-		Cookies:       twitCookies.NewCookiesFromString(meta.Cookies),
-		WithJOTClient: true,
-	}
-	twitClient := &TwitterClient{
-		connector: tc,
-		userLogin: login,
-		client:    twittermeow.NewClient(clientOpts, login.Log),
-		userCache: make(map[string]types.User),
-	}
-	twitClient.client.SetEventHandler(twitClient.HandleTwitterEvent)
+func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
+	twitClient := NewTwitterClient(ctx, login)
 
 	_, currentUser, err := twitClient.client.LoadMessagesPage()
 	if err != nil {
