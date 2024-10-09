@@ -97,6 +97,22 @@ func (c *Client) Connect() error {
 	return c.polling.startPolling()
 }
 
+func (c *Client) Disconnect() error {
+	return c.polling.stopPolling()
+}
+
+func (c *Client) Logout() (bool, error) {
+	if !c.isAuthenticated() {
+		return false, ErrNotAuthenticatedYet
+	}
+	err := c.session.LoadPage(endpoints.BASE_LOGOUT_URL)
+	if err != nil {
+		return false, err
+	}
+	c.cookies.Set(cookies.XAuthToken, "")
+	return true, nil
+}
+
 func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSettingsResponse, error) {
 	err := c.session.LoadPage(endpoints.BASE_MESSAGES_URL)
 	if err != nil {
@@ -173,7 +189,7 @@ func (c *Client) SetProxy(proxyAddr string) error {
 	return nil
 }
 
-func (c *Client) isLoggedIn() bool {
+func (c *Client) IsLoggedIn() bool {
 	isLoggedIn := !c.cookies.IsCookieEmpty(cookies.XAuthToken)
 	log.Println("is logged in:", isLoggedIn)
 	return isLoggedIn
@@ -229,7 +245,7 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {
-		if c.cookies.IsCookieEmpty(cookies.XGuestToken) && !c.isLoggedIn() {
+		if c.cookies.IsCookieEmpty(cookies.XGuestToken) && !c.IsLoggedIn() {
 			// most likely means your cookies are invalid / expired
 			return fmt.Errorf("failed to find guest token by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
 		}

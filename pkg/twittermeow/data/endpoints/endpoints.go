@@ -8,6 +8,7 @@ const (
 	BASE_URL          = "https://" + BASE_HOST
 	BASE_LOGIN_URL    = BASE_URL + "/login"
 	BASE_MESSAGES_URL = BASE_URL + "/messages"
+	BASE_LOGOUT_URL   = BASE_URL + "/logout"
 
 	API_BASE_HOST = "api.x.com"
 	API_BASE_URL  = "https://" + API_BASE_HOST
