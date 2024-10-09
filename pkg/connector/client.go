@@ -137,9 +137,13 @@ func (tc *TwitterClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost)
 
 func (tc *TwitterClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *bridgev2.NetworkRoomCapabilities {
 	return &bridgev2.NetworkRoomCapabilities{
-		Captions: true,
-		Replies: true,
-		Reactions: true,
+		FormattedText: false,
+		UserMentions:  true,
+		RoomMentions:  false,
+
+		Captions:      true,
+		Replies:       true,
+		Reactions:     true,
 		ReactionCount: 1,
 	}
 }
