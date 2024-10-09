@@ -86,23 +86,23 @@ func (tc *TwitterClient) Connect(ctx context.Context) error {
 }
 
 func (tc *TwitterClient) Disconnect() {
-	//TODO implement me
-	panic("implement me")
+	tc.client.Disconnect()
 }
 
 func (tc *TwitterClient) IsLoggedIn() bool {
-	//TODO implement me
-	panic("implement me")
+	return tc.client.IsLoggedIn()
 }
 
 func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
-	//TODO implement me
-	panic("implement me")
+	log := zerolog.Ctx(ctx)
+	_, err := tc.client.Logout()
+	if err != nil {
+		log.Error().Err(err).Msg("error logging out")
+	}
 }
 
-func (tc *TwitterClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
-	//TODO implement me
-	panic("implement me")
+func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) bool {
+	return networkid.UserID(tc.client.GetCurrentUserID()) == userID
 }
 
 func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
