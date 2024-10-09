@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
+
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	bridgeEvt "maunium.net/go/mautrix/event"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 func (tc *TwitterClient) MessagesToBackfillMessages(ctx context.Context, messages []types.Message, conv types.Conversation) ([]*bridgev2.BackfillMessage, error) {
@@ -42,11 +44,11 @@ func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message t
 	parts := make([]*bridgev2.ConvertedMessagePart, 0)
 
 	textPart := &bridgev2.ConvertedMessagePart{
-		ID: partId,
+		ID:   partId,
 		Type: bridgeEvt.EventMessage,
 		Content: &bridgeEvt.MessageEventContent{
 			MsgType: bridgeEvt.MsgText,
-			Body: message.MessageData.Text,
+			Body:    message.MessageData.Text,
 		},
 	}
 
@@ -55,7 +57,7 @@ func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message t
 	if replyData.ID != "" {
 		replyTo = &networkid.MessageOptionalPartID{
 			MessageID: networkid.MessageID(replyData.ID),
-			PartID: &partId,
+			PartID:    &partId,
 		}
 	}
 
@@ -81,20 +83,20 @@ func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message t
 	return &bridgev2.BackfillMessage{
 		ConvertedMessage: &bridgev2.ConvertedMessage{
 			ReplyTo: replyTo,
-			Parts: parts,
+			Parts:   parts,
 		},
 		Sender: bridgev2.EventSender{
 			IsFromMe: message.MessageData.SenderID == selfUserId,
-			Sender: networkid.UserID(message.MessageData.SenderID),
+			Sender:   networkid.UserID(message.MessageData.SenderID),
 		},
-		ID: networkid.MessageID(message.MessageData.ID),
+		ID:        networkid.MessageID(message.MessageData.ID),
 		Timestamp: sentAt,
 		Reactions: messageReactions,
 	}, nil
 }
 
 func RemoveEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
-    start, end := indices[0], indices[1]
+	start, end := indices[0], indices[1]
 	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
 }
 
@@ -110,10 +112,10 @@ func (tc *TwitterClient) MessageReactionsToBackfillReactions(reactions []types.M
 			Timestamp: reactionTime,
 			Sender: bridgev2.EventSender{
 				IsFromMe: reaction.SenderID == selfUserId,
-				Sender: networkid.UserID(reaction.SenderID),
+				Sender:   networkid.UserID(reaction.SenderID),
 			},
 			EmojiID: "",
-			Emoji: reaction.EmojiReaction,
+			Emoji:   reaction.EmojiReaction,
 		}
 		backfillReactions = append(backfillReactions, backfillReaction)
 	}
@@ -123,10 +125,10 @@ func (tc *TwitterClient) MessageReactionsToBackfillReactions(reactions []types.M
 func (tc *TwitterClient) ConversationToChatInfo(conv *types.Conversation) *bridgev2.ChatInfo {
 	memberList := tc.ParticipantsToMemberList(conv.Participants)
 	return &bridgev2.ChatInfo{
-		Name: &conv.Name,
-		Avatar: MakeAvatar(conv.AvatarImageHttps),
-		Members: memberList,
-		Type: tc.ConversationTypeToRoomType(conv.Type),
+		Name:        &conv.Name,
+		Avatar:      MakeAvatar(conv.AvatarImageHttps),
+		Members:     memberList,
+		Type:        tc.ConversationTypeToRoomType(conv.Type),
 		CanBackfill: true,
 	}
 }
@@ -151,9 +153,9 @@ func (tc *TwitterClient) UsersToMemberList(users []types.User) *bridgev2.ChatMem
 	}
 
 	return &bridgev2.ChatMemberList{
-		IsFull: true,
+		IsFull:           true,
 		TotalMemberCount: len(users),
-		Members: chatMembers,
+		Members:          chatMembers, // TODO use membermap instead
 	}
 }
 
@@ -165,9 +167,9 @@ func (tc *TwitterClient) ParticipantsToMemberList(participants []types.Participa
 	}
 
 	return &bridgev2.ChatMemberList{
-		IsFull: true,
+		IsFull:           true,
 		TotalMemberCount: len(participants),
-		Members: chatMembers,
+		Members:          chatMembers, // TODO use membermap instead
 	}
 }
 
@@ -175,10 +177,10 @@ func (tc *TwitterClient) UserToChatMember(user types.User, isFromMe bool) bridge
 	return bridgev2.ChatMember{
 		EventSender: bridgev2.EventSender{
 			IsFromMe: isFromMe,
-			Sender: networkid.UserID(user.IDStr),
+			Sender:   networkid.UserID(user.IDStr),
 		},
 		UserInfo: &bridgev2.UserInfo{
-			Name: &user.Name,
+			Name:   &user.Name,
 			Avatar: MakeAvatar(user.ProfileImageURL),
 		},
 	}
@@ -188,7 +190,7 @@ func (tc *TwitterClient) ParticipantToChatMember(participant types.Participant, 
 	return bridgev2.ChatMember{
 		EventSender: bridgev2.EventSender{
 			IsFromMe: isFromMe,
-			Sender: networkid.UserID(participant.UserID),
+			Sender:   networkid.UserID(participant.UserID),
 			//SenderLogin: networkid.UserLoginID(participant.UserID),
 		},
 		UserInfo: tc.GetUserInfoBridge(participant.UserID),
@@ -199,7 +201,7 @@ func (tc *TwitterClient) GetUserInfoBridge(userId string) *bridgev2.UserInfo {
 	var userinfo *bridgev2.UserInfo
 	if userCacheEntry, ok := tc.userCache[userId]; ok {
 		userinfo = &bridgev2.UserInfo{
-			Name: &userCacheEntry.Name,
+			Name:   &userCacheEntry.Name,
 			Avatar: MakeAvatar(userCacheEntry.ProfileImageURL),
 		}
 	}
@@ -257,8 +259,8 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	return &bridgev2.ConvertedMessagePart{
-		ID: networkid.PartID(fmt.Sprintf("attachment-%s", attachmentInfo.IDStr)),
-		Type: bridgeEvt.EventMessage,
+		ID:      networkid.PartID(fmt.Sprintf("attachment-%s", attachmentInfo.IDStr)),
+		Type:    bridgeEvt.EventMessage,
 		Content: &content,
 	}, indices, nil
 }
@@ -280,12 +282,11 @@ func convertTwitterAttachmentMetadata(attachmentInfo *types.AttachmentInfo, mime
 	content := bridgeEvt.MessageEventContent{
 		Info: &bridgeEvt.FileInfo{
 			MimeType: mimeType,
-			Size: len(attachmentBytes),
+			Size:     len(attachmentBytes),
 		},
 		MsgType: msgType,
-		Body: attachmentInfo.IDStr,
+		Body:    attachmentInfo.IDStr,
 	}
-
 
 	originalInfo := attachmentInfo.OriginalInfo
 	if originalInfo.Width != 0 {
@@ -298,7 +299,6 @@ func convertTwitterAttachmentMetadata(attachmentInfo *types.AttachmentInfo, mime
 	if attachmentInfo.VideoInfo.DurationMillis != 0 {
 		content.Info.Duration = attachmentInfo.VideoInfo.DurationMillis
 	}
-
 
 	return content
 }

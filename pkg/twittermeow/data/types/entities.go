@@ -3,9 +3,9 @@ package types
 import "fmt"
 
 type Attachment struct {
-	Video *AttachmentInfo `json:"video,omitempty"`
+	Video       *AttachmentInfo `json:"video,omitempty"`
 	AnimatedGif *AttachmentInfo `json:"animated_gif,omitempty"`
-	Photo *AttachmentInfo `json:"photo,omitempty"`
+	Photo       *AttachmentInfo `json:"photo,omitempty"`
 }
 type Urls struct {
 	URL         string `json:"url,omitempty"`
@@ -20,9 +20,9 @@ type Entities struct {
 	Urls         []Urls `json:"urls,omitempty"`
 }
 type OriginalInfo struct {
-	URL    string 	`json:"url,omitempty"`
-	Width  int 		`json:"width,omitempty"`
-	Height int 		`json:"height,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
 }
 type Thumb struct {
 	W      int    `json:"w,omitempty"`
@@ -56,8 +56,8 @@ type Variant struct {
 	URL         string `json:"url,omitempty"`
 }
 type VideoInfo struct {
-	AspectRatio    []int      `json:"aspect_ratio,omitempty"`
-	DurationMillis int        `json:"duration_millis,omitempty"`
+	AspectRatio    []int     `json:"aspect_ratio,omitempty"`
+	DurationMillis int       `json:"duration_millis,omitempty"`
 	Variants       []Variant `json:"variants,omitempty"`
 }
 
@@ -95,14 +95,14 @@ type MediaStats struct {
 	TTL int    `json:"ttl,omitempty"`
 }
 type Ok struct {
-	Palette []Palette `json:"palette,omitempty"`
-	ViewCount string `json:"view_count,omitempty"`
+	Palette   []Palette `json:"palette,omitempty"`
+	ViewCount string    `json:"view_count,omitempty"`
 }
 type R struct {
 	Ok any `json:"ok,omitempty"`
 }
 type MediaColor struct {
-	R   any   `json:"r,omitempty"`
+	R   any `json:"r,omitempty"`
 	TTL int `json:"ttl,omitempty"`
 }
 type AltTextR struct {
@@ -111,11 +111,12 @@ type AltTextR struct {
 type AltText struct {
 	// this is weird, it can be both string or AltTextR struct object
 	R   any `json:"r,omitempty"`
-	TTL int         `json:"ttl,omitempty"`
+	TTL int `json:"ttl,omitempty"`
 }
+
 // different for video/image/gif
 type Ext struct {
-	MediaStats any `json:"mediaStats,omitempty"`
+	MediaStats any        `json:"mediaStats,omitempty"`
 	MediaColor MediaColor `json:"mediaColor,omitempty"`
 	AltText    AltText    `json:"altText,omitempty"`
 }

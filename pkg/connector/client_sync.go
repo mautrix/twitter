@@ -3,15 +3,17 @@ package connector
 import (
 	"context"
 	"fmt"
+
 	"github.com/rs/zerolog"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/simplevent"
+
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
-	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/simplevent"
 )
 
-func (tc *TwitterClient) syncChannels(ctx context.Context) {
+func (tc *TwitterClient) syncChannels(_ context.Context) {
 	//log := zerolog.Ctx(ctx)
 
 	reqQuery := payload.DmRequestQuery{}.Default()
@@ -44,7 +46,6 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 
 	methods.MergeMaps(tc.userCache, inboxData.Users)
 
-	
 	conversations, err := inboxData.Prettify()
 	if err != nil {
 		panic(fmt.Sprintf("failed to prettify inbox data after fetching conversations: %s", err.Error()))
@@ -66,10 +67,10 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 					return c.
 						Str("portal_key", conv.ConversationID)
 				},
-				PortalKey: tc.MakePortalKey(conv),
+				PortalKey:    tc.MakePortalKey(conv),
 				CreatePortal: true,
 			},
-			ChatInfo: tc.ConversationToChatInfo(&conv),
+			ChatInfo:        tc.ConversationToChatInfo(&conv),
 			LatestMessageTS: latestMessageTS,
 		}
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, evt)

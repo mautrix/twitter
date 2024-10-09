@@ -159,12 +159,12 @@ func (c *Client) DeleteMessage(variables *payload.DMMessageDeleteMutationVariabl
 		variables.RequestID = uuid.NewString()
 	}
 
-	payload := &payload.GraphQLPayload{
+	GQLPayload := &payload.GraphQLPayload{
 		Variables: variables,
 		QueryID:   "BJ6DtxA2llfjnRoRjaiIiw",
 	}
 
-	jsonBody, err := payload.Encode()
+	jsonBody, err := GQLPayload.Encode()
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (c *Client) UnpinConversation(conversationId string) (*response.UnpinConver
 func (c *Client) React(reactionPayload *payload.ReactionActionPayload, remove bool) (*response.ReactionResponse, error) {
 	graphQlPayload := payload.GraphQLPayload{
 		Variables: reactionPayload,
-		QueryID: "VyDyV9pC2oZEj6g52hgnhA",
+		QueryID:   "VyDyV9pC2oZEj6g52hgnhA",
 	}
 
 	url := endpoints.ADD_REACTION_URL
@@ -297,7 +297,7 @@ func (c *Client) React(reactionPayload *payload.ReactionActionPayload, remove bo
 	if err != nil {
 		return nil, err
 	}
-	
+
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
 		Method:         "POST",

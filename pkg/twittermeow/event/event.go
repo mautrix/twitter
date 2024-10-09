@@ -2,6 +2,7 @@ package event
 
 import (
 	"time"
+
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -10,14 +11,14 @@ type XEventType string
 const (
 	XMessageEvent                    XEventType = "message"
 	XMessageDeleteEvent              XEventType = "message_delete"
-	XReactionCreatedEvent			 XEventType = "reaction_create"
-	XReactionDeletedEvent			 XEventType = "reaction_delete"
+	XReactionCreatedEvent            XEventType = "reaction_create"
+	XReactionDeletedEvent            XEventType = "reaction_delete"
 	XConversationReadEvent           XEventType = "conversation_read"
 	XConversationMetadataUpdateEvent XEventType = "conversation_metadata_update"
-	XConversationNameUpdate 		 XEventType = "conversation_name_update"
+	XConversationNameUpdate          XEventType = "conversation_name_update"
 	XConversationCreateEvent         XEventType = "conversation_create"
 	XConversationDeleteEvent         XEventType = "remove_conversation"
-	XParticipantsJoinedEvent	     XEventType = "participants_join"
+	XParticipantsJoinedEvent         XEventType = "participants_join"
 	XDisableNotificationsEvent       XEventType = "disable_notifications"
 )
 
@@ -31,7 +32,7 @@ type XEventMessage struct {
 	AffectsSort  bool
 	Entities     *types.Entities
 	Attachment   *types.Attachment
-	ReplyData	 types.ReplyData
+	ReplyData    types.ReplyData
 	Reactions    []types.MessageReaction
 }
 
@@ -52,19 +53,19 @@ type XEventConversationCreated struct {
 }
 
 type XEventConversationDelete struct {
-	ConversationID 	string
-	EventID      	string
-	DeletedAt    	time.Time
-	AffectsSort  	bool
-	LastEventID 	string
+	ConversationID string
+	EventID        string
+	DeletedAt      time.Time
+	AffectsSort    bool
+	LastEventID    string
 }
 
 type XEventParticipantsJoined struct {
-	EventID string
-	EventTime time.Time
-	AffectsSort bool
-	Conversation types.Conversation
-	Sender types.User
+	EventID         string
+	EventTime       time.Time
+	AffectsSort     bool
+	Conversation    types.Conversation
+	Sender          types.User
 	NewParticipants []types.User
 }
 
@@ -77,10 +78,10 @@ type XEventConversationMetadataUpdate struct {
 
 type XEventConversationNameUpdate struct {
 	Conversation types.Conversation
-	EventID		 string
-	UpdatedAt	 time.Time
+	EventID      string
+	UpdatedAt    time.Time
 	Name         string
-    Executor	 types.User
+	Executor     types.User
 	AffectsSort  bool
 }
 
@@ -94,14 +95,14 @@ type XEventMessageDeleted struct {
 }
 
 type XEventReaction struct {
-	Conversation   types.Conversation
-	Action         types.MessageReactionAction
-	ID             string
-	Time           time.Time
-	MessageID      string
-	ReactionKey    string
-	EmojiReaction  string
-	SenderID       string
-	RecipientID	   string // empty for group chats
-	AffectsSort    bool
+	Conversation  types.Conversation
+	Action        types.MessageReactionAction
+	ID            string
+	Time          time.Time
+	MessageID     string
+	ReactionKey   string
+	EmojiReaction string
+	SenderID      string
+	RecipientID   string // empty for group chats
+	AffectsSort   bool
 }

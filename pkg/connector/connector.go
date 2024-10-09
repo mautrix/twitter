@@ -20,16 +20,18 @@ import (
 	"context"
 	"fmt"
 	"log"
+
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
+
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 )
 
-type TwitterConnector struct{
+type TwitterConnector struct {
 	br *bridgev2.Bridge
-	
+
 	Config *TwitterConfig
 }
 
@@ -43,7 +45,7 @@ func (tc *TwitterConnector) Init(bridge *bridgev2.Bridge) {
 	tc.br = bridge
 }
 
-func (tc *TwitterConnector) Start(ctx context.Context) error {
+func (tc *TwitterConnector) Start(_ context.Context) error {
 
 	log.Println("starting....")
 	return nil
@@ -63,10 +65,10 @@ func (tc *TwitterConnector) GetName() bridgev2.BridgeName {
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 	return database.MetaTypes{
 		Reaction: nil,
-		Portal: nil,
-		Message: nil,
-		Ghost: nil,
-		UserLogin: func () any {
+		Portal:   nil,
+		Message:  nil,
+		Ghost:    nil,
+		UserLogin: func() any {
 			return &UserLoginMetadata{}
 		},
 	}
@@ -80,16 +82,16 @@ type UserLoginMetadata struct {
 	Cookies string
 }
 
-func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
+func (tc *TwitterConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
 	meta := login.Metadata.(*UserLoginMetadata)
 	clientOpts := &twittermeow.ClientOpts{
-		Cookies: twitCookies.NewCookiesFromString(meta.Cookies),
+		Cookies:       twitCookies.NewCookiesFromString(meta.Cookies),
 		WithJOTClient: true,
 	}
 	twitClient := &TwitterClient{
 		connector: tc,
 		userLogin: login,
-		client: twittermeow.NewClient(clientOpts, login.Log),
+		client:    twittermeow.NewClient(clientOpts, login.Log),
 		userCache: make(map[string]types.User),
 	}
 	twitClient.client.SetEventHandler(twitClient.HandleTwitterEvent)
@@ -99,9 +101,8 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 		return fmt.Errorf("failed to load messages page")
 	}
 
-
 	login.RemoteName = currentUser.ScreenName
 	login.Client = twitClient
-	
+
 	return nil
 }

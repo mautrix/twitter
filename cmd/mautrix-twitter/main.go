@@ -17,8 +17,9 @@
 package main
 
 import (
-	"go.mau.fi/mautrix-twitter/pkg/connector"
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
+
+	"go.mau.fi/mautrix-twitter/pkg/connector"
 )
 
 // Information to find out exactly which commit the bridge was built from.
@@ -35,7 +36,7 @@ func main() {
 		URL:         "https://github.com/mautrix/twitter",
 		Description: "A Matrix-Twitter puppeting bridge.",
 		Version:     "0.16.0",
-		Connector: connector.NewConnector(),
+		Connector:   connector.NewConnector(),
 	}
 	m.InitVersion(Tag, Commit, BuildTime)
 	m.Run()

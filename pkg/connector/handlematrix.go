@@ -2,11 +2,13 @@ package connector
 
 import (
 	"context"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
 var (
@@ -23,11 +25,11 @@ var (
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
 	conversationId := string(msg.Portal.ID)
 	sendDMPayload := &payload.SendDirectMessagePayload{
-		ConversationID: conversationId,
-		IncludeCards: 1,
+		ConversationID:    conversationId,
+		IncludeCards:      1,
 		IncludeQuoteCount: true,
-		RecipientIds: false,
-		DmUsers: false,
+		RecipientIds:      false,
+		DmUsers:           false,
 	}
 
 	if msg.ReplyTo != nil {
@@ -50,7 +52,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 
 		uploadMediaParams := &payload.UploadMediaQuery{
-			MediaType: MSG_TYPE_TO_MEDIA_TYPE[content.MsgType],
+			MediaType:     MSG_TYPE_TO_MEDIA_TYPE[content.MsgType],
 			MediaCategory: MSG_TYPE_TO_MEDIA_CATEGORY[content.MsgType],
 		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(uploadMediaParams, data)
@@ -77,36 +79,36 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	respMessageData := messageData[0]
 	return &bridgev2.MatrixMessageResponse{
 		DB: &database.Message{
-			ID: networkid.MessageID(respMessageData.MessageID),
-			MXID: msg.Event.ID,
-			Room: msg.Portal.PortalKey,
-			SenderID: networkid.UserID(tc.client.GetCurrentUserID()),
+			ID:        networkid.MessageID(respMessageData.MessageID),
+			MXID:      msg.Event.ID,
+			Room:      msg.Portal.PortalKey,
+			SenderID:  networkid.UserID(tc.client.GetCurrentUserID()),
 			Timestamp: respMessageData.SentAt,
 		},
 	}, nil
 }
 
-func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
+func (tc *TwitterClient) HandleMatrixReactionRemove(_ context.Context, msg *bridgev2.MatrixReactionRemove) error {
 	return tc.doHandleMatrixReaction(true, string(msg.Portal.ID), string(msg.TargetReaction.MessageID), msg.TargetReaction.Emoji)
 }
 
-func (tc *TwitterClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
+func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	return bridgev2.MatrixReactionPreResponse{
-		SenderID: networkid.UserID(tc.userLogin.ID),
-		Emoji: msg.Content.RelatesTo.Key,
+		SenderID:     networkid.UserID(tc.userLogin.ID),
+		Emoji:        msg.Content.RelatesTo.Key,
 		MaxReactions: 1,
 	}, nil
 }
 
-func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
+func (tc *TwitterClient) HandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
 	return nil, tc.doHandleMatrixReaction(false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji)
 }
 
 func (tc *TwitterClient) doHandleMatrixReaction(remove bool, conversationId, messageId, emoji string) error {
 	reactionPayload := &payload.ReactionActionPayload{
 		ConversationID: conversationId,
-		MessageID: messageId,
-		ReactionTypes: []string{"Emoji"},
+		MessageID:      messageId,
+		ReactionTypes:  []string{"Emoji"},
 		EmojiReactions: []string{emoji},
 	}
 	reactionResponse, err := tc.client.React(reactionPayload, remove)

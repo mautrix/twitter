@@ -1,24 +1,24 @@
 package types
 
 type MessageData struct {
-	ID          string     `json:"id,omitempty"`
-	Time        string     `json:"time,omitempty"`
-	RecipientID string     `json:"recipient_id,omitempty"`
-	SenderID    string     `json:"sender_id,omitempty"`
-	Text        string     `json:"text,omitempty"`
-	Entities    Entities   `json:"entities,omitempty"`
+	ID          string      `json:"id,omitempty"`
+	Time        string      `json:"time,omitempty"`
+	RecipientID string      `json:"recipient_id,omitempty"`
+	SenderID    string      `json:"sender_id,omitempty"`
+	Text        string      `json:"text,omitempty"`
+	Entities    Entities    `json:"entities,omitempty"`
 	Attachment  *Attachment `json:"attachment,omitempty"`
-	ReplyData 	ReplyData  `json:"reply_data,omitempty"`
+	ReplyData   ReplyData   `json:"reply_data,omitempty"`
 }
 
 type Message struct {
-	ID             		string      `json:"id,omitempty"`
-	Time           		string      `json:"time,omitempty"`
-	AffectsSort    		bool        `json:"affects_sort,omitempty"`
-	RequestID      		string      `json:"request_id,omitempty"`
-	ConversationID 		string      `json:"conversation_id,omitempty"`
-	MessageData    		MessageData `json:"message_data,omitempty"`
-	MessageReactions    []MessageReaction `json:"message_reactions,omitempty"`
+	ID               string            `json:"id,omitempty"`
+	Time             string            `json:"time,omitempty"`
+	AffectsSort      bool              `json:"affects_sort,omitempty"`
+	RequestID        string            `json:"request_id,omitempty"`
+	ConversationID   string            `json:"conversation_id,omitempty"`
+	MessageData      MessageData       `json:"message_data,omitempty"`
+	MessageReactions []MessageReaction `json:"message_reactions,omitempty"`
 }
 
 type ReplyData struct {
@@ -30,9 +30,10 @@ type ReplyData struct {
 }
 
 type MessageReactionAction string
+
 const (
-	MessageReactionAdd 		MessageReactionAction = "reaction_add"
-	MessageReactionRemove 	MessageReactionAction = "reaction_remove"
+	MessageReactionAdd    MessageReactionAction = "reaction_add"
+	MessageReactionRemove MessageReactionAction = "reaction_remove"
 )
 
 type MessageReaction struct {
@@ -86,13 +87,12 @@ type ConversationNameUpdateData struct {
 	AffectsSort      bool   `json:"affects_sort,omitempty"`
 }
 
-
 type ParticipantsJoinedData struct {
-	ID             string         `json:"id,omitempty"`
-	Time           string         `json:"time,omitempty"`
-	AffectsSort    bool           `json:"affects_sort,omitempty"`
-	ConversationID string         `json:"conversation_id,omitempty"`
-	SenderID       string         `json:"sender_id,omitempty"`
+	ID             string        `json:"id,omitempty"`
+	Time           string        `json:"time,omitempty"`
+	AffectsSort    bool          `json:"affects_sort,omitempty"`
+	ConversationID string        `json:"conversation_id,omitempty"`
+	SenderID       string        `json:"sender_id,omitempty"`
 	Participants   []Participant `json:"participants,omitempty"`
 }
 
@@ -113,9 +113,9 @@ const (
 type Conversation struct {
 	ConversationID               string           `json:"conversation_id,omitempty"`
 	Type                         ConversationType `json:"type,omitempty"`
-	Name                         string 		  `json:"name,omitempty"`
-	AvatarImageHttps             string 		  `json:"avatar_image_https,omitempty"`
-	Avatar                       Avatar 		  `json:"avatar,omitempty"`
+	Name                         string           `json:"name,omitempty"`
+	AvatarImageHttps             string           `json:"avatar_image_https,omitempty"`
+	Avatar                       Avatar           `json:"avatar,omitempty"`
 	SortEventID                  string           `json:"sort_event_id,omitempty"`
 	SortTimestamp                string           `json:"sort_timestamp,omitempty"`
 	CreateTime                   string           `json:"create_time,omitempty"`

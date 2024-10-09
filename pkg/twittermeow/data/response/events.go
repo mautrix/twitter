@@ -64,24 +64,22 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 				if err != nil {
 					return nil, err
 				}
-				
+
 				updatedReactionEventData := event.XEventReaction{
-					Conversation: data.GetConversationByID(reactionEventData.ConversationID),
-					Time: reactionActionAt,
-					ID: reactionEventData.ID,
-					ReactionKey: reactionEventData.ReactionKey,
+					Conversation:  data.GetConversationByID(reactionEventData.ConversationID),
+					Time:          reactionActionAt,
+					ID:            reactionEventData.ID,
+					ReactionKey:   reactionEventData.ReactionKey,
 					EmojiReaction: reactionEventData.EmojiReaction,
-					AffectsSort: reactionEventData.AffectsSort,
-					SenderID: reactionEventData.SenderID,
-					MessageID: reactionEventData.MessageID,
+					AffectsSort:   reactionEventData.AffectsSort,
+					SenderID:      reactionEventData.SenderID,
+					MessageID:     reactionEventData.MessageID,
 				}
 				switch entryType {
 				case event.XReactionCreatedEvent:
 					updatedReactionEventData.Action = types.MessageReactionAdd
-				case event.XReactionDeletedEvent:
-					updatedReactionEventData.Action = types.MessageReactionRemove
 				default:
-					break
+					updatedReactionEventData.Action = types.MessageReactionRemove
 				}
 				updatedEntry = updatedReactionEventData
 			case event.XMessageEvent:
@@ -105,9 +103,9 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					Text:         messageEventData.MessageData.Text,
 					Entities:     &messageEventData.MessageData.Entities,
 					Attachment:   messageEventData.MessageData.Attachment,
-					ReplyData: 	  messageEventData.MessageData.ReplyData,
+					ReplyData:    messageEventData.MessageData.ReplyData,
 					AffectsSort:  messageEventData.AffectsSort,
-					Reactions: 	  messageEventData.MessageReactions,
+					Reactions:    messageEventData.MessageReactions,
 				}
 			case event.XConversationNameUpdate:
 				var convNameUpdateEventData types.ConversationNameUpdateData
@@ -123,11 +121,11 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 
 				updatedEntry = event.XEventConversationNameUpdate{
 					Conversation: data.GetConversationByID(convNameUpdateEventData.ConversationID),
-					Name: convNameUpdateEventData.ConversationName,
-					Executor: data.GetUserByID(convNameUpdateEventData.ByUserID),
-					EventID: convNameUpdateEventData.ID,
-					AffectsSort: convNameUpdateEventData.AffectsSort,
-					UpdatedAt: updatedAt,
+					Name:         convNameUpdateEventData.ConversationName,
+					Executor:     data.GetUserByID(convNameUpdateEventData.ByUserID),
+					EventID:      convNameUpdateEventData.ID,
+					AffectsSort:  convNameUpdateEventData.AffectsSort,
+					UpdatedAt:    updatedAt,
 				}
 			case event.XParticipantsJoinedEvent:
 				var participantsJoinedEventData types.ParticipantsJoinedData
@@ -142,11 +140,11 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 				}
 
 				updatedEntry = event.XEventParticipantsJoined{
-					EventID: participantsJoinedEventData.ID,
-					EventTime: eventTime,
-					AffectsSort: participantsJoinedEventData.AffectsSort,
-					Conversation: data.GetConversationByID(participantsJoinedEventData.ConversationID),
-					Sender: data.GetUserByID(participantsJoinedEventData.SenderID),
+					EventID:         participantsJoinedEventData.ID,
+					EventTime:       eventTime,
+					AffectsSort:     participantsJoinedEventData.AffectsSort,
+					Conversation:    data.GetConversationByID(participantsJoinedEventData.ConversationID),
+					Sender:          data.GetUserByID(participantsJoinedEventData.SenderID),
 					NewParticipants: data.GetParticipantUsers(participantsJoinedEventData.Participants),
 				}
 			case event.XMessageDeleteEvent:
@@ -201,11 +199,11 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 				}
 
 				updatedEntry = event.XEventConversationDelete{
-					ConversationID:  convDeletedEventData.ConversationID,
-					EventID:         convDeletedEventData.ID,
-					DeletedAt: 		 deletedAt,
-					AffectsSort:     convDeletedEventData.AffectsSort,
-					LastEventID: 	 convDeletedEventData.LastEventID,
+					ConversationID: convDeletedEventData.ConversationID,
+					EventID:        convDeletedEventData.ID,
+					DeletedAt:      deletedAt,
+					AffectsSort:    convDeletedEventData.AffectsSort,
+					LastEventID:    convDeletedEventData.LastEventID,
 				}
 			case event.XConversationCreateEvent:
 				var convCreatedEventData types.ConversationCreatedData
@@ -226,7 +224,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					AffectsSort:  convCreatedEventData.AffectsSort,
 					RequestID:    convCreatedEventData.RequestID,
 				}
-				
+
 			case event.XConversationMetadataUpdateEvent:
 				var convMetadataUpdateEventData types.ConversationMetadataUpdate
 				err = json.Unmarshal(jsonEvData, &convMetadataUpdateEventData)

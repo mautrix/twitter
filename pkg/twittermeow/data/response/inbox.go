@@ -131,6 +131,6 @@ func (data *XInboxData) GetMessageEntriesByConversationID(conversationId string,
 	if sortByTimestamp {
 		methods.SortMessagesByTime(messages)
 	}
-	
+
 	return messages, nil
 }

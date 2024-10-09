@@ -5,10 +5,11 @@ import (
 	"log"
 	"os"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 var _ bridgev2.BackfillingNetworkAPI = (*TwitterClient)(nil)
@@ -16,7 +17,7 @@ var _ bridgev2.BackfillingNetworkAPI = (*TwitterClient)(nil)
 func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationId := string(params.Portal.PortalKey.ID)
 	cursor := params.Cursor
-    //count := params.Count
+	//count := params.Count
 
 	reqQuery := payload.DmRequestQuery{}.Default()
 	reqQuery.Count = 25
@@ -42,9 +43,9 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	fetchMessagesResp := &bridgev2.FetchMessagesResponse{
 		Messages: backfilledMessages,
-		Cursor: networkid.PaginationCursor(messageResp.ConversationTimeline.MinEntryID),
-		HasMore: messageResp.ConversationTimeline.Status == types.HAS_MORE,
-		Forward: params.Forward,
+		Cursor:   networkid.PaginationCursor(messageResp.ConversationTimeline.MinEntryID),
+		HasMore:  messageResp.ConversationTimeline.Status == types.HAS_MORE,
+		Forward:  params.Forward,
 	}
 
 	return fetchMessagesResp, nil
