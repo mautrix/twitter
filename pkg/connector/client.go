@@ -22,21 +22,22 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+	"maunium.net/go/mautrix/bridge/status"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	bridgeEvt "maunium.net/go/mautrix/event"
+
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/event"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
-	"maunium.net/go/mautrix/bridge/status"
-	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/networkid"
-	bridgeEvt "maunium.net/go/mautrix/event"
 )
 
 type TwitterClient struct {
-	connector   *TwitterConnector
-	client 		*twittermeow.Client
+	connector *TwitterConnector
+	client    *twittermeow.Client
 
 	userLogin *bridgev2.UserLogin
 
@@ -44,8 +45,8 @@ type TwitterClient struct {
 }
 
 var (
-	_ bridgev2.NetworkAPI = (*TwitterClient)(nil)
-	_ bridgev2.ReactionHandlingNetworkAPI = (*TwitterClient)(nil)
+	_ bridgev2.NetworkAPI                    = (*TwitterClient)(nil)
+	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
 )
 
@@ -54,14 +55,14 @@ func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2
 		Str("component", "twitter_client").
 		Str("user_login_id", string(login.ID)).
 		Logger()
-	
+
 	meta := login.Metadata.(*UserLoginMetadata)
 	clientOpts := &twittermeow.ClientOpts{
-		Cookies: cookies.NewCookiesFromString(meta.Cookies),
+		Cookies:       cookies.NewCookiesFromString(meta.Cookies),
 		WithJOTClient: true,
 	}
 	twitClient := &TwitterClient{
-		client: twittermeow.NewClient(clientOpts, log),
+		client:    twittermeow.NewClient(clientOpts, log),
 		userLogin: login,
 		userCache: make(map[string]types.User),
 	}
@@ -70,7 +71,6 @@ func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2
 
 	return twitClient, nil
 }
-
 
 func (tc *TwitterClient) Connect(ctx context.Context) error {
 	if tc.client == nil {
@@ -150,16 +150,16 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	if msg.ReplyData.ID != "" {
 		MessageOptionalPartID = &networkid.MessageOptionalPartID{
 			MessageID: networkid.MessageID(msg.ReplyData.ID),
-			PartID: &partId,
+			PartID:    &partId,
 		}
 	}
 
 	textPart := &bridgev2.ConvertedMessagePart{
-		ID: partId,
+		ID:   partId,
 		Type: bridgeEvt.EventMessage,
 		Content: &bridgeEvt.MessageEventContent{
 			MsgType: bridgeEvt.MsgText,
-			Body: msg.Text,
+			Body:    msg.Text,
 		},
 	}
 
@@ -181,7 +181,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 
 	cm := &bridgev2.ConvertedMessage{
 		ReplyTo: MessageOptionalPartID,
-		Parts: parts,
+		Parts:   parts,
 	}
 
 	return cm, nil
@@ -193,7 +193,7 @@ func (tc *TwitterClient) MakePortalKey(conv types.Conversation) networkid.Portal
 		receiver = tc.userLogin.ID
 	}
 	return networkid.PortalKey{
-		ID: networkid.PortalID(conv.ConversationID),
+		ID:       networkid.PortalID(conv.ConversationID),
 		Receiver: receiver,
 	}
 }
@@ -204,7 +204,7 @@ func (tc *TwitterClient) MakePortalKeyFromID(conversationId string) networkid.Po
 		receiver = tc.userLogin.ID
 	}
 	return networkid.PortalKey{
-		ID: networkid.PortalID(conversationId),
+		ID:       networkid.PortalID(conversationId),
 		Receiver: receiver,
 	}
 }
