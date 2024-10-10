@@ -76,7 +76,7 @@ type UserLoginMetadata struct {
 }
 
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	twitClient := NewTwitterClient(ctx, login)
+	twitClient := NewTwitterClient(ctx, tc, login)
 
 	_, currentUser, err := twitClient.client.LoadMessagesPage()
 	if err != nil {

@@ -50,7 +50,7 @@ var (
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
 )
 
-func NewTwitterClient(ctx context.Context, login *bridgev2.UserLogin) *TwitterClient {
+func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2.UserLogin) *TwitterClient {
 	log := zerolog.Ctx(ctx).With().
 		Str("component", "twitter_client").
 		Str("user_login_id", string(login.ID)).
@@ -68,7 +68,7 @@ func NewTwitterClient(ctx context.Context, login *bridgev2.UserLogin) *TwitterCl
 	}
 
 	twitClient.client.SetEventHandler(twitClient.HandleTwitterEvent)
-
+	twitClient.connector = tc
 	return twitClient
 }
 
