@@ -1,0 +1,18 @@
+# Proxy to use for all Twitter connections.
+proxy: null
+# Alternative to proxy: an HTTP endpoint that returns the proxy URL to use for Twitter connections.
+get_proxy_url: null
+
+# Localpart template of MXIDs for Twitter users.
+# {userid} is replaced with the user ID of the Twitter user.
+username_template: "twitter_{userid}"
+# Displayname template for Twitter users.
+# {displayname} is replaced with the display name of the Twitter user.
+# {username} is replaced with the username of the Twitter user.
+displayname_template: "{displayname} (Twitter)"
+# Maximum length of displayname
+displayname_max_length: 100
+
+# Whether the bridge should send a read receipt from the bridge bot when a message has
+# been sent to Twitter.
+delivery_receipts: false
