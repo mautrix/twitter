@@ -7,6 +7,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 func (c *Client) Login() error {
@@ -54,4 +55,65 @@ func (c *Client) GetDMPermissions(params payload.GetDMPermissionsQuery) (*respon
 
 	data := response.GetDMPermissionsResponse{}
 	return &data, json.Unmarshal(respBody, &data)
+}
+
+type WebPushConfig struct {
+	Endpoint string
+	P256DH   []byte
+	Auth     []byte
+}
+
+type PushNotificationSetting int
+
+const (
+	REGISTER   PushNotificationSetting = 0
+	UNREGISTER PushNotificationSetting = 1
+)
+
+func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, config WebPushConfig) error {
+	var url string
+	switch setting {
+	case REGISTER:
+		url = endpoints.NOTIFICATION_LOGIN_URL
+	case UNREGISTER:
+		url = endpoints.NOTIFICATION_LOGOUT_URL
+	default:
+		return fmt.Errorf("unknown push notification setting: %d", setting)
+	}
+
+	payload := payload.WebPushConfigPayload{
+		Env:             3,
+		ProtocolVersion: 1,
+
+		Locale:    "en",
+		OSVersion: UDID,
+		UDID:      UDID,
+
+		Token: config.Endpoint,
+	}
+
+	if config.P256DH != nil {
+		payload.P256DH = methods.EncodeToUnpaddedBase64URL(config.P256DH)
+	}
+
+	if config.P256DH != nil {
+		payload.Auth = methods.EncodeToUnpaddedBase64URL(config.Auth)
+	}
+
+	encodedBody, err := json.Marshal(payload)
+
+	if err != nil {
+		return err
+	}
+
+	apiRequestOpts := apiRequestOpts{
+		Url:            url,
+		Method:         "POST",
+		WithClientUUID: true,
+		Referer:        endpoints.BASE_NOTIFICATION_SETTINGS_URL,
+		Origin:         endpoints.BASE_URL,
+		Body:           encodedBody,
+	}
+	_, _, err = c.makeAPIRequest(apiRequestOpts)
+	return err
 }

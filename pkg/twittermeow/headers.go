@@ -20,6 +20,8 @@ const SecCHMobile = "?0"
 const SecCHModel = ""
 const SecCHPrefersColorScheme = "light"
 
+const UDID = OSName + "/" + BrowserName
+
 var defaultConstantHeaders = http.Header{
 	"accept":                      []string{"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"},
 	"accept-language":             []string{"en-US,en;q=0.9"},

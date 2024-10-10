@@ -55,3 +55,16 @@ type ReactionActionPayload struct {
 func (p *ReactionActionPayload) Encode() ([]byte, error) {
 	return json.Marshal(p)
 }
+
+type WebPushConfigPayload struct {
+	Token  string `json:"token"`
+	P256DH string `json:"encryption_key1"`
+	Auth   string `json:"encryption_key2"`
+
+	OSVersion string `json:"os_version"`
+	UDID      string `json:"udid"`
+	Locale    string `json:"locale"`
+
+	Env             int `json:"env"`
+	ProtocolVersion int `json:"protocol_version"`
+}

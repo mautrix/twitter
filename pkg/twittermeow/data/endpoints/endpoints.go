@@ -4,11 +4,12 @@ const (
 	TWITTER_BASE_HOST = "twitter.com"
 	TWITTER_BASE_URL  = "https://" + TWITTER_BASE_HOST
 
-	BASE_HOST         = "x.com"
-	BASE_URL          = "https://" + BASE_HOST
-	BASE_LOGIN_URL    = BASE_URL + "/login"
-	BASE_MESSAGES_URL = BASE_URL + "/messages"
-	BASE_LOGOUT_URL   = BASE_URL + "/logout"
+	BASE_HOST                      = "x.com"
+	BASE_URL                       = "https://" + BASE_HOST
+	BASE_LOGIN_URL                 = BASE_URL + "/login"
+	BASE_MESSAGES_URL              = BASE_URL + "/messages"
+	BASE_LOGOUT_URL                = BASE_URL + "/logout"
+	BASE_NOTIFICATION_SETTINGS_URL = BASE_URL + "/settings/push_notifications"
 
 	API_BASE_HOST = "api.x.com"
 	API_BASE_URL  = "https://" + API_BASE_HOST
@@ -37,4 +38,8 @@ const (
 	UPLOAD_BASE_HOST = "upload.x.com"
 	UPLOAD_BASE_URL  = "https://" + UPLOAD_BASE_HOST
 	UPLOAD_MEDIA_URL = UPLOAD_BASE_URL + "/i/media/upload.json"
+
+	NOTIFICATION_SETTINGS_URL = BASE_URL + "/i/api/1.1/notifications/settings"
+	NOTIFICATION_LOGIN_URL    = NOTIFICATION_SETTINGS_URL + "/login.json"
+	NOTIFICATION_LOGOUT_URL   = NOTIFICATION_SETTINGS_URL + "/logout.json"
 )
