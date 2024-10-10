@@ -71,10 +71,6 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 	return &bridgev2.NetworkGeneralCapabilities{}
 }
 
-type UserLoginMetadata struct {
-	Cookies string
-}
-
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	twitClient := NewTwitterClient(ctx, tc, login)
 

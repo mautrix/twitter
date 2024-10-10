@@ -48,6 +48,7 @@ var (
 	_ bridgev2.NetworkAPI                    = (*TwitterClient)(nil)
 	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
+	_ bridgev2.PushableNetworkAPI            = (*TwitterClient)(nil)
 )
 
 func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2.UserLogin) *TwitterClient {
@@ -70,6 +71,39 @@ func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2
 	twitClient.client.SetEventHandler(twitClient.HandleTwitterEvent)
 	twitClient.connector = tc
 	return twitClient
+}
+
+var pushCfg = &bridgev2.PushConfig{
+	Web: &bridgev2.WebPushConfig{VapidKey: "BF5oEo0xDUpgylKDTlsd8pZmxQA1leYINiY-rSscWYK_3tWAkz4VMbtf1MLE_Yyd6iII6o-e3Q9TCN5vZMzVMEs"},
+}
+
+func (tc *TwitterClient) GetPushConfigs() *bridgev2.PushConfig {
+	return pushCfg
+}
+
+func (tc *TwitterClient) RegisterPushNotifications(ctx context.Context, pushType bridgev2.PushType, token string) error {
+	if tc.client == nil {
+		return bridgev2.ErrNotLoggedIn
+	}
+	switch pushType {
+	case bridgev2.PushTypeWeb:
+		meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+		if meta.PushKeys == nil {
+			meta.GeneratePushKeys()
+			err := tc.userLogin.Save(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to save push key: %w", err)
+			}
+		}
+		pc := twittermeow.WebPushConfig{
+			Endpoint: token,
+			Auth:     meta.PushKeys.Auth,
+			P256DH:   meta.PushKeys.P256DH,
+		}
+		return tc.client.SetPushNotificationConfig(twittermeow.REGISTER, pc)
+	default:
+		return fmt.Errorf("unsupported push type: %v", pushType)
+	}
 }
 
 func (tc *TwitterClient) Connect(ctx context.Context) error {
