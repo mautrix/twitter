@@ -55,6 +55,10 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			MediaType:     MSG_TYPE_TO_MEDIA_TYPE[content.MsgType],
 			MediaCategory: MSG_TYPE_TO_MEDIA_CATEGORY[content.MsgType],
 		}
+		if content.Info.MimeType == "image/gif" {
+			uploadMediaParams.MediaType = "image/gif"
+			uploadMediaParams.MediaCategory = "dm_gif"
+		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(uploadMediaParams, data)
 		if err != nil {
 			return nil, err
