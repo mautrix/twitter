@@ -11,6 +11,7 @@ require (
 	github.com/rs/zerolog v1.33.0
 	go.mau.fi/util v0.8.0
 	golang.org/x/net v0.29.0
+	gopkg.in/yaml.v3 v3.0.1
 	maunium.net/go/mautrix v0.21.0
 )
 
@@ -37,6 +38,5 @@ require (
 	golang.org/x/sys v0.25.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	maunium.net/go/mauflag v1.0.0 // indirect
 )

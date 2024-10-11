@@ -178,7 +178,7 @@ func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*
 	}
 
 	data := types.Message{}
-	return &data, json.Unmarshal(respBody, data)
+	return &data, json.Unmarshal(respBody, &data)
 }
 
 // keep in mind this only deletes the message for you

@@ -47,7 +47,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
 
-		if perms.CanDm == false || perms.ErrorCode > 0 {
+		if !perms.CanDm || perms.ErrorCode > 0 {
 			return nil, fmt.Errorf("not allowed to DM this Twitter user: %v", resolvedUser.IDStr)
 		}
 
@@ -57,7 +57,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 
 	return &bridgev2.ResolveIdentifierResponse{
 		Ghost:  ghost,
-		UserID: networkid.UserID(resolvedUser.ID),
+		UserID: networkid.UserID(resolvedUser.IDStr),
 		Chat:   &bridgev2.CreateChatResponse{PortalKey: portalKey},
 	}, nil
 }
