@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -82,4 +83,12 @@ func RandStr(length int) string {
 func EncodeToUnpaddedBase64URL(data []byte) string {
 	encoded := base64.URLEncoding.EncodeToString(data)
 	return string(encoded[:len(encoded)-len(encoded)%4])
+}
+
+func CreateConversationId(conversationIds []string) string {
+	sort.Slice(conversationIds, func(i, j int) bool {
+		return conversationIds[i] < conversationIds[j]
+	})
+
+	return strings.Join(conversationIds, "-")
 }
