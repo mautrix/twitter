@@ -11,6 +11,7 @@ type XEventType string
 const (
 	XMessageEvent                    XEventType = "message"
 	XMessageDeleteEvent              XEventType = "message_delete"
+	XMessageEditEvent                XEventType = "message_edit"
 	XReactionCreatedEvent            XEventType = "reaction_create"
 	XReactionDeletedEvent            XEventType = "reaction_delete"
 	XConversationReadEvent           XEventType = "conversation_read"
@@ -34,6 +35,7 @@ type XEventMessage struct {
 	Attachment   *types.Attachment
 	ReplyData    types.ReplyData
 	Reactions    []types.MessageReaction
+	EditCount    int
 }
 
 type XEventConversationRead struct {

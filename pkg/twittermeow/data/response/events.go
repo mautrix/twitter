@@ -82,7 +82,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					updatedReactionEventData.Action = types.MessageReactionRemove
 				}
 				updatedEntry = updatedReactionEventData
-			case event.XMessageEvent:
+			case event.XMessageEvent, event.XMessageEditEvent:
 				var messageEventData types.Message
 				err = json.Unmarshal(jsonEvData, &messageEventData)
 				if err != nil {
@@ -106,6 +106,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					ReplyData:    messageEventData.MessageData.ReplyData,
 					AffectsSort:  messageEventData.AffectsSort,
 					Reactions:    messageEventData.MessageReactions,
+					EditCount:    messageEventData.MessageData.EditCount,
 				}
 			case event.XConversationNameUpdate:
 				var convNameUpdateEventData types.ConversationNameUpdateData

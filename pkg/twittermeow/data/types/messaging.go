@@ -9,6 +9,7 @@ type MessageData struct {
 	Entities    Entities    `json:"entities,omitempty"`
 	Attachment  *Attachment `json:"attachment,omitempty"`
 	ReplyData   ReplyData   `json:"reply_data,omitempty"`
+	EditCount   int         `json:"edit_count,omitempty"`
 }
 
 type Message struct {

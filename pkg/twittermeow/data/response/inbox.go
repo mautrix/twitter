@@ -124,6 +124,8 @@ func (data *XInboxData) GetMessageEntriesByConversationID(conversationId string,
 				if message.ConversationID == conversationId {
 					messages = append(messages, message)
 				}
+			} else if entryType == event.XMessageEditEvent {
+				// todo: add edits and return them alongside messages
 			}
 		}
 	}

@@ -217,3 +217,18 @@ func (p *GetDMPermissionsQuery) Encode() ([]byte, error) {
 	}
 	return []byte(values.Encode()), nil
 }
+
+type EditDirectMessagePayload struct {
+	ConversationID string `url:"conversation_id,omitempty"`
+	RequestID      string `url:"request_id,omitempty"`
+	DmID           string `url:"dm_id,omitempty"` // used to specify a message, specifically for editing
+	Text           string `url:"text"`
+}
+
+func (p *EditDirectMessagePayload) Encode() ([]byte, error) {
+	values, err := query.Values(p)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(values.Encode()), nil
+}

@@ -153,6 +153,34 @@ func (c *Client) SendDirectMessage(payload *payload.SendDirectMessagePayload) (*
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*types.Message, error) {
+	if payload.RequestID == "" {
+		payload.RequestID = uuid.NewString()
+	}
+
+	encodedQuery, err := payload.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s?%s", endpoints.EDIT_DM_URL, string(encodedQuery))
+	apiRequestOpts := apiRequestOpts{
+		Url:            url,
+		Method:         "POST",
+		WithClientUUID: true,
+		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.FORM,
+	}
+	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	data := types.Message{}
+	return &data, json.Unmarshal(respBody, data)
+}
+
 // keep in mind this only deletes the message for you
 func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVariables) (*response.DMMessageDeleteMutationResponse, error) {
 	if variables.RequestID == "" {

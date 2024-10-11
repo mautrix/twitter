@@ -22,6 +22,7 @@ const (
 	UPDATE_LAST_SEEN_EVENT_ID_URL     = BASE_URL + "/i/api/1.1/dm/update_last_seen_event_id.json"
 	TRUSTED_INBOX_TIMELINE_URL        = BASE_URL + "/i/api/1.1/dm/inbox_timeline/trusted.json"
 	SEND_DM_URL                       = BASE_URL + "/i/api/1.1/dm/new2.json"
+	EDIT_DM_URL                       = BASE_URL + "/i/api/1.1/dm/edit.json"
 	GRAPHQL_MESSAGE_DELETION_MUTATION = BASE_URL + "/i/api/graphql/BJ6DtxA2llfjnRoRjaiIiw/DMMessageDeleteMutation"
 	SEARCH_TYPEAHEAD_URL              = BASE_URL + "/i/api/1.1/search/typeahead.json"
 	DM_PERMISSIONS_URL                = BASE_URL + "/i/api/1.1/dm/permissions.json"
