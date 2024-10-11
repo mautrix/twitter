@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -201,8 +202,8 @@ func (tc *TwitterClient) GetUserInfoBridge(userId string) *bridgev2.UserInfo {
 	var userinfo *bridgev2.UserInfo
 	if userCacheEntry, ok := tc.userCache[userId]; ok {
 		userinfo = &bridgev2.UserInfo{
-			Name:   &userCacheEntry.Name,
-			Avatar: MakeAvatar(userCacheEntry.ProfileImageURL),
+			Name:        ptr.Ptr(tc.connector.Config.FormatDisplayname(userCacheEntry.ScreenName, userCacheEntry.Name)),
+			Avatar:      MakeAvatar(userCacheEntry.ProfileImageURL),
 			Identifiers: []string{fmt.Sprintf("twitter:%s", userCacheEntry.ScreenName)},
 		}
 	}
