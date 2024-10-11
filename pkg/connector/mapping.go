@@ -203,6 +203,7 @@ func (tc *TwitterClient) GetUserInfoBridge(userId string) *bridgev2.UserInfo {
 		userinfo = &bridgev2.UserInfo{
 			Name:   &userCacheEntry.Name,
 			Avatar: MakeAvatar(userCacheEntry.ProfileImageURL),
+			Identifiers: []string{fmt.Sprintf("twitter:%s", userCacheEntry.ScreenName)},
 		}
 	}
 	return userinfo
