@@ -66,16 +66,16 @@ type WebPushConfig struct {
 type PushNotificationSetting int
 
 const (
-	REGISTER   PushNotificationSetting = 0
-	UNREGISTER PushNotificationSetting = 1
+	REGISTER_PUSH   PushNotificationSetting = 0
+	UNREGISTER_PUSH PushNotificationSetting = 1
 )
 
 func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, config WebPushConfig) error {
 	var url string
 	switch setting {
-	case REGISTER:
+	case REGISTER_PUSH:
 		url = endpoints.NOTIFICATION_LOGIN_URL
-	case UNREGISTER:
+	case UNREGISTER_PUSH:
 		url = endpoints.NOTIFICATION_LOGOUT_URL
 	default:
 		return fmt.Errorf("unknown push notification setting: %d", setting)

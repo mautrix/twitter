@@ -100,7 +100,7 @@ func (tc *TwitterClient) RegisterPushNotifications(ctx context.Context, pushType
 			Auth:     meta.PushKeys.Auth,
 			P256DH:   meta.PushKeys.P256DH,
 		}
-		return tc.client.SetPushNotificationConfig(twittermeow.REGISTER, pc)
+		return tc.client.SetPushNotificationConfig(twittermeow.REGISTER_PUSH, pc)
 	default:
 		return fmt.Errorf("unsupported push type: %v", pushType)
 	}
