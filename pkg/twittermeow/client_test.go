@@ -164,7 +164,7 @@ func deleteMessageForMeTest(initialInboxData *response.XInboxData) {
 	payload := &payload.DMMessageDeleteMutationVariables{
 		MessageID: mostRecentMessage.MessageData.ID,
 	}
-	deleteMessageResp, err := cli.DeleteMessage(payload)
+	deleteMessageResp, err := cli.DeleteMessageForMe(payload)
 	if err != nil {
 		log.Fatalf("failed to delete message with id %s in conversation with id %s", payload.MessageID, firstConversation.ConversationID)
 	}

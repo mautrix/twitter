@@ -154,7 +154,7 @@ func (c *Client) SendDirectMessage(payload *payload.SendDirectMessagePayload) (*
 }
 
 // keep in mind this only deletes the message for you
-func (c *Client) DeleteMessage(variables *payload.DMMessageDeleteMutationVariables) (*response.DMMessageDeleteMutationResponse, error) {
+func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVariables) (*response.DMMessageDeleteMutationResponse, error) {
 	if variables.RequestID == "" {
 		variables.RequestID = uuid.NewString()
 	}
