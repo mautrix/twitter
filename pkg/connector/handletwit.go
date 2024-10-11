@@ -15,9 +15,14 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 	case event.XEventMessage:
 		sender := evtData.Sender
 		isFromMe := sender.IDStr == string(tc.userLogin.ID)
+		msgType := bridgev2.RemoteEventMessage
+
+		if evtData.EditCount > 0 {
+			msgType = bridgev2.RemoteEventEdit
+		}
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.Message[*event.XEventMessage]{
 			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventMessage,
+				Type: msgType,
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.
 						Str("message_id", evtData.MessageID).
@@ -34,10 +39,11 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 				},
 				Timestamp: evtData.CreatedAt,
 			},
-			ID: networkid.MessageID(evtData.MessageID),
-
+			ID:                 networkid.MessageID(evtData.MessageID),
+			TargetMessage:      networkid.MessageID(evtData.MessageID),
 			Data:               &evtData,
 			ConvertMessageFunc: tc.convertToMatrix,
+			ConvertEditFunc:    tc.convertEditToMatrix,
 		})
 	case event.XEventReaction:
 		reactionRemoteEvent := tc.wrapReaction(evtData)

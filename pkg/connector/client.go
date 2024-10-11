@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridge/status"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	bridgeEvt "maunium.net/go/mautrix/event"
 
@@ -45,10 +47,8 @@ type TwitterClient struct {
 }
 
 var (
-	_ bridgev2.NetworkAPI                    = (*TwitterClient)(nil)
-	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
-	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
-	_ bridgev2.PushableNetworkAPI            = (*TwitterClient)(nil)
+	_ bridgev2.NetworkAPI         = (*TwitterClient)(nil)
+	_ bridgev2.PushableNetworkAPI = (*TwitterClient)(nil)
 )
 
 func NewTwitterClient(ctx context.Context, tc *TwitterConnector, login *bridgev2.UserLogin) *TwitterClient {
@@ -175,11 +175,25 @@ func (tc *TwitterClient) GetCapabilities(ctx context.Context, portal *bridgev2.P
 		UserMentions:  true,
 		RoomMentions:  false,
 
+		Edits:         true,
+		EditMaxCount:  10,
+		EditMaxAge:    15 * time.Minute,
 		Captions:      true,
 		Replies:       true,
 		Reactions:     true,
 		ReactionCount: 1,
 	}
+}
+
+func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *event.XEventMessage) (*bridgev2.ConvertedEdit, error) {
+	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
+	converted, err := tc.convertToMatrix(ctx, portal, intent, data)
+	if err != nil {
+		return nil, err
+	}
+	return &bridgev2.ConvertedEdit{
+		ModifiedParts: []*bridgev2.ConvertedEditPart{converted.Parts[0].ToEditPart(existing[0])},
+	}, nil
 }
 
 func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *event.XEventMessage) (*bridgev2.ConvertedMessage, error) {

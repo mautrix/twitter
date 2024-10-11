@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -20,6 +21,12 @@ var (
 		event.MsgVideo: payload.MEDIA_CATEGORY_DM_VIDEO,
 		event.MsgImage: payload.MEDIA_CATEGORY_DM_IMAGE,
 	}
+)
+
+var (
+	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
+	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
+	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
 )
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
@@ -140,4 +147,14 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	}
 
 	return tc.client.MarkConversationRead(params)
+}
+
+func (tc *TwitterClient) HandleMatrixEdit(_ context.Context, edit *bridgev2.MatrixEdit) error {
+	_, err := tc.client.EditDirectMessage(&payload.EditDirectMessagePayload{
+		ConversationID: string(edit.Portal.ID),
+		RequestID:      uuid.New().String(),
+		DmID:           string(edit.EditTarget.ID),
+		Text:           edit.Content.Body,
+	})
+	return err
 }
