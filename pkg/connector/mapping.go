@@ -148,29 +148,30 @@ func (tc *TwitterClient) ConversationTypeToRoomType(convType types.ConversationT
 
 func (tc *TwitterClient) UsersToMemberList(users []types.User) *bridgev2.ChatMemberList {
 	selfUserId := tc.client.GetCurrentUserID()
-	chatMembers := make([]bridgev2.ChatMember, len(users)-1)
+
+	memberMap := map[networkid.UserID]bridgev2.ChatMember{}
 	for _, user := range users {
-		chatMembers = append(chatMembers, tc.UserToChatMember(user, user.IDStr == selfUserId))
+		memberMap[networkid.UserID(user.IDStr)] = tc.UserToChatMember(user, user.IDStr == selfUserId)
 	}
 
 	return &bridgev2.ChatMemberList{
 		IsFull:           true,
 		TotalMemberCount: len(users),
-		Members:          chatMembers, // TODO use membermap instead
+		MemberMap:        memberMap,
 	}
 }
 
 func (tc *TwitterClient) ParticipantsToMemberList(participants []types.Participant) *bridgev2.ChatMemberList {
 	selfUserId := tc.client.GetCurrentUserID()
-	chatMembers := make([]bridgev2.ChatMember, len(participants)-1)
+	memberMap := map[networkid.UserID]bridgev2.ChatMember{}
 	for _, participant := range participants {
-		chatMembers = append(chatMembers, tc.ParticipantToChatMember(participant, participant.UserID == selfUserId))
+		memberMap[networkid.UserID(participant.UserID)] = tc.ParticipantToChatMember(participant, participant.UserID == selfUserId)
 	}
 
 	return &bridgev2.ChatMemberList{
 		IsFull:           true,
 		TotalMemberCount: len(participants),
-		Members:          chatMembers, // TODO use membermap instead
+		MemberMap:        memberMap,
 	}
 }
 
@@ -192,7 +193,6 @@ func (tc *TwitterClient) ParticipantToChatMember(participant types.Participant, 
 		EventSender: bridgev2.EventSender{
 			IsFromMe: isFromMe,
 			Sender:   networkid.UserID(participant.UserID),
-			//SenderLogin: networkid.UserLoginID(participant.UserID),
 		},
 		UserInfo: tc.GetUserInfoBridge(participant.UserID),
 	}
@@ -216,6 +216,7 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	var mimeType string
 	var indices []int
 	var msgType bridgeEvt.MessageType
+	extraInfo := map[string]any{}
 	if attachment.Photo != nil {
 		// image attachment
 		attachmentInfo = attachment.Photo
@@ -223,9 +224,18 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 		msgType = bridgeEvt.MsgImage
 		attachmentURL = attachmentInfo.MediaURLHTTPS
 		indices = attachmentInfo.Indices
-	} else if attachment.Video != nil {
+	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
 		// video attachment
-		attachmentInfo = attachment.Video
+		if attachment.AnimatedGif != nil {
+			attachmentInfo = attachment.AnimatedGif
+			extraInfo["fi.mau.gif"] = true
+			extraInfo["fi.mau.loop"] = true
+			extraInfo["fi.mau.autoplay"] = true
+			extraInfo["fi.mau.hide_controls"] = true
+			extraInfo["fi.mau.no_audio"] = true
+		} else {
+			attachmentInfo = attachment.Video
+		}
 		mimeType = "video/mp4"
 		msgType = bridgeEvt.MsgVideo
 
@@ -235,18 +245,10 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 		}
 		attachmentURL = highestBitRateVariant.URL
 		indices = attachmentInfo.Indices
-	} else if attachment.AnimatedGif != nil {
-		// gif attachment
-		attachmentInfo = attachment.AnimatedGif
-		mimeType = "image/gif"
-		msgType = bridgeEvt.MsgVideo
+	}
 
-		highestBitRateVariant, err := attachmentInfo.VideoInfo.GetHighestBitrateVariant()
-		if err != nil {
-			return nil, nil, err
-		}
-		attachmentURL = highestBitRateVariant.URL
-		indices = attachmentInfo.Indices
+	if attachmentInfo == nil || attachmentInfo.IDStr == "" {
+		return nil, nil, fmt.Errorf("missing attachment info")
 	}
 
 	attachmentBytes, err := DownloadPlainFile(ctx, tc.client.GetCookieString(), attachmentURL, "twitter attachment")
@@ -264,6 +266,9 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 		ID:      networkid.PartID(fmt.Sprintf("attachment-%s", attachmentInfo.IDStr)),
 		Type:    bridgeEvt.EventMessage,
 		Content: &content,
+		Extra: map[string]any{
+			"info": extraInfo,
+		},
 	}, indices, nil
 }
 
