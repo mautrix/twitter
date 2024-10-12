@@ -88,7 +88,7 @@ type DmRequestQuery struct {
 	Ext                                 string      `url:"ext"`
 }
 
-func (p *DmRequestQuery) Encode() ([]byte, error) {
+func (p DmRequestQuery) Encode() ([]byte, error) {
 	values, err := query.Values(p)
 	if err != nil {
 		return nil, err
@@ -96,8 +96,8 @@ func (p *DmRequestQuery) Encode() ([]byte, error) {
 	return []byte(values.Encode()), nil
 }
 
-func (p DmRequestQuery) Default() *DmRequestQuery {
-	return &DmRequestQuery{
+func (p DmRequestQuery) Default() DmRequestQuery {
+	return DmRequestQuery{
 		NSFWFilteringEnabled:                false,
 		IncludeProfileInterstitialType:      1,
 		IncludeBlocking:                     1,

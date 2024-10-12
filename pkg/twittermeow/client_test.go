@@ -59,7 +59,7 @@ func deleteConversationTest(initialInboxData *response.XInboxData) {
 	firstConversation := conversations[0].Conversation
 
 	payload := payload.DmRequestQuery{}.Default()
-	err = cli.DeleteConversation(firstConversation.ConversationID, payload)
+	err = cli.DeleteConversation(firstConversation.ConversationID, &payload)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -129,9 +129,9 @@ func createConversationAndSendMessageTest() {
 	myUserID := cli.GetCurrentUserID()
 	conversationId := fmt.Sprintf("%s-%s", pickedUser.IDStr, myUserID)
 
-	contextQuery := (&payload.DmRequestQuery{}).Default()
+	contextQuery := payload.DmRequestQuery{}.Default()
 	contextQuery.IncludeConversationInfo = true
-	_, err = cli.FetchConversationContext(conversationId, contextQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
+	_, err = cli.FetchConversationContext(conversationId, &contextQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func logAllTrustedConversations(initialInboxData *response.XInboxData) {
 
 	paginationNextEntryID := trustedInboxTimeline.MinEntryID
 	paginationStatus := trustedInboxTimeline.Status
-	reqQuery := (&payload.DmRequestQuery{})
+	reqQuery := &payload.DmRequestQuery{}
 
 	for paginationStatus == types.HAS_MORE {
 		reqQuery.MaxID = paginationNextEntryID
@@ -410,7 +410,7 @@ func logAllMessagesInConversation(initialInboxData *response.XInboxData) {
 	reqQuery := (&payload.DmRequestQuery{}).Default()
 	for conversationMessageHistoryStatus == types.HAS_MORE {
 		reqQuery.MaxID = paginationNextEntryID
-		fetchMessagesResponse, err := cli.FetchConversationContext(firstConversation.ConversationID, reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
+		fetchMessagesResponse, err := cli.FetchConversationContext(firstConversation.ConversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
 		if err != nil {
 			log.Fatal(err)
 		}

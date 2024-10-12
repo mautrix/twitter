@@ -46,7 +46,7 @@ func (pc *PollingClient) startListening() {
 			userUpdatesQuery.Cursor = pc.currentCursor
 		}
 
-		userUpdatesResponse, err := pc.client.GetDMUserUpdates(userUpdatesQuery)
+		userUpdatesResponse, err := pc.client.GetDMUserUpdates(&userUpdatesQuery)
 		if err != nil {
 			log.Fatal(err)
 		}

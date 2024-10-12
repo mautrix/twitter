@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
@@ -16,7 +17,7 @@ import (
 func (tc *TwitterClient) syncChannels(_ context.Context) {
 	//log := zerolog.Ctx(ctx)
 
-	reqQuery := payload.DmRequestQuery{}.Default()
+	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
 	initalInboxState, err := tc.client.GetInitialInboxState(reqQuery)
 	if err != nil {
 		panic(fmt.Sprintf("failed to fetch initial inbox state: %s", err.Error()))

@@ -120,7 +120,10 @@ func (tc *TwitterClient) Connect(ctx context.Context) error {
 }
 
 func (tc *TwitterClient) Disconnect() {
-	tc.client.Disconnect()
+	err := tc.client.Disconnect()
+	if err != nil {
+		tc.userLogin.Log.Error().Err(err).Msg("failed to disconnect, err:")
+	}
 }
 
 func (tc *TwitterClient) IsLoggedIn() bool {
@@ -139,11 +142,11 @@ func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) 
 	return networkid.UserID(tc.client.GetCurrentUserID()) == userID
 }
 
-func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+func (tc *TwitterClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	conversationId := string(portal.PortalKey.ID)
 	queryConversationPayload := payload.DmRequestQuery{}.Default()
 	queryConversationPayload.IncludeConversationInfo = true
-	conversationData, err := tc.client.FetchConversationContext(conversationId, queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
+	conversationData, err := tc.client.FetchConversationContext(conversationId, &queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +164,7 @@ func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Porta
 	return tc.ConversationToChatInfo(&conversation), nil
 }
 
-func (tc *TwitterClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
+func (tc *TwitterClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	userInfo := tc.GetUserInfoBridge(string(ghost.ID))
 	if userInfo == nil {
 		return nil, fmt.Errorf("failed to find user info in cache by id: %s", ghost.ID)
@@ -169,7 +172,7 @@ func (tc *TwitterClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost)
 	return userInfo, nil
 }
 
-func (tc *TwitterClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *bridgev2.NetworkRoomCapabilities {
+func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *bridgev2.NetworkRoomCapabilities {
 	return &bridgev2.NetworkRoomCapabilities{
 		FormattedText: false,
 		UserMentions:  true,

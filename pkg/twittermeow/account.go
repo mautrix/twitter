@@ -81,7 +81,7 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 		return fmt.Errorf("unknown push notification setting: %d", setting)
 	}
 
-	payload := payload.WebPushConfigPayload{
+	webPushPayload := payload.WebPushConfigPayload{
 		Env:             3,
 		ProtocolVersion: 1,
 
@@ -93,14 +93,14 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 	}
 
 	if config.P256DH != nil {
-		payload.P256DH = methods.EncodeToUnpaddedBase64URL(config.P256DH)
+		webPushPayload.P256DH = methods.EncodeToUnpaddedBase64URL(config.P256DH)
 	}
 
 	if config.P256DH != nil {
-		payload.Auth = methods.EncodeToUnpaddedBase64URL(config.Auth)
+		webPushPayload.Auth = methods.EncodeToUnpaddedBase64URL(config.Auth)
 	}
 
-	encodedBody, err := json.Marshal(payload)
+	encodedBody, err := json.Marshal(webPushPayload)
 
 	if err != nil {
 		return err

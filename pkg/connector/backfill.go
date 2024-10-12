@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -19,7 +20,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 	cursor := params.Cursor
 	//count := params.Count
 
-	reqQuery := payload.DmRequestQuery{}.Default()
+	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
 	reqQuery.Count = 25
 	messageResp, err := tc.client.FetchConversationContext(conversationId, reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
 	if err != nil {

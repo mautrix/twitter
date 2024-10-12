@@ -1,6 +1,7 @@
 package twittermeow
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -8,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -135,7 +138,7 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		return nil, nil, err
 	}
 
-	initialInboxState, err := c.GetInitialInboxState((&payload.DmRequestQuery{}).Default())
+	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DmRequestQuery{}.Default()))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -174,8 +177,9 @@ func (c *Client) SetProxy(proxyAddr string) error {
 		if err != nil {
 			return err
 		}
-		//lint:ignore SA1019 TODO fix deprecated method
-		c.http.Transport.(*http.Transport).Dial = c.socksProxy.Dial
+		c.http.Transport.(*http.Transport).DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
+			return c.socksProxy.Dial(network, addr)
+		}
 		contextDialer, ok := c.socksProxy.(proxy.ContextDialer)
 		if ok {
 			c.http.Transport.(*http.Transport).DialContext = contextDialer.DialContext
