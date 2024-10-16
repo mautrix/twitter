@@ -27,14 +27,10 @@ import (
 type TwitterConnector struct {
 	br *bridgev2.Bridge
 
-	Config *Config
+	Config Config
 }
 
 var _ bridgev2.NetworkConnector = (*TwitterConnector)(nil)
-
-func NewConnector() *TwitterConnector {
-	return &TwitterConnector{}
-}
 
 func (tc *TwitterConnector) Init(bridge *bridgev2.Bridge) {
 	tc.br = bridge

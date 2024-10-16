@@ -9,7 +9,3 @@ get_proxy_url: null
 displayname_template: "{{ .DisplayName }} (Twitter)"
 # Maximum length of displayname
 displayname_max_length: 100
-
-# Whether the bridge should send a read receipt from the bridge bot when a message has
-# been sent to Twitter.
-delivery_receipts: false

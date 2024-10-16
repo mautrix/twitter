@@ -19,8 +19,6 @@ type Config struct {
 	DisplaynameTemplate  string `yaml:"displayname_template"`
 	DisplayNameMaxLength int    `yaml:"displayname_max_length"`
 
-	DeliveryReceipts bool `yaml:"delivery_receipts"`
-
 	displaynameTemplate *template.Template `yaml:"-"`
 }
 
@@ -46,8 +44,6 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str, "username_template")
 	helper.Copy(up.Str, "displayname_template")
 	helper.Copy(up.Int, "displayname_max_length")
-
-	helper.Copy(up.Bool, "delivery_receipts")
 }
 
 type DisplaynameParams struct {
