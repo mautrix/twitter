@@ -25,3 +25,4 @@ repos:
     hooks:
       - id: zerolog-ban-msgf
       - id: zerolog-use-stringer
+      - id: prevent-literal-http-methods
