@@ -139,10 +139,7 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 	}, nil
 }
 
-func (t *TwitterLogin) Cancel() {
-	//TODO implement me
-	panic("implement me")
-}
+func (t *TwitterLogin) Cancel() {}
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
 	cookieStruct := twitCookies.NewCookies(cookies)
