@@ -36,7 +36,7 @@ func main() {
 		URL:         "https://github.com/mautrix/twitter",
 		Description: "A Matrix-Twitter puppeting bridge.",
 		Version:     "0.2.0",
-		Connector:   connector.NewConnector(),
+		Connector:   &connector.TwitterConnector{},
 	}
 	m.InitVersion(Tag, Commit, BuildTime)
 	m.Run()
