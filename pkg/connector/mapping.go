@@ -263,7 +263,7 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	return &bridgev2.ConvertedMessagePart{
-		ID:      networkid.PartID(fmt.Sprintf("attachment-%s", attachmentInfo.IDStr)),
+		ID:      networkid.PartID(""),
 		Type:    bridgeEvt.EventMessage,
 		Content: &content,
 		Extra: map[string]any{

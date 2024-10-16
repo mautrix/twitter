@@ -200,17 +200,15 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 }
 
 func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *event.XEventMessage) (*bridgev2.ConvertedMessage, error) {
-	partId := networkid.PartID("")
-	var MessageOptionalPartID *networkid.MessageOptionalPartID
+	var replyTo *networkid.MessageOptionalPartID
 	if msg.ReplyData.ID != "" {
-		MessageOptionalPartID = &networkid.MessageOptionalPartID{
+		replyTo = &networkid.MessageOptionalPartID{
 			MessageID: networkid.MessageID(msg.ReplyData.ID),
-			PartID:    &partId,
 		}
 	}
 
 	textPart := &bridgev2.ConvertedMessagePart{
-		ID:   partId,
+		ID:   "",
 		Type: bridgeEvt.EventMessage,
 		Content: &bridgeEvt.MessageEventContent{
 			MsgType: bridgeEvt.MsgText,
@@ -235,9 +233,11 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	}
 
 	cm := &bridgev2.ConvertedMessage{
-		ReplyTo: MessageOptionalPartID,
+		ReplyTo: replyTo,
 		Parts:   parts,
 	}
+
+	cm.MergeCaption() // merges captions and media onto one part
 
 	return cm, nil
 }
