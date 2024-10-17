@@ -8,6 +8,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
 )
 
 func (c *Client) Login() error {
@@ -107,6 +108,7 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 		Referer:        endpoints.BASE_NOTIFICATION_SETTINGS_URL,
 		Origin:         endpoints.BASE_URL,
 		Body:           encodedBody,
+		ContentType:    types.JSON,
 	}
 	_, _, err = c.makeAPIRequest(apiRequestOpts)
 	return err
