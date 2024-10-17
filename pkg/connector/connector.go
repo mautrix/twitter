@@ -18,7 +18,6 @@ package connector
 
 import (
 	"context"
-	"fmt"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -70,12 +69,6 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	twitClient := NewTwitterClient(ctx, tc, login)
 
-	_, currentUser, err := twitClient.client.LoadMessagesPage()
-	if err != nil {
-		return fmt.Errorf("failed to load messages page")
-	}
-
-	login.RemoteName = currentUser.ScreenName
 	login.Client = twitClient
 
 	return nil
