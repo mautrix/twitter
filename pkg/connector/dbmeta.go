@@ -9,7 +9,7 @@ import (
 )
 
 type UserLoginMetadata struct {
-	Cookies  string
+	Cookies  string    `json:"cookies"`
 	PushKeys *PushKeys `json:"push_keys,omitempty"`
 }
 
