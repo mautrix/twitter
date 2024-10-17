@@ -152,7 +152,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 
 func (s *SessionLoader) doCookiesMetaDataLoad() error {
 	logData := []interface{}{
-		&payload.JotLogPayload{Description: "rweb:cookiesMetadata:load", Product: "rweb", EventValue: time.UnixMilli(fetchedTime).Sub(time.Now()).Milliseconds()},
+		&payload.JotLogPayload{Description: "rweb:cookiesMetadata:load", Product: "rweb", EventValue: time.Until(time.UnixMilli(fetchedTime)).Milliseconds()},
 	}
 	return s.client.performJotClientEvent(payload.JotLoggingCategoryPerftown, false, logData)
 }

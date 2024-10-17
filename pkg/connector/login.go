@@ -75,65 +75,6 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 						{Type: bridgev2.LoginCookieTypeCookie, Name: "auth_token"},
 					},
 				},
-				/*
-						{
-							ID: "guest_id",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "guest_id" },
-							},
-						},
-						{
-							ID: "twid",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "twid" },
-							},
-						},
-						{
-							ID: "kdt",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "kdt" },
-							},
-						},
-						{
-							ID: "night_mode",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "night_mode" },
-							},
-						},
-						{
-							ID: "personalization_id",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "personalization_id" },
-							},
-						},
-						{
-							ID: "guest_id_marketing",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "guest_id_marketing" },
-							},
-						},
-						{
-							ID: "guest_id_ads",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "guest_id_ads" },
-							},
-						},
-						{
-							ID: "d_prefs",
-							Required: false,
-							Sources: []bridgev2.LoginCookieFieldSource{
-								{ Type: bridgev2.LoginCookieTypeCookie, Name: "d_prefs" },
-							},
-						},
-					},
-				*/
 			},
 		},
 	}, nil

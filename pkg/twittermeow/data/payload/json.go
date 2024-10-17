@@ -29,7 +29,7 @@ func (p *GraphQLPayload) Encode() ([]byte, error) {
 }
 
 type SendTypingNotificationVariables struct {
-	ConversationID string `json:"conversationId, omitempty"`
+	ConversationID string `json:"conversationId,omitempty"`
 }
 
 type DMMessageDeleteMutationVariables struct {

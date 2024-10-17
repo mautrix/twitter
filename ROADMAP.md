@@ -9,8 +9,8 @@
       * [x] Videos
       * [x] Gifs
   * [x] Message reactions
-  * [ ] Typing notifications
-  * [ ] Read receipts
+  * [x] Typing notifications
+  * [x] Read receipts
 * Twitter → Matrix
   * [x] Message content
     * [x] Text
@@ -23,7 +23,7 @@
   * [ ] Message history
     * [ ] When creating portal
     * [ ] Missed messages
-  * [] Avatars
+  * [x] Avatars
   * [ ] † Typing notifications
   * [ ] † Read receipts
 * Misc
@@ -34,4 +34,4 @@
   * [ ] Option to use own Matrix account for messages sent from other Twitter clients
   * [ ] E2EE in Matrix rooms
 
-† Information not automatically sent from source, i.e. implementation may not be possible
+† Implementation is impossible / really difficult  at the current state of the mautrix-go framework
