@@ -311,14 +311,25 @@ func convertTwitterAttachmentMetadata(attachmentInfo *types.AttachmentInfo, mime
 }
 
 func MakeAvatar(avatarURL string) *bridgev2.Avatar {
-	// idk if this check is needed, maybe the Remove field is enough. Change later if it isn't needed
-	if avatarURL == "" {
-		return nil
-	}
 	return &bridgev2.Avatar{
 		ID: networkid.AvatarID(avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
-			return DownloadPlainFile(ctx, "", avatarURL, "avatar")
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, avatarURL, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prepare request: %w", err)
+			}
+
+			getResp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("failed to download avatar: %w", err)
+			}
+
+			data, err := io.ReadAll(getResp.Body)
+			_ = getResp.Body.Close()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read avatar data: %w", err)
+			}
+			return data, err
 		},
 		Remove: avatarURL == "",
 	}
