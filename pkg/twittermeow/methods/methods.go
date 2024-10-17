@@ -9,20 +9,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-var Charset = []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890")
-
-// retrieved from main page resp, its a 2 year old timestamp I don't think this is changing
-const fetchedTime = 1661971138705
-
-func GenerateEventValue() int64 {
-	ts := time.Now().UnixNano() / int64(time.Millisecond)
-	return ts - fetchedTime
-}
-
-func GetTimestampMS() int64 {
-	return time.Now().UnixNano() / int64(time.Millisecond)
-}
-
 func UnixStringMilliToTime(input string) (time.Time, error) {
 	secs, err := strconv.ParseInt(input, 10, 64)
 	if err != nil {

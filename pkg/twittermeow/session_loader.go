@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	neturl "net/url"
+	"time"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -20,6 +21,9 @@ import (
 var (
 	errCookieGuestIDNotFound = errors.New("failed to retrieve and set 'guest_id' cookie from Set-Cookie response headers")
 )
+
+// retrieved from main page resp, its a 2 year old timestamp; looks constant
+const fetchedTime = 1661971138705
 
 type SessionAuthTokens struct {
 	authenticated    string
@@ -148,7 +152,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 
 func (s *SessionLoader) doCookiesMetaDataLoad() error {
 	logData := []interface{}{
-		&payload.JotLogPayload{Description: "rweb:cookiesMetadata:load", Product: "rweb", EventValue: methods.GenerateEventValue()},
+		&payload.JotLogPayload{Description: "rweb:cookiesMetadata:load", Product: "rweb", EventValue: time.UnixMilli(fetchedTime).Sub(time.Now()).Milliseconds()},
 	}
 	return s.client.performJotClientEvent(payload.JotLoggingCategoryPerftown, false, logData)
 }
@@ -221,7 +225,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents() error {
 		return err
 	}
 
-	triggeredTimestamp := methods.GetTimestampMS()
+	triggeredTimestamp := time.Now().UnixMilli()
 	logData = []interface{}{
 		&payload.JotDebugLogPayload{
 			Category:      payload.JotDebugLoggingCategoryClientEvent,
