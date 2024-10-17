@@ -1,7 +1,6 @@
 package methods
 
 import (
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,20 +62,6 @@ func SortMessagesByTime(messages []types.Message) {
 
 		return timeJ < timeI
 	})
-}
-
-func MergeMaps[K comparable, V any](dst, src map[K]V) {
-	for key, value := range src {
-		dst[key] = value
-	}
-}
-
-func RandStr(length int) string {
-	b := make([]rune, length)
-	for i := range b {
-		b[i] = Charset[rand.Intn(len(Charset))]
-	}
-	return string(b)
 }
 
 func CreateConversationId(conversationIds []string) string {

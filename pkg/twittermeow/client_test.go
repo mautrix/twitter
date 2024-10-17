@@ -5,8 +5,11 @@ package twittermeow_test
 import (
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -15,9 +18,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/debug"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/event"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
-
-	"github.com/google/uuid"
 )
 
 var cli *twittermeow.Client
@@ -364,8 +364,8 @@ func logAllTrustedConversations(initialInboxData *response.XInboxData) {
 			log.Fatal(err)
 		}
 
-		methods.MergeMaps(initialInboxData.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
-		methods.MergeMaps(initialInboxData.Users, nextInboxTimelineResponse.InboxTimeline.Users)
+		maps.Copy(initialInboxData.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
+		maps.Copy(initialInboxData.Users, nextInboxTimelineResponse.InboxTimeline.Users)
 		initialInboxData.Entries = append(initialInboxData.Entries, nextInboxTimelineResponse.InboxTimeline.Entries...)
 
 		paginationNextEntryID = nextInboxTimelineResponse.InboxTimeline.MinEntryID
@@ -477,12 +477,6 @@ func eventHandler(evt interface{}) {
 			Any("entities", evtData.Entities).
 			Any("attachment", evtData.Attachment).
 			Msg("New message event!")
-	case event.XEventConversationRead:
-		cli.Logger.Info().
-			Str("conversation_id", evtData.Conversation.ConversationID).
-			Str("last_read_event_id", evtData.LastReadEventID).
-			Str("read_at", evtData.ReadAt.String()).
-			Msg("Conversation was read!")
 	case event.XEventConversationCreated:
 		cli.Logger.Info().
 			Str("conversation_id", evtData.Conversation.ConversationID).

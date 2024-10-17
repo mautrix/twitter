@@ -11,10 +11,11 @@ import (
 	"net/textproto"
 	"time"
 
+	"go.mau.fi/util/random"
+
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
 )
 
@@ -150,7 +151,7 @@ func (c *Client) newMediaAppendPayload(mediaBytes []byte) ([]byte, string, error
 	var appendMediaPayload bytes.Buffer
 	writer := multipart.NewWriter(&appendMediaPayload)
 
-	err := writer.SetBoundary("----WebKitFormBoundary" + methods.RandStr(16))
+	err := writer.SetBoundary("----WebKitFormBoundary" + random.String(16))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to set boundary (%s)", err.Error())
 	}

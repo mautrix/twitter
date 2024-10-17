@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -33,8 +34,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/event"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 type TwitterClient struct {
@@ -159,7 +158,7 @@ func (tc *TwitterClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal)
 	conversation := conversations[conversationId]
 	users := conversationData.ConversationTimeline.Users
 
-	methods.MergeMaps(tc.userCache, users)
+	maps.Copy(tc.userCache, users)
 
 	return tc.ConversationToChatInfo(&conversation), nil
 }

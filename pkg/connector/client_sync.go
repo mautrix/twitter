@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
@@ -14,13 +15,14 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-func (tc *TwitterClient) syncChannels(_ context.Context) {
-	//log := zerolog.Ctx(ctx)
+func (tc *TwitterClient) syncChannels(ctx context.Context) {
+	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
 	initalInboxState, err := tc.client.GetInitialInboxState(reqQuery)
 	if err != nil {
-		panic(fmt.Sprintf("failed to fetch initial inbox state: %s", err.Error()))
+		log.Error().Err(err).Msg("failed to fetch initial inbox state:")
+		return
 	}
 
 	inboxData := initalInboxState.InboxInitialState
@@ -34,22 +36,24 @@ func (tc *TwitterClient) syncChannels(_ context.Context) {
 		reqQuery.MaxID = cursor
 		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(reqQuery)
 		if err != nil {
-			panic(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s: %s", cursor, err.Error()))
+			log.Error().Err(err).Msg(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s:", cursor))
+			return
 		}
 
-		methods.MergeMaps(inboxData.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
-		methods.MergeMaps(inboxData.Users, nextInboxTimelineResponse.InboxTimeline.Users)
+		maps.Copy(inboxData.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
+		maps.Copy(inboxData.Users, nextInboxTimelineResponse.InboxTimeline.Users)
 		inboxData.Entries = append(inboxData.Entries, nextInboxTimelineResponse.InboxTimeline.Entries...)
 
 		cursor = nextInboxTimelineResponse.InboxTimeline.MinEntryID
 		paginationStatus = nextInboxTimelineResponse.InboxTimeline.Status
 	}
 
-	methods.MergeMaps(tc.userCache, inboxData.Users)
+	maps.Copy(tc.userCache, inboxData.Users)
 
 	conversations, err := inboxData.Prettify()
 	if err != nil {
-		panic(fmt.Sprintf("failed to prettify inbox data after fetching conversations: %s", err.Error()))
+		log.Error().Err(err).Msg("failed to prettify inbox data after fetching conversations:")
+		return
 	}
 
 	for _, convInboxData := range conversations {
@@ -59,7 +63,8 @@ func (tc *TwitterClient) syncChannels(_ context.Context) {
 		latestMessage := messages[len(messages)-1]
 		latestMessageTS, err := methods.UnixStringMilliToTime(latestMessage.MessageData.Time)
 		if err != nil {
-			panic(fmt.Sprintf("failed to convert latest message TS to time.Time: %s", err.Error()))
+			log.Error().Err(err).Msg("failed to convert latest message TS to time.Time:")
+			return
 		}
 		evt := &simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
