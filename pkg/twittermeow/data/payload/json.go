@@ -28,6 +28,10 @@ func (p *GraphQLPayload) Encode() ([]byte, error) {
 	return json.Marshal(p)
 }
 
+type SendTypingNotificationVariables struct {
+	ConversationID string `json:"conversationId, omitempty"`
+}
+
 type DMMessageDeleteMutationVariables struct {
 	MessageID string `json:"messageId,omitempty"`
 	RequestID string `json:"requestId,omitempty"`

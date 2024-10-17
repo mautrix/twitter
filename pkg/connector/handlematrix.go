@@ -24,7 +24,15 @@ var (
 	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
+	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 )
+
+func (tc *TwitterClient) HandleMatrixTyping(_ context.Context, msg *bridgev2.MatrixTyping) error {
+	if msg.IsTyping && msg.Type == bridgev2.TypingTypeText {
+		return tc.client.SendTypingNotification(string(msg.Portal.ID))
+	}
+	return nil
+}
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
 	conversationId := string(msg.Portal.ID)

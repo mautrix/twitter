@@ -181,6 +181,35 @@ func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+func (c *Client) SendTypingNotification(conversationId string) error {
+	variables := &payload.SendTypingNotificationVariables{
+		ConversationID: conversationId,
+	}
+
+	GQLPayload := &payload.GraphQLPayload{
+		Variables: variables,
+		QueryID:   "HL96-xZ3Y81IEzAdczDokg",
+	}
+
+	jsonBody, err := GQLPayload.Encode()
+	if err != nil {
+		return err
+	}
+
+	apiRequestOpts := apiRequestOpts{
+		Url:            endpoints.SEND_TYPING_NOTIFICATION,
+		Method:         "POST",
+		WithClientUUID: true,
+		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, conversationId),
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.JSON,
+		Body:           jsonBody,
+	}
+	_, resp, err := c.makeAPIRequest(apiRequestOpts)
+	fmt.Println(resp)
+	return err
+}
+
 // keep in mind this only deletes the message for you
 func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVariables) (*response.DMMessageDeleteMutationResponse, error) {
 	if variables.RequestID == "" {
