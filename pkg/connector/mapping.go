@@ -191,7 +191,6 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 		mimeType = "image/jpeg" // attachment doesn't include this specifically
 		msgType = bridgeEvt.MsgImage
 		attachmentURL = attachmentInfo.MediaURLHTTPS
-		indices = attachmentInfo.Indices
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
 		// video attachment
 		if attachment.AnimatedGif != nil {
@@ -212,20 +211,31 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 			return nil, nil, err
 		}
 		attachmentURL = highestBitRateVariant.URL
-		indices = attachmentInfo.Indices
 	}
 
 	if attachmentInfo == nil || attachmentInfo.IDStr == "" {
 		return nil, nil, fmt.Errorf("missing attachment info")
 	}
 
-	attachmentBytes, err := DownloadPlainFile(ctx, tc.client.GetCookieString(), attachmentURL, "twitter attachment")
+	indices = attachmentInfo.Indices
+
+	cookieString := tc.client.GetCookieString()
+	attachmentSize, err := GetFileSize(ctx, cookieString, attachmentURL)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	content := convertTwitterAttachmentMetadata(attachmentInfo, mimeType, msgType, attachmentBytes)
-	err = uploadMedia(ctx, portal, intent, attachmentBytes, &content)
+	content := convertTwitterAttachmentMetadata(attachmentInfo, mimeType, msgType, attachmentSize)
+
+	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, attachmentSize, true, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+		err = GetPlainFileStream(ctx, cookieString, attachmentURL, "twitter attachment", file)
+		if err != nil {
+			return nil, err
+		}
+
+		return &bridgev2.FileStreamResult{MimeType: content.Info.MimeType}, nil
+	})
+
 	if err != nil {
 		return nil, nil, err
 	}
@@ -240,24 +250,11 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	}, indices, nil
 }
 
-func uploadMedia(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data []byte, content *bridgeEvt.MessageEventContent) error {
-	mxc, file, err := intent.UploadMedia(ctx, portal.MXID, data, "", content.Info.MimeType)
-	if err != nil {
-		return err
-	}
-	if file != nil {
-		content.File = file
-	} else {
-		content.URL = mxc
-	}
-	return nil
-}
-
-func convertTwitterAttachmentMetadata(attachmentInfo *types.AttachmentInfo, mimeType string, msgType bridgeEvt.MessageType, attachmentBytes []byte) bridgeEvt.MessageEventContent {
+func convertTwitterAttachmentMetadata(attachmentInfo *types.AttachmentInfo, mimeType string, msgType bridgeEvt.MessageType, attachmentSize int64) bridgeEvt.MessageEventContent {
 	content := bridgeEvt.MessageEventContent{
 		Info: &bridgeEvt.FileInfo{
 			MimeType: mimeType,
-			Size:     len(attachmentBytes),
+			Size:     int(attachmentSize),
 		},
 		MsgType: msgType,
 		Body:    attachmentInfo.IDStr,
@@ -303,10 +300,10 @@ func MakeAvatar(avatarURL string) *bridgev2.Avatar {
 	}
 }
 
-func DownloadPlainFile(ctx context.Context, cookies, url, thing string) ([]byte, error) {
+func GetPlainFileStream(ctx context.Context, cookies, url, thing string, writer io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare request: %w", err)
+		return fmt.Errorf("failed to prepare request: %w", err)
 	}
 
 	if cookies != "" {
@@ -315,13 +312,31 @@ func DownloadPlainFile(ctx context.Context, cookies, url, thing string) ([]byte,
 
 	getResp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download %s: %w", thing, err)
+		return fmt.Errorf("failed to download %s: %w", thing, err)
 	}
 
-	data, err := io.ReadAll(getResp.Body)
-	_ = getResp.Body.Close()
+	_, err = io.Copy(writer, getResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s data: %w", thing, err)
+		return fmt.Errorf("failed to read %s data: %w", thing, err)
 	}
-	return data, nil
+
+	return nil
+}
+
+func GetFileSize(ctx context.Context, cookies, url string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare request: %w", err)
+	}
+
+	if cookies != "" {
+		req.Header.Add("cookie", cookies)
+	}
+
+	headResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get file size: %w", err)
+	}
+
+	return headResp.ContentLength, nil
 }
