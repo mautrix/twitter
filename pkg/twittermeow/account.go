@@ -1,13 +1,13 @@
 package twittermeow
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 func (c *Client) Login() error {
@@ -89,15 +89,9 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 		OSVersion: UDID,
 		UDID:      UDID,
 
-		Token: config.Endpoint,
-	}
-
-	if config.P256DH != nil {
-		webPushPayload.P256DH = methods.EncodeToUnpaddedBase64URL(config.P256DH)
-	}
-
-	if config.P256DH != nil {
-		webPushPayload.Auth = methods.EncodeToUnpaddedBase64URL(config.Auth)
+		Token:  config.Endpoint,
+		P256DH: base64.RawURLEncoding.EncodeToString(config.P256DH),
+		Auth:   base64.RawURLEncoding.EncodeToString(config.Auth),
 	}
 
 	encodedBody, err := json.Marshal(webPushPayload)

@@ -1,7 +1,6 @@
 package methods
 
 import (
-	"encoding/base64"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -78,11 +77,6 @@ func RandStr(length int) string {
 		b[i] = Charset[rand.Intn(len(Charset))]
 	}
 	return string(b)
-}
-
-func EncodeToUnpaddedBase64URL(data []byte) string {
-	encoded := base64.URLEncoding.EncodeToString(data)
-	return string(encoded[:len(encoded)-len(encoded)%4])
 }
 
 func CreateConversationId(conversationIds []string) string {
