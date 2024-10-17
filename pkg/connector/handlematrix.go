@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"maunium.net/go/mautrix/bridgev2"
@@ -13,10 +14,6 @@ import (
 )
 
 var (
-	MSG_TYPE_TO_MEDIA_TYPE = map[event.MessageType]payload.MediaType{
-		event.MsgVideo: payload.MEDIA_TYPE_VIDEO_MP4,
-		event.MsgImage: payload.MEDIA_TYPE_IMAGE_JPEG,
-	}
 	MSG_TYPE_TO_MEDIA_CATEGORY = map[event.MessageType]payload.MediaCategory{
 		event.MsgVideo: payload.MEDIA_CATEGORY_DM_VIDEO,
 		event.MsgImage: payload.MEDIA_CATEGORY_DM_IMAGE,
@@ -44,14 +41,16 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	content := msg.Content
-	if content.FileName != "" && content.Body != content.FileName {
-		sendDMPayload.Text = content.Body
-	}
+	sendDMPayload.Text = content.Body
 
 	switch content.MsgType {
 	case event.MsgText:
-		sendDMPayload.Text = content.Body
+		break
 	case event.MsgVideo, event.MsgImage:
+		if content.Body == content.FileName {
+			sendDMPayload.Text = ""
+		}
+
 		file := content.GetFile()
 		data, err := tc.connector.br.Bot.DownloadMedia(ctx, file.URL, file)
 		if err != nil {
@@ -59,13 +58,12 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 
 		uploadMediaParams := &payload.UploadMediaQuery{
-			MediaType:     MSG_TYPE_TO_MEDIA_TYPE[content.MsgType],
 			MediaCategory: MSG_TYPE_TO_MEDIA_CATEGORY[content.MsgType],
 		}
 		if content.Info.MimeType == "image/gif" {
-			uploadMediaParams.MediaType = "image/gif"
 			uploadMediaParams.MediaCategory = "dm_gif"
 		}
+
 		uploadedMediaResponse, err := tc.client.UploadMedia(uploadMediaParams, data)
 		if err != nil {
 			return nil, err
@@ -74,7 +72,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		tc.client.Logger.Debug().Any("media_info", uploadedMediaResponse).Msg("Successfully uploaded media to twitter's servers")
 		sendDMPayload.MediaID = uploadedMediaResponse.MediaIDString
 	default:
-		tc.client.Logger.Warn().Any("msg_type", content.MsgType).Msg("Found unhandled MsgType in HandleMatrixMessage function")
+		return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
 	}
 
 	resp, err := tc.client.SendDirectMessage(sendDMPayload)
