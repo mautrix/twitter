@@ -195,7 +195,7 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) 
 	}
 }
 
-func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *event.XEventMessage) (*bridgev2.ConvertedEdit, error) {
+func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
 	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
 	converted, err := tc.convertToMatrix(ctx, portal, intent, data)
 	if err != nil {
@@ -206,7 +206,7 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	}, nil
 }
 
-func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *event.XEventMessage) (*bridgev2.ConvertedMessage, error) {
+func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessage, error) {
 	var replyTo *networkid.MessageOptionalPartID
 	if msg.ReplyData.ID != "" {
 		replyTo = &networkid.MessageOptionalPartID{

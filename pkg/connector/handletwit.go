@@ -20,7 +20,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 		if evtData.EditCount > 0 {
 			msgType = bridgev2.RemoteEventEdit
 		}
-		tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.Message[*event.XEventMessage]{
+		tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: msgType,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -41,7 +41,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 			},
 			ID:                 networkid.MessageID(evtData.MessageID),
 			TargetMessage:      networkid.MessageID(evtData.MessageID),
-			Data:               &evtData,
+			Data:               XMDFromEventMessage(&evtData),
 			ConvertMessageFunc: tc.convertToMatrix,
 			ConvertEditFunc:    tc.convertEditToMatrix,
 		})
@@ -139,10 +139,6 @@ func (tc *TwitterClient) wrapReaction(data event.XEventReaction) *simplevent.Rea
 		eventType = bridgev2.RemoteEventReaction
 	}
 
-	var receiver networkid.UserLoginID
-	if data.Conversation.Type == types.ONE_TO_ONE {
-		receiver = networkid.UserLoginID(tc.userLogin.ID)
-	}
 	return &simplevent.Reaction{
 		EventMeta: simplevent.EventMeta{
 			Type: eventType,
@@ -153,10 +149,7 @@ func (tc *TwitterClient) wrapReaction(data event.XEventReaction) *simplevent.Rea
 					Str("reaction_key", data.ReactionKey).
 					Str("emoji_reaction", data.EmojiReaction)
 			},
-			PortalKey: networkid.PortalKey{
-				ID:       networkid.PortalID(data.Conversation.ConversationID),
-				Receiver: receiver,
-			},
+			PortalKey: tc.MakePortalKey(data.Conversation),
 			Timestamp: data.Time,
 			Sender: bridgev2.EventSender{
 				IsFromMe: data.SenderID == string(tc.userLogin.ID),
@@ -166,5 +159,14 @@ func (tc *TwitterClient) wrapReaction(data event.XEventReaction) *simplevent.Rea
 		EmojiID:       "",
 		Emoji:         data.EmojiReaction,
 		TargetMessage: networkid.MessageID(data.MessageID),
+	}
+}
+
+func XMDFromEventMessage(eventMessage *event.XEventMessage) *types.MessageData {
+	return &types.MessageData{
+		Text:       eventMessage.Text,
+		Attachment: eventMessage.Attachment,
+		ID:         eventMessage.MessageID,
+		ReplyData:  eventMessage.ReplyData,
 	}
 }

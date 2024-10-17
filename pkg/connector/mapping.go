@@ -41,51 +41,19 @@ func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message t
 		return nil, err
 	}
 
-	partId := networkid.PartID("")
-	parts := make([]*bridgev2.ConvertedMessagePart, 0)
-
-	textPart := &bridgev2.ConvertedMessagePart{
-		ID:   partId,
-		Type: bridgeEvt.EventMessage,
-		Content: &bridgeEvt.MessageEventContent{
-			MsgType: bridgeEvt.MsgText,
-			Body:    message.MessageData.Text,
-		},
+	intent := tc.userLogin.Bridge.Matrix.BotIntent()
+	portal, err := tc.connector.br.GetPortalByKey(ctx, tc.MakePortalKey(conv))
+	if err != nil {
+		return nil, err
 	}
 
-	replyData := message.MessageData.ReplyData
-	var replyTo *networkid.MessageOptionalPartID
-	if replyData.ID != "" {
-		replyTo = &networkid.MessageOptionalPartID{
-			MessageID: networkid.MessageID(replyData.ID),
-			PartID:    &partId,
-		}
-	}
-
-	if message.MessageData.Attachment != nil {
-		portal, err := tc.connector.br.GetPortalByKey(ctx, tc.MakePortalKey(conv))
-		if err != nil {
-			return nil, err
-		}
-
-		convertedAttachmentPart, indices, err := tc.TwitterAttachmentToMatrix(ctx, portal, tc.userLogin.Bridge.Matrix.BotIntent(), message.MessageData.Attachment)
-		if err != nil {
-			return nil, err
-		}
-
-		RemoveEntityLinkFromText(textPart, indices)
-		parts = append(parts, convertedAttachmentPart)
-	}
-
-	if len(textPart.Content.Body) > 0 {
-		parts = append(parts, textPart)
+	cm, err := tc.convertToMatrix(ctx, portal, intent, &message.MessageData)
+	if err != nil {
+		return nil, err
 	}
 
 	return &bridgev2.BackfillMessage{
-		ConvertedMessage: &bridgev2.ConvertedMessage{
-			ReplyTo: replyTo,
-			Parts:   parts,
-		},
+		ConvertedMessage: cm,
 		Sender: bridgev2.EventSender{
 			IsFromMe: message.MessageData.SenderID == selfUserId,
 			Sender:   networkid.UserID(message.MessageData.SenderID),
