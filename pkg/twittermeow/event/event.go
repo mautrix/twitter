@@ -14,7 +14,6 @@ const (
 	XMessageEditEvent                XEventType = "message_edit"
 	XReactionCreatedEvent            XEventType = "reaction_create"
 	XReactionDeletedEvent            XEventType = "reaction_delete"
-	XConversationReadEvent           XEventType = "conversation_read"
 	XConversationMetadataUpdateEvent XEventType = "conversation_metadata_update"
 	XConversationNameUpdate          XEventType = "conversation_name_update"
 	XConversationCreateEvent         XEventType = "conversation_create"
@@ -36,14 +35,6 @@ type XEventMessage struct {
 	ReplyData    types.ReplyData
 	Reactions    []types.MessageReaction
 	EditCount    int
-}
-
-type XEventConversationRead struct {
-	Conversation    types.Conversation
-	EventID         string
-	ReadAt          time.Time
-	AffectsSort     bool
-	LastReadEventID string
 }
 
 type XEventConversationCreated struct {

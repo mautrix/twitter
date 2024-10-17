@@ -48,15 +48,6 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 	case event.XEventReaction:
 		reactionRemoteEvent := tc.wrapReaction(evtData)
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, reactionRemoteEvent)
-	case event.XEventConversationRead:
-		// conversation read events are only fired by yourself??
-		// if another user reads your message this is never fired
-		// they use user_updates and last_read_event_id to figure that out with the polling client
-		tc.client.Logger.Info().
-			Str("conversation_id", evtData.Conversation.ConversationID).
-			Str("last_read_event_id", evtData.LastReadEventID).
-			Str("read_at", evtData.ReadAt.String()).
-			Msg("Conversation was read!")
 	case event.XEventConversationCreated:
 		// honestly not sure when this is ever called... ? might be when they initialize the conversation with me?
 		tc.client.Logger.Warn().Any("data", evtData).Msg("XEventConversationCreated")

@@ -168,25 +168,6 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					AffectsSort:  messageDeletedEventData.AffectsSort,
 					Messages:     messageDeletedEventData.Messages,
 				}
-			case event.XConversationReadEvent:
-				var convReadEventData types.ConversationRead
-				err = json.Unmarshal(jsonEvData, &convReadEventData)
-				if err != nil {
-					return nil, err
-				}
-
-				readAt, err := methods.UnixStringMilliToTime(convReadEventData.Time)
-				if err != nil {
-					return nil, err
-				}
-
-				updatedEntry = event.XEventConversationRead{
-					EventID:         convReadEventData.ID,
-					Conversation:    data.GetConversationByID(convReadEventData.ConversationID),
-					ReadAt:          readAt,
-					AffectsSort:     convReadEventData.AffectsSort,
-					LastReadEventID: convReadEventData.LastReadEventID,
-				}
 			case event.XConversationDeleteEvent:
 				var convDeletedEventData types.ConversationDeletedData
 				err = json.Unmarshal(jsonEvData, &convDeletedEventData)
