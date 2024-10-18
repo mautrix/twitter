@@ -1,4 +1,4 @@
-mautrix-twitter
+./mautrix-twitter
 logs/
 *.db*
 *.yaml

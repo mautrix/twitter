@@ -33,6 +33,11 @@ type TwitterLogin struct {
 	Cookies string
 }
 
+var (
+	LoginStepIDCookies  = "fi.mau.twitter.login.enter_cookies"
+	LoginStepIDComplete = "fi.mau.twitter.login.complete"
+)
+
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
@@ -55,8 +60,8 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
-		StepID:       "fi.mau.twitter.login.enter_cookies",
-		Instructions: "Enter a JSON object with your cookies, or a cURL command copied from browser devtools.\n\nFor example: `{\"ct0\":\"123466-...\",\"auth_token\":\"abcde-...\"}`",
+		StepID:       LoginStepIDCookies,
+		Instructions: "Open the Login URL in an Incognito/Private browsing mode. Then, extract the cookies as a JSON object/cURL command copied from the Network tab of your browser's DevTools. After that, close the browser **before** pasting the cookies.\n\nFor example: `{\"ct0\":\"123466-...\",\"auth_token\":\"abcde-...\"}`",
 		CookiesParams: &bridgev2.LoginCookiesParams{
 			URL:       "https://x.com",
 			UserAgent: "",
@@ -94,7 +99,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 	client := twittermeow.NewClient(clientOpts, t.User.Log)
 
-	_, _, err := client.LoadMessagesPage()
+	_, settings, err := client.LoadMessagesPage()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load messages page after submitting cookies")
 	}
@@ -103,8 +108,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	ul, err := t.User.NewLogin(
 		ctx,
 		&database.UserLogin{
-			ID:       id,
-			Metadata: meta,
+			ID:         id,
+			Metadata:   meta,
+			RemoteName: settings.ScreenName,
 		},
 		&bridgev2.NewLoginParams{
 			DeleteOnConflict:  true,
@@ -116,7 +122,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeComplete,
-		StepID:       "fi.mau.twitter.login.complete",
+		StepID:       LoginStepIDComplete,
 		Instructions: fmt.Sprintf("Successfully logged into @%s", ul.UserLogin.RemoteName),
 		CompleteParams: &bridgev2.LoginCompleteParams{
 			UserLoginID: ul.ID,
