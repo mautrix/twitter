@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -37,7 +38,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		return err
 	}
 
-	clientTransactionId, err := crypto.SignTransaction(jc.client.session.verificationToken, endpoints.JOT_CLIENT_EVENT_URL, "POST")
+	clientTransactionId, err := crypto.SignTransaction(jc.client.session.verificationToken, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost)
 	if err != nil {
 		return err
 	}
@@ -60,7 +61,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		Extra:               extraHeaders,
 	}
 
-	clientLogResponse, _, err := jc.client.MakeRequest(endpoints.JOT_CLIENT_EVENT_URL, "POST", jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.FORM)
+	clientLogResponse, _, err := jc.client.MakeRequest(endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost, jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.FORM)
 	if err != nil {
 		return err
 	}

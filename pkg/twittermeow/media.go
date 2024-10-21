@@ -42,7 +42,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	_, respBody, err := c.MakeRequest(url, "POST", headers, nil, types.NONE)
+	_, respBody, err := c.MakeRequest(url, http.MethodPost, headers, nil, types.NONE)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		headers.Add("content-type", contentType)
 
 		url = fmt.Sprintf("%s?command=APPEND&media_id=%s&segment_index=0", endpoints.UPLOAD_MEDIA_URL, initUploadResponse.MediaIDString)
-		resp, respBody, err := c.MakeRequest(url, "POST", headers, appendMediaPayload, types.NONE)
+		resp, respBody, err := c.MakeRequest(url, http.MethodPost, headers, appendMediaPayload, types.NONE)
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +89,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 		url = fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
 		headers.Del("content-type")
-		resp, respBody, err = c.MakeRequest(url, "POST", headers, nil, types.NONE)
+		resp, respBody, err = c.MakeRequest(url, http.MethodPost, headers, nil, types.NONE)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +134,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 func (c *Client) GetMediaUploadStatus(mediaId string, h http.Header) (*response.FinalizedUploadMediaResponse, []byte, error) {
 	url := fmt.Sprintf("%s?command=STATUS&media_id=%s", endpoints.UPLOAD_MEDIA_URL, mediaId)
-	resp, respBody, err := c.MakeRequest(url, "GET", h, nil, types.NONE)
+	resp, respBody, err := c.MakeRequest(url, http.MethodGet, h, nil, types.NONE)
 	if err != nil {
 		return nil, nil, err
 	}

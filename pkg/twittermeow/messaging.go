@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -21,7 +22,7 @@ func (c *Client) GetInitialInboxState(params *payload.DmRequestQuery) (*response
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "GET",
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
@@ -42,7 +43,7 @@ func (c *Client) GetDMUserUpdates(params *payload.DmRequestQuery) (*response.Get
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "GET",
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
@@ -63,7 +64,7 @@ func (c *Client) MarkConversationRead(params *payload.MarkConversationReadQuery)
 	url := fmt.Sprintf(endpoints.CONVERSATION_MARK_READ_URL, params.ConversationID)
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           encodedQueryBody,
 		ContentType:    types.FORM,
@@ -91,7 +92,7 @@ func (c *Client) FetchConversationContext(conversationId string, params *payload
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "GET",
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
@@ -112,7 +113,7 @@ func (c *Client) FetchTrustedThreads(params *payload.DmRequestQuery) (*response.
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "GET",
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
@@ -137,7 +138,7 @@ func (c *Client) SendDirectMessage(payload *payload.SendDirectMessagePayload) (*
 	url := endpoints.SEND_DM_URL
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
@@ -166,7 +167,7 @@ func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*
 	url := fmt.Sprintf("%s?%s", endpoints.EDIT_DM_URL, string(encodedQuery))
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
 		Origin:         endpoints.BASE_URL,
@@ -198,7 +199,7 @@ func (c *Client) SendTypingNotification(conversationId string) error {
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            endpoints.SEND_TYPING_NOTIFICATION,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, conversationId),
 		Origin:         endpoints.BASE_URL,
@@ -229,7 +230,7 @@ func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVa
 	url := endpoints.GRAPHQL_MESSAGE_DELETION_MUTATION
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Origin:         endpoints.BASE_URL,
@@ -253,7 +254,7 @@ func (c *Client) DeleteConversation(conversationId string, payload *payload.DmRe
 	url := fmt.Sprintf(endpoints.DELETE_CONVERSATION_URL, conversationId)
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           encodedQueryBody,
 		Referer:        endpoints.BASE_MESSAGES_URL,
@@ -289,7 +290,7 @@ func (c *Client) PinConversation(conversationId string) (*response.PinConversati
 	url := endpoints.PIN_CONVERSATION_URL
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Referer:        endpoints.BASE_MESSAGES_URL,
@@ -322,7 +323,7 @@ func (c *Client) UnpinConversation(conversationId string) (*response.UnpinConver
 	url := endpoints.UNPIN_CONVERSATION_URL
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Referer:        endpoints.BASE_MESSAGES_URL,
@@ -357,7 +358,7 @@ func (c *Client) React(reactionPayload *payload.ReactionActionPayload, remove bo
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Origin:         endpoints.BASE_URL,

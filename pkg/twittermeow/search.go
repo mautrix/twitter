@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -18,7 +19,7 @@ func (c *Client) Search(params payload.SearchQuery) (*response.SearchResponse, e
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "GET",
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 		Referer:        endpoints.BASE_MESSAGES_URL + "/compose",
 	}

@@ -215,7 +215,7 @@ func (c *Client) fetchAndParseMainScript(scriptUrl string) error {
 		"sec-fetch-dest": "script",
 		"origin":         endpoints.BASE_URL,
 	}
-	_, scriptRespBody, err := c.MakeRequest(scriptUrl, "GET", c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
+	_, scriptRespBody, err := c.MakeRequest(scriptUrl, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
 	if err != nil {
 		return err
 	}

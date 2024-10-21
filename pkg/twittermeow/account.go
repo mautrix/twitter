@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -27,7 +28,7 @@ func (c *Client) GetAccountSettings(params payload.AccountSettingsQuery) (*respo
 	url := fmt.Sprintf("%s?%s", endpoints.ACCOUNT_SETTINGS_URL, string(encodedQuery))
 	apiRequestOpts := apiRequestOpts{
 		Url:    url,
-		Method: "GET",
+		Method: http.MethodGet,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -46,7 +47,7 @@ func (c *Client) GetDMPermissions(params payload.GetDMPermissionsQuery) (*respon
 	url := fmt.Sprintf("%s?%s", endpoints.DM_PERMISSIONS_URL, string(encodedQuery))
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "GET",
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
@@ -103,7 +104,7 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 
 	apiRequestOpts := apiRequestOpts{
 		Url:            url,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Referer:        endpoints.BASE_NOTIFICATION_SETTINGS_URL,
 		Origin:         endpoints.BASE_URL,
