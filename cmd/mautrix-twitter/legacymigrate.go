@@ -15,6 +15,9 @@ ALTER TABLE reaction RENAME TO reaction_old;
 ALTER TABLE "user" RENAME TO user_old;
 `
 
+//go:embed legacymigrate.sql
+var legacyMigrateCopyData string
+
 func migrateLegacyConfig(helper up.Helper) {
 	bridgeconfig.CopyToOtherLocation(helper, up.Str, []string{"bridge", "displayname_template"}, []string{"network", "displayname_template"})
 	bridgeconfig.CopyToOtherLocation(helper, up.Int, []string{"bridge", "displayname_max_length"}, []string{"network", "displayname_max_length"})

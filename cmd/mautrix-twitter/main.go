@@ -44,7 +44,15 @@ var m = mxmain.BridgeMain{
 
 func main() {
 	bridgeconfig.HackyMigrateLegacyNetworkConfig = migrateLegacyConfig
-
+	m.PostInit = func() {
+		m.CheckLegacyDB(
+			8,
+			"v0.1.0",
+			"v0.2.0",
+			m.LegacyMigrateSimple(legacyMigrateRenameTables, legacyMigrateCopyData, 18),
+			true,
+		)
+	}
 	m.PostStart = func() {
 		if m.Matrix.Provisioning != nil {
 			m.Matrix.Provisioning.Router.HandleFunc("/v1/login", legacyProvLogin).Methods(http.MethodGet)
