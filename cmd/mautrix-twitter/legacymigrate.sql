@@ -17,16 +17,9 @@ SELECT
     json_object
     (
         'cookies',
-        -- only: postgres
-        --jsonb_build_object
-        -- only: sqlite (line commented)
-        json_object
-        (
-            'auth_token', auth_token,
-            'ct0', csrf_token
-        )
-    ),
-    '{}'
+        ('auth_token =' || auth_token || '; ct0=' || csrf_token || ';')
+    ), -- metadata
+    '{}' -- remote_profile
 FROM user_old WHERE twid IS NOT NULL;
 
 INSERT INTO ghost (
