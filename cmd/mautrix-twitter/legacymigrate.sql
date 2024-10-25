@@ -11,9 +11,9 @@ SELECT
     CAST(twid AS TEXT), -- id
     '', -- remote_name
     notice_room,
-    -- only: postgres
-    --jsonb_build_object
-    -- only: sqlite (line commented)
+--  only: postgres (line commented)
+--  jsonb_build_object
+    -- only: sqlite
     json_object
     (
         'cookies',
