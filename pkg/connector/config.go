@@ -41,7 +41,6 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str|up.Null, "proxy")
 	helper.Copy(up.Str|up.Null, "get_proxy_url")
 
-	helper.Copy(up.Str, "username_template")
 	helper.Copy(up.Str, "displayname_template")
 	helper.Copy(up.Int, "displayname_max_length")
 }
