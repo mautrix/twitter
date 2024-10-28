@@ -34,12 +34,18 @@ type Response struct {
 func legacyProvLogin(w http.ResponseWriter, r *http.Request) {
 	user := m.Matrix.Provisioning.GetUser(r)
 	ctx := r.Context()
-	var newCookies map[string]string
-	err := json.NewDecoder(r.Body).Decode(&newCookies)
+	var cookies map[string]string
+	err := json.NewDecoder(r.Body).Decode(&cookies)
 	if err != nil {
 		jsonResponse(w, http.StatusBadRequest, Error{ErrCode: mautrix.MBadJSON.ErrCode, Error: err.Error()})
 		return
 	}
+
+	newCookies := map[string]string{
+		"auth_token": cookies["auth_token"],
+		"ct0":        cookies["csrf_token"],
+	}
+
 	lp, err := c.CreateLogin(ctx, user, "cookies")
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to create login")
