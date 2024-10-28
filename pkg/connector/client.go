@@ -123,7 +123,12 @@ func (tc *TwitterClient) Connect(ctx context.Context) error {
 	tc.userLogin.Save(ctx)
 
 	go tc.syncChannels(ctx)
-	return tc.client.Connect()
+	err = tc.client.Connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect to twitter client: %w", err)
+	}
+	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
+	return nil
 }
 
 func (tc *TwitterClient) Disconnect() {

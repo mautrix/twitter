@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"maunium.net/go/mautrix/bridge/status"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -120,6 +121,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	if err != nil {
 		return nil, err
 	}
+
+	ul.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
+
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeComplete,
 		StepID:       LoginStepIDComplete,
