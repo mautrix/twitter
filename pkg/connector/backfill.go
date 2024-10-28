@@ -2,8 +2,6 @@ package connector
 
 import (
 	"context"
-	"log"
-	"os"
 
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -17,19 +15,13 @@ var _ bridgev2.BackfillingNetworkAPI = (*TwitterClient)(nil)
 
 func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationId := string(params.Portal.PortalKey.ID)
-	cursor := params.Cursor
-	//count := params.Count
 
 	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
-	reqQuery.Count = 25
+	reqQuery.Count = params.Count
+	reqQuery.MaxID = string(params.Cursor)
 	messageResp, err := tc.client.FetchConversationContext(conversationId, reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
 	if err != nil {
 		return nil, err
-	}
-
-	if cursor != "" {
-		log.Println("found cursor:", params)
-		os.Exit(1)
 	}
 
 	messages, err := messageResp.ConversationTimeline.GetMessageEntriesByConversationID(conversationId, true)
