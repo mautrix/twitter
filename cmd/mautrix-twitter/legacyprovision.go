@@ -95,10 +95,7 @@ func legacyProvLogin(w http.ResponseWriter, r *http.Request) {
 	} else if finalStep.StepID != connector.LoginStepIDComplete {
 		jsonResponse(w, http.StatusInternalServerError, Error{ErrCode: "M_UNKNOWN", Error: "Unexpected login step"})
 	} else {
-		jsonResponse(w, http.StatusOK, Response{
-			Success: true,
-			Status:  "logged_in",
-		})
+		jsonResponse(w, http.StatusOK, map[string]any{})
 		go handleLoginComplete(context.WithoutCancel(ctx), user, finalStep.CompleteParams.UserLogin)
 	}
 }
