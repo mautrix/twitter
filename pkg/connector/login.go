@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"maunium.net/go/mautrix/bridge/status"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -32,6 +31,7 @@ import (
 type TwitterLogin struct {
 	User    *bridgev2.User
 	Cookies string
+	tc      *TwitterConnector
 }
 
 var (
@@ -55,7 +55,7 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 	if flowID != "cookies" {
 		return nil, fmt.Errorf("unknown login flow ID: %s", flowID)
 	}
-	return &TwitterLogin{User: user}, nil
+	return &TwitterLogin{User: user, tc: tc}, nil
 }
 
 func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
@@ -116,13 +116,14 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		&bridgev2.NewLoginParams{
 			DeleteOnConflict:  true,
 			DontReuseExisting: false,
+			LoadUserLogin:     t.tc.LoadUserLogin,
 		},
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	ul.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
+	ul.Client.Connect(ctx)
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeComplete,
