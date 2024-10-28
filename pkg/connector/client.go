@@ -149,6 +149,22 @@ func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) 
 	return networkid.UserID(tc.client.GetCurrentUserID()) == userID
 }
 
+func (tc *TwitterClient) GetCurrentUser() (user *types.User, err error) {
+	_, settings, err := tc.client.LoadMessagesPage()
+	if err != nil {
+		return nil, err
+	}
+	searchResponse, err := tc.client.Search(payload.SearchQuery{
+		Query:      settings.ScreenName,
+		ResultType: payload.SEARCH_RESULT_TYPE_USERS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	user = &searchResponse.Users[0]
+	return
+}
+
 func (tc *TwitterClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	conversationId := string(portal.PortalKey.ID)
 	queryConversationPayload := payload.DmRequestQuery{}.Default()
