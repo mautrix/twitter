@@ -18,7 +18,12 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
 	reqQuery.Count = params.Count
-	reqQuery.MaxID = string(params.Cursor)
+	if params.Cursor == "" {
+		reqQuery.MaxID = string(params.AnchorMessage.ID)
+	} else {
+		reqQuery.MaxID = string(params.Cursor)
+	}
+
 	messageResp, err := tc.client.FetchConversationContext(conversationId, reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
 	if err != nil {
 		return nil, err
