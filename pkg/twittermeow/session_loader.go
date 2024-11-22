@@ -57,7 +57,7 @@ func (s *SessionLoader) GetCurrentUser() *response.AccountSettingsResponse {
 }
 
 func (s *SessionLoader) isAuthenticated() bool {
-	return s.currentUser != nil && s.currentUser.ScreenName != ""
+	return s.currentUser != nil /*&& s.currentUser.ScreenName != ""*/
 }
 
 func (s *SessionLoader) LoadPage(url string) error {
