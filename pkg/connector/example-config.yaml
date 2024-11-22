@@ -7,5 +7,3 @@ get_proxy_url: null
 # {{ .DisplayName }} is replaced with the display name of the Twitter user.
 # {{ .Username }} is replaced with the username of the Twitter user.
 displayname_template: "{{ .DisplayName }} (Twitter)"
-# Maximum length of displayname
-displayname_max_length: 100

@@ -16,8 +16,7 @@ type Config struct {
 	Proxy       string `yaml:"proxy"`
 	GetProxyURL string `yaml:"get_proxy_url"`
 
-	DisplaynameTemplate  string `yaml:"displayname_template"`
-	DisplayNameMaxLength int    `yaml:"displayname_max_length"`
+	DisplaynameTemplate string `yaml:"displayname_template"`
 
 	displaynameTemplate *template.Template `yaml:"-"`
 }
@@ -42,7 +41,6 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str|up.Null, "get_proxy_url")
 
 	helper.Copy(up.Str, "displayname_template")
-	helper.Copy(up.Int, "displayname_max_length")
 }
 
 type DisplaynameParams struct {
