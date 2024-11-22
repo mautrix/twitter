@@ -22,6 +22,9 @@ func (c *Client) newJotClient() *JotClient {
 }
 
 func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory, debug bool, body []interface{}) error {
+	if true {
+		return nil
+	}
 	logPayloadBytes, err := json.Marshal(body)
 	if err != nil {
 		return err
