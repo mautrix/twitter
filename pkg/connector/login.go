@@ -102,7 +102,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	_, settings, err := client.LoadMessagesPage()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load messages page after submitting cookies")
+		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
 	}
 
 	id := networkid.UserLoginID(client.GetCurrentUserID())

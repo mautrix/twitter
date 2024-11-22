@@ -116,7 +116,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) error {
 
 	_, currentUser, err := tc.client.LoadMessagesPage()
 	if err != nil {
-		return fmt.Errorf("failed to load messages page")
+		return fmt.Errorf("failed to load messages page: %w", err)
 	}
 
 	tc.userLogin.RemoteName = currentUser.ScreenName
