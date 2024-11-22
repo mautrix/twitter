@@ -18,7 +18,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
 	reqQuery.Count = params.Count
-	if params.Cursor == "" {
+	if params.Cursor == "" && params.AnchorMessage != nil {
 		reqQuery.MaxID = string(params.AnchorMessage.ID)
 	} else {
 		reqQuery.MaxID = string(params.Cursor)
