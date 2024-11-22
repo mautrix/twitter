@@ -66,6 +66,10 @@ SELECT
     '{}' -- metadata
 FROM portal_old;
 
+INSERT INTO ghost (bridge_id, id, name, avatar_id, avatar_hash, avatar_mxc, name_set, avatar_set, contact_info_set, is_bot, identifiers, metadata)
+VALUES ('', '', '', '', '', '', false, false, false, false, '[]', '{}')
+ON CONFLICT (bridge_id, id) DO NOTHING;
+
 INSERT INTO message (
     bridge_id, id, part_id, mxid, room_id, room_receiver,
     sender_id, sender_mxid, timestamp, edit_count, metadata
@@ -77,20 +81,10 @@ SELECT
     mxid, -- mxid
     (SELECT twid FROM portal_old WHERE portal_old.mxid=message_old.mx_room), -- room_id
     CAST(receiver as TEXT), -- room_receiver
-    (
-        SELECT
-            CASE
-                WHEN portal_old.receiver = receiver THEN portal_old.other_user
-                WHEN portal_old.other_user = receiver THEN portal_old.receiver
-                END
-        FROM portal_old
-        WHERE portal_old.receiver = receiver
-           OR portal_old.other_user = receiver
-        LIMIT 1
-    ), -- sender_id,
-    '', -- sender_mxid,
-    0, -- timestamp,
-    0, -- edit_count,
+    '', -- sender_id
+    '', -- sender_mxid
+    0, -- timestamp
+    0, -- edit_count
     '{}' -- metadata
 FROM message_old;
 
@@ -132,7 +126,7 @@ UPDATE mx_user_profile SET displayname='' WHERE displayname IS NULL;
 UPDATE mx_user_profile SET avatar_url='' WHERE avatar_url IS NULL;
 
 CREATE TABLE mx_registrations (
-                                  user_id TEXT PRIMARY KEY
+    user_id TEXT PRIMARY KEY
 );
 
 UPDATE mx_version SET version=7;
