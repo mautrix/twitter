@@ -2,7 +2,9 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -18,14 +20,33 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	reqQuery := payload.DMRequestQuery{}.Default()
 	reqQuery.Count = params.Count
+	log := zerolog.Ctx(ctx)
+	log.Debug().
+		Bool("forward", params.Forward).
+		Str("cursor", string(params.Cursor)).
+		Int("count", params.Count).
+		Msg("Backfill params")
+	if params.AnchorMessage != nil {
+		log.Debug().
+			Time("anchor_ts", params.AnchorMessage.Timestamp).
+			Str("anchor_id", string(params.AnchorMessage.ID)).
+			Msg("Backfill anchor message")
+	}
 	if !params.Forward {
 		if params.Cursor != "" {
 			reqQuery.MaxID = string(params.Cursor)
+			log.Debug().Msg("Using cursor as max ID")
 		} else if params.AnchorMessage != nil {
 			reqQuery.MaxID = string(params.AnchorMessage.ID)
+			log.Debug().Msg("Using anchor as max ID")
+		} else {
+			return nil, fmt.Errorf("no cursor or anchor message provided for backward backfill")
 		}
 	} else if params.AnchorMessage != nil {
 		reqQuery.MinID = string(params.AnchorMessage.ID)
+		log.Debug().Msg("Using anchor as min ID")
+	} else {
+		log.Debug().Msg("No anchor for forward backfill, fetching latest messages")
 	}
 
 	messageResp, err := tc.client.FetchConversationContext(conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
@@ -38,9 +59,45 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		return nil, err
 	}
 
-	converted := make([]*bridgev2.BackfillMessage, len(messages))
-	for i, msg := range messages {
-		converted[i] = tc.convertBackfillMessage(ctx, params.Portal, msg)
+	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
+	log.Debug().
+		Int("message_count", len(messages)).
+		Str("oldest_raw_ts", messages[0].Time).
+		Str("newest_raw_ts", messages[len(messages)-1].Time).
+		Msg("Fetched messages")
+	for _, msg := range messages {
+		sentAt, _ := methods.UnixStringMilliToTime(msg.MessageData.Time)
+		log := log.With().
+			Str("message_id", msg.MessageData.ID).
+			Str("message_raw_ts", msg.Time).
+			Time("message_ts", sentAt).
+			Logger()
+		if params.AnchorMessage != nil {
+			if string(params.AnchorMessage.ID) == msg.ID {
+				log.Warn().Msg("Skipping anchor message")
+				continue
+			} else if params.Forward && sentAt.Before(params.AnchorMessage.Timestamp) {
+				log.Warn().Msg("Skipping too old message in forwards backfill")
+				continue
+			} else if !params.Forward && sentAt.After(params.AnchorMessage.Timestamp) {
+				log.Warn().Msg("Skipping too new message in backwards backfill")
+				continue
+			}
+		}
+		log.Trace().Time("message_ts", sentAt).Msg("Converting message")
+		// TODO get correct intent
+		intent := tc.userLogin.Bridge.Matrix.BotIntent()
+		convertedMsg := &bridgev2.BackfillMessage{
+			ConvertedMessage: tc.convertToMatrix(ctx, params.Portal, intent, &msg.MessageData),
+			Sender: bridgev2.EventSender{
+				IsFromMe: msg.MessageData.SenderID == string(tc.userLogin.ID),
+				Sender:   networkid.UserID(msg.MessageData.SenderID),
+			},
+			ID:        networkid.MessageID(msg.MessageData.ID),
+			Timestamp: sentAt,
+			Reactions: tc.convertBackfillReactions(msg.MessageReactions),
+		}
+		converted = append(converted, convertedMsg)
 	}
 
 	fetchMessagesResp := &bridgev2.FetchMessagesResponse{
@@ -53,22 +110,6 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 	}
 
 	return fetchMessagesResp, nil
-}
-
-func (tc *TwitterClient) convertBackfillMessage(ctx context.Context, portal *bridgev2.Portal, message types.Message) *bridgev2.BackfillMessage {
-	sentAt, _ := methods.UnixStringMilliToTime(message.MessageData.Time)
-	// TODO get correct intent
-	intent := tc.userLogin.Bridge.Matrix.BotIntent()
-	return &bridgev2.BackfillMessage{
-		ConvertedMessage: tc.convertToMatrix(ctx, portal, intent, &message.MessageData),
-		Sender: bridgev2.EventSender{
-			IsFromMe: message.MessageData.SenderID == string(tc.userLogin.ID),
-			Sender:   networkid.UserID(message.MessageData.SenderID),
-		},
-		ID:        networkid.MessageID(message.MessageData.ID),
-		Timestamp: sentAt,
-		Reactions: tc.convertBackfillReactions(message.MessageReactions),
-	}
 }
 
 func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReaction) []*bridgev2.BackfillReaction {
