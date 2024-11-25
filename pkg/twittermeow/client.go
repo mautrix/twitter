@@ -36,7 +36,7 @@ type Client struct {
 	Logger       zerolog.Logger
 	cookies      *cookies.Cookies
 	session      *SessionLoader
-	http         *http.Client
+	HTTP         *http.Client
 	httpProxy    func(*http.Request) (*url.URL, error)
 	socksProxy   proxy.Dialer
 	eventHandler EventHandler
@@ -47,7 +47,7 @@ type Client struct {
 
 func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 	cli := Client{
-		http: &http.Client{
+		HTTP: &http.Client{
 			Transport: &http.Transport{
 				DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 				TLSHandshakeTimeout:   10 * time.Second,
@@ -171,18 +171,18 @@ func (c *Client) SetProxy(proxyAddr string) error {
 
 	if proxyParsed.Scheme == "http" || proxyParsed.Scheme == "https" {
 		c.httpProxy = http.ProxyURL(proxyParsed)
-		c.http.Transport.(*http.Transport).Proxy = c.httpProxy
+		c.HTTP.Transport.(*http.Transport).Proxy = c.httpProxy
 	} else if proxyParsed.Scheme == "socks5" {
 		c.socksProxy, err = proxy.FromURL(proxyParsed, &net.Dialer{Timeout: 20 * time.Second})
 		if err != nil {
 			return err
 		}
-		c.http.Transport.(*http.Transport).DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
+		c.HTTP.Transport.(*http.Transport).DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
 			return c.socksProxy.Dial(network, addr)
 		}
 		contextDialer, ok := c.socksProxy.(proxy.ContextDialer)
 		if ok {
-			c.http.Transport.(*http.Transport).DialContext = contextDialer.DialContext
+			c.HTTP.Transport.(*http.Transport).DialContext = contextDialer.DialContext
 		}
 	}
 
@@ -278,11 +278,11 @@ func (c *Client) performJotClientEvent(category payload.JotLoggingCategory, debu
 }
 
 func (c *Client) enableRedirects() {
-	c.http.CheckRedirect = nil
+	c.HTTP.CheckRedirect = nil
 }
 
 func (c *Client) disableRedirects() {
-	c.http.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+	c.HTTP.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return ErrRedirectAttempted
 	}
 }
@@ -312,6 +312,10 @@ func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, 
 		Origin:              apiRequestOpts.Origin,
 		Extra: map[string]string{
 			"x-client-transaction-id": clientTransactionId,
+			"accept":                  "*/*",
+			"sec-fetch-dest":          "empty",
+			"sec-fetch-mode":          "cors",
+			"sec-fetch-site":          "same-site",
 		},
 		WithXClientUUID: apiRequestOpts.WithClientUUID,
 	}

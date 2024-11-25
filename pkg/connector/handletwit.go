@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"context"
+
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -39,11 +41,13 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 				},
 				Timestamp: evtData.CreatedAt,
 			},
-			ID:                 networkid.MessageID(evtData.MessageID),
-			TargetMessage:      networkid.MessageID(evtData.MessageID),
-			Data:               XMDFromEventMessage(&evtData),
-			ConvertMessageFunc: tc.convertToMatrix,
-			ConvertEditFunc:    tc.convertEditToMatrix,
+			ID:            networkid.MessageID(evtData.MessageID),
+			TargetMessage: networkid.MessageID(evtData.MessageID),
+			Data:          XMDFromEventMessage(&evtData),
+			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
+				return tc.convertToMatrix(ctx, portal, intent, data), nil
+			},
+			ConvertEditFunc: tc.convertEditToMatrix,
 		})
 	case event.XEventReaction:
 		reactionRemoteEvent := tc.wrapReaction(evtData)

@@ -90,7 +90,7 @@ func (c *Client) makeRequestDirect(url string, method string, headers http.Heade
 
 	newRequest.Header = headers
 
-	response, err := c.http.Do(newRequest)
+	response, err := c.HTTP.Do(newRequest)
 	defer func() {
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()

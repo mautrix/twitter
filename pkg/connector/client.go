@@ -218,16 +218,12 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) 
 
 func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
 	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
-	converted, err := tc.convertToMatrix(ctx, portal, intent, data)
-	if err != nil {
-		return nil, err
-	}
 	return &bridgev2.ConvertedEdit{
-		ModifiedParts: []*bridgev2.ConvertedEditPart{converted.Parts[0].ToEditPart(existing[0])},
+		ModifiedParts: []*bridgev2.ConvertedEditPart{tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existing[0])},
 	}, nil
 }
 
-func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessage, error) {
+func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) *bridgev2.ConvertedMessage {
 	var replyTo *networkid.MessageOptionalPartID
 	if msg.ReplyData.ID != "" {
 		replyTo = &networkid.MessageOptionalPartID{
@@ -249,11 +245,19 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	if msg.Attachment != nil {
 		convertedAttachmentPart, indices, err := tc.TwitterAttachmentToMatrix(ctx, portal, intent, msg.Attachment)
 		if err != nil {
-			return nil, err
+			zerolog.Ctx(ctx).Err(err).Msg("Failed to convert attachment")
+			parts = append(parts, &bridgev2.ConvertedMessagePart{
+				ID:   "",
+				Type: bridgeEvt.EventMessage,
+				Content: &bridgeEvt.MessageEventContent{
+					MsgType: bridgeEvt.MsgNotice,
+					Body:    "Failed to convert attachment from Twitter",
+				},
+			})
+		} else {
+			parts = append(parts, convertedAttachmentPart)
+			RemoveEntityLinkFromText(textPart, indices)
 		}
-		parts = append(parts, convertedAttachmentPart)
-
-		RemoveEntityLinkFromText(textPart, indices)
 	}
 
 	if len(textPart.Content.Body) > 0 {
@@ -264,15 +268,14 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		ReplyTo: replyTo,
 		Parts:   parts,
 	}
+	cm.MergeCaption()
 
-	cm.MergeCaption() // merges captions and media onto one part
-
-	return cm, nil
+	return cm
 }
 
 func (tc *TwitterClient) MakePortalKey(conv types.Conversation) networkid.PortalKey {
 	var receiver networkid.UserLoginID
-	if conv.Type == types.ONE_TO_ONE {
+	if conv.Type == types.ONE_TO_ONE || tc.connector.br.Config.SplitPortals {
 		receiver = tc.userLogin.ID
 	}
 	return networkid.PortalKey{
@@ -281,13 +284,13 @@ func (tc *TwitterClient) MakePortalKey(conv types.Conversation) networkid.Portal
 	}
 }
 
-func (tc *TwitterClient) MakePortalKeyFromID(conversationId string) networkid.PortalKey {
+func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.PortalKey {
 	var receiver networkid.UserLoginID
-	if strings.Contains(conversationId, "-") {
+	if strings.Contains(conversationID, "-") || tc.connector.br.Config.SplitPortals {
 		receiver = tc.userLogin.ID
 	}
 	return networkid.PortalKey{
-		ID:       networkid.PortalID(conversationId),
+		ID:       networkid.PortalID(conversationID),
 		Receiver: receiver,
 	}
 }

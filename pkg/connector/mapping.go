@@ -5,97 +5,29 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
+	"go.mau.fi/util/exmime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	bridgeEvt "maunium.net/go/mautrix/event"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
-
-func (tc *TwitterClient) MessagesToBackfillMessages(ctx context.Context, messages []types.Message, conv types.Conversation) ([]*bridgev2.BackfillMessage, error) {
-	backfilledMessages := make([]*bridgev2.BackfillMessage, 0)
-	selfUserId := tc.client.GetCurrentUserID()
-	for _, msg := range messages {
-		backfilledMessage, err := tc.MessageToBackfillMessage(ctx, msg, conv, selfUserId)
-		if err != nil {
-			return nil, err
-		}
-		backfilledMessages = append(backfilledMessages, backfilledMessage)
-	}
-
-	return backfilledMessages, nil
-}
-
-func (tc *TwitterClient) MessageToBackfillMessage(ctx context.Context, message types.Message, conv types.Conversation, selfUserId string) (*bridgev2.BackfillMessage, error) {
-	messageReactions, err := tc.MessageReactionsToBackfillReactions(message.MessageReactions, selfUserId)
-	if err != nil {
-		return nil, err
-	}
-
-	sentAt, err := methods.UnixStringMilliToTime(message.MessageData.Time)
-	if err != nil {
-		return nil, err
-	}
-
-	intent := tc.userLogin.Bridge.Matrix.BotIntent()
-	portal, err := tc.connector.br.GetPortalByKey(ctx, tc.MakePortalKey(conv))
-	if err != nil {
-		return nil, err
-	}
-
-	cm, err := tc.convertToMatrix(ctx, portal, intent, &message.MessageData)
-	if err != nil {
-		return nil, err
-	}
-
-	return &bridgev2.BackfillMessage{
-		ConvertedMessage: cm,
-		Sender: bridgev2.EventSender{
-			IsFromMe: message.MessageData.SenderID == selfUserId,
-			Sender:   networkid.UserID(message.MessageData.SenderID),
-		},
-		ID:        networkid.MessageID(message.MessageData.ID),
-		Timestamp: sentAt,
-		Reactions: messageReactions,
-	}, nil
-}
 
 func RemoveEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
 	start, end := indices[0], indices[1]
 	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
 }
 
-func (tc *TwitterClient) MessageReactionsToBackfillReactions(reactions []types.MessageReaction, selfUserId string) ([]*bridgev2.BackfillReaction, error) {
-	backfillReactions := make([]*bridgev2.BackfillReaction, 0)
-	for _, reaction := range reactions {
-		reactionTime, err := methods.UnixStringMilliToTime(reaction.Time)
-		if err != nil {
-			return nil, err
-		}
-
-		backfillReaction := &bridgev2.BackfillReaction{
-			Timestamp: reactionTime,
-			Sender: bridgev2.EventSender{
-				IsFromMe: reaction.SenderID == selfUserId,
-				Sender:   networkid.UserID(reaction.SenderID),
-			},
-			EmojiID: "",
-			Emoji:   reaction.EmojiReaction,
-		}
-		backfillReactions = append(backfillReactions, backfillReaction)
-	}
-	return backfillReactions, nil
-}
-
 func (tc *TwitterClient) ConversationToChatInfo(conv *types.Conversation) *bridgev2.ChatInfo {
 	memberList := tc.ParticipantsToMemberList(conv.Participants)
 	return &bridgev2.ChatInfo{
 		Name:        &conv.Name,
-		Avatar:      MakeAvatar(conv.AvatarImageHttps),
+		Avatar:      tc.MakeAvatar(conv.AvatarImageHttps),
 		Members:     memberList,
 		Type:        tc.ConversationTypeToRoomType(conv.Type),
 		CanBackfill: true,
@@ -151,7 +83,7 @@ func (tc *TwitterClient) UserToChatMember(user types.User, isFromMe bool) bridge
 		},
 		UserInfo: &bridgev2.UserInfo{
 			Name:   &user.Name,
-			Avatar: MakeAvatar(user.ProfileImageURL),
+			Avatar: tc.MakeAvatar(user.ProfileImageURL),
 		},
 	}
 }
@@ -171,7 +103,7 @@ func (tc *TwitterClient) GetUserInfoBridge(userId string) *bridgev2.UserInfo {
 	if userCacheEntry, ok := tc.userCache[userId]; ok {
 		userinfo = &bridgev2.UserInfo{
 			Name:        ptr.Ptr(tc.connector.Config.FormatDisplayname(userCacheEntry.ScreenName, userCacheEntry.Name)),
-			Avatar:      MakeAvatar(userCacheEntry.ProfileImageURL),
+			Avatar:      tc.MakeAvatar(userCacheEntry.ProfileImageURL),
 			Identifiers: []string{fmt.Sprintf("twitter:%s", userCacheEntry.ScreenName)},
 		}
 	}
@@ -182,17 +114,14 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
 	var mimeType string
-	var indices []int
 	var msgType bridgeEvt.MessageType
 	extraInfo := map[string]any{}
 	if attachment.Photo != nil {
-		// image attachment
 		attachmentInfo = attachment.Photo
 		mimeType = "image/jpeg" // attachment doesn't include this specifically
 		msgType = bridgeEvt.MsgImage
 		attachmentURL = attachmentInfo.MediaURLHTTPS
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
-		// video attachment
 		if attachment.AnimatedGif != nil {
 			attachmentInfo = attachment.AnimatedGif
 			extraInfo["fi.mau.gif"] = true
@@ -211,29 +140,41 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 			return nil, nil, err
 		}
 		attachmentURL = highestBitRateVariant.URL
+	} else {
+		return nil, nil, fmt.Errorf("unsupported attachment type")
 	}
 
-	if attachmentInfo == nil || attachmentInfo.IDStr == "" {
-		return nil, nil, fmt.Errorf("missing attachment info")
-	}
-
-	indices = attachmentInfo.Indices
-
-	cookieString := tc.client.GetCookieString()
-	attachmentSize, err := GetFileSize(ctx, cookieString, attachmentURL)
+	fileResp, err := tc.downloadFile(ctx, attachmentURL)
 	if err != nil {
 		return nil, nil, err
 	}
+	content := bridgeEvt.MessageEventContent{
+		Info: &bridgeEvt.FileInfo{
+			MimeType: mimeType,
+			Width:    attachmentInfo.OriginalInfo.Width,
+			Height:   attachmentInfo.OriginalInfo.Height,
+			Duration: attachmentInfo.VideoInfo.DurationMillis,
+		},
+		MsgType: msgType,
+		Body:    attachmentInfo.IDStr,
+	}
+	if content.Body == "" {
+		content.Body = strings.TrimPrefix(string(msgType), "m.")
+	}
+	ext := exmime.ExtensionFromMimetype(mimeType)
+	if !strings.HasSuffix(content.Body, ext) {
+		content.Body += ext
+	}
 
-	content := convertTwitterAttachmentMetadata(attachmentInfo, mimeType, msgType, attachmentSize)
-
-	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, attachmentSize, true, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-		err = GetPlainFileStream(ctx, cookieString, attachmentURL, "twitter attachment", file)
+	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, true, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+		_, err := io.Copy(file, fileResp.Body)
 		if err != nil {
 			return nil, err
 		}
-
-		return &bridgev2.FileStreamResult{MimeType: content.Info.MimeType}, nil
+		return &bridgev2.FileStreamResult{
+			MimeType: content.Info.MimeType,
+			FileName: content.Body,
+		}, nil
 	})
 
 	if err != nil {
@@ -247,96 +188,38 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 		Extra: map[string]any{
 			"info": extraInfo,
 		},
-	}, indices, nil
+	}, attachmentInfo.Indices, nil
 }
 
-func convertTwitterAttachmentMetadata(attachmentInfo *types.AttachmentInfo, mimeType string, msgType bridgeEvt.MessageType, attachmentSize int64) bridgeEvt.MessageEventContent {
-	content := bridgeEvt.MessageEventContent{
-		Info: &bridgeEvt.FileInfo{
-			MimeType: mimeType,
-			Size:     int(attachmentSize),
-		},
-		MsgType: msgType,
-		Body:    attachmentInfo.IDStr,
-	}
-
-	originalInfo := attachmentInfo.OriginalInfo
-	if originalInfo.Width != 0 {
-		content.Info.Width = originalInfo.Width
-	}
-	if originalInfo.Height != 0 {
-		content.Info.Height = originalInfo.Height
-	}
-
-	if attachmentInfo.VideoInfo.DurationMillis != 0 {
-		content.Info.Duration = attachmentInfo.VideoInfo.DurationMillis
-	}
-
-	return content
-}
-
-func MakeAvatar(avatarURL string) *bridgev2.Avatar {
+func (tc *TwitterClient) MakeAvatar(avatarURL string) *bridgev2.Avatar {
 	return &bridgev2.Avatar{
 		ID: networkid.AvatarID(avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, avatarURL, nil)
+			resp, err := tc.downloadFile(ctx, avatarURL)
 			if err != nil {
-				return nil, fmt.Errorf("failed to prepare request: %w", err)
+				return nil, err
 			}
-
-			getResp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				return nil, fmt.Errorf("failed to download avatar: %w", err)
-			}
-
-			data, err := io.ReadAll(getResp.Body)
-			_ = getResp.Body.Close()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read avatar data: %w", err)
-			}
+			data, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
 			return data, err
 		},
 		Remove: avatarURL == "",
 	}
 }
 
-func GetPlainFileStream(ctx context.Context, cookies, url, thing string, writer io.Writer) error {
+func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to prepare request: %w", err)
+		return nil, fmt.Errorf("failed to prepare request: %w", err)
 	}
 
-	if cookies != "" {
-		req.Header.Add("cookie", cookies)
-	}
+	headers := twittermeow.BaseHeaders.Clone()
+	headers.Set("Cookie", tc.client.GetCookieString())
+	req.Header = headers
 
-	getResp, err := http.DefaultClient.Do(req)
+	getResp, err := tc.client.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to download %s: %w", thing, err)
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-
-	_, err = io.Copy(writer, getResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read %s data: %w", thing, err)
-	}
-
-	return nil
-}
-
-func GetFileSize(ctx context.Context, cookies, url string) (int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare request: %w", err)
-	}
-
-	if cookies != "" {
-		req.Header.Add("cookie", cookies)
-	}
-
-	headResp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get file size: %w", err)
-	}
-
-	return headResp.ContentLength, nil
+	return getResp, nil
 }

@@ -54,6 +54,7 @@ type DmRequestQuery struct {
 	Count                               int         `url:"count,omitempty"`
 	Context                             ContextInfo `url:"context,omitempty"`
 	MaxID                               string      `url:"max_id,omitempty"` // when fetching messages, this is the message id
+	MinID                               string      `url:"min_id,omitempty"`
 	NSFWFilteringEnabled                bool        `url:"nsfw_filtering_enabled"`
 	IncludeProfileInterstitialType      int         `url:"include_profile_interstitial_type"`
 	IncludeBlocking                     int         `url:"include_blocking"`
