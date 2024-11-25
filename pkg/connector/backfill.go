@@ -58,6 +58,16 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 	if err != nil {
 		return nil, err
 	}
+	if len(messages) == 0 {
+		log.Debug().
+			Str("timeline_status", string(messageResp.ConversationTimeline.Status)).
+			Msg("No messages in backfill response")
+		return &bridgev2.FetchMessagesResponse{
+			Messages: make([]*bridgev2.BackfillMessage, 0),
+			HasMore:  false,
+			Forward:  params.Forward,
+		}, nil
+	}
 
 	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
 	log.Debug().
