@@ -61,11 +61,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 		methods.SortMessagesByTime(convInboxData.Messages)
 		messages := convInboxData.Messages
 		latestMessage := messages[len(messages)-1]
-		latestMessageTS, err := methods.UnixStringMilliToTime(latestMessage.MessageData.Time)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to convert latest message TS to time.Time:")
-			return
-		}
+		latestMessageTS := methods.ParseSnowflake(latestMessage.MessageData.ID)
 		evt := &simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventChatResync,

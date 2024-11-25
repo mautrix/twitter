@@ -66,25 +66,25 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		Str("newest_raw_ts", messages[len(messages)-1].Time).
 		Msg("Fetched messages")
 	for _, msg := range messages {
-		sentAt, _ := methods.UnixStringMilliToTime(msg.MessageData.Time)
+		messageTS := methods.ParseSnowflake(msg.ID)
 		log := log.With().
 			Str("message_id", msg.MessageData.ID).
 			Str("message_raw_ts", msg.Time).
-			Time("message_ts", sentAt).
+			Time("message_ts", messageTS).
 			Logger()
 		if params.AnchorMessage != nil {
 			if string(params.AnchorMessage.ID) == msg.ID {
 				log.Warn().Msg("Skipping anchor message")
 				continue
-			} else if params.Forward && sentAt.Before(params.AnchorMessage.Timestamp) {
+			} else if params.Forward && messageTS.Before(params.AnchorMessage.Timestamp) {
 				log.Warn().Msg("Skipping too old message in forwards backfill")
 				continue
-			} else if !params.Forward && sentAt.After(params.AnchorMessage.Timestamp) {
+			} else if !params.Forward && messageTS.After(params.AnchorMessage.Timestamp) {
 				log.Warn().Msg("Skipping too new message in backwards backfill")
 				continue
 			}
 		}
-		log.Trace().Time("message_ts", sentAt).Msg("Converting message")
+		log.Trace().Msg("Converting message")
 		// TODO get correct intent
 		intent := tc.userLogin.Bridge.Matrix.BotIntent()
 		convertedMsg := &bridgev2.BackfillMessage{
@@ -94,7 +94,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 				Sender:   networkid.UserID(msg.MessageData.SenderID),
 			},
 			ID:        networkid.MessageID(msg.MessageData.ID),
-			Timestamp: sentAt,
+			Timestamp: messageTS,
 			Reactions: tc.convertBackfillReactions(msg.MessageReactions),
 		}
 		converted = append(converted, convertedMsg)
@@ -115,9 +115,8 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReaction) []*bridgev2.BackfillReaction {
 	backfillReactions := make([]*bridgev2.BackfillReaction, 0)
 	for _, reaction := range reactions {
-		reactionTime, _ := methods.UnixStringMilliToTime(reaction.Time)
 		backfillReaction := &bridgev2.BackfillReaction{
-			Timestamp: reactionTime,
+			Timestamp: methods.ParseSnowflake(reaction.ID),
 			Sender: bridgev2.EventSender{
 				IsFromMe: reaction.SenderID == string(tc.userLogin.ID),
 				Sender:   networkid.UserID(reaction.SenderID),

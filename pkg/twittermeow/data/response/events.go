@@ -60,11 +60,9 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				reactionActionAt, err := methods.UnixStringMilliToTime(reactionEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				reactionActionAt := methods.ParseSnowflake(reactionEventData.ID)
 
+				// TODO remove pointless re-wrapping of events (applies to all types)
 				updatedReactionEventData := event.XEventReaction{
 					Conversation:  data.GetConversationByID(reactionEventData.ConversationID),
 					Time:          reactionActionAt,
@@ -89,10 +87,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				createdAt, err := methods.UnixStringMilliToTime(messageEventData.MessageData.Time)
-				if err != nil {
-					return nil, err
-				}
+				createdAt := methods.ParseSnowflake(messageEventData.MessageData.ID)
 
 				updatedEntry = event.XEventMessage{
 					Conversation: data.GetConversationByID(messageEventData.ConversationID),
@@ -115,10 +110,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				updatedAt, err := methods.UnixStringMilliToTime(convNameUpdateEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				updatedAt := methods.ParseSnowflake(convNameUpdateEventData.ID)
 
 				updatedEntry = event.XEventConversationNameUpdate{
 					Conversation: data.GetConversationByID(convNameUpdateEventData.ConversationID),
@@ -135,10 +127,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				eventTime, err := methods.UnixStringMilliToTime(participantsJoinedEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				eventTime := methods.ParseSnowflake(participantsJoinedEventData.ID)
 
 				updatedEntry = event.XEventParticipantsJoined{
 					EventID:         participantsJoinedEventData.ID,
@@ -155,10 +144,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				deletedAt, err := methods.UnixStringMilliToTime(messageDeletedEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				deletedAt := methods.ParseSnowflake(messageDeletedEventData.ID)
 
 				updatedEntry = event.XEventMessageDeleted{
 					Conversation: data.GetConversationByID(messageDeletedEventData.ConversationID),
@@ -175,10 +161,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				deletedAt, err := methods.UnixStringMilliToTime(convDeletedEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				deletedAt := methods.ParseSnowflake(convDeletedEventData.ID)
 
 				updatedEntry = event.XEventConversationDelete{
 					ConversationID: convDeletedEventData.ConversationID,
@@ -194,10 +177,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				createdAt, err := methods.UnixStringMilliToTime(convCreatedEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				createdAt := methods.ParseSnowflake(convCreatedEventData.ID)
 
 				updatedEntry = event.XEventConversationCreated{
 					EventID:      convCreatedEventData.ID,
@@ -214,10 +194,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					return nil, err
 				}
 
-				updatedAt, err := methods.UnixStringMilliToTime(convMetadataUpdateEventData.Time)
-				if err != nil {
-					return nil, err
-				}
+				updatedAt := methods.ParseSnowflake(convMetadataUpdateEventData.ID)
 
 				updatedEntry = event.XEventConversationMetadataUpdate{
 					EventID:      convMetadataUpdateEventData.ID,

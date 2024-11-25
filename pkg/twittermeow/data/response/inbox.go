@@ -66,6 +66,8 @@ type PrettifiedMessage struct {
 	Reactions      []types.MessageReaction
 }
 
+// TODO this function and struct are dumb, they should be deleted
+
 func (data *XInboxData) PrettifyMessages(conversationID string) ([]PrettifiedMessage, error) {
 	messages, err := data.GetMessageEntriesByConversationID(conversationID, true)
 	if err != nil {
@@ -74,10 +76,7 @@ func (data *XInboxData) PrettifyMessages(conversationID string) ([]PrettifiedMes
 
 	prettifiedMessages := make([]PrettifiedMessage, 0)
 	for _, msg := range messages {
-		sentAt, err := methods.UnixStringMilliToTime(msg.Time)
-		if err != nil {
-			return nil, err
-		}
+		sentAt := methods.ParseSnowflake(msg.ID)
 
 		prettifiedMessage := PrettifiedMessage{
 			EventID:        msg.ID,

@@ -81,7 +81,7 @@ SELECT
     CASE WHEN receiver<>0 THEN CAST(receiver AS TEXT) ELSE '' END, -- room_receiver
     '', -- sender_id
     '', -- sender_mxid
-    0, -- timestamp
+    ((id>>22)+1288834974657)*1000000, -- timestamp
     0, -- edit_count
     '{}' -- metadata
 FROM message_old;
@@ -99,7 +99,7 @@ SELECT
     '', -- emoji_id
     (SELECT twid FROM portal_old WHERE portal_old.mxid=reaction_old.mx_room), -- room_id
     CASE WHEN tw_receiver<>0 THEN CAST(tw_receiver AS TEXT) ELSE '' END, -- room_receiver
-    0, -- timestamp
+    ((tw_reaction_id>>22)+1288834974657)*1000000, -- timestamp
     mxid,
     reaction, -- emoji
     '{}' -- metadata
