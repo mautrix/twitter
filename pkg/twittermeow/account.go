@@ -27,7 +27,7 @@ func (c *Client) GetAccountSettings(params payload.AccountSettingsQuery) (*respo
 	}
 	url := fmt.Sprintf("%s?%s", endpoints.ACCOUNT_SETTINGS_URL, string(encodedQuery))
 	apiRequestOpts := apiRequestOpts{
-		Url:    url,
+		URL:    url,
 		Method: http.MethodGet,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
@@ -46,7 +46,7 @@ func (c *Client) GetDMPermissions(params payload.GetDMPermissionsQuery) (*respon
 	}
 	url := fmt.Sprintf("%s?%s", endpoints.DM_PERMISSIONS_URL, string(encodedQuery))
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
@@ -103,7 +103,7 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 	}
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Referer:        endpoints.BASE_NOTIFICATION_SETTINGS_URL,

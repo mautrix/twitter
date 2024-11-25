@@ -18,7 +18,7 @@ func (c *Client) Search(params payload.SearchQuery) (*response.SearchResponse, e
 	url := fmt.Sprintf("%s?%s", endpoints.SEARCH_TYPEAHEAD_URL, string(encodedQuery))
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 		Referer:        endpoints.BASE_MESSAGES_URL + "/compose",

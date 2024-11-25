@@ -9,7 +9,7 @@ import (
 var (
 	metaTagRegex           = regexp.MustCompile(`<meta\s+http-equiv=["']refresh["']\s+content=["'][^;]+;\s*url\s*=\s*([^"']+)["']\s*/?>`)
 	migrateFormDataRegex   = regexp.MustCompile(`<form[^>]* action="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="tok" value="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="data" value="([^"]+)"[^>]*>`)
-	mainScriptUrlRegex     = regexp.MustCompile(`https:\/\/(?:[A-Za-z0-9.-]+)\/responsive-web\/client-web\/main\.[0-9A-Za-z]+\.js`)
+	mainScriptURLRegex     = regexp.MustCompile(`https:\/\/(?:[A-Za-z0-9.-]+)\/responsive-web\/client-web\/main\.[0-9A-Za-z]+\.js`)
 	bearerTokenRegex       = regexp.MustCompile(`(Bearer\s[A-Za-z0-9%]+)`)
 	guestTokenRegex        = regexp.MustCompile(`gt=([0-9]+)`)
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
@@ -34,7 +34,7 @@ func ParseMigrateRequestData(html string) (string, *payload.MigrationRequestPayl
 }
 
 func ParseMainScriptURL(html string) string {
-	match := mainScriptUrlRegex.FindStringSubmatch(html)
+	match := mainScriptURLRegex.FindStringSubmatch(html)
 	if len(match) < 1 {
 		return ""
 	}

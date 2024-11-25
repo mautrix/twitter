@@ -37,13 +37,13 @@ func SignTransaction(verificationToken, url, method string) (string, error) {
 		return "", fmt.Errorf("failed to decode verification token while signing client transaction id: %e", err)
 	}
 
-	parsedUrl, err := neturl.Parse(url)
+	parsedURL, err := neturl.Parse(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse path for request (url=%s, method=%s): %e", url, method, err)
 	}
 
 	ts, tsBytes := signTimestamp()
-	unsignedString := fmt.Sprintf("%s!%s!%s%s%s", method, parsedUrl.Path, ts, twitterStr, hexStr)
+	unsignedString := fmt.Sprintf("%s!%s!%s%s%s", method, parsedURL.Path, ts, twitterStr, hexStr)
 
 	hash := sha256.Sum256([]byte(unsignedString))
 	hashSlice := hash[:16]

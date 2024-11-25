@@ -41,7 +41,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		return err
 	}
 
-	clientTransactionId, err := crypto.SignTransaction(jc.client.session.verificationToken, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost)
+	clientTransactionID, err := crypto.SignTransaction(jc.client.session.verificationToken, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost)
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		"sec-fetch-site":          "same-site",
 		"sec-fetch-mode":          "cors",
 		"sec-fetch-dest":          "empty",
-		"x-client-transaction-id": clientTransactionId,
+		"x-client-transaction-id": clientTransactionID,
 	}
 
 	headerOpts := HeaderOpts{

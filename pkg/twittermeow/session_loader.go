@@ -61,7 +61,7 @@ func (s *SessionLoader) isAuthenticated() bool {
 }
 
 func (s *SessionLoader) LoadPage(url string) error {
-	mainPageUrl, err := neturl.Parse(url)
+	mainPageURL, err := neturl.Parse(url)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 	}
 
 	mainPageHTML := string(mainPageRespBody)
-	migrationUrl, migrationRequired := methods.ParseMigrateURL(mainPageHTML)
+	migrationURL, migrationRequired := methods.ParseMigrateURL(mainPageHTML)
 	if migrationRequired {
 		log.Println("migration is required...")
 		extraHeaders = map[string]string{
@@ -92,13 +92,13 @@ func (s *SessionLoader) LoadPage(url string) error {
 			"sec-fetch-mode":            "navigate",
 			"sec-fetch-dest":            "document",
 		}
-		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(migrationUrl, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageUrl.Host), WithCookies: true}), nil, types.NONE)
+		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.NONE)
 		if err != nil {
 			return err
 		}
 
 		migrationPageHTML := string(migrationPageRespBody)
-		migrationFormUrl, migrationFormPayload := methods.ParseMigrateRequestData(migrationPageHTML)
+		migrationFormURL, migrationFormPayload := methods.ParseMigrateRequestData(migrationPageHTML)
 		if migrationFormPayload != nil {
 			migrationForm, err := query.Values(migrationFormPayload)
 			if err != nil {
@@ -108,15 +108,15 @@ func (s *SessionLoader) LoadPage(url string) error {
 			extraHeaders["origin"] = endpoints.TWITTER_BASE_URL
 
 			s.client.disableRedirects()
-			mainPageResp, _, err = s.client.MakeRequest(migrationFormUrl, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
-			if err == nil && !errors.Is(err, ErrRedirectAttempted) {
+			mainPageResp, _, err = s.client.MakeRequest(migrationFormURL, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
+			if err == nil || !errors.Is(err, ErrRedirectAttempted) {
 				return fmt.Errorf("failed to make request to main page, server did not respond with a redirect response")
 			}
 			s.client.enableRedirects()
 			s.client.cookies.UpdateFromResponse(mainPageResp) // update the cookies received from the redirected response headers
 
-			migrationFormUrl = endpoints.BASE_URL + mainPageResp.Header.Get("Location")
-			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(migrationFormUrl, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
+			migrationFormURL = endpoints.BASE_URL + mainPageResp.Header.Get("Location")
+			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
 			if err != nil {
 				return err
 			}

@@ -16,7 +16,7 @@ var _ bridgev2.BackfillingNetworkAPI = (*TwitterClient)(nil)
 func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationID := string(params.Portal.PortalKey.ID)
 
-	reqQuery := payload.DmRequestQuery{}.Default()
+	reqQuery := payload.DMRequestQuery{}.Default()
 	reqQuery.Count = params.Count
 	if !params.Forward {
 		if params.Cursor != "" {

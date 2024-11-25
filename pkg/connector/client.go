@@ -171,20 +171,20 @@ func (tc *TwitterClient) GetCurrentUser() (user *types.User, err error) {
 }
 
 func (tc *TwitterClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
-	conversationId := string(portal.PortalKey.ID)
-	queryConversationPayload := payload.DmRequestQuery{}.Default()
+	conversationID := string(portal.PortalKey.ID)
+	queryConversationPayload := payload.DMRequestQuery{}.Default()
 	queryConversationPayload.IncludeConversationInfo = true
-	conversationData, err := tc.client.FetchConversationContext(conversationId, &queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
+	conversationData, err := tc.client.FetchConversationContext(conversationID, &queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {
 		return nil, err
 	}
 
 	conversations := conversationData.ConversationTimeline.Conversations
 	if len(conversations) <= 0 {
-		return nil, fmt.Errorf("failed to find conversation by id %s", string(conversationId))
+		return nil, fmt.Errorf("failed to find conversation by id %s", string(conversationID))
 	}
 
-	conversation := conversations[conversationId]
+	conversation := conversations[conversationID]
 	users := conversationData.ConversationTimeline.Users
 
 	maps.Copy(tc.userCache, users)

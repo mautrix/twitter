@@ -40,7 +40,7 @@ func (pc *PollingClient) startPolling() error {
 }
 
 func (pc *PollingClient) startListening() {
-	userUpdatesQuery := (&payload.DmRequestQuery{}).Default()
+	userUpdatesQuery := (&payload.DMRequestQuery{}).Default()
 	for range pc.ticker.C {
 		if pc.currentCursor != "" {
 			userUpdatesQuery.Cursor = pc.currentCursor

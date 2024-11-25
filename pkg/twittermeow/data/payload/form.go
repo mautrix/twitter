@@ -48,8 +48,8 @@ const (
 	CONTEXT_FETCH_DM_CONVERSATION_HISTORY ContextInfo = "FETCH_DM_CONVERSATION_HISTORY"
 )
 
-type DmRequestQuery struct {
-	ActiveConversationId                string      `url:"active_conversation_id,omitempty"`
+type DMRequestQuery struct {
+	ActiveConversationID                string      `url:"active_conversation_id,omitempty"`
 	Cursor                              string      `url:"cursor,omitempty"`
 	Count                               int         `url:"count,omitempty"`
 	Context                             ContextInfo `url:"context,omitempty"`
@@ -89,7 +89,7 @@ type DmRequestQuery struct {
 	Ext                                 string      `url:"ext"`
 }
 
-func (p DmRequestQuery) Encode() ([]byte, error) {
+func (p DMRequestQuery) Encode() ([]byte, error) {
 	values, err := query.Values(p)
 	if err != nil {
 		return nil, err
@@ -97,8 +97,8 @@ func (p DmRequestQuery) Encode() ([]byte, error) {
 	return []byte(values.Encode()), nil
 }
 
-func (p DmRequestQuery) Default() DmRequestQuery {
-	return DmRequestQuery{
+func (p DMRequestQuery) Default() DMRequestQuery {
+	return DMRequestQuery{
 		NSFWFilteringEnabled:                false,
 		IncludeProfileInterstitialType:      1,
 		IncludeBlocking:                     1,
@@ -168,7 +168,7 @@ type UploadMediaQuery struct {
 	SourceURL       string        `url:"source_url,omitempty"`
 	MediaID         string        `url:"media_id,omitempty"`
 	VideoDurationMS float32       `url:"video_duration_ms,omitempty"`
-	OriginalMd5     string        `url:"original_md5,omitempty"`
+	OriginalMD5     string        `url:"original_md5,omitempty"`
 	SegmentIndex    int           `url:"segment_index,omitempty"`
 	MediaType       MediaType     `url:"media_type,omitempty"`
 	MediaCategory   MediaCategory `url:"media_category,omitempty"`
@@ -207,8 +207,8 @@ func (p *SearchQuery) Encode() ([]byte, error) {
 
 type GetDMPermissionsQuery struct {
 	// seperated by commas: userid1,userid2,userid3
-	RecipientIds string `url:"recipient_ids"`
-	DmUsers      bool   `url:"dm_users"`
+	RecipientIDs string `url:"recipient_ids"`
+	DMUsers      bool   `url:"dm_users"`
 }
 
 func (p *GetDMPermissionsQuery) Encode() ([]byte, error) {
@@ -222,7 +222,7 @@ func (p *GetDMPermissionsQuery) Encode() ([]byte, error) {
 type EditDirectMessagePayload struct {
 	ConversationID string `url:"conversation_id,omitempty"`
 	RequestID      string `url:"request_id,omitempty"`
-	DmID           string `url:"dm_id,omitempty"` // used to specify a message, specifically for editing
+	DMID           string `url:"dm_id,omitempty"` // used to specify a message, specifically for editing
 	Text           string `url:"text"`
 }
 

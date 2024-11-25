@@ -7,7 +7,7 @@ type Attachment struct {
 	AnimatedGif *AttachmentInfo `json:"animated_gif,omitempty"`
 	Photo       *AttachmentInfo `json:"photo,omitempty"`
 }
-type Urls struct {
+type URLs struct {
 	URL         string `json:"url,omitempty"`
 	ExpandedURL string `json:"expanded_url,omitempty"`
 	DisplayURL  string `json:"display_url,omitempty"`
@@ -17,7 +17,7 @@ type Entities struct {
 	Hashtags     []any  `json:"hashtags,omitempty"`
 	Symbols      []any  `json:"symbols,omitempty"`
 	UserMentions []any  `json:"user_mentions,omitempty"`
-	Urls         []Urls `json:"urls,omitempty"`
+	URLs         []URLs `json:"urls,omitempty"`
 }
 type OriginalInfo struct {
 	URL    string `json:"url,omitempty"`

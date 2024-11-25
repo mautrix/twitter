@@ -79,7 +79,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		finalizeMediaQuery := &payload.UploadMediaQuery{
 			Command:     "FINALIZE",
 			MediaID:     initUploadResponse.MediaIDString,
-			OriginalMd5: originalMd5,
+			OriginalMD5: originalMd5,
 		}
 
 		encodedQuery, err = finalizeMediaQuery.Encode()
@@ -132,15 +132,15 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 	return finalizedMediaResult, nil
 }
 
-func (c *Client) GetMediaUploadStatus(mediaId string, h http.Header) (*response.FinalizedUploadMediaResponse, []byte, error) {
-	url := fmt.Sprintf("%s?command=STATUS&media_id=%s", endpoints.UPLOAD_MEDIA_URL, mediaId)
+func (c *Client) GetMediaUploadStatus(mediaID string, h http.Header) (*response.FinalizedUploadMediaResponse, []byte, error) {
+	url := fmt.Sprintf("%s?command=STATUS&media_id=%s", endpoints.UPLOAD_MEDIA_URL, mediaID)
 	resp, respBody, err := c.MakeRequest(url, http.MethodGet, h, nil, types.NONE)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if resp.StatusCode > 204 {
-		return nil, nil, fmt.Errorf("failed to get status of uploaded media with id %s (status_code=%d, response_body=%s)", mediaId, resp.StatusCode, string(respBody))
+		return nil, nil, fmt.Errorf("failed to get status of uploaded media with id %s (status_code=%d, response_body=%s)", mediaID, resp.StatusCode, string(respBody))
 	}
 
 	mediaStatusResult := &response.FinalizedUploadMediaResponse{}

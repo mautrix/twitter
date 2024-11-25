@@ -18,7 +18,7 @@ import (
 func (tc *TwitterClient) syncChannels(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
 
-	reqQuery := ptr.Ptr(payload.DmRequestQuery{}.Default())
+	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
 	initalInboxState, err := tc.client.GetInitialInboxState(reqQuery)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to fetch initial inbox state:")

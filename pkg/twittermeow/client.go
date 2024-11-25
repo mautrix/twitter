@@ -138,7 +138,7 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		return nil, nil, err
 	}
 
-	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DmRequestQuery{}.Default()))
+	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DMRequestQuery{}.Default()))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -207,7 +207,7 @@ func (c *Client) SetEventHandler(handler EventHandler) {
 	c.eventHandler = handler
 }
 
-func (c *Client) fetchAndParseMainScript(scriptUrl string) error {
+func (c *Client) fetchAndParseMainScript(scriptURL string) error {
 	extraHeaders := map[string]string{
 		"accept":         "*/*",
 		"sec-fetch-site": "cross-site",
@@ -215,7 +215,7 @@ func (c *Client) fetchAndParseMainScript(scriptUrl string) error {
 		"sec-fetch-dest": "script",
 		"origin":         endpoints.BASE_URL,
 	}
-	_, scriptRespBody, err := c.MakeRequest(scriptUrl, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
+	_, scriptRespBody, err := c.MakeRequest(scriptURL, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
 	if err != nil {
 		return err
 	}
@@ -257,12 +257,12 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 		c.cookies.Set(cookies.XGuestToken, guestToken)
 	}
 
-	mainScriptUrl := methods.ParseMainScriptURL(mainPageHTML)
-	if mainScriptUrl == "" {
+	mainScriptURL := methods.ParseMainScriptURL(mainPageHTML)
+	if mainScriptURL == "" {
 		return fmt.Errorf("failed to find main script url by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
 	}
 
-	err := c.fetchAndParseMainScript(mainScriptUrl)
+	err := c.fetchAndParseMainScript(mainScriptURL)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (c *Client) disableRedirects() {
 }
 
 type apiRequestOpts struct {
-	Url            string
+	URL            string
 	Referer        string
 	Origin         string
 	Method         string
@@ -298,7 +298,7 @@ type apiRequestOpts struct {
 }
 
 func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
-	clientTransactionId, err := crypto.SignTransaction(c.session.verificationToken, apiRequestOpts.Url, apiRequestOpts.Method)
+	clientTransactionID, err := crypto.SignTransaction(c.session.verificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -311,7 +311,7 @@ func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, 
 		Referer:             apiRequestOpts.Referer,
 		Origin:              apiRequestOpts.Origin,
 		Extra: map[string]string{
-			"x-client-transaction-id": clientTransactionId,
+			"x-client-transaction-id": clientTransactionID,
 			"accept":                  "*/*",
 			"sec-fetch-dest":          "empty",
 			"sec-fetch-mode":          "cors",
@@ -321,5 +321,5 @@ func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, 
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	return c.MakeRequest(apiRequestOpts.Url, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
+	return c.MakeRequest(apiRequestOpts.URL, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
 }

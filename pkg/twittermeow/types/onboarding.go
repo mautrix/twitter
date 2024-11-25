@@ -477,7 +477,7 @@ type RecommendedUser struct {
 	URL         string `json:"url,omitempty"`
 	Entities    struct {
 		URL struct {
-			Urls []struct {
+			URLs []struct {
 				URL         string `json:"url,omitempty"`
 				ExpandedURL string `json:"expanded_url,omitempty"`
 				DisplayURL  string `json:"display_url,omitempty"`
@@ -485,7 +485,7 @@ type RecommendedUser struct {
 			} `json:"urls,omitempty"`
 		} `json:"url,omitempty"`
 		Description struct {
-			Urls []any `json:"urls,omitempty"`
+			URLs []any `json:"urls,omitempty"`
 		} `json:"description,omitempty"`
 	} `json:"entities,omitempty"`
 	Protected                      bool   `json:"protected,omitempty"`

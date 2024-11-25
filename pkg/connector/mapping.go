@@ -47,11 +47,11 @@ func (tc *TwitterClient) ConversationTypeToRoomType(convType types.ConversationT
 }
 
 func (tc *TwitterClient) UsersToMemberList(users []types.User) *bridgev2.ChatMemberList {
-	selfUserId := tc.client.GetCurrentUserID()
+	selfUserID := tc.client.GetCurrentUserID()
 
 	memberMap := map[networkid.UserID]bridgev2.ChatMember{}
 	for _, user := range users {
-		memberMap[networkid.UserID(user.IDStr)] = tc.UserToChatMember(user, user.IDStr == selfUserId)
+		memberMap[networkid.UserID(user.IDStr)] = tc.UserToChatMember(user, user.IDStr == selfUserID)
 	}
 
 	return &bridgev2.ChatMemberList{
@@ -62,10 +62,10 @@ func (tc *TwitterClient) UsersToMemberList(users []types.User) *bridgev2.ChatMem
 }
 
 func (tc *TwitterClient) ParticipantsToMemberList(participants []types.Participant) *bridgev2.ChatMemberList {
-	selfUserId := tc.client.GetCurrentUserID()
+	selfUserID := tc.client.GetCurrentUserID()
 	memberMap := map[networkid.UserID]bridgev2.ChatMember{}
 	for _, participant := range participants {
-		memberMap[networkid.UserID(participant.UserID)] = tc.ParticipantToChatMember(participant, participant.UserID == selfUserId)
+		memberMap[networkid.UserID(participant.UserID)] = tc.ParticipantToChatMember(participant, participant.UserID == selfUserID)
 	}
 
 	return &bridgev2.ChatMemberList{
@@ -98,9 +98,9 @@ func (tc *TwitterClient) ParticipantToChatMember(participant types.Participant, 
 	}
 }
 
-func (tc *TwitterClient) GetUserInfoBridge(userId string) *bridgev2.UserInfo {
+func (tc *TwitterClient) GetUserInfoBridge(userID string) *bridgev2.UserInfo {
 	var userinfo *bridgev2.UserInfo
-	if userCacheEntry, ok := tc.userCache[userId]; ok {
+	if userCacheEntry, ok := tc.userCache[userID]; ok {
 		userinfo = &bridgev2.UserInfo{
 			Name:        ptr.Ptr(tc.connector.Config.FormatDisplayname(userCacheEntry.ScreenName, userCacheEntry.Name)),
 			Avatar:      tc.MakeAvatar(userCacheEntry.ProfileImageURL),

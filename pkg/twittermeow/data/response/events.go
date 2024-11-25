@@ -25,15 +25,15 @@ type UserEvents struct {
 	Conversations            map[string]types.Conversation      `json:"conversations,omitempty"`
 }
 
-func (data *XInboxData) GetUserByID(userId string) types.User {
-	if user, ok := data.Users[userId]; ok {
+func (data *XInboxData) GetUserByID(userID string) types.User {
+	if user, ok := data.Users[userID]; ok {
 		return user
 	}
 	return types.User{}
 }
 
-func (data *XInboxData) GetConversationByID(conversationId string) types.Conversation {
-	if conv, ok := data.Conversations[conversationId]; ok {
+func (data *XInboxData) GetConversationByID(conversationID string) types.Conversation {
+	if conv, ok := data.Conversations[conversationID]; ok {
 		return conv
 	}
 	return types.Conversation{}

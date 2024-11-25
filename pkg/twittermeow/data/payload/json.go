@@ -5,14 +5,14 @@ import "encoding/json"
 type SendDirectMessagePayload struct {
 	ConversationID    string `json:"conversation_id,omitempty"`
 	MediaID           string `json:"media_id,omitempty"`
-	ReplyToDmID       string `json:"reply_to_dm_id,omitempty"`
-	RecipientIds      bool   `json:"recipient_ids"`
+	ReplyToDMID       string `json:"reply_to_dm_id,omitempty"`
+	RecipientIDs      bool   `json:"recipient_ids"`
 	RequestID         string `json:"request_id,omitempty"`
 	Text              string `json:"text"`
 	CardsPlatform     string `json:"cards_platform,omitempty"`
 	IncludeCards      int    `json:"include_cards,omitempty"`
 	IncludeQuoteCount bool   `json:"include_quote_count"`
-	DmUsers           bool   `json:"dm_users"`
+	DMUsers           bool   `json:"dm_users"`
 }
 
 func (p *SendDirectMessagePayload) Encode() ([]byte, error) {

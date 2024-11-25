@@ -66,8 +66,8 @@ type PrettifiedMessage struct {
 	Reactions      []types.MessageReaction
 }
 
-func (data *XInboxData) PrettifyMessages(conversationId string) ([]PrettifiedMessage, error) {
-	messages, err := data.GetMessageEntriesByConversationID(conversationId, true)
+func (data *XInboxData) PrettifyMessages(conversationID string) ([]PrettifiedMessage, error) {
+	messages, err := data.GetMessageEntriesByConversationID(conversationID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (data *XInboxData) GetParticipantUsers(participants []types.Participant) []
 	return result
 }
 
-func (data *XInboxData) GetMessageEntriesByConversationID(conversationId string, sortByTimestamp bool) ([]types.Message, error) {
+func (data *XInboxData) GetMessageEntriesByConversationID(conversationID string, sortByTimestamp bool) ([]types.Message, error) {
 	messages := make([]types.Message, 0)
 	for _, entry := range data.Entries {
 		for entryType, entryData := range entry {
@@ -121,7 +121,7 @@ func (data *XInboxData) GetMessageEntriesByConversationID(conversationId string,
 					return nil, err
 				}
 
-				if message.ConversationID == conversationId {
+				if message.ConversationID == conversationID {
 					messages = append(messages, message)
 				}
 			} else if entryType == event.XMessageEditEvent {

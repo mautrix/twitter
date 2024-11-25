@@ -148,7 +148,7 @@ type Participant struct {
 	LastReadEventID         string `json:"last_read_event_id,omitempty"`
 	IsAdmin                 bool   `json:"is_admin,omitempty"`
 	JoinTime                string `json:"join_time,omitempty"`
-	JoinConversationEventId string `json:"join_conversation_event_id,omitempty"`
+	JoinConversationEventID string `json:"join_conversation_event_id,omitempty"`
 }
 
 type MessageDeleted struct {

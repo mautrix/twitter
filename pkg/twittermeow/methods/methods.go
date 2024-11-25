@@ -50,10 +50,10 @@ func SortMessagesByTime(messages []types.Message) {
 	})
 }
 
-func CreateConversationId(conversationIds []string) string {
-	sort.Slice(conversationIds, func(i, j int) bool {
-		return conversationIds[i] < conversationIds[j]
+func CreateConversationID(conversationIDs []string) string {
+	sort.Slice(conversationIDs, func(i, j int) bool {
+		return conversationIDs[i] < conversationIDs[j]
 	})
 
-	return strings.Join(conversationIds, "-")
+	return strings.Join(conversationIDs, "-")
 }

@@ -58,7 +58,7 @@ func deleteConversationTest(initialInboxData *response.XInboxData) {
 	}
 	firstConversation := conversations[0].Conversation
 
-	payload := payload.DmRequestQuery{}.Default()
+	payload := payload.DMRequestQuery{}.Default()
 	err = cli.DeleteConversation(firstConversation.ConversationID, &payload)
 	if err != nil {
 		log.Fatal(err)
@@ -98,7 +98,7 @@ func createConversationAndSendMessageTest() {
 
 	var pickedUser *types.User
 	for _, user := range searchResponse.Users {
-		if user.IsDmAble {
+		if user.IsDMAble {
 			pickedUser = &user
 			break
 		}
@@ -109,12 +109,12 @@ func createConversationAndSendMessageTest() {
 	}
 
 	dmPermissionsQuery := payload.GetDMPermissionsQuery{
-		RecipientIds: pickedUser.IDStr,
-		DmUsers:      true,
+		RecipientIDs: pickedUser.IDStr,
+		DMUsers:      true,
 	}
 	dmPermissionsResponse, err := cli.GetDMPermissions(dmPermissionsQuery)
 	if err != nil {
-		log.Fatalf("failed to fetch dm permissions for recipients with ids %s", dmPermissionsQuery.RecipientIds)
+		log.Fatalf("failed to fetch dm permissions for recipients with ids %s", dmPermissionsQuery.RecipientIDs)
 	}
 
 	pickedUserDMPermissions := dmPermissionsResponse.Permissions.GetPermissionsForUser(pickedUser.IDStr)
@@ -122,35 +122,35 @@ func createConversationAndSendMessageTest() {
 		log.Fatalf("failed to find permissions for user with id %s", pickedUser.IDStr)
 	}
 
-	if !pickedUserDMPermissions.CanDm {
-		log.Fatalf("exiting because I do not have the correct permissions to dm user with id: %s (canDm=%v, errorCode=%d)", pickedUser.IDStr, pickedUserDMPermissions.CanDm, pickedUserDMPermissions.ErrorCode)
+	if !pickedUserDMPermissions.CanDM {
+		log.Fatalf("exiting because I do not have the correct permissions to dm user with id: %s (canDm=%v, errorCode=%d)", pickedUser.IDStr, pickedUserDMPermissions.CanDM, pickedUserDMPermissions.ErrorCode)
 	}
 
 	myUserID := cli.GetCurrentUserID()
-	conversationId := fmt.Sprintf("%s-%s", pickedUser.IDStr, myUserID)
+	conversationID := fmt.Sprintf("%s-%s", pickedUser.IDStr, myUserID)
 
-	contextQuery := payload.DmRequestQuery{}.Default()
+	contextQuery := payload.DMRequestQuery{}.Default()
 	contextQuery.IncludeConversationInfo = true
-	_, err = cli.FetchConversationContext(conversationId, &contextQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
+	_, err = cli.FetchConversationContext(conversationID, &contextQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	sendDirectMessagePayload := &payload.SendDirectMessagePayload{
-		ConversationID:    conversationId,
+		ConversationID:    conversationID,
 		CardsPlatform:     "Web-12",
 		IncludeCards:      1,
 		IncludeQuoteCount: true,
-		DmUsers:           false,
-		RecipientIds:      false,
+		DMUsers:           false,
+		RecipientIDs:      false,
 		Text:              "testing creating a conversation by sending a message",
 	}
 	sentMessageResp, err := cli.SendDirectMessage(sendDirectMessagePayload)
 	if err != nil {
-		log.Fatalf("failed to initialize and send message to conversation by id %s", conversationId)
+		log.Fatalf("failed to initialize and send message to conversation by id %s", conversationID)
 	}
 
-	cli.Logger.Info().Any("response", sentMessageResp).Str("conversation_id", conversationId).Str("other_user_id", pickedUser.IDStr).Msg("Successfully initialized new conversation by sending a test message")
+	cli.Logger.Info().Any("response", sentMessageResp).Str("conversation_id", conversationID).Str("other_user_id", pickedUser.IDStr).Msg("Successfully initialized new conversation by sending a test message")
 }
 
 func deleteMessageForMeTest(initialInboxData *response.XInboxData) {
@@ -203,8 +203,8 @@ func uploadAndSendImageTest(initialInboxData *response.XInboxData) {
 		Text:              "",
 		MediaID:           mediaResult.MediaIDString,
 		IncludeQuoteCount: true,
-		RecipientIds:      false,
-		DmUsers:           false,
+		RecipientIDs:      false,
+		DMUsers:           false,
 	}
 
 	sentMessageResponse, err := cli.SendDirectMessage(payload)
@@ -226,13 +226,13 @@ func testReplyToMessage(initialInboxData *response.XInboxData) {
 	payload := &payload.SendDirectMessagePayload{
 		ConversationID:    firstConversation.ConversationID,
 		RequestID:         uuid.NewString(),
-		ReplyToDmID:       mostRecentMessage.MessageData.ID,
+		ReplyToDMID:       mostRecentMessage.MessageData.ID,
 		CardsPlatform:     "Web-12",
 		IncludeCards:      1,
 		Text:              "this is a test reply",
 		IncludeQuoteCount: true,
-		RecipientIds:      false,
-		DmUsers:           false,
+		RecipientIDs:      false,
+		DMUsers:           false,
 	}
 
 	sentReplyResponse, err := cli.SendDirectMessage(payload)
@@ -268,8 +268,8 @@ func uploadAndSendGifTest(initialInboxData *response.XInboxData) {
 		Text:              "",
 		MediaID:           mediaResult.MediaIDString,
 		IncludeQuoteCount: true,
-		RecipientIds:      false,
-		DmUsers:           false,
+		RecipientIDs:      false,
+		DMUsers:           false,
 	}
 
 	sentMessageResponse, err := cli.SendDirectMessage(payload)
@@ -311,8 +311,8 @@ func uploadAndSendVideoTest(initialInboxData *response.XInboxData) {
 		Text:              "",
 		MediaID:           mediaResult.MediaIDString,
 		IncludeQuoteCount: true,
-		RecipientIds:      false,
-		DmUsers:           false,
+		RecipientIDs:      false,
+		DMUsers:           false,
 	}
 
 	sentMessageResponse, err := cli.SendDirectMessage(payload)
@@ -337,8 +337,8 @@ func sendMessageTest(initialInboxData *response.XInboxData) {
 		CardsPlatform:     "Web-12",
 		IncludeCards:      1,
 		IncludeQuoteCount: true,
-		RecipientIds:      false,
-		DmUsers:           false,
+		RecipientIDs:      false,
+		DMUsers:           false,
 	}
 
 	sentMessageResponse, err := cli.SendDirectMessage(payload)
@@ -355,7 +355,7 @@ func logAllTrustedConversations(initialInboxData *response.XInboxData) {
 
 	paginationNextEntryID := trustedInboxTimeline.MinEntryID
 	paginationStatus := trustedInboxTimeline.Status
-	reqQuery := &payload.DmRequestQuery{}
+	reqQuery := &payload.DMRequestQuery{}
 
 	for paginationStatus == types.HAS_MORE {
 		reqQuery.MaxID = paginationNextEntryID
@@ -407,7 +407,7 @@ func logAllMessagesInConversation(initialInboxData *response.XInboxData) {
 
 	totalMessages := len(conversations[0].Messages)
 	paginationNextEntryID := firstConversation.MinEntryID
-	reqQuery := (&payload.DmRequestQuery{}).Default()
+	reqQuery := (&payload.DMRequestQuery{}).Default()
 	for conversationMessageHistoryStatus == types.HAS_MORE {
 		reqQuery.MaxID = paginationNextEntryID
 		fetchMessagesResponse, err := cli.FetchConversationContext(firstConversation.ConversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)

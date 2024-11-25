@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (c *Client) GetInitialInboxState(params *payload.DmRequestQuery) (*response.InboxInitialStateResponse, error) {
+func (c *Client) GetInitialInboxState(params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
 		return nil, err
@@ -21,7 +21,7 @@ func (c *Client) GetInitialInboxState(params *payload.DmRequestQuery) (*response
 	url := fmt.Sprintf("%s?%s", endpoints.INBOX_INITIAL_STATE_URL, string(encodedQuery))
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
@@ -34,7 +34,7 @@ func (c *Client) GetInitialInboxState(params *payload.DmRequestQuery) (*response
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) GetDMUserUpdates(params *payload.DmRequestQuery) (*response.GetDMUserUpdatesResponse, error) {
+func (c *Client) GetDMUserUpdates(params *payload.DMRequestQuery) (*response.GetDMUserUpdatesResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func (c *Client) GetDMUserUpdates(params *payload.DmRequestQuery) (*response.Get
 	url := fmt.Sprintf("%s?%s", endpoints.DM_USER_UPDATES_URL, string(encodedQuery))
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
@@ -63,7 +63,7 @@ func (c *Client) MarkConversationRead(params *payload.MarkConversationReadQuery)
 
 	url := fmt.Sprintf(endpoints.CONVERSATION_MARK_READ_URL, params.ConversationID)
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           encodedQueryBody,
@@ -82,16 +82,16 @@ func (c *Client) MarkConversationRead(params *payload.MarkConversationReadQuery)
 	return nil
 }
 
-func (c *Client) FetchConversationContext(conversationId string, params *payload.DmRequestQuery, context payload.ContextInfo) (*response.ConversationDMResponse, error) {
+func (c *Client) FetchConversationContext(conversationID string, params *payload.DMRequestQuery, context payload.ContextInfo) (*response.ConversationDMResponse, error) {
 	params.Context = context
 	encodedQuery, err := params.Encode()
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s?%s", fmt.Sprintf(endpoints.CONVERSATION_FETCH_MESSAGES, conversationId), string(encodedQuery))
+	url := fmt.Sprintf("%s?%s", fmt.Sprintf(endpoints.CONVERSATION_FETCH_MESSAGES, conversationID), string(encodedQuery))
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
@@ -104,7 +104,7 @@ func (c *Client) FetchConversationContext(conversationId string, params *payload
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) FetchTrustedThreads(params *payload.DmRequestQuery) (*response.InboxTimelineResponse, error) {
+func (c *Client) FetchTrustedThreads(params *payload.DMRequestQuery) (*response.InboxTimelineResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (c *Client) FetchTrustedThreads(params *payload.DmRequestQuery) (*response.
 	url := fmt.Sprintf("%s?%s", endpoints.TRUSTED_INBOX_TIMELINE_URL, string(encodedQuery))
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
@@ -137,7 +137,7 @@ func (c *Client) SendDirectMessage(payload *payload.SendDirectMessagePayload) (*
 
 	url := endpoints.SEND_DM_URL
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
@@ -166,7 +166,7 @@ func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*
 
 	url := fmt.Sprintf("%s?%s", endpoints.EDIT_DM_URL, string(encodedQuery))
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
@@ -182,9 +182,9 @@ func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) SendTypingNotification(conversationId string) error {
+func (c *Client) SendTypingNotification(conversationID string) error {
 	variables := &payload.SendTypingNotificationVariables{
-		ConversationID: conversationId,
+		ConversationID: conversationID,
 	}
 
 	GQLPayload := &payload.GraphQLPayload{
@@ -198,10 +198,10 @@ func (c *Client) SendTypingNotification(conversationId string) error {
 	}
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            endpoints.SEND_TYPING_NOTIFICATION,
+		URL:            endpoints.SEND_TYPING_NOTIFICATION,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
-		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, conversationId),
+		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, conversationID),
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.JSON,
 		Body:           jsonBody,
@@ -229,7 +229,7 @@ func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVa
 
 	url := endpoints.GRAPHQL_MESSAGE_DELETION_MUTATION
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
@@ -245,15 +245,15 @@ func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVa
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) DeleteConversation(conversationId string, payload *payload.DmRequestQuery) error {
+func (c *Client) DeleteConversation(conversationID string, payload *payload.DMRequestQuery) error {
 	encodedQueryBody, err := payload.Encode()
 	if err != nil {
 		return err
 	}
 
-	url := fmt.Sprintf(endpoints.DELETE_CONVERSATION_URL, conversationId)
+	url := fmt.Sprintf(endpoints.DELETE_CONVERSATION_URL, conversationID)
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           encodedQueryBody,
@@ -267,16 +267,16 @@ func (c *Client) DeleteConversation(conversationId string, payload *payload.DmRe
 	}
 
 	if resp.StatusCode > 204 {
-		return fmt.Errorf("failed to delete conversation by id %s (status_code=%d, response_body=%s)", conversationId, resp.StatusCode, string(respBody))
+		return fmt.Errorf("failed to delete conversation by id %s (status_code=%d, response_body=%s)", conversationID, resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-func (c *Client) PinConversation(conversationId string) (*response.PinConversationResponse, error) {
+func (c *Client) PinConversation(conversationID string) (*response.PinConversationResponse, error) {
 	graphQlPayload := payload.GraphQLPayload{
 		Variables: payload.PinAndUnpinConversationVariables{
-			ConversationID: conversationId,
+			ConversationID: conversationID,
 			Label:          payload.LABEL_TYPE_PINNED,
 		},
 		QueryID: "o0aymgGiJY-53Y52YSUGVA",
@@ -289,7 +289,7 @@ func (c *Client) PinConversation(conversationId string) (*response.PinConversati
 
 	url := endpoints.PIN_CONVERSATION_URL
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
@@ -306,10 +306,10 @@ func (c *Client) PinConversation(conversationId string) (*response.PinConversati
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) UnpinConversation(conversationId string) (*response.UnpinConversationResponse, error) {
+func (c *Client) UnpinConversation(conversationID string) (*response.UnpinConversationResponse, error) {
 	graphQlPayload := payload.GraphQLPayload{
 		Variables: payload.PinAndUnpinConversationVariables{
-			ConversationID: conversationId,
+			ConversationID: conversationID,
 			LabelType:      payload.LABEL_TYPE_PINNED,
 		},
 		QueryID: "_TQxP2Rb0expwVP9ktGrTQ",
@@ -322,7 +322,7 @@ func (c *Client) UnpinConversation(conversationId string) (*response.UnpinConver
 
 	url := endpoints.UNPIN_CONVERSATION_URL
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
@@ -357,7 +357,7 @@ func (c *Client) React(reactionPayload *payload.ReactionActionPayload, remove bo
 	}
 
 	apiRequestOpts := apiRequestOpts{
-		Url:            url,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,

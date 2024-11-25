@@ -35,17 +35,17 @@ func (tc *TwitterClient) HandleMatrixTyping(_ context.Context, msg *bridgev2.Mat
 }
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
-	conversationId := string(msg.Portal.ID)
+	conversationID := string(msg.Portal.ID)
 	sendDMPayload := &payload.SendDirectMessagePayload{
-		ConversationID:    conversationId,
+		ConversationID:    conversationID,
 		IncludeCards:      1,
 		IncludeQuoteCount: true,
-		RecipientIds:      false,
-		DmUsers:           false,
+		RecipientIDs:      false,
+		DMUsers:           false,
 	}
 
 	if msg.ReplyTo != nil {
-		sendDMPayload.ReplyToDmID = string(msg.ReplyTo.ID)
+		sendDMPayload.ReplyToDMID = string(msg.ReplyTo.ID)
 	}
 
 	content := msg.Content
@@ -88,7 +88,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		return nil, err
 	}
 
-	messageData, err := resp.PrettifyMessages(conversationId)
+	messageData, err := resp.PrettifyMessages(conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +121,10 @@ func (tc *TwitterClient) HandleMatrixReaction(_ context.Context, msg *bridgev2.M
 	return nil, tc.doHandleMatrixReaction(false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji)
 }
 
-func (tc *TwitterClient) doHandleMatrixReaction(remove bool, conversationId, messageId, emoji string) error {
+func (tc *TwitterClient) doHandleMatrixReaction(remove bool, conversationID, messageID, emoji string) error {
 	reactionPayload := &payload.ReactionActionPayload{
-		ConversationID: conversationId,
-		MessageID:      messageId,
+		ConversationID: conversationID,
+		MessageID:      messageID,
 		ReactionTypes:  []string{"Emoji"},
 		EmojiReactions: []string{emoji},
 	}
@@ -159,7 +159,7 @@ func (tc *TwitterClient) HandleMatrixEdit(_ context.Context, edit *bridgev2.Matr
 	_, err := tc.client.EditDirectMessage(&payload.EditDirectMessagePayload{
 		ConversationID: string(edit.Portal.ID),
 		RequestID:      uuid.New().String(),
-		DmID:           string(edit.EditTarget.ID),
+		DMID:           string(edit.EditTarget.ID),
 		Text:           edit.Content.Body,
 	})
 	return err

@@ -25,13 +25,13 @@ type AccountSettingsResponse struct {
 	AllowDmGroupsFrom                               string           `json:"allow_dm_groups_from,omitempty"`
 	TranslatorType                                  string           `json:"translator_type,omitempty"`
 	CountryCode                                     string           `json:"country_code,omitempty"`
-	NsfwUser                                        bool             `json:"nsfw_user,omitempty"`
-	NsfwAdmin                                       bool             `json:"nsfw_admin,omitempty"`
+	NSFWUser                                        bool             `json:"nsfw_user,omitempty"`
+	NSFWAdmin                                       bool             `json:"nsfw_admin,omitempty"`
 	RankedTimelineSetting                           any              `json:"ranked_timeline_setting,omitempty"`
 	RankedTimelineEligible                          any              `json:"ranked_timeline_eligible,omitempty"`
 	AddressBookLiveSyncEnabled                      bool             `json:"address_book_live_sync_enabled,omitempty"`
 	UniversalQualityFilteringEnabled                string           `json:"universal_quality_filtering_enabled,omitempty"`
-	DmReceiptSetting                                string           `json:"dm_receipt_setting,omitempty"`
+	DMReceiptSetting                                string           `json:"dm_receipt_setting,omitempty"`
 	AltTextComposeEnabled                           any              `json:"alt_text_compose_enabled,omitempty"`
 	MentionFilter                                   string           `json:"mention_filter,omitempty"`
 	AllowAuthenticatedPeriscopeRequests             bool             `json:"allow_authenticated_periscope_requests,omitempty"`
@@ -50,8 +50,8 @@ type SleepTime struct {
 	StartTime any  `json:"start_time,omitempty"`
 }
 type Ok struct {
-	SsoIDHash   string `json:"ssoIdHash,omitempty"`
-	SsoProvider string `json:"ssoProvider,omitempty"`
+	SSOIDHash   string `json:"ssoIdHash,omitempty"`
+	SSOProvider string `json:"ssoProvider,omitempty"`
 }
 type R struct {
 	Ok []Ok `json:"ok,omitempty"`
@@ -64,7 +64,7 @@ type Ext struct {
 	SsoConnections SsoConnections `json:"ssoConnections,omitempty"`
 }
 type SettingsMetadata struct {
-	IsEu string `json:"is_eu,omitempty"`
+	IsEU string `json:"is_eu,omitempty"`
 }
 
 type GetDMPermissionsResponse struct {
@@ -73,7 +73,7 @@ type GetDMPermissionsResponse struct {
 }
 
 type PermissionDetails struct {
-	CanDm     bool `json:"can_dm,omitempty"`
+	CanDM     bool `json:"can_dm,omitempty"`
 	ErrorCode int  `json:"error_code,omitempty"`
 }
 
@@ -81,8 +81,8 @@ type Permissions struct {
 	IDKeys map[string]PermissionDetails `json:"id_keys,omitempty"`
 }
 
-func (perms Permissions) GetPermissionsForUser(userId string) *PermissionDetails {
-	if user, ok := perms.IDKeys[userId]; ok {
+func (perms Permissions) GetPermissionsForUser(userID string) *PermissionDetails {
+	if user, ok := perms.IDKeys[userID]; ok {
 		return &user
 	}
 

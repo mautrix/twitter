@@ -21,14 +21,14 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 		Query:      identifier,
 		ResultType: payload.SEARCH_RESULT_TYPE_USERS,
 	})
+	if err != nil {
+		return nil, err
+	}
 	var resolvedUser types.User
 	for _, user := range response.Users {
 		if user.ScreenName == identifier {
 			resolvedUser = user
 		}
-	}
-	if err != nil {
-		return nil, err
 	}
 	ghost, err := tc.connector.br.GetGhostByID(ctx, networkid.UserID(resolvedUser.IDStr))
 	if err != nil {
@@ -38,8 +38,8 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 	var portalKey networkid.PortalKey
 	if startChat {
 		permissions, err := tc.client.GetDMPermissions(payload.GetDMPermissionsQuery{
-			RecipientIds: resolvedUser.IDStr,
-			DmUsers:      true,
+			RecipientIDs: resolvedUser.IDStr,
+			DMUsers:      true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get DM permissions for Twitter User: %w", err)
@@ -47,12 +47,12 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
 
-		if !perms.CanDm || perms.ErrorCode > 0 {
+		if !perms.CanDM || perms.ErrorCode > 0 {
 			return nil, fmt.Errorf("not allowed to DM this Twitter user: %v", resolvedUser.IDStr)
 		}
 
-		conversationId := methods.CreateConversationId([]string{resolvedUser.IDStr, tc.client.GetCurrentUserID()})
-		portalKey = tc.MakePortalKeyFromID(conversationId)
+		conversationID := methods.CreateConversationID([]string{resolvedUser.IDStr, tc.client.GetCurrentUserID()})
+		portalKey = tc.MakePortalKeyFromID(conversationID)
 	}
 
 	return &bridgev2.ResolveIdentifierResponse{
