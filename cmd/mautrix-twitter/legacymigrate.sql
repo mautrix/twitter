@@ -1,8 +1,6 @@
-INSERT INTO user (bridge_id, mxid, management_room, access_token)
+INSERT INTO "user" (bridge_id, mxid, management_room, access_token)
 SELECT '', mxid, notice_room, ''
 FROM user_old;
-
-
 
 INSERT INTO user_login (bridge_id, user_mxid, id, remote_name, space_room, metadata, remote_profile)
 SELECT
@@ -80,7 +78,7 @@ SELECT
     '', -- part_id
     mxid, -- mxid
     (SELECT twid FROM portal_old WHERE portal_old.mxid=message_old.mx_room), -- room_id
-    CAST(receiver as TEXT), -- room_receiver
+    CASE WHEN receiver<>0 THEN CAST(receiver AS TEXT) ELSE '' END, -- room_receiver
     '', -- sender_id
     '', -- sender_mxid
     0, -- timestamp
@@ -100,7 +98,7 @@ SELECT
     '', -- sender_mxid
     '', -- emoji_id
     (SELECT twid FROM portal_old WHERE portal_old.mxid=reaction_old.mx_room), -- room_id
-    CAST(tw_receiver as TEXT), -- room_receiver
+    CASE WHEN tw_receiver<>0 THEN CAST(tw_receiver AS TEXT) ELSE '' END, -- room_receiver
     0, -- timestamp
     mxid,
     reaction, -- emoji
