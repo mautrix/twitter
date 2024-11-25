@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
 )
 
@@ -39,7 +43,13 @@ func (c *Client) MakeRequest(url string, method string, headers http.Header, pay
 		resp, respDat, err := c.makeRequestDirect(url, method, headers, payload, contentType)
 		dur := time.Since(start)
 		if err == nil {
-			c.Logger.Debug().
+			var logEvt *zerolog.Event
+			if strings.HasPrefix(url, endpoints.DM_USER_UPDATES_URL) {
+				logEvt = c.Logger.Trace()
+			} else {
+				logEvt = c.Logger.Debug()
+			}
+			logEvt.
 				Str("url", url).
 				Str("method", method).
 				Dur("duration", dur).
