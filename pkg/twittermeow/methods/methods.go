@@ -1,10 +1,14 @@
 package methods
 
 import (
+	"cmp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/exp/maps"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
@@ -18,42 +22,33 @@ func UnixStringMilliToTime(input string) (time.Time, error) {
 }
 
 func SortConversationsByTimestamp(conversations map[string]types.Conversation) []types.Conversation {
-	var conversationSlice []types.Conversation
-	for _, conversation := range conversations {
-		conversationSlice = append(conversationSlice, conversation)
-	}
-
-	sort.Slice(conversationSlice, func(j, i int) bool {
-		timeJ, errJ := strconv.ParseInt(conversationSlice[j].SortTimestamp, 10, 64)
-		timeI, errI := strconv.ParseInt(conversationSlice[i].SortTimestamp, 10, 64)
-
-		if errI != nil || errJ != nil {
-			return errI == nil
+	conversationValues := maps.Values(conversations)
+	slices.SortFunc(conversationValues, func(a, b types.Conversation) int {
+		timeA, errA := strconv.ParseInt(a.SortTimestamp, 10, 64)
+		timeB, errB := strconv.ParseInt(b.SortTimestamp, 10, 64)
+		if errB != nil || errA != nil {
+			return 0
 		}
 
-		return timeI < timeJ
+		return cmp.Compare(timeA, timeB)
 	})
 
-	return conversationSlice
+	return conversationValues
 }
 
 func SortMessagesByTime(messages []types.Message) {
-	sort.Slice(messages, func(j, i int) bool {
-		timeJ, errJ := strconv.ParseInt(messages[j].Time, 10, 64)
-		timeI, errI := strconv.ParseInt(messages[i].Time, 10, 64)
-
-		if errI != nil || errJ != nil {
-			return errI == nil
+	slices.SortFunc(messages, func(a, b types.Message) int {
+		timeA, errA := strconv.ParseInt(a.Time, 10, 64)
+		timeB, errB := strconv.ParseInt(b.Time, 10, 64)
+		if errB != nil || errA != nil {
+			return 0
 		}
 
-		return timeJ < timeI
+		return cmp.Compare(timeA, timeB)
 	})
 }
 
 func CreateConversationID(conversationIDs []string) string {
-	sort.Slice(conversationIDs, func(i, j int) bool {
-		return conversationIDs[i] < conversationIDs[j]
-	})
-
+	sort.Strings(conversationIDs)
 	return strings.Join(conversationIDs, "-")
 }

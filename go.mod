@@ -10,6 +10,7 @@ require (
 	github.com/mattn/go-colorable v0.1.13
 	github.com/rs/zerolog v1.33.0
 	go.mau.fi/util v0.8.0
+	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/net v0.29.0
 	gopkg.in/yaml.v3 v3.0.1
 	maunium.net/go/mautrix v0.21.0
@@ -33,7 +34,6 @@ require (
 	github.com/yuin/goldmark v1.7.4 // indirect
 	go.mau.fi/zeroconfig v0.1.3 // indirect
 	golang.org/x/crypto v0.27.0 // indirect
-	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.25.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
