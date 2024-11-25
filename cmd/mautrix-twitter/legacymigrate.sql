@@ -81,7 +81,7 @@ SELECT
     CASE WHEN receiver<>0 THEN CAST(receiver AS TEXT) ELSE '' END, -- room_receiver
     '', -- sender_id
     '', -- sender_mxid
-    ((id>>22)+1288834974657)*1000000, -- timestamp
+    ((twid>>22)+1288834974657)*1000000, -- timestamp
     0, -- edit_count
     '{}' -- metadata
 FROM message_old;
