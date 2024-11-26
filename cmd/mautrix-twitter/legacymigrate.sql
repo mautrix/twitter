@@ -99,7 +99,7 @@ SELECT
     '', -- emoji_id
     (SELECT twid FROM portal_old WHERE portal_old.mxid=reaction_old.mx_room), -- room_id
     CASE WHEN tw_receiver<>0 THEN CAST(tw_receiver AS TEXT) ELSE '' END, -- room_receiver
-    ((tw_reaction_id>>22)+1288834974657)*1000000, -- timestamp
+    ((COALESCE(tw_reaction_id, tw_msgid)>>22)+1288834974657)*1000000, -- timestamp
     mxid,
     reaction, -- emoji
     '{}' -- metadata
