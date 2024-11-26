@@ -27,10 +27,10 @@ INSERT INTO ghost (
 SELECT
     '', -- bridge_id
     CAST(twid AS TEXT), -- id
-    name, -- name
-    photo_url, -- avatar_id
+    COALESCE(name, ''), -- name
+    COALESCE(photo_url, ''), -- avatar_id
     '', -- avatar_hash
-    photo_mxc, -- avatar_mxc
+    COALESCE(photo_mxc, ''), -- avatar_mxc
     CASE WHEN name <> '' THEN 1 ELSE 0 END, -- name_set
     CASE WHEN photo_mxc <> '' THEN 1 ELSE 0 END, -- avatar_set
     contact_info_set, -- contact_info_set
