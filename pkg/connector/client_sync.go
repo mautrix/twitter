@@ -60,6 +60,9 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 		conv := convInboxData.Conversation
 		methods.SortMessagesByTime(convInboxData.Messages)
 		messages := convInboxData.Messages
+		if len(messages) == 0 {
+			continue
+		}
 		latestMessage := messages[len(messages)-1]
 		latestMessageTS := methods.ParseSnowflake(latestMessage.MessageData.ID)
 		evt := &simplevent.ChatResync{
