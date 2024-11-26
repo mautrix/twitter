@@ -8,15 +8,15 @@ A Matrix-Twitter DM puppeting bridge.
 
 ## Documentation
 All setup and usage instructions are located on
-[docs.mau.fi](https://docs.mau.fi/bridges/python/twitter/index.html).
+[docs.mau.fi](https://docs.mau.fi/bridges/go/twitter/index.html).
 Some quick links:
 
-* [Bridge setup](https://docs.mau.fi/bridges/python/setup.html?bridge=twitter)
+* [Bridge setup](https://docs.mau.fi/bridges/go/setup.html?bridge=twitter)
   (or [with Docker](https://docs.mau.fi/bridges/general/docker-setup.html?bridge=twitter))
-* Basic usage: [Authentication](https://docs.mau.fi/bridges/python/twitter/authentication.html)
+* Basic usage: [Authentication](https://docs.mau.fi/bridges/go/twitter/authentication.html)
 
 ### Features & Roadmap
-[ROADMAP.md](https://github.com/mautrix/twitter/blob/master/ROADMAP.md)
+[ROADMAP.md](https://github.com/mautrix/twitter/blob/main/ROADMAP.md)
 contains a general overview of what is supported by the bridge.
 
 ## Discussion
