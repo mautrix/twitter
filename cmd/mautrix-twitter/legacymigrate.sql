@@ -49,7 +49,7 @@ SELECT
     CAST(twid AS TEXT), -- id
     CASE WHEN receiver<>0 THEN CAST(receiver AS TEXT) ELSE '' END, -- receiver
     mxid, -- mxid
-    CASE WHEN conv_type <> 'ONE_TO_ONE' THEN CAST(other_user AS TEXT) END, -- other_user_id
+    CASE WHEN conv_type='ONE_TO_ONE' THEN CAST(other_user AS TEXT) END, -- other_user_id
     '', -- name
     '', -- topic
     '', -- avatar_id
@@ -60,7 +60,7 @@ SELECT
     false, -- topic_set
     false, -- name_is_custom
     false, -- in_space
-    CASE WHEN conv_type <> 'GROUP_DM' THEN 'group_dm' ELSE 'dm' END, -- room_type
+    CASE WHEN conv_type='GROUP_DM' THEN 'group_dm' ELSE 'dm' END, -- room_type
     '{}' -- metadata
 FROM portal_old;
 
