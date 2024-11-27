@@ -33,7 +33,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    tc.MakePortalKey(evtData.Conversation),
-				CreatePortal: true,
+				CreatePortal: !evtData.Conversation.LowQuality,
 				Sender: bridgev2.EventSender{
 					IsFromMe:    isFromMe,
 					SenderLogin: networkid.UserLoginID(sender.IDStr),
@@ -107,8 +107,9 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 						Str("conversation_id", evtData.Conversation.ConversationID).
 						Int("total_new_members", len(evtData.NewParticipants))
 				},
-				PortalKey: tc.MakePortalKey(evtData.Conversation),
-				Timestamp: evtData.EventTime,
+				PortalKey:    tc.MakePortalKey(evtData.Conversation),
+				CreatePortal: !evtData.Conversation.LowQuality,
+				Timestamp:    evtData.EventTime,
 			},
 			ChatInfoChange: &bridgev2.ChatInfoChange{
 				MemberChanges: tc.UsersToMemberList(evtData.NewParticipants),
