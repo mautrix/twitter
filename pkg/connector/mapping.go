@@ -25,11 +25,18 @@ func RemoveEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []
 
 func (tc *TwitterClient) ConversationToChatInfo(conv *types.Conversation) *bridgev2.ChatInfo {
 	memberList := tc.ParticipantsToMemberList(conv.Participants)
+	var userLocal bridgev2.UserLocalPortalInfo
+	if conv.Muted {
+		userLocal.MutedUntil = ptr.Ptr(bridgeEvt.MutedForever)
+	} else {
+		userLocal.MutedUntil = ptr.Ptr(bridgev2.Unmuted)
+	}
 	return &bridgev2.ChatInfo{
 		Name:        &conv.Name,
 		Avatar:      tc.MakeAvatar(conv.AvatarImageHttps),
 		Members:     memberList,
 		Type:        tc.ConversationTypeToRoomType(conv.Type),
+		UserLocal:   &userLocal,
 		CanBackfill: true,
 	}
 }
