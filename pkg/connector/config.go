@@ -18,6 +18,8 @@ type Config struct {
 
 	DisplaynameTemplate string `yaml:"displayname_template"`
 
+	ConversationSyncLimit int `yaml:"conversation_sync_limit"`
+
 	displaynameTemplate *template.Template `yaml:"-"`
 }
 
@@ -39,8 +41,8 @@ func (c *Config) UnmarshalYAML(node *yaml.Node) error {
 func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str|up.Null, "proxy")
 	helper.Copy(up.Str|up.Null, "get_proxy_url")
-
 	helper.Copy(up.Str, "displayname_template")
+	helper.Copy(up.Int, "conversation_sync_limit")
 }
 
 type DisplaynameParams struct {

@@ -7,3 +7,6 @@ get_proxy_url: null
 # {{ .DisplayName }} is replaced with the display name of the Twitter user.
 # {{ .Username }} is replaced with the username of the Twitter user.
 displayname_template: "{{ .DisplayName }} (Twitter)"
+
+# Maximum number of conversations to sync on startup
+conversation_sync_limit: 20

@@ -30,9 +30,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 	cursor := trustedInbox.MinEntryID
 	paginationStatus := trustedInbox.Status
 
-	// loop until no more threads can be found
-	// add backfill configuration to limit this later
-	for paginationStatus == types.HAS_MORE {
+	for paginationStatus == types.HAS_MORE && (tc.connector.Config.ConversationSyncLimit == -1 || len(inboxData.Entries) < tc.connector.Config.ConversationSyncLimit) {
 		reqQuery.MaxID = cursor
 		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(reqQuery)
 		if err != nil {
