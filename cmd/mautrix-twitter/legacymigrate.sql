@@ -9,13 +9,12 @@ SELECT
     CAST(twid AS TEXT), -- id
     '', -- remote_name
     notice_room,
---  only: postgres (line commented)
---  jsonb_build_object
-    -- only: sqlite
-    json_object
+    -- only: postgres
+    jsonb_build_object
+    -- only: sqlite (line commented)
+--  json_object
     (
-        'cookies',
-        ('auth_token =' || auth_token || '; ct0=' || csrf_token || ';')
+        'cookies', 'auth_token=' || auth_token || '; ct0=' || csrf_token || ';'
     ), -- metadata
     '{}' -- remote_profile
 FROM user_old WHERE twid IS NOT NULL;
