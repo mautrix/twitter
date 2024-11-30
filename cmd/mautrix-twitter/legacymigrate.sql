@@ -30,8 +30,8 @@ SELECT
     COALESCE(photo_url, ''), -- avatar_id
     '', -- avatar_hash
     COALESCE(photo_mxc, ''), -- avatar_mxc
-    CASE WHEN name <> '' THEN 1 ELSE 0 END, -- name_set
-    CASE WHEN photo_mxc <> '' THEN 1 ELSE 0 END, -- avatar_set
+    name <> '', -- name_set
+    photo_mxc <> '', -- avatar_set
     contact_info_set, -- contact_info_set
     false, -- is_bot
     '[]', -- identifiers
@@ -54,8 +54,8 @@ SELECT
     '', -- avatar_id
     '', -- avatar_hash
     '', -- avatar_mxc
-    1, -- name_set
-    1, --avatar_set
+    false, -- name_set
+    false, -- avatar_set
     false, -- topic_set
     false, -- name_is_custom
     false, -- in_space
