@@ -129,6 +129,7 @@ CREATE TABLE mx_registrations (
 
 UPDATE mx_version SET version=7;
 
+DROP TABLE backfill_status;
 DROP TABLE reaction_old;
 DROP TABLE message_old;
 DROP TABLE portal_old;
