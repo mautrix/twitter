@@ -8,7 +8,7 @@ SELECT
     mxid, -- user_mxid
     CAST(twid AS TEXT), -- id
     '', -- remote_name
-    notice_room,
+    '', -- space_room
     -- only: postgres
     jsonb_build_object
     -- only: sqlite (line commented)
