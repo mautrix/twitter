@@ -20,5 +20,5 @@ var legacyMigrateCopyData string
 
 func migrateLegacyConfig(helper up.Helper) {
 	helper.Set(up.Str, "mautrix.bridge.e2ee", "encryption", "pickle_key")
-	bridgeconfig.CopyToOtherLocation(helper, up.Int, []string{"bridge", "displayname_max_length"}, []string{"network", "displayname_max_length"})
+	bridgeconfig.CopyToOtherLocation(helper, up.Int, []string{"bridge", "initial_conversation_sync"}, []string{"network", "conversation_sync_limit"})
 }
