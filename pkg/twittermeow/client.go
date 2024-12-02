@@ -3,7 +3,6 @@ package twittermeow
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -194,9 +193,7 @@ func (c *Client) SetProxy(proxyAddr string) error {
 }
 
 func (c *Client) IsLoggedIn() bool {
-	isLoggedIn := !c.cookies.IsCookieEmpty(cookies.XAuthToken)
-	log.Println("is logged in:", isLoggedIn)
-	return isLoggedIn
+	return !c.cookies.IsCookieEmpty(cookies.XAuthToken)
 }
 
 func (c *Client) isAuthenticated() bool {

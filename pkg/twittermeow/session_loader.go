@@ -3,7 +3,6 @@ package twittermeow
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	neturl "net/url"
 	"time"
@@ -85,7 +84,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 	mainPageHTML := string(mainPageRespBody)
 	migrationURL, migrationRequired := methods.ParseMigrateURL(mainPageHTML)
 	if migrationRequired {
-		log.Println("migration is required...")
+		s.client.Logger.Debug().Msg("Migrating session from twitter.com")
 		extraHeaders = map[string]string{
 			"upgrade-insecure-requests": "1",
 			"sec-fetch-site":            "cross-site",
