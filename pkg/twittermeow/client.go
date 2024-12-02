@@ -132,7 +132,6 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		IncludeCountryCode:          true,
 		IncludeExtDMNSFWMediaFilter: true,
 	})
-
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get account settings: %w", err)
 	}
