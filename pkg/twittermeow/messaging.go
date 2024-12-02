@@ -69,14 +69,9 @@ func (c *Client) MarkConversationRead(params *payload.MarkConversationReadQuery)
 		Body:           encodedQueryBody,
 		ContentType:    types.FORM,
 	}
-	resp, respBody, err := c.makeAPIRequest(apiRequestOpts)
+	_, _, err = c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
 		return err
-	}
-
-	if resp.StatusCode > 204 {
-		c.Logger.Warn().Any("response_body", string(respBody)).Any("status_code", resp.StatusCode).Any("params", params).Msg("Failed to mark conversation as read")
-		return ErrFailedMarkConversationRead
 	}
 
 	return nil

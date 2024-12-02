@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -108,7 +109,10 @@ func (c *Client) makeRequestDirect(url string, method string, headers http.Heade
 		return nil, nil, fmt.Errorf("%w: %w", ErrResponseReadFailed, err)
 	}
 	if response.StatusCode >= 400 {
-		if len(responseBody) < 512 {
+		var respErr TwitterErrors
+		if json.Unmarshal(responseBody, &respErr) == nil {
+			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
+		} else if len(responseBody) < 512 {
 			return response, responseBody, fmt.Errorf("HTTP %d: %s", response.StatusCode, responseBody)
 		}
 		return response, responseBody, fmt.Errorf("HTTP %d (%d bytes of data)", response.StatusCode, len(responseBody))

@@ -117,10 +117,19 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	_, currentUser, err := tc.client.LoadMessagesPage()
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to load messages page")
-		tc.userLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateUnknownError,
-			Error:      "twitter-load-error",
-		})
+		if twittermeow.IsAuthError(err) {
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateBadCredentials,
+				Error:      "twitter-invalid-credentials",
+				Message:    err.Error(),
+			})
+		} else {
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateUnknownError,
+				Error:      "twitter-load-error",
+				Message:    err.Error(),
+			})
+		}
 		return
 	}
 

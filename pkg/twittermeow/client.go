@@ -89,7 +89,7 @@ func (c *Client) GetCookieString() string {
 
 func (c *Client) Connect() error {
 	if c.eventHandler == nil {
-		return ErrConnectPleaseSetEventHandler
+		return ErrConnectSetEventHandler
 	}
 
 	if !c.isAuthenticated() {
