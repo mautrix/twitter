@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 )
 
 const BrowserName = "Chrome"
@@ -29,6 +30,8 @@ var BaseHeaders = http.Header{
 	"sec-ch-ua":          []string{SecCHUserAgent},
 	"sec-ch-ua-platform": []string{SecCHPlatform},
 	"sec-ch-ua-mobile":   []string{SecCHMobile},
+	"referer":            []string{endpoints.BASE_URL + "/"},
+	"origin":             []string{endpoints.BASE_URL},
 	//"sec-ch-prefers-color-scheme": []string{SecCHPrefersColorScheme},
 	//"sec-ch-ua-full-version-list": []string{SecCHFullVersionList},
 	//"sec-ch-ua-model":             []string{SecCHModel},
