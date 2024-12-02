@@ -121,35 +121,36 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
-	data, err := c.GetAccountSettings(payload.AccountSettingsQuery{
-		IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
-		IncludeMentionFilter:        true,
-		IncludeNSFWUserFlag:         true,
-		IncludeNSFWAdminFlag:        true,
-		IncludeRankedTimeline:       true,
-		IncludeAltTextCompose:       true,
-		Ext:                         "ssoConnections",
-		IncludeCountryCode:          true,
-		IncludeExtDMNSFWMediaFilter: true,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get account settings: %w", err)
-	}
+	//data, err := c.GetAccountSettings(payload.AccountSettingsQuery{
+	//	IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
+	//	IncludeMentionFilter:        true,
+	//	IncludeNSFWUserFlag:         true,
+	//	IncludeNSFWAdminFlag:        true,
+	//	IncludeRankedTimeline:       true,
+	//	IncludeAltTextCompose:       true,
+	//	Ext:                         "ssoConnections",
+	//	IncludeCountryCode:          true,
+	//	IncludeExtDMNSFWMediaFilter: true,
+	//})
+	//if err != nil {
+	//	return nil, nil, fmt.Errorf("failed to get account settings: %w", err)
+	//}
 
 	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DMRequestQuery{}.Default()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
 	}
 
-	c.session.SetCurrentUser(data)
+	//c.session.SetCurrentUser(data)
+	c.session.SetCurrentUser(&response.AccountSettingsResponse{})
 	c.polling.SetCurrentCursor(initialInboxState.InboxInitialState.Cursor)
 
 	c.Logger.Info().
-		Str("screen_name", data.ScreenName).
+		//Str("screen_name", data.ScreenName).
 		Str("initial_inbox_cursor", initialInboxState.InboxInitialState.Cursor).
 		Msg("Successfully loaded and authenticated as user")
 
-	return &initialInboxState.InboxInitialState, data, nil
+	return &initialInboxState.InboxInitialState, &response.AccountSettingsResponse{}, nil
 }
 
 func (c *Client) GetCurrentUser() *response.AccountSettingsResponse {
