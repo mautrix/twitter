@@ -62,7 +62,7 @@ func (s *SessionLoader) isAuthenticated() bool {
 func (s *SessionLoader) LoadPage(url string) error {
 	mainPageURL, err := neturl.Parse(url)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse URL %q: %w", url, err)
 	}
 	extraHeaders := map[string]string{
 		"upgrade-insecure-requests": "1",
@@ -72,7 +72,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 	}
 	mainPageResp, mainPageRespBody, err := s.client.MakeRequest(url, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.NONE)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send main page request: %w", err)
 	}
 
 	s.client.cookies.UpdateFromResponse(mainPageResp)
@@ -93,7 +93,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 		}
 		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.NONE)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to send migration request: %w", err)
 		}
 
 		migrationPageHTML := string(migrationPageRespBody)
@@ -101,7 +101,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 		if migrationFormPayload != nil {
 			migrationForm, err := query.Values(migrationFormPayload)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to parse migration form data: %w", err)
 			}
 			migrationPayload := []byte(migrationForm.Encode())
 			extraHeaders["origin"] = endpoints.TWITTER_BASE_URL
@@ -117,18 +117,18 @@ func (s *SessionLoader) LoadPage(url string) error {
 			migrationFormURL = endpoints.BASE_URL + mainPageResp.Header.Get("Location")
 			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send main page request after migration: %w", err)
 			}
 
 			mainPageHTML := string(mainPageRespBody)
 			err = s.client.parseMainPageHTML(mainPageResp, mainPageHTML)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to parse main page HTML after migration: %w", err)
 			}
 
 			err = s.doInitialClientLoggingEvents()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to perform initial client logging events after migration: %w", err)
 			}
 
 		} else {
@@ -139,12 +139,12 @@ func (s *SessionLoader) LoadPage(url string) error {
 		mainPageHTML := string(mainPageRespBody)
 		err = s.client.parseMainPageHTML(mainPageResp, mainPageHTML)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse main page HTML: %w", err)
 		}
 
 		err = s.doInitialClientLoggingEvents()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to perform initial client logging events after migration: %w", err)
 		}
 	}
 	return nil

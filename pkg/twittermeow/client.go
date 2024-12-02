@@ -118,7 +118,7 @@ func (c *Client) Logout() (bool, error) {
 func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSettingsResponse, error) {
 	err := c.session.LoadPage(endpoints.BASE_MESSAGES_URL)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
 	data, err := c.GetAccountSettings(payload.AccountSettingsQuery{
@@ -134,12 +134,12 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 	})
 
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to get account settings: %w", err)
 	}
 
 	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DMRequestQuery{}.Default()))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
 	}
 
 	c.session.SetCurrentUser(data)
@@ -150,7 +150,7 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		Str("initial_inbox_cursor", initialInboxState.InboxInitialState.Cursor).
 		Msg("Successfully loaded and authenticated as user")
 
-	return &initialInboxState.InboxInitialState, data, err
+	return &initialInboxState.InboxInitialState, data, nil
 }
 
 func (c *Client) GetCurrentUser() *response.AccountSettingsResponse {
