@@ -105,18 +105,23 @@ func (tc *TwitterClient) RegisterPushNotifications(ctx context.Context, pushType
 	}
 }
 
-func (tc *TwitterClient) Connect(ctx context.Context) error {
+func (tc *TwitterClient) Connect(ctx context.Context) {
 	if tc.client == nil {
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateBadCredentials,
 			Error:      "twitter-not-logged-in",
 		})
-		return nil
+		return
 	}
 
 	_, currentUser, err := tc.client.LoadMessagesPage()
 	if err != nil {
-		return fmt.Errorf("failed to load messages page: %w", err)
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to load messages page")
+		tc.userLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateUnknownError,
+			Error:      "twitter-load-error",
+		})
+		return
 	}
 
 	tc.userLogin.RemoteName = currentUser.ScreenName
@@ -125,10 +130,14 @@ func (tc *TwitterClient) Connect(ctx context.Context) error {
 	go tc.syncChannels(ctx)
 	err = tc.client.Connect()
 	if err != nil {
-		return fmt.Errorf("failed to connect to twitter client: %w", err)
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to start polling")
+		tc.userLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateUnknownError,
+			Error:      "twitter-connect-error",
+		})
+		return
 	}
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
-	return nil
 }
 
 func (tc *TwitterClient) Disconnect() {
