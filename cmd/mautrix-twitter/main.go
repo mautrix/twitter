@@ -55,7 +55,6 @@ func main() {
 	}
 	m.PostStart = func() {
 		if m.Matrix.Provisioning != nil {
-			m.Matrix.Provisioning.Router.HandleFunc("/v1/api/whoami", legacyProvStatus).Methods(http.MethodGet)
 			m.Matrix.Provisioning.Router.HandleFunc("/v1/api/login", legacyProvLogin).Methods(http.MethodPost)
 			m.Matrix.Provisioning.Router.HandleFunc("/v1/api/logout", legacyProvLogout).Methods(http.MethodPost)
 		}

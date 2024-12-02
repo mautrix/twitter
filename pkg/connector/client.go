@@ -164,6 +164,7 @@ func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) 
 }
 
 func (tc *TwitterClient) GetCurrentUser() (user *types.User, err error) {
+	// TODO wtf is this
 	_, settings, err := tc.client.LoadMessagesPage()
 	if err != nil {
 		return nil, err

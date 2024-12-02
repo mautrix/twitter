@@ -10,7 +10,6 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridge/status"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/bridgeconfig"
 
 	"go.mau.fi/mautrix-twitter/pkg/connector"
 )
@@ -30,34 +29,6 @@ type Error struct {
 type Response struct {
 	Success bool   `json:"success"`
 	Status  string `json:"status"`
-}
-
-var levelsToNames = map[bridgeconfig.Permissions]string{
-	bridgeconfig.PermissionLevelBlock:    "block",
-	bridgeconfig.PermissionLevelRelay:    "relay",
-	bridgeconfig.PermissionLevelCommands: "commands",
-	bridgeconfig.PermissionLevelUser:     "user",
-	bridgeconfig.PermissionLevelAdmin:    "admin",
-}
-
-func legacyProvStatus(w http.ResponseWriter, r *http.Request) {
-	user := m.Matrix.Provisioning.GetUser(r)
-	response := map[string]any{
-		"permissions": levelsToNames[user.Permissions],
-		"mxid":        user.MXID.String(),
-	}
-
-	ul := user.GetDefaultLogin()
-	if ul.ID != "" { // if logged in
-		twitClient := connector.NewTwitterClient(r.Context(), c, ul)
-
-		currentUser, err := twitClient.GetCurrentUser()
-		if err == nil {
-			response["twitter"] = currentUser
-		}
-	}
-
-	jsonResponse(w, http.StatusOK, response)
 }
 
 func legacyProvLogin(w http.ResponseWriter, r *http.Request) {
