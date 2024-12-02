@@ -30,9 +30,9 @@ SELECT
     COALESCE(photo_url, ''), -- avatar_id
     '', -- avatar_hash
     COALESCE(photo_mxc, ''), -- avatar_mxc
-    name <> '', -- name_set
-    photo_mxc <> '', -- avatar_set
-    contact_info_set, -- contact_info_set
+    COALESCE(name <> '', false), -- name_set
+    COALESCE(photo_mxc <> '', false), -- avatar_set
+    COALESCE(contact_info_set, false), -- contact_info_set
     false, -- is_bot
     '[]', -- identifiers
     '{}' -- metadata
