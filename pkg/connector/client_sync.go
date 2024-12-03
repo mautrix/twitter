@@ -36,6 +36,8 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 		if err != nil {
 			log.Error().Err(err).Msg(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s:", cursor))
 			return
+		} else if len(nextInboxTimelineResponse.InboxTimeline.Entries) == 0 {
+			break
 		}
 
 		maps.Copy(inboxData.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
