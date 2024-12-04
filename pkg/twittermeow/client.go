@@ -233,12 +233,12 @@ func (c *Client) fetchAndParseMainScript(scriptURL string) error {
 func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML string) error {
 	country := methods.ParseCountry(mainPageHTML)
 	if country == "" {
-		return fmt.Errorf("failed to find session country by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
+		return fmt.Errorf("country code not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 
 	verificationToken := methods.ParseVerificationToken(mainPageHTML)
 	if verificationToken == "" {
-		return fmt.Errorf("failed to find twitter verification token by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
+		return fmt.Errorf("verification token not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 
 	c.session.SetCountry(country)
@@ -248,7 +248,7 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 	if guestToken == "" {
 		if c.cookies.IsCookieEmpty(cookies.XGuestToken) && !c.IsLoggedIn() {
 			// most likely means your cookies are invalid / expired
-			return fmt.Errorf("failed to find guest token by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
+			return fmt.Errorf("guest token not found (HTTP %d)", mainPageResp.StatusCode)
 		}
 	} else {
 		c.cookies.Set(cookies.XGuestToken, guestToken)
@@ -256,7 +256,7 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 
 	mainScriptURL := methods.ParseMainScriptURL(mainPageHTML)
 	if mainScriptURL == "" {
-		return fmt.Errorf("failed to find main script url by regex in redirected html response body (response_body=%s, status_code=%d)", mainPageHTML, mainPageResp.StatusCode)
+		return fmt.Errorf("main script not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 
 	err := c.fetchAndParseMainScript(mainScriptURL)

@@ -132,7 +132,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 			}
 
 		} else {
-			return fmt.Errorf("failed to find form request data in migration response: (response_body=%s, status_code=%d)", migrationPageHTML, migrationPageResp.StatusCode)
+			return fmt.Errorf("failed to find form request data in migration response (HTTP %d)", migrationPageResp.StatusCode)
 		}
 	} else {
 		// most likely means... already authenticated
