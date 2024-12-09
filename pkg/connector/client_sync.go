@@ -73,7 +73,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 						Str("portal_key", conv.ConversationID)
 				},
 				PortalKey:    tc.MakePortalKey(conv),
-				CreatePortal: true,
+				CreatePortal: !conv.LowQuality,
 			},
 			ChatInfo:        tc.ConversationToChatInfo(&conv),
 			LatestMessageTS: latestMessageTS,
