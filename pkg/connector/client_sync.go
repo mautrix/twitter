@@ -70,7 +70,9 @@ func (tc *TwitterClient) syncChannels(ctx context.Context) {
 				Type: bridgev2.RemoteEventChatResync,
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.
-						Str("portal_key", conv.ConversationID)
+						Str("conversation_id", conv.ConversationID).
+						Bool("conv_low_quality", conv.LowQuality).
+						Bool("conv_trusted", conv.Trusted)
 				},
 				PortalKey:    tc.MakePortalKey(conv),
 				CreatePortal: !conv.LowQuality,

@@ -30,7 +30,9 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 						Str("message_id", evtData.MessageID).
 						Str("sender", sender.IDStr).
 						Str("sender_login", sender.ScreenName).
-						Bool("is_from_me", isFromMe)
+						Bool("is_from_me", isFromMe).
+						Bool("conv_low_quality", evtData.Conversation.LowQuality).
+						Bool("conv_trusted", evtData.Conversation.Trusted)
 				},
 				PortalKey:    tc.MakePortalKey(evtData.Conversation),
 				CreatePortal: !evtData.Conversation.LowQuality,
@@ -105,7 +107,9 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.
 						Str("conversation_id", evtData.Conversation.ConversationID).
-						Int("total_new_members", len(evtData.NewParticipants))
+						Int("total_new_members", len(evtData.NewParticipants)).
+						Bool("conv_low_quality", evtData.Conversation.LowQuality).
+						Bool("conv_trusted", evtData.Conversation.Trusted)
 				},
 				PortalKey:    tc.MakePortalKey(evtData.Conversation),
 				CreatePortal: !evtData.Conversation.LowQuality,
