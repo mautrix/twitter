@@ -154,14 +154,6 @@ const (
 	MEDIA_CATEGORY_DM_GIF   MediaCategory = "dm_gif"
 )
 
-type MediaType string
-
-const (
-	MEDIA_TYPE_IMAGE_JPEG MediaType = "image/jpeg"
-	MEDIA_TYPE_IMAGE_GIF  MediaType = "image/gif"
-	MEDIA_TYPE_VIDEO_MP4  MediaType = "video/mp4"
-)
-
 type UploadMediaQuery struct {
 	Command         string        `url:"command,omitempty"`
 	TotalBytes      int           `url:"total_bytes,omitempty"`
@@ -170,7 +162,7 @@ type UploadMediaQuery struct {
 	VideoDurationMS float32       `url:"video_duration_ms,omitempty"`
 	OriginalMD5     string        `url:"original_md5,omitempty"`
 	SegmentIndex    int           `url:"segment_index,omitempty"`
-	MediaType       MediaType     `url:"media_type,omitempty"`
+	MediaType       string        `url:"media_type,omitempty"`
 	MediaCategory   MediaCategory `url:"media_category,omitempty"`
 }
 

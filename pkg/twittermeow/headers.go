@@ -24,22 +24,23 @@ const SecCHPrefersColorScheme = "light"
 const UDID = OSName + "/" + BrowserName
 
 var BaseHeaders = http.Header{
-	"accept":             []string{"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"},
-	"accept-language":    []string{"en-US,en;q=0.9"},
-	"user-agent":         []string{UserAgent},
-	"sec-ch-ua":          []string{SecCHUserAgent},
-	"sec-ch-ua-platform": []string{SecCHPlatform},
-	"sec-ch-ua-mobile":   []string{SecCHMobile},
-	"referer":            []string{endpoints.BASE_URL + "/"},
-	"origin":             []string{endpoints.BASE_URL},
-	//"sec-ch-prefers-color-scheme": []string{SecCHPrefersColorScheme},
-	//"sec-ch-ua-full-version-list": []string{SecCHFullVersionList},
-	//"sec-ch-ua-model":             []string{SecCHModel},
-	//"sec-ch-ua-platform-version":  []string{SecCHPlatformVersion},
+	"Accept":             []string{"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"},
+	"Accept-Language":    []string{"en-US,en;q=0.9"},
+	"User-Agent":         []string{UserAgent},
+	"Sec-Ch-Ua":          []string{SecCHUserAgent},
+	"Sec-Ch-Ua-Platform": []string{SecCHPlatform},
+	"Sec-Ch-Ua-Mobile":   []string{SecCHMobile},
+	"Referer":            []string{endpoints.BASE_URL + "/"},
+	"Origin":             []string{endpoints.BASE_URL},
+	//"Sec-Ch-Prefers-Color-Scheme": []string{SecCHPrefersColorScheme},
+	//"Sec-Ch-Ua-Full-Version-List": []string{SecCHFullVersionList},
+	//"Sec-Ch-Ua-Model":             []string{SecCHModel},
+	//"Sec-Ch-Ua-Platform-Version":  []string{SecCHPlatformVersion},
 }
 
 type HeaderOpts struct {
 	WithAuthBearer      bool
+	WithNonAuthBearer   bool
 	WithCookies         bool
 	WithXGuestToken     bool
 	WithXTwitterHeaders bool
@@ -60,11 +61,11 @@ func (c *Client) buildHeaders(opts HeaderOpts) http.Header {
 		opts.Extra["cookie"] = c.cookies.String()
 	}
 
-	if opts.WithAuthBearer {
+	if opts.WithAuthBearer || opts.WithNonAuthBearer {
 		authTokens := c.session.GetAuthTokens()
 		// check if client is authenticated here
 		var bearerToken string
-		if c.isAuthenticated() {
+		if c.isAuthenticated() && !opts.WithNonAuthBearer {
 			bearerToken = authTokens.authenticated
 		} else {
 			bearerToken = authTokens.notAuthenticated

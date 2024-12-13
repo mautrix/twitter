@@ -186,7 +186,7 @@ func uploadAndSendImageTest(initialInboxData *response.XInboxData) {
 	}
 
 	uploadQuery := &payload.UploadMediaQuery{
-		MediaType:     payload.MEDIA_TYPE_IMAGE_JPEG,
+		MediaType:     "image/jpeg",
 		MediaCategory: payload.MEDIA_CATEGORY_DM_IMAGE,
 	}
 
@@ -252,7 +252,7 @@ func uploadAndSendGifTest(initialInboxData *response.XInboxData) {
 
 	uploadQuery := &payload.UploadMediaQuery{
 		SourceURL:     "https://media1.giphy.com/media/v1.Y2lkPWU4MjZjOWZjYzdkYTk5YWM3ODE2MjczYTlkYWFiZjY2MDkxYTIyZDJmMjVlMDAwYiZlcD12MV9naWZzX2NhdGVnb3JpZXNfY2F0ZWdvcnlfdGFnJmN0PWc/z3HFoEzXCMykr4L0TB/giphy.gif",
-		MediaType:     payload.MEDIA_TYPE_IMAGE_GIF,
+		MediaType:     "image/gif",
 		MediaCategory: payload.MEDIA_CATEGORY_DM_GIF,
 	}
 	mediaResult, err := cli.UploadMedia(uploadQuery, nil)
@@ -294,7 +294,7 @@ func uploadAndSendVideoTest(initialInboxData *response.XInboxData) {
 	}
 
 	uploadQuery := &payload.UploadMediaQuery{
-		MediaType:     payload.MEDIA_TYPE_VIDEO_MP4,
+		MediaType:     "video/mp4",
 		MediaCategory: payload.MEDIA_CATEGORY_DM_VIDEO,
 	}
 

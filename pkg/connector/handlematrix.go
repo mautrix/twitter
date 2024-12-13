@@ -67,6 +67,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 		uploadMediaParams := &payload.UploadMediaQuery{
 			MediaCategory: MSG_TYPE_TO_MEDIA_CATEGORY[content.MsgType],
+			MediaType:     content.Info.MimeType,
 		}
 		if content.Info.MimeType == "image/gif" {
 			uploadMediaParams.MediaCategory = "dm_gif"

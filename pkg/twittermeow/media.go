@@ -34,11 +34,17 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 	url := fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
 	headerOpts := HeaderOpts{
-		WithAuthBearer: true,
-		WithXCsrfToken: true,
-		WithCookies:    true,
-		Origin:         endpoints.BASE_URL,
-		Referer:        endpoints.BASE_URL + "/",
+		WithNonAuthBearer: true,
+		WithXCsrfToken:    true,
+		WithCookies:       true,
+		Origin:            endpoints.BASE_URL,
+		Referer:           endpoints.BASE_URL + "/",
+		Extra: map[string]string{
+			"sec-fetch-dest": "empty",
+			"sec-fetch-mode": "cors",
+			"sec-fetch-site": "same-site",
+			"accept":         "*/*",
+		},
 	}
 	headers := c.buildHeaders(headerOpts)
 
