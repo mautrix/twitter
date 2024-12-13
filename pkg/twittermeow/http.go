@@ -24,7 +24,6 @@ var (
 	ErrRequestFailed       = errors.New("failed to send request")
 	ErrResponseReadFailed  = errors.New("failed to read response body")
 	ErrMaxRetriesReached   = errors.New("maximum retries reached")
-	ErrGeneric403          = errors.New("HTTP 403")
 )
 
 func (c *Client) MakeRequest(url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
@@ -47,7 +46,7 @@ func (c *Client) MakeRequest(url string, method string, headers http.Header, pay
 				Dur("duration", dur).
 				Msg("Request successful")
 			return resp, respDat, nil
-		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 502 && !errors.Is(err, ErrGeneric403) {
+		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 502 {
 			c.Logger.Err(err).
 				Str("url", url).
 				Str("method", method).
@@ -114,9 +113,6 @@ func (c *Client) makeRequestDirect(url string, method string, headers http.Heade
 		if json.Unmarshal(responseBody, &respErr) == nil {
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
 		} else if len(responseBody) < 512 {
-			if response.StatusCode == 403 {
-				return response, responseBody, fmt.Errorf("%w: %s", ErrGeneric403, responseBody)
-			}
 			return response, responseBody, fmt.Errorf("HTTP %d: %s", response.StatusCode, responseBody)
 		}
 		return response, responseBody, fmt.Errorf("HTTP %d (%d bytes of data)", response.StatusCode, len(responseBody))
