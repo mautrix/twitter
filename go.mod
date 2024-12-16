@@ -9,11 +9,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-colorable v0.1.13
 	github.com/rs/zerolog v1.33.0
-	go.mau.fi/util v0.8.3-0.20241212004537-24c1a9b1d8f6
-	golang.org/x/exp v0.0.0-20241210194714-1829a127f884
+	go.mau.fi/util v0.8.3
+	golang.org/x/exp v0.0.0-20241215155358-4a5509556b9e
 	golang.org/x/net v0.32.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.22.1-0.20241212004632-bfdd0efd0e2e
+	maunium.net/go/mautrix v0.22.1
 )
 
 require (
