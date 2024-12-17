@@ -120,23 +120,24 @@ func (c *Client) FetchTrustedThreads(params *payload.DMRequestQuery) (*response.
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) SendDirectMessage(payload *payload.SendDirectMessagePayload) (*response.XInboxData, error) {
-	if payload.RequestID == "" {
-		payload.RequestID = uuid.NewString()
+func (c *Client) SendDirectMessage(pl *payload.SendDirectMessagePayload) (*response.XInboxData, error) {
+	if pl.RequestID == "" {
+		pl.RequestID = uuid.NewString()
 	}
 
-	jsonBody, err := payload.Encode()
+	jsonBody, err := pl.Encode()
 	if err != nil {
 		return nil, err
 	}
 
-	url := endpoints.SEND_DM_URL
+	query, _ := (payload.DMSendQuery{}).Default().Encode()
+	url := endpoints.SEND_DM_URL + "?" + string(query)
 	apiRequestOpts := apiRequestOpts{
 		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           jsonBody,
-		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
+		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, pl.ConversationID),
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.JSON,
 	}

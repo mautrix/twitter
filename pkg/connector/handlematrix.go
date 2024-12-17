@@ -42,6 +42,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		IncludeQuoteCount: true,
 		RecipientIDs:      false,
 		DMUsers:           false,
+		CardsPlatform:     "Web-12",
 	}
 
 	if msg.ReplyTo != nil {

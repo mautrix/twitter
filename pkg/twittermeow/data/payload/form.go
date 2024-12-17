@@ -141,6 +141,44 @@ func (p DMRequestQuery) Default() DMRequestQuery {
 	}
 }
 
+type DMSendQuery struct {
+	Ext                            string `url:"ext"`
+	IncludeExtAltText              bool   `url:"include_ext_alt_text"`
+	IncludeExtLimitedActionResults bool   `url:"include_ext_limited_action_results"`
+	IncludeReplyCount              int    `url:"include_reply_count"`
+	TweetMode                      string `url:"tweet_mode"`
+	IncludeExtViews                bool   `url:"include_ext_views"`
+	IncludeGroups                  bool   `url:"include_groups"`
+	IncludeInboxTimelines          bool   `url:"include_inbox_timelines"`
+	IncludeExtMediaColor           bool   `url:"include_ext_media_color"`
+	SupportsReactions              bool   `url:"supports_reactions"`
+	SupportsEdit                   bool   `url:"supports_edit"`
+}
+
+func (p DMSendQuery) Encode() ([]byte, error) {
+	values, err := query.Values(p)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(values.Encode()), nil
+}
+
+func (p DMSendQuery) Default() DMSendQuery {
+	return DMSendQuery{
+		IncludeExtAltText:              true,
+		IncludeExtLimitedActionResults: true,
+		IncludeReplyCount:              1,
+		TweetMode:                      "extended",
+		IncludeExtViews:                true,
+		IncludeGroups:                  true,
+		IncludeInboxTimelines:          true,
+		IncludeExtMediaColor:           true,
+		SupportsReactions:              true,
+		SupportsEdit:                   true,
+		Ext:                            "mediaColor,altText,mediaStats,highlightedLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
+	}
+}
+
 type MarkConversationReadQuery struct {
 	ConversationID  string `url:"conversationId"`
 	LastReadEventID string `url:"last_read_event_id"`
