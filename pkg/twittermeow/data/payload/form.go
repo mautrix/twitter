@@ -56,6 +56,8 @@ type DMRequestQuery struct {
 	MaxID                               string      `url:"max_id,omitempty"` // when fetching messages, this is the message id
 	MinID                               string      `url:"min_id,omitempty"`
 	NSFWFilteringEnabled                bool        `url:"nsfw_filtering_enabled"`
+	FilterLowQuality                    bool        `url:"filter_low_quality"`
+	IncludeQuality                      string      `url:"include_quality"`
 	IncludeProfileInterstitialType      int         `url:"include_profile_interstitial_type"`
 	IncludeBlocking                     int         `url:"include_blocking"`
 	IncludeConversationInfo             bool        `url:"include_conversation_info"`
@@ -84,8 +86,10 @@ type DMRequestQuery struct {
 	IncludeInboxTimelines               bool        `url:"include_inbox_timelines"`
 	IncludeExtMediaColor                bool        `url:"include_ext_media_color"`
 	SupportsReactions                   bool        `url:"supports_reactions"`
+	SupportsEdit                        bool        `url:"supports_edit"`
 	IncludeExtEditControl               bool        `url:"include_ext_edit_control"`
 	IncludeExtBusinessAffiliationsLabel bool        `url:"include_ext_business_affiliations_label"`
+	IncludeExtHasParodyProfileLabel     bool        `url:"include_ext_has_parody_profile_label"`
 	Ext                                 string      `url:"ext"`
 }
 
@@ -100,6 +104,8 @@ func (p DMRequestQuery) Encode() ([]byte, error) {
 func (p DMRequestQuery) Default() DMRequestQuery {
 	return DMRequestQuery{
 		NSFWFilteringEnabled:                false,
+		FilterLowQuality:                    true,
+		IncludeQuality:                      "all",
 		IncludeProfileInterstitialType:      1,
 		IncludeBlocking:                     1,
 		IncludeBlockedBy:                    1,
@@ -127,8 +133,10 @@ func (p DMRequestQuery) Default() DMRequestQuery {
 		IncludeInboxTimelines:               true,
 		IncludeExtMediaColor:                true,
 		SupportsReactions:                   true,
+		SupportsEdit:                        true,
 		IncludeExtEditControl:               true,
 		IncludeExtBusinessAffiliationsLabel: true,
+		IncludeExtHasParodyProfileLabel:     true,
 		Ext:                                 "mediaColor,altText,mediaStats,highlightedLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
 	}
 }
