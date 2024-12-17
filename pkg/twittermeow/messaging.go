@@ -202,8 +202,7 @@ func (c *Client) SendTypingNotification(conversationID string) error {
 		ContentType:    types.JSON,
 		Body:           jsonBody,
 	}
-	_, resp, err := c.makeAPIRequest(apiRequestOpts)
-	fmt.Println(resp)
+	_, _, err = c.makeAPIRequest(apiRequestOpts)
 	return err
 }
 
