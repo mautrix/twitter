@@ -114,7 +114,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		return
 	}
 
-	_, currentUser, err := tc.client.LoadMessagesPage()
+	inboxState, currentUser, err := tc.client.LoadMessagesPage()
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to load messages page")
 		if twittermeow.IsAuthError(err) {
@@ -132,20 +132,39 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		return
 	}
 
-	tc.userLogin.RemoteName = currentUser.ScreenName
-	tc.userLogin.Save(ctx)
+	selfUser := inboxState.InboxInitialState.GetUserByID(tc.client.GetCurrentUserID())
+	if tc.userLogin.RemoteName != currentUser.ScreenName || tc.userLogin.RemoteProfile.Name != selfUser.Name {
+		tc.userLogin.RemoteName = currentUser.ScreenName
+		tc.userLogin.RemoteProfile = status.RemoteProfile{
+			// TODO fetch from /1.1/users/email_phone_info.json?
+			Phone:    "",
+			Email:    "",
+			Username: currentUser.ScreenName,
+			Name:     selfUser.Name,
+			// TODO set on ghost and reuse same mxc
+			Avatar: "",
+		}
+		err = tc.userLogin.Save(ctx)
+		if err != nil {
+			zerolog.Ctx(ctx).Err(err).Msg("Failed to save user login after updating remote profile")
+		}
+	}
 
-	go tc.syncChannels(ctx)
-	err = tc.client.Connect()
+	go tc.syncChannels(ctx, inboxState)
+	tc.startPolling(ctx)
+}
+
+func (tc *TwitterClient) startPolling(ctx context.Context) {
+	err := tc.client.Connect()
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to start polling")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateUnknownError,
 			Error:      "twitter-connect-error",
 		})
-		return
+	} else {
+		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 	}
-	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 }
 
 func (tc *TwitterClient) Disconnect() {

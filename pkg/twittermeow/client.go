@@ -119,7 +119,7 @@ func (c *Client) Logout() (bool, error) {
 	return true, nil
 }
 
-func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSettingsResponse, error) {
+func (c *Client) LoadMessagesPage() (*response.InboxInitialStateResponse, *response.AccountSettingsResponse, error) {
 	err := c.session.LoadPage(endpoints.BASE_MESSAGES_URL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
@@ -154,7 +154,7 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		Str("initial_inbox_cursor", initialInboxState.InboxInitialState.Cursor).
 		Msg("Successfully loaded and authenticated as user")
 
-	return &initialInboxState.InboxInitialState, data, nil
+	return initialInboxState, data, nil
 }
 
 func (c *Client) GetCurrentUser() *response.AccountSettingsResponse {

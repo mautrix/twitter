@@ -11,21 +11,25 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-func (tc *TwitterClient) syncChannels(ctx context.Context) {
+func (tc *TwitterClient) syncChannels(ctx context.Context, initialInboxState *response.InboxInitialStateResponse) {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
-	initalInboxState, err := tc.client.GetInitialInboxState(reqQuery)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to fetch initial inbox state:")
-		return
+	if initialInboxState == nil {
+		var err error
+		initialInboxState, err = tc.client.GetInitialInboxState(reqQuery)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to fetch initial inbox state:")
+			return
+		}
 	}
 
-	inboxData := initalInboxState.InboxInitialState
+	inboxData := initialInboxState.InboxInitialState
 	trustedInbox := inboxData.InboxTimelines.Trusted
 	cursor := trustedInbox.MinEntryID
 	paginationStatus := trustedInbox.Status
