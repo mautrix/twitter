@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
@@ -34,6 +35,9 @@ type SessionLoader struct {
 	client            *Client
 	currentUser       *response.AccountSettingsResponse
 	verificationToken string
+	loadingAnims      *[4][16][11]int
+	variableIndexes   *[4]int
+	animationToken    string
 	country           string
 	clientUUID        string
 	authTokens        *SessionAuthTokens
@@ -259,8 +263,19 @@ func (s *SessionLoader) SetCountry(country string) {
 	s.country = country
 }
 
-func (s *SessionLoader) SetVerificationToken(verificationToken string) {
+func (s *SessionLoader) SetVerificationToken(verificationToken string, anims *[4][16][11]int) {
 	s.verificationToken = verificationToken
+	s.loadingAnims = anims
+}
+
+func (s *SessionLoader) SetVariableIndexes(indexes *[4]int) {
+	s.variableIndexes = indexes
+}
+
+func (s *SessionLoader) CalculateAnimationToken() {
+	if s.variableIndexes != nil && s.loadingAnims != nil && s.verificationToken != "" {
+		s.animationToken = crypto.GenerateAnimationState(s.variableIndexes, s.loadingAnims, s.verificationToken)
+	}
 }
 
 func (s *SessionLoader) GetVerificationToken() string {

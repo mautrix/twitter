@@ -41,7 +41,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		return err
 	}
 
-	clientTransactionID, err := crypto.SignTransaction(jc.client.session.verificationToken, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost)
+	clientTransactionID, err := crypto.SignTransaction(jc.client.session.animationToken, jc.client.session.verificationToken, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost)
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ go 1.22.0
 toolchain go1.23.4
 
 require (
+	github.com/PuerkitoBio/goquery v1.9.3
 	github.com/google/go-querystring v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-colorable v0.1.13
@@ -18,6 +19,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect

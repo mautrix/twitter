@@ -2,13 +2,17 @@ package twittermeow
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -121,36 +125,36 @@ func (c *Client) LoadMessagesPage() (*response.XInboxData, *response.AccountSett
 		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
-	//data, err := c.GetAccountSettings(payload.AccountSettingsQuery{
-	//	IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
-	//	IncludeMentionFilter:        true,
-	//	IncludeNSFWUserFlag:         true,
-	//	IncludeNSFWAdminFlag:        true,
-	//	IncludeRankedTimeline:       true,
-	//	IncludeAltTextCompose:       true,
-	//	Ext:                         "ssoConnections",
-	//	IncludeCountryCode:          true,
-	//	IncludeExtDMNSFWMediaFilter: true,
-	//})
-	//if err != nil {
-	//	return nil, nil, fmt.Errorf("failed to get account settings: %w", err)
-	//}
+	data, err := c.GetAccountSettings(payload.AccountSettingsQuery{
+		IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
+		IncludeMentionFilter:        true,
+		IncludeNSFWUserFlag:         true,
+		IncludeNSFWAdminFlag:        true,
+		IncludeRankedTimeline:       true,
+		IncludeAltTextCompose:       true,
+		Ext:                         "ssoConnections",
+		IncludeCountryCode:          true,
+		IncludeExtDMNSFWMediaFilter: true,
+	})
+	if err != nil {
+		c.Logger.Warn().Err(err).Msg("Failed to get account settings")
+		data = &response.AccountSettingsResponse{}
+	}
 
 	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DMRequestQuery{}.Default()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
 	}
 
-	//c.session.SetCurrentUser(data)
-	c.session.SetCurrentUser(&response.AccountSettingsResponse{})
+	c.session.SetCurrentUser(data)
 	c.polling.SetCurrentCursor(initialInboxState.InboxInitialState.Cursor)
 
 	c.Logger.Info().
-		//Str("screen_name", data.ScreenName).
+		Str("screen_name", data.ScreenName).
 		Str("initial_inbox_cursor", initialInboxState.InboxInitialState.Cursor).
 		Msg("Successfully loaded and authenticated as user")
 
-	return &initialInboxState.InboxInitialState, &response.AccountSettingsResponse{}, nil
+	return &initialInboxState.InboxInitialState, data, nil
 }
 
 func (c *Client) GetCurrentUser() *response.AccountSettingsResponse {
@@ -204,7 +208,7 @@ func (c *Client) SetEventHandler(handler EventHandler) {
 	c.eventHandler = handler
 }
 
-func (c *Client) fetchAndParseMainScript(scriptURL string) error {
+func (c *Client) fetchScript(url string) ([]byte, error) {
 	extraHeaders := map[string]string{
 		"accept":         "*/*",
 		"sec-fetch-site": "cross-site",
@@ -212,23 +216,49 @@ func (c *Client) fetchAndParseMainScript(scriptURL string) error {
 		"sec-fetch-dest": "script",
 		"origin":         endpoints.BASE_URL,
 	}
-	_, scriptRespBody, err := c.MakeRequest(scriptURL, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
+	_, scriptRespBody, err := c.MakeRequest(url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
+	return scriptRespBody, err
+}
+
+func (c *Client) fetchAndParseMainScript(scriptURL string) error {
+	scriptRespBody, err := c.fetchScript(scriptURL)
 	if err != nil {
 		return err
 	}
 
-	scriptText := string(scriptRespBody)
-
-	authTokens := methods.ParseBearerTokens(scriptText)
+	authTokens := methods.ParseBearerTokens(scriptRespBody)
 	if len(authTokens) < 2 {
 		return fmt.Errorf("failed to find auth tokens in main script response body")
 	}
 
 	authenticatedToken, notAuthenticatedToken := authTokens[0], authTokens[1]
-	c.session.SetAuthTokens(authenticatedToken, notAuthenticatedToken)
+	c.session.SetAuthTokens(string(authenticatedToken), string(notAuthenticatedToken))
 
 	return nil
 }
+
+func (c *Client) fetchAndParseSScript(scriptURL string) (*[4]int, error) {
+	scriptRespBody, err := c.fetchScript(scriptURL)
+	if err != nil {
+		return nil, err
+	}
+
+	byteIndexes := methods.ParseVariableIndexes(scriptRespBody)
+	if len(byteIndexes) < 5 {
+		return nil, fmt.Errorf("failed to find variable indexes")
+	}
+	var indexes [4]int
+	for i := 0; i < 4; i++ {
+		index, err := strconv.Atoi(string(byteIndexes[i+1]))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse variable index %d (%s): %w", i, byteIndexes[i+1], err)
+		}
+		indexes[i] = index
+	}
+	return &indexes, nil
+}
+
+var nonNumbers = regexp.MustCompile(`\D+`)
 
 func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML string) error {
 	country := methods.ParseCountry(mainPageHTML)
@@ -236,13 +266,58 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 		return fmt.Errorf("country code not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 
-	verificationToken := methods.ParseVerificationToken(mainPageHTML)
-	if verificationToken == "" {
-		return fmt.Errorf("verification token not found (HTTP %d)", mainPageResp.StatusCode)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(mainPageHTML))
+	if err != nil {
+		return fmt.Errorf("failed to parse main page html: %w", err)
+	}
+	verificationToken, ok := doc.Find("meta[name^=tw]").Attr("content")
+	if !ok {
+		return fmt.Errorf("failed to find meta tags in main page html")
+	}
+	var loadingAnims = new([4][16][11]int)
+	idx := 0
+	doc.Find("svg[id^=loading-x-anim]").Each(func(i int, svg *goquery.Selection) {
+		if idx >= 4 {
+			idx++
+			return
+		}
+		pathVal, ok := svg.Find("path").Eq(1).Attr("d")
+		if !ok {
+			return
+		}
+		sets := strings.Split(pathVal[9:], "C")
+		if len(sets) != 16 {
+			return
+		}
+		var numSets [16][11]int
+		for i, set := range sets {
+			numbers := strings.Split(strings.TrimSpace(nonNumbers.ReplaceAllString(set, " ")), " ")
+			if len(numbers) != 11 {
+				return
+			}
+			for j, num := range numbers {
+				parsed, err := strconv.Atoi(num)
+				if err != nil {
+					return
+				}
+				numSets[i][j] = parsed
+			}
+		}
+		loadingAnims[idx] = numSets
+		idx++
+	})
+	if idx != 4 {
+		c.Logger.Warn().Int("found_count", idx).Msg("Didn't find 4 loading animations in main page HTML")
+		loadingAnims = nil
+	} else {
+		c.Logger.Trace().
+			Str("verification_token", verificationToken).
+			Any("loading_animations", loadingAnims[:]).
+			Msg("Found loading animations and verification token")
 	}
 
 	c.session.SetCountry(country)
-	c.session.SetVerificationToken(verificationToken)
+	c.session.SetVerificationToken(verificationToken, loadingAnims)
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {
@@ -259,10 +334,24 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 		return fmt.Errorf("main script not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 
-	err := c.fetchAndParseMainScript(mainScriptURL)
+	err = c.fetchAndParseMainScript(mainScriptURL)
 	if err != nil {
 		return err
 	}
+
+	ondemandS := methods.ParseOndemandS(mainPageHTML)
+	if ondemandS == "" {
+		c.Logger.Warn().Msg("ondemand.s not found in main page HTML")
+	} else if indexes, err := c.fetchAndParseSScript(fmt.Sprintf("https://abs.twimg.com/responsive-web/client-web/ondemand.s.%sa.js", ondemandS)); err != nil {
+		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
+	} else {
+		c.session.SetVariableIndexes(indexes)
+		c.Logger.Trace().
+			Any("variable_indexes", indexes[:]).
+			Msg("Found variable indexes")
+	}
+
+	c.session.CalculateAnimationToken()
 
 	return nil
 }
@@ -295,9 +384,10 @@ type apiRequestOpts struct {
 }
 
 func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
-	clientTransactionID, err := crypto.SignTransaction(c.session.verificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
+	clientTransactionID, err := crypto.SignTransaction(c.session.animationToken, c.session.verificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
 	if err != nil {
-		return nil, nil, err
+		c.Logger.Trace().Err(err).Msg("Failed to create client transaction ID")
+		clientTransactionID = base64.RawStdEncoding.EncodeToString([]byte("e:"))
 	}
 
 	headerOpts := HeaderOpts{

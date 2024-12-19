@@ -14,6 +14,8 @@ var (
 	guestTokenRegex        = regexp.MustCompile(`gt=([0-9]+)`)
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
+	ondemandSRegex         = regexp.MustCompile(`"ondemand.s":"([a-f0-9]+)"`)
+	variableIndexesRegex   = regexp.MustCompile(`const\[\w{1,2},\w{1,2}]=\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
 )
 
 func ParseMigrateURL(html string) (string, bool) {
@@ -41,8 +43,12 @@ func ParseMainScriptURL(html string) string {
 	return match[0]
 }
 
-func ParseBearerTokens(html string) []string {
-	return bearerTokenRegex.FindAllString(html, -1)
+func ParseBearerTokens(js []byte) [][]byte {
+	return bearerTokenRegex.FindAll(js, -1)
+}
+
+func ParseVariableIndexes(js []byte) [][]byte {
+	return variableIndexesRegex.FindSubmatch(js)
 }
 
 func ParseGuestToken(html string) string {
@@ -63,6 +69,14 @@ func ParseVerificationToken(html string) string {
 
 func ParseCountry(html string) string {
 	match := countryCodeRegex.FindStringSubmatch(html)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
+}
+
+func ParseOndemandS(html string) string {
+	match := ondemandSRegex.FindStringSubmatch(html)
 	if len(match) < 2 {
 		return ""
 	}
