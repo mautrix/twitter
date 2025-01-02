@@ -137,6 +137,9 @@ func (c *Client) LoadMessagesPage() (*response.InboxInitialStateResponse, *respo
 		IncludeExtDMNSFWMediaFilter: true,
 	})
 	if err != nil {
+		if IsAuthError(err) {
+			return nil, nil, err
+		}
 		c.Logger.Warn().Err(err).Msg("Failed to get account settings")
 		data = &response.AccountSettingsResponse{}
 	}
