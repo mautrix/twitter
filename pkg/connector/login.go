@@ -28,6 +28,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 type TwitterLogin struct {
@@ -100,7 +101,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		Cookies:       cookieStruct,
 		WithJOTClient: true,
 	}
-	client := twittermeow.NewClient(clientOpts, t.User.Log)
+	client := twittermeow.NewClient(clientOpts, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
 	inboxState, settings, err := client.LoadMessagesPage()
 	if err != nil {
@@ -123,7 +124,18 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		&bridgev2.NewLoginParams{
 			DeleteOnConflict:  true,
 			DontReuseExisting: false,
-			LoadUserLogin:     t.tc.LoadUserLogin,
+			LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
+				client.Logger = login.Log.With().Str("component", "twitter_client").Logger()
+				twitClient := &TwitterClient{
+					connector: t.tc,
+					client:    client,
+					userLogin: login,
+					userCache: make(map[string]types.User),
+				}
+				client.SetEventHandler(twitClient.HandleTwitterEvent)
+				login.Client = twitClient
+				return nil
+			},
 		},
 	)
 	if err != nil {

@@ -67,9 +67,6 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	twitClient := NewTwitterClient(ctx, tc, login)
-
-	login.Client = twitClient
-
+	login.Client = NewTwitterClient(tc, login)
 	return nil
 }
