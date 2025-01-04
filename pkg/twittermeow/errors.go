@@ -34,7 +34,7 @@ func IsAuthError(err error) bool {
 }
 
 func (te TwitterError) Is(other error) bool {
-	var ote *TwitterError
+	var ote TwitterError
 	if errors.As(other, &ote) {
 		return te.Code == ote.Code || te.Message == ote.Message
 	}
