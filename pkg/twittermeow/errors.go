@@ -23,6 +23,7 @@ var (
 	ErrCouldNotAuthenticate     error = TwitterError{Code: 32}
 	ErrUserSuspended            error = TwitterError{Code: 63}
 	ErrAccountSuspended         error = TwitterError{Code: 63}
+	ErrNotActive                error = TwitterError{Code: 141}
 	ErrAccountTemporarilyLocked error = TwitterError{Code: 326}
 )
 
@@ -30,6 +31,7 @@ func IsAuthError(err error) bool {
 	return errors.Is(err, ErrCouldNotAuthenticate) ||
 		errors.Is(err, ErrUserSuspended) ||
 		errors.Is(err, ErrAccountSuspended) ||
+		errors.Is(err, ErrNotActive) ||
 		errors.Is(err, ErrAccountTemporarilyLocked)
 }
 
