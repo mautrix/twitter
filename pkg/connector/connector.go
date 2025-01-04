@@ -65,8 +65,3 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
 	return &bridgev2.NetworkGeneralCapabilities{}
 }
-
-func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	login.Client = NewTwitterClient(tc, login)
-	return nil
-}

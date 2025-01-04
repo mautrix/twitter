@@ -28,7 +28,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 type TwitterLogin struct {
@@ -126,14 +125,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 			DontReuseExisting: false,
 			LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
 				client.Logger = login.Log.With().Str("component", "twitter_client").Logger()
-				twitClient := &TwitterClient{
-					connector: t.tc,
-					client:    client,
-					userLogin: login,
-					userCache: make(map[string]types.User),
-				}
-				client.SetEventHandler(twitClient.HandleTwitterEvent)
-				login.Client = twitClient
+				login.Client = NewTwitterClient(login, t.tc, client)
 				return nil
 			},
 		},

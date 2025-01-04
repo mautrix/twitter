@@ -50,18 +50,23 @@ var (
 	_ bridgev2.PushableNetworkAPI = (*TwitterClient)(nil)
 )
 
-func NewTwitterClient(tc *TwitterConnector, login *bridgev2.UserLogin) *TwitterClient {
-	twitClient := &TwitterClient{
-		client: twittermeow.NewClient(&twittermeow.ClientOpts{
-			Cookies:       cookies.NewCookiesFromString(login.Metadata.(*UserLoginMetadata).Cookies),
-			WithJOTClient: true,
-		}, login.Log.With().Str("component", "twitter_client").Logger()),
+func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, client *twittermeow.Client) *TwitterClient {
+	tc := &TwitterClient{
+		connector: connector,
+		client:    client,
 		userLogin: login,
 		userCache: make(map[string]types.User),
-		connector: tc,
 	}
-	twitClient.client.SetEventHandler(twitClient.HandleTwitterEvent)
-	return twitClient
+	client.SetEventHandler(tc.HandleTwitterEvent)
+	return tc
+}
+
+func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
+	login.Client = NewTwitterClient(login, tc, twittermeow.NewClient(&twittermeow.ClientOpts{
+		Cookies:       cookies.NewCookiesFromString(login.Metadata.(*UserLoginMetadata).Cookies),
+		WithJOTClient: true,
+	}, login.Log.With().Str("component", "twitter_client").Logger()))
+	return nil
 }
 
 var pushCfg = &bridgev2.PushConfig{
