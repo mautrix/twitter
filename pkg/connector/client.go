@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"maps"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridge/status"
@@ -232,22 +231,6 @@ func (tc *TwitterClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) (
 		return nil, fmt.Errorf("failed to find user info in cache by id: %s", ghost.ID)
 	}
 	return userInfo, nil
-}
-
-func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *bridgev2.NetworkRoomCapabilities {
-	return &bridgev2.NetworkRoomCapabilities{
-		FormattedText: false,
-		UserMentions:  true,
-		RoomMentions:  false,
-
-		Edits:         true,
-		EditMaxCount:  10,
-		EditMaxAge:    15 * time.Minute,
-		Captions:      true,
-		Replies:       true,
-		Reactions:     true,
-		ReactionCount: 1,
-	}
 }
 
 func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {

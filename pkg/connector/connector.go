@@ -61,7 +61,3 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 		},
 	}
 }
-
-func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
-	return &bridgev2.NetworkGeneralCapabilities{}
-}

@@ -174,10 +174,11 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, true, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-		_, err := io.Copy(file, fileResp.Body)
+		n, err := io.Copy(file, fileResp.Body)
 		if err != nil {
 			return nil, err
 		}
+		content.Info.Size = int(n)
 		return &bridgev2.FileStreamResult{
 			MimeType: content.Info.MimeType,
 			FileName: content.Body,
