@@ -44,7 +44,13 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, initialInboxState *re
 			break
 		}
 
+		if inboxData.Conversations == nil {
+			inboxData.Conversations = map[string]types.Conversation{}
+		}
 		maps.Copy(inboxData.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
+		if inboxData.Users == nil {
+			inboxData.Users = map[string]types.User{}
+		}
 		maps.Copy(inboxData.Users, nextInboxTimelineResponse.InboxTimeline.Users)
 		inboxData.Entries = append(inboxData.Entries, nextInboxTimelineResponse.InboxTimeline.Entries...)
 
