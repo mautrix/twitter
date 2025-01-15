@@ -1,7 +1,6 @@
 package twittermeow
 
 import (
-	"log"
 	"time"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -48,12 +47,17 @@ func (pc *PollingClient) startListening() {
 
 		userUpdatesResponse, err := pc.client.GetDMUserUpdates(&userUpdatesQuery)
 		if err != nil {
-			log.Fatal(err)
+			pc.client.Logger.Err(err).Msg("Failed to get user updates")
+			time.Sleep(1 * time.Minute)
+			continue
 		}
 
 		userEvents := userUpdatesResponse.UserEvents
 		if len(userEvents.Entries) > 0 {
-			pc.client.processEventEntries(userUpdatesResponse)
+			err := pc.client.processEventEntries(userUpdatesResponse)
+			if err != nil {
+				pc.client.Logger.Err(err).Msg("Failed to process user events")
+			}
 		}
 
 		// pc.client.logger.Info().Any("user_events", userUpdatesResponse.UserEvents).Any("inbox_initial_state", userUpdatesResponse.InboxInitialState).Msg("Got polling update response")
