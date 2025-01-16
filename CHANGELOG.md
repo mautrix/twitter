@@ -1,3 +1,7 @@
+# v0.2.1 (2025-01-16)
+
+* Fixed various bugs.
+
 # v0.2.0 (2024-12-16)
 
 * Rewrote bridge in Go using bridgev2 architecture.

@@ -38,7 +38,7 @@ var m = mxmain.BridgeMain{
 	Name:        "mautrix-twitter",
 	URL:         "https://github.com/mautrix/twitter",
 	Description: "A Matrix-Twitter puppeting bridge.",
-	Version:     "0.2.0",
+	Version:     "0.2.1",
 	Connector:   c,
 }
 
