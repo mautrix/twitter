@@ -6,7 +6,7 @@ type MessageData struct {
 	RecipientID string      `json:"recipient_id,omitempty"`
 	SenderID    string      `json:"sender_id,omitempty"`
 	Text        string      `json:"text,omitempty"`
-	Entities    Entities    `json:"entities,omitempty"`
+	Entities    *Entities   `json:"entities,omitempty"`
 	Attachment  *Attachment `json:"attachment,omitempty"`
 	ReplyData   ReplyData   `json:"reply_data,omitempty"`
 	EditCount   int         `json:"edit_count,omitempty"`

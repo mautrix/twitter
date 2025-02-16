@@ -6,6 +6,7 @@ type Attachment struct {
 	Video       *AttachmentInfo `json:"video,omitempty"`
 	AnimatedGif *AttachmentInfo `json:"animated_gif,omitempty"`
 	Photo       *AttachmentInfo `json:"photo,omitempty"`
+	Card        *AttachmentCard `json:"card,omitempty"`
 }
 type URLs struct {
 	URL         string `json:"url,omitempty"`
@@ -138,4 +139,20 @@ type AttachmentInfo struct {
 	ExtAltText    string        `json:"ext_alt_text,omitempty"`
 	Ext           Ext           `json:"ext,omitempty"`
 	AudioOnly     bool          `json:"audio_only,omitempty"`
+}
+
+type AttachmentCard struct {
+	BindingValues AttachmentCardBinding `json:"binding_values,omitempty"`
+}
+
+type AttachmentCardBinding struct {
+	CardURL     AttachmentCardBindingValue `json:"card_url,omitempty"`
+	Description AttachmentCardBindingValue `json:"description,omitempty"`
+	Domain      AttachmentCardBindingValue `json:"domain,omitempty"`
+	Title       AttachmentCardBindingValue `json:"title,omitempty"`
+	VanityUrl   AttachmentCardBindingValue `json:"vanity_url,omitempty"`
+}
+
+type AttachmentCardBindingValue struct {
+	StringValue string `json:"string_value,omitempty"`
 }

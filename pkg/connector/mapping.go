@@ -117,7 +117,8 @@ func (tc *TwitterClient) GetUserInfoBridge(userID string) *bridgev2.UserInfo {
 	return userinfo
 }
 
-func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachment *types.Attachment) (*bridgev2.ConvertedMessagePart, []int, error) {
+func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
+	attachment := msg.Attachment
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
 	var mimeType string
@@ -147,6 +148,16 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 			return nil, nil, err
 		}
 		attachmentURL = highestBitRateVariant.URL
+	} else if attachment.Card != nil {
+		content := bridgeEvt.MessageEventContent{
+			MsgType:            bridgeEvt.MsgText,
+			BeeperLinkPreviews: []*bridgeEvt.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, attachment.Card, msg.Entities.URLs)},
+		}
+		return &bridgev2.ConvertedMessagePart{
+			ID:      networkid.PartID(""),
+			Type:    bridgeEvt.EventMessage,
+			Content: &content,
+		}, []int{0, 0}, nil
 	} else {
 		return nil, nil, fmt.Errorf("unsupported attachment type")
 	}
@@ -230,4 +241,22 @@ func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Re
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	return getResp, nil
+}
+
+func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *bridgeEvt.BeeperLinkPreview {
+	canonicalURL := card.BindingValues.CardURL.StringValue
+	for _, url := range urls {
+		if url.URL == canonicalURL {
+			canonicalURL = url.ExpandedURL
+			break
+		}
+	}
+	preview := &bridgeEvt.BeeperLinkPreview{
+		LinkPreview: bridgeEvt.LinkPreview{
+			CanonicalURL: canonicalURL,
+			Title:        card.BindingValues.Title.StringValue,
+			Description:  card.BindingValues.Description.StringValue,
+		},
+	}
+	return preview
 }
