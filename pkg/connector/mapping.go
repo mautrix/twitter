@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rs/zerolog"
 	"go.mau.fi/util/exmime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -158,6 +159,16 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 			Type:    bridgeEvt.EventMessage,
 			Content: &content,
 		}, []int{0, 0}, nil
+	} else if attachment.Tweet != nil {
+		content := bridgeEvt.MessageEventContent{
+			MsgType:            bridgeEvt.MsgText,
+			BeeperLinkPreviews: []*bridgeEvt.BeeperLinkPreview{tc.attachmentTweetToMatrix(ctx, portal, intent, attachment.Tweet)},
+		}
+		return &bridgev2.ConvertedMessagePart{
+			ID:      networkid.PartID(""),
+			Type:    bridgeEvt.EventMessage,
+			Content: &content,
+		}, []int{0, 0}, nil
 	} else {
 		return nil, nil, fmt.Errorf("unsupported attachment type")
 	}
@@ -259,4 +270,41 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types
 		},
 	}
 	return preview
+}
+
+func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, tweet *types.AttachmentTweet) *bridgeEvt.BeeperLinkPreview {
+	linkPreview := bridgeEvt.LinkPreview{
+		CanonicalURL: tweet.ExpandedURL,
+		Title:        tweet.Status.User.Name + " on X",
+		Description:  tweet.Status.FullText,
+	}
+	medias := tweet.Status.Entities.Media
+	if len(medias) > 0 {
+		media := medias[0]
+		if media.Type == "photo" {
+			resp, err := tc.downloadFile(ctx, media.MediaURLHTTPS)
+			if err == nil {
+				linkPreview.ImageType = "image/jpeg"
+				linkPreview.ImageWidth = media.OriginalInfo.Width
+				linkPreview.ImageHeight = media.OriginalInfo.Height
+				linkPreview.ImageSize = int(resp.ContentLength)
+				linkPreview.ImageURL, _, err = intent.UploadMediaStream(ctx, portal.MXID, resp.ContentLength, false, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+					_, err := io.Copy(file, resp.Body)
+					if err != nil {
+						return nil, err
+					}
+					return &bridgev2.FileStreamResult{
+						MimeType: linkPreview.ImageType,
+						FileName: "image.jpeg",
+					}, nil
+				})
+				if err != nil {
+					zerolog.Ctx(ctx).Err(err).Msg("failed to upload tweet image to Matrix")
+				}
+			}
+		}
+	}
+	return &bridgeEvt.BeeperLinkPreview{
+		LinkPreview: linkPreview,
+	}
 }
