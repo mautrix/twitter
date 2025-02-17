@@ -62,7 +62,7 @@ type PrettifiedMessage struct {
 	AffectsSort    bool
 	Text           string
 	Attachment     *types.Attachment
-	Entities       types.Entities
+	Entities       *types.Entities
 	Reactions      []types.MessageReaction
 }
 

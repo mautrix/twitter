@@ -96,7 +96,7 @@ func (data *XInboxData) ToEventEntries() ([]interface{}, error) {
 					MessageID:    messageEventData.MessageData.ID,
 					CreatedAt:    createdAt,
 					Text:         messageEventData.MessageData.Text,
-					Entities:     &messageEventData.MessageData.Entities,
+					Entities:     messageEventData.MessageData.Entities,
 					Attachment:   messageEventData.MessageData.Attachment,
 					ReplyData:    messageEventData.MessageData.ReplyData,
 					AffectsSort:  messageEventData.AffectsSort,
