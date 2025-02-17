@@ -272,7 +272,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 				},
 			})
 		} else {
-			if msg.Attachment.Card != nil {
+			if msg.Attachment.Card != nil || msg.Attachment.Tweet != nil {
 				textPart.Content.BeeperLinkPreviews = convertedAttachmentPart.Content.BeeperLinkPreviews
 			} else {
 				parts = append(parts, convertedAttachmentPart)
