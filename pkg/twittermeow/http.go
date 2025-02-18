@@ -16,7 +16,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
 )
 
-const MaxHTTPRetries = 5
+var MaxHTTPRetries = 5
 
 var (
 	ErrRedirectAttempted   = errors.New("redirect attempted")
