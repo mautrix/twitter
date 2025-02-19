@@ -260,7 +260,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	parts := make([]*bridgev2.ConvertedMessagePart, 0)
 
 	if msg.Attachment != nil {
-		convertedAttachmentPart, indices, err := tc.TwitterAttachmentToMatrix(ctx, portal, intent, msg.Attachment)
+		convertedAttachmentPart, indices, err := tc.TwitterAttachmentToMatrix(ctx, portal, intent, msg)
 		if err != nil {
 			zerolog.Ctx(ctx).Err(err).Msg("Failed to convert attachment")
 			parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -272,8 +272,12 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 				},
 			})
 		} else {
-			parts = append(parts, convertedAttachmentPart)
-			RemoveEntityLinkFromText(textPart, indices)
+			if msg.Attachment.Card != nil || msg.Attachment.Tweet != nil {
+				textPart.Content.BeeperLinkPreviews = convertedAttachmentPart.Content.BeeperLinkPreviews
+			} else {
+				parts = append(parts, convertedAttachmentPart)
+				RemoveEntityLinkFromText(textPart, indices)
+			}
 		}
 	}
 

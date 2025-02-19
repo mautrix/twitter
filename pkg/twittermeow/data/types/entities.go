@@ -3,9 +3,11 @@ package types
 import "fmt"
 
 type Attachment struct {
-	Video       *AttachmentInfo `json:"video,omitempty"`
-	AnimatedGif *AttachmentInfo `json:"animated_gif,omitempty"`
-	Photo       *AttachmentInfo `json:"photo,omitempty"`
+	Video       *AttachmentInfo  `json:"video,omitempty"`
+	AnimatedGif *AttachmentInfo  `json:"animated_gif,omitempty"`
+	Photo       *AttachmentInfo  `json:"photo,omitempty"`
+	Card        *AttachmentCard  `json:"card,omitempty"`
+	Tweet       *AttachmentTweet `json:"tweet,omitempty"`
 }
 type URLs struct {
 	URL         string `json:"url,omitempty"`
@@ -14,10 +16,11 @@ type URLs struct {
 	Indices     []int  `json:"indices,omitempty"`
 }
 type Entities struct {
-	Hashtags     []any  `json:"hashtags,omitempty"`
-	Symbols      []any  `json:"symbols,omitempty"`
-	UserMentions []any  `json:"user_mentions,omitempty"`
-	URLs         []URLs `json:"urls,omitempty"`
+	Hashtags     []any            `json:"hashtags,omitempty"`
+	Symbols      []any            `json:"symbols,omitempty"`
+	UserMentions []any            `json:"user_mentions,omitempty"`
+	URLs         []URLs           `json:"urls,omitempty"`
+	Media        []AttachmentInfo `json:"media,omitempty"`
 }
 type OriginalInfo struct {
 	URL    string `json:"url,omitempty"`
@@ -138,4 +141,32 @@ type AttachmentInfo struct {
 	ExtAltText    string        `json:"ext_alt_text,omitempty"`
 	Ext           Ext           `json:"ext,omitempty"`
 	AudioOnly     bool          `json:"audio_only,omitempty"`
+}
+
+type AttachmentCard struct {
+	BindingValues AttachmentCardBinding `json:"binding_values,omitempty"`
+}
+
+type AttachmentCardBinding struct {
+	CardURL     AttachmentCardBindingValue `json:"card_url,omitempty"`
+	Description AttachmentCardBindingValue `json:"description,omitempty"`
+	Domain      AttachmentCardBindingValue `json:"domain,omitempty"`
+	Title       AttachmentCardBindingValue `json:"title,omitempty"`
+	VanityUrl   AttachmentCardBindingValue `json:"vanity_url,omitempty"`
+}
+
+type AttachmentCardBindingValue struct {
+	StringValue string `json:"string_value,omitempty"`
+}
+
+type AttachmentTweet struct {
+	DisplayURL  string                `json:"display_url,omitempty"`
+	ExpandedURL string                `json:"expanded_url,omitempty"`
+	Status      AttachmentTweetStatus `json:"status,omitempty"`
+}
+
+type AttachmentTweetStatus struct {
+	FullText string   `json:"full_text,omitempty"`
+	Entities Entities `json:"entities,omitempty"`
+	User     User     `json:"user,omitempty"`
 }

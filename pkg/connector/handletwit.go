@@ -177,5 +177,6 @@ func XMDFromEventMessage(eventMessage *event.XEventMessage) *types.MessageData {
 		Attachment: eventMessage.Attachment,
 		ID:         eventMessage.MessageID,
 		ReplyData:  eventMessage.ReplyData,
+		Entities:   eventMessage.Entities,
 	}
 }
