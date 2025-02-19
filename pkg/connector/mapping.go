@@ -283,7 +283,9 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 		media := medias[0]
 		if media.Type == "photo" {
 			resp, err := tc.downloadFile(ctx, media.MediaURLHTTPS)
-			if err == nil {
+			if err != nil {
+				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
+			} else {
 				linkPreview.ImageType = "image/jpeg"
 				linkPreview.ImageWidth = media.OriginalInfo.Width
 				linkPreview.ImageHeight = media.OriginalInfo.Height
