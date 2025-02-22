@@ -15,10 +15,19 @@ type URLs struct {
 	DisplayURL  string `json:"display_url,omitempty"`
 	Indices     []int  `json:"indices,omitempty"`
 }
+
+type UserMention struct {
+	ID         int64  `json:"id,omitempty"`
+	IDStr      string `json:"id_str,omitempty"`
+	Name       string `json:"name,omitempty"`
+	ScreenName string `json:"screen_name,omitempty"`
+	Indices    []int  `json:"indices,omitempty"`
+}
+
 type Entities struct {
 	Hashtags     []any            `json:"hashtags,omitempty"`
 	Symbols      []any            `json:"symbols,omitempty"`
-	UserMentions []any            `json:"user_mentions,omitempty"`
+	UserMentions []UserMention    `json:"user_mentions,omitempty"`
 	URLs         []URLs           `json:"urls,omitempty"`
 	Media        []AttachmentInfo `json:"media,omitempty"`
 }

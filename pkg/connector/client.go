@@ -29,6 +29,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	bridgeEvt "maunium.net/go/mautrix/event"
 
+	"go.mau.fi/mautrix-twitter/pkg/connector/twitterfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -255,6 +256,11 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 			MsgType: bridgeEvt.MsgText,
 			Body:    msg.Text,
 		},
+	}
+
+	content := twitterfmt.Parse(ctx, portal, msg)
+	if content != nil {
+		textPart.Content = content
 	}
 
 	parts := make([]*bridgev2.ConvertedMessagePart, 0)
