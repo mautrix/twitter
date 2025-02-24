@@ -1,8 +1,12 @@
 package twitterfmt
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"html"
+	"math"
+	"slices"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -18,57 +22,42 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	cursor := 0
 	sortedEntites := sortEntities(msg.Entities)
 
-	for _, entity := range sortedEntites {
-		if entity.URL != nil {
-			url := entity.URL
+	for _, union := range sortedEntites {
+		switch entity := union.(type) {
+		case types.URLs:
+			url := entity
 			start, end := url.Indices[0], url.Indices[1]
 			if cursor < start {
 				bodyHtml.WriteString(string(charArr[cursor:start]))
 			}
 			bodyHtml.WriteString(url.ExpandedURL)
 			cursor = end
-		}
-		if entity.UserMention != nil {
-			mention := entity.UserMention
+		case types.UserMention:
+			mention := entity
 			start, end := mention.Indices[0], mention.Indices[1]
 			if cursor < start {
 				bodyHtml.WriteString(string(charArr[cursor:start]))
 			}
 
 			uid := mention.IDStr
-			dmPortals, err := portal.Bridge.GetDMPortalsWith(ctx, networkid.UserID(uid))
+			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid))
 			if err != nil {
+				bodyHtml.WriteString("@" + mention.ScreenName)
 				continue
 			}
 
-			if len(dmPortals) != 0 {
-				fmt.Fprintf(&bodyHtml,
-					`<a href="%s">%s</a>`,
-					dmPortals[0].MXID.URI().MatrixToURL(),
-					dmPortals[0].Name,
-				)
-			} else {
-				userLogin := portal.Bridge.GetCachedUserLoginByID(networkid.UserLoginID(uid))
-				text := "@" + mention.ScreenName
-				if userLogin != nil {
-					fmt.Fprintf(&bodyHtml,
-						`<a href="%s">%s</a>`,
-						userLogin.UserMXID.URI().MatrixToURL(),
-						text,
-					)
-
-				} else {
-					bodyHtml.WriteString(text)
-				}
-			}
+			fmt.Fprintf(&bodyHtml,
+				`<a href="%s">%s</a>`,
+				ghost.Intent.GetMXID().URI().MatrixToURL(),
+				ghost.Name,
+			)
 			cursor = end
 		}
-
 	}
 
 	content := &event.MessageEventContent{
 		MsgType: event.MsgText,
-		Body:    msg.Text,
+		Body:    html.UnescapeString(msg.Text),
 	}
 
 	if msg.Entities != nil {
@@ -80,51 +69,37 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	return content
 }
 
-type Entity struct {
-	UserMention *types.UserMention
-	URL         *types.URLs
+type EntityUnion = any
+
+func getStart(union any) int {
+	switch entity := union.(type) {
+	case types.URLs:
+		return entity.Indices[0]
+	case types.UserMention:
+		return entity.Indices[0]
+	default:
+		return math.MaxInt32
+	}
 }
 
-func sortEntities(entities *types.Entities) []Entity {
+func sortEntities(entities *types.Entities) []EntityUnion {
 	if entities == nil {
-		return []Entity{}
+		return []EntityUnion{}
 	}
 
-	urls := entities.URLs
-	mentions := entities.UserMentions
-	urlIndex := 0
-	mentionIndex := 0
+	merged := make([]EntityUnion, 0)
 
-	sorted := make([]Entity, 0)
-
-	for urlIndex < len(urls) && mentionIndex < len(mentions) {
-		urlStart := urls[urlIndex].Indices[0]
-		mentionStart := mentions[mentionIndex].Indices[0]
-
-		if urlStart < mentionStart {
-			sorted = append(sorted, Entity{
-				URL: &urls[urlIndex],
-			})
-			urlIndex++
-		} else {
-			sorted = append(sorted, Entity{
-				UserMention: &mentions[mentionIndex],
-			})
-			mentionIndex++
-		}
+	for _, url := range entities.URLs {
+		merged = append(merged, url)
 	}
 
-	for ; urlIndex < len(urls); urlIndex++ {
-		sorted = append(sorted, Entity{
-			URL: &urls[urlIndex],
-		})
+	for _, mention := range entities.UserMentions {
+		merged = append(merged, mention)
 	}
 
-	for ; mentionIndex < len(mentions); mentionIndex++ {
-		sorted = append(sorted, Entity{
-			UserMention: &mentions[mentionIndex],
-		})
-	}
+	slices.SortFunc(merged, func(a EntityUnion, b EntityUnion) int {
+		return cmp.Compare(getStart(a), getStart(b))
+	})
 
-	return sorted
+	return merged
 }

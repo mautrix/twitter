@@ -250,17 +250,9 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	}
 
 	textPart := &bridgev2.ConvertedMessagePart{
-		ID:   "",
-		Type: bridgeEvt.EventMessage,
-		Content: &bridgeEvt.MessageEventContent{
-			MsgType: bridgeEvt.MsgText,
-			Body:    msg.Text,
-		},
-	}
-
-	content := twitterfmt.Parse(ctx, portal, msg)
-	if content != nil {
-		textPart.Content = content
+		ID:      "",
+		Type:    bridgeEvt.EventMessage,
+		Content: twitterfmt.Parse(ctx, portal, msg),
 	}
 
 	parts := make([]*bridgev2.ConvertedMessagePart, 0)
