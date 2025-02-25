@@ -18,7 +18,7 @@ import (
 
 func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData) *event.MessageEventContent {
 	body := strings.Builder{}
-	bodyHtml := strings.Builder{}
+	bodyHTML := strings.Builder{}
 	charArr := []rune(msg.Text)
 	cursor := 0
 	sortedEntites := sortEntities(msg.Entities)
@@ -30,27 +30,27 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			start, end := url.Indices[0], url.Indices[1]
 			if cursor < start {
 				body.WriteString(string(charArr[cursor:start]))
-				bodyHtml.WriteString(string(charArr[cursor:start]))
+				bodyHTML.WriteString(string(charArr[cursor:start]))
 			}
 			body.WriteString(url.ExpandedURL)
-			bodyHtml.WriteString(url.ExpandedURL)
+			bodyHTML.WriteString(url.ExpandedURL)
 			cursor = end
 		case types.UserMention:
 			mention := entity
 			start, end := mention.Indices[0], mention.Indices[1]
 			body.WriteString(string(charArr[cursor:end]))
 			if cursor < start {
-				bodyHtml.WriteString(string(charArr[cursor:start]))
+				bodyHTML.WriteString(string(charArr[cursor:start]))
 			}
 
 			uid := mention.IDStr
 			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid))
 			if err != nil {
-				bodyHtml.WriteString("@" + mention.ScreenName)
+				bodyHTML.WriteString("@" + mention.ScreenName)
 				continue
 			}
 
-			fmt.Fprintf(&bodyHtml,
+			fmt.Fprintf(&bodyHTML,
 				`<a href="%s">%s</a>`,
 				ghost.Intent.GetMXID().URI().MatrixToURL(),
 				ghost.Name,
@@ -66,9 +66,9 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	}
 
 	if msg.Entities != nil {
-		bodyHtml.WriteString(string(charArr[cursor:]))
+		bodyHTML.WriteString(string(charArr[cursor:]))
 		content.Format = event.FormatHTML
-		content.FormattedBody = bodyHtml.String()
+		content.FormattedBody = bodyHTML.String()
 	}
 
 	return content
