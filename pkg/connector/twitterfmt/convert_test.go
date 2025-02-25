@@ -33,7 +33,7 @@ func TestParse(t *testing.T) {
 					},
 				},
 			},
-			body: "🚀 https://t.co/WCPQgzfcO4 abc",
+			body: "🚀 https://x.com abc",
 			html: "🚀 https://x.com abc",
 		},
 	}
