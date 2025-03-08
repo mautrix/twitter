@@ -28,7 +28,9 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	bridgeEvt "maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 
+	"go.mau.fi/mautrix-twitter/pkg/connector/matrixfmt"
 	"go.mau.fi/mautrix-twitter/pkg/connector/twitterfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -43,6 +45,8 @@ type TwitterClient struct {
 	userLogin *bridgev2.UserLogin
 
 	userCache map[string]types.User
+
+	matrixParser *matrixfmt.HTMLParser
 }
 
 var (
@@ -58,6 +62,20 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		userCache: make(map[string]types.User),
 	}
 	client.SetEventHandler(tc.HandleTwitterEvent)
+	tc.matrixParser = &matrixfmt.HTMLParser{
+		GetUsernameFromMXID: func(ctx context.Context, uid id.UserID) string {
+			userID, ok := tc.connector.br.Matrix.ParseGhostMXID(uid)
+			if !ok {
+				return ""
+			}
+			ghost, err := tc.connector.br.GetGhostByID(ctx, userID)
+			if err != nil || len(ghost.Identifiers) < 1 {
+				return ""
+			}
+			id := ghost.Identifiers[0]
+			return strings.TrimPrefix(id, "twitter:")
+		},
+	}
 	return tc
 }
 
