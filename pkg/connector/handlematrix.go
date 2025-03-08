@@ -10,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 
+	"go.mau.fi/mautrix-twitter/pkg/connector/matrixfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
@@ -50,7 +51,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	content := msg.Content
-	sendDMPayload.Text = content.Body
+	sendDMPayload.Text = matrixfmt.Parse(ctx, tc.matrixParser, content)
 
 	switch content.MsgType {
 	case event.MsgText:
