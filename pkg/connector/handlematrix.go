@@ -60,8 +60,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			sendDMPayload.Text = ""
 		}
 
-		file := content.GetFile()
-		data, err := tc.connector.br.Bot.DownloadMedia(ctx, file.URL, file)
+		data, err := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
 		if err != nil {
 			return nil, err
 		}
