@@ -35,7 +35,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 						Bool("conv_trusted", evtData.Conversation.Trusted)
 				},
 				PortalKey:    tc.MakePortalKey(evtData.Conversation),
-				CreatePortal: !evtData.Conversation.LowQuality,
+				CreatePortal: isFromMe || !evtData.Conversation.LowQuality,
 				Sender: bridgev2.EventSender{
 					IsFromMe:    isFromMe,
 					SenderLogin: networkid.UserLoginID(sender.IDStr),
