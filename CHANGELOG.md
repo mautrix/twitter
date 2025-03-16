@@ -1,3 +1,11 @@
+# v0.3.0 (2025-03-16)
+
+* Added support for tweet attachments.
+* Added support for unshortening URLs in incoming messages.
+* Fixed sending media in unencrypted Matrix rooms.
+* Fixed chats not being bridged in some cases even after accepting the message
+  request on Twitter.
+
 # v0.2.1 (2025-01-16)
 
 * Fixed various bugs.
