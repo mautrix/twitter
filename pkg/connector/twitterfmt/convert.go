@@ -68,7 +68,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	if msg.Entities != nil {
 		bodyHTML.WriteString(string(charArr[cursor:]))
 		content.Format = event.FormatHTML
-		content.FormattedBody = bodyHTML.String()
+		content.FormattedBody = strings.ReplaceAll(bodyHTML.String(), "\n", "<br>")
 	}
 
 	return content
