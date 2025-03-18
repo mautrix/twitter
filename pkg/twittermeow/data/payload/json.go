@@ -60,6 +60,28 @@ func (p *ReactionActionPayload) Encode() ([]byte, error) {
 	return json.Marshal(p)
 }
 
+type PushNotificationSettings struct {
+	Addressbook     string `json:"AddressbookSetting,omitempty"`
+	Ads             string `json:"AdsSetting,omitempty"`
+	DirectMessages  string `json:"DirectMessagesSetting,omitempty"`
+	DMReaction      string `json:"DmReactionSetting,omitempty"`
+	FollowersNonVit string `json:"FollowersNonVitSetting,omitempty"`
+	FollowersVit    string `json:"FollowersVitSetting,omitempty"`
+	LifelineAlerts  string `json:"LifelineAlertsSetting,omitempty"`
+	LikesNonVit     string `json:"LikesNonVitSetting,omitempty"`
+	LikesVit        string `json:"LikesVitSetting,omitempty"`
+	LiveVideo       string `json:"LiveVideoSetting,omitempty"`
+	Mentions        string `json:"MentionsSetting,omitempty"`
+	Moments         string `json:"MomentsSetting,omitempty"`
+	News            string `json:"NewsSetting,omitempty"`
+	PhotoTags       string `json:"PhotoTagsSetting,omitempty"`
+	Recommendations string `json:"RecommendationsSetting,omitempty"`
+	Retweets        string `json:"RetweetsSetting,omitempty"`
+	Spaces          string `json:"SpacesSetting,omitempty"`
+	Topics          string `json:"TopicsSetting,omitempty"`
+	Tweets          string `json:"TweetsSetting,omitempty"`
+}
+
 type WebPushConfigPayload struct {
 	Token  string `json:"token"`
 	P256DH string `json:"encryption_key1"`
@@ -71,4 +93,11 @@ type WebPushConfigPayload struct {
 
 	Env             int `json:"env"`
 	ProtocolVersion int `json:"protocol_version"`
+
+	Checksum string                    `json:"checksum,omitempty"`
+	Settings *PushNotificationSettings `json:"settings,omitempty"`
+}
+
+type PushConfigPayloadWrapper struct {
+	PushDeviceInfo *WebPushConfigPayload `json:"push_device_info"`
 }

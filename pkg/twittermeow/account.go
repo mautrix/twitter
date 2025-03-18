@@ -63,24 +63,32 @@ type WebPushConfig struct {
 	Endpoint string
 	P256DH   []byte
 	Auth     []byte
+
+	Settings *payload.PushNotificationSettings
 }
 
-type PushNotificationSetting int
+type PushNotificationConfigAction int
 
 const (
-	REGISTER_PUSH   PushNotificationSetting = 0
-	UNREGISTER_PUSH PushNotificationSetting = 1
+	PushRegister PushNotificationConfigAction = iota
+	PushUnregister
+	PushCheckin
+	PushSave
 )
 
-func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, config WebPushConfig) error {
+func (c *Client) SetPushNotificationConfig(action PushNotificationConfigAction, config WebPushConfig) error {
 	var url string
-	switch setting {
-	case REGISTER_PUSH:
+	switch action {
+	case PushRegister:
 		url = endpoints.NOTIFICATION_LOGIN_URL
-	case UNREGISTER_PUSH:
+	case PushUnregister:
 		url = endpoints.NOTIFICATION_LOGOUT_URL
+	case PushCheckin:
+		url = endpoints.NOTIFICATION_CHECKIN_URL
+	case PushSave:
+		url = endpoints.NOTIFICATION_SAVE_URL
 	default:
-		return fmt.Errorf("unknown push notification setting: %d", setting)
+		return fmt.Errorf("unknown push notification setting: %d", action)
 	}
 
 	webPushPayload := payload.WebPushConfigPayload{
@@ -94,10 +102,20 @@ func (c *Client) SetPushNotificationConfig(setting PushNotificationSetting, conf
 		Token:  config.Endpoint,
 		P256DH: base64.RawURLEncoding.EncodeToString(config.P256DH),
 		Auth:   base64.RawURLEncoding.EncodeToString(config.Auth),
+
+		Settings: config.Settings,
 	}
 
-	encodedBody, err := json.Marshal(webPushPayload)
+	var wrappedPayload any
+	if action != PushUnregister {
+		wrappedPayload = &payload.PushConfigPayloadWrapper{
+			PushDeviceInfo: &webPushPayload,
+		}
+	} else {
+		wrappedPayload = &webPushPayload
+	}
 
+	encodedBody, err := json.Marshal(wrappedPayload)
 	if err != nil {
 		return err
 	}

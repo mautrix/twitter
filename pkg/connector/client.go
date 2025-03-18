@@ -73,6 +73,28 @@ var pushCfg = &bridgev2.PushConfig{
 	Web: &bridgev2.WebPushConfig{VapidKey: "BF5oEo0xDUpgylKDTlsd8pZmxQA1leYINiY-rSscWYK_3tWAkz4VMbtf1MLE_Yyd6iII6o-e3Q9TCN5vZMzVMEs"},
 }
 
+var pushSettings = &payload.PushNotificationSettings{
+	Addressbook:     "off",
+	Ads:             "off",
+	DirectMessages:  "on",
+	DMReaction:      "reaction_your_own",
+	FollowersNonVit: "off",
+	FollowersVit:    "off",
+	LifelineAlerts:  "off",
+	LikesNonVit:     "off",
+	LikesVit:        "off",
+	LiveVideo:       "off",
+	Mentions:        "off",
+	Moments:         "off",
+	News:            "off",
+	PhotoTags:       "off",
+	Recommendations: "off",
+	Retweets:        "off",
+	Spaces:          "off",
+	Topics:          "off",
+	Tweets:          "off",
+}
+
 func (tc *TwitterClient) GetPushConfigs() *bridgev2.PushConfig {
 	return pushCfg
 }
@@ -96,7 +118,16 @@ func (tc *TwitterClient) RegisterPushNotifications(ctx context.Context, pushType
 			Auth:     meta.PushKeys.Auth,
 			P256DH:   meta.PushKeys.P256DH,
 		}
-		return tc.client.SetPushNotificationConfig(twittermeow.REGISTER_PUSH, pc)
+		err := tc.client.SetPushNotificationConfig(twittermeow.PushRegister, pc)
+		if err != nil {
+			return fmt.Errorf("failed to set push notification config: %w", err)
+		}
+		pc.Settings = pushSettings
+		err = tc.client.SetPushNotificationConfig(twittermeow.PushSave, pc)
+		if err != nil {
+			return fmt.Errorf("failed to set push notification preferences: %w", err)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported push type: %v", pushType)
 	}
