@@ -405,7 +405,7 @@ func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, 
 			"accept":                  "*/*",
 			"sec-fetch-dest":          "empty",
 			"sec-fetch-mode":          "cors",
-			"sec-fetch-site":          "same-site",
+			"sec-fetch-site":          "same-origin",
 		},
 		WithXClientUUID: apiRequestOpts.WithClientUUID,
 	}

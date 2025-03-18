@@ -42,7 +42,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		Extra: map[string]string{
 			"sec-fetch-dest": "empty",
 			"sec-fetch-mode": "cors",
-			"sec-fetch-site": "same-site",
+			"sec-fetch-site": "same-origin",
 			"accept":         "*/*",
 		},
 	}

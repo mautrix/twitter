@@ -80,7 +80,7 @@ func (c *Client) MakeRequest(url string, method string, headers http.Header, pay
 }
 
 func (c *Client) makeRequestDirect(url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	newRequest, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
+	newRequest, err := http.NewRequest(method, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}
@@ -112,6 +112,8 @@ func (c *Client) makeRequestDirect(url string, method string, headers http.Heade
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
+		} else if len(responseBody) == 0 {
+			return response, responseBody, fmt.Errorf("HTTP %d (no response body)", response.StatusCode)
 		} else if len(responseBody) < 512 {
 			return response, responseBody, fmt.Errorf("HTTP %d: %s", response.StatusCode, responseBody)
 		}
