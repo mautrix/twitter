@@ -66,11 +66,11 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		PillConverter: func(displayname, mxid, eventID string, ctx format.Context) string {
 			userID, ok := tc.connector.br.Matrix.ParseGhostMXID(id.UserID(mxid))
 			if !ok {
-				return "@" + displayname
+				return displayname
 			}
 			ghost, err := tc.connector.br.GetGhostByID(context.TODO(), userID)
 			if err != nil || len(ghost.Identifiers) < 1 {
-				return "@" + displayname
+				return displayname
 			}
 			id := ghost.Identifiers[0]
 			return "@" + strings.TrimPrefix(id, "twitter:")
