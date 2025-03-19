@@ -63,6 +63,9 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 	}
 	client.SetEventHandler(tc.HandleTwitterEvent)
 	tc.matrixParser = &format.HTMLParser{
+		TabsToSpaces:   4,
+		Newline:        "\n",
+		HorizontalLine: "\n---\n",
 		PillConverter: func(displayname, mxid, eventID string, ctx format.Context) string {
 			userID, ok := tc.connector.br.Matrix.ParseGhostMXID(id.UserID(mxid))
 			if !ok {
