@@ -4,15 +4,14 @@ import (
 	"context"
 
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
 )
 
-func Parse(ctx context.Context, parser *HTMLParser, content *event.MessageEventContent) string {
+func Parse(ctx context.Context, parser *format.HTMLParser, content *event.MessageEventContent) string {
 	if content.FormattedBody == "" {
 		return content.Body
 	}
 
-	parseCtx := NewContext(ctx)
-	parseCtx.AllowedMentions = content.Mentions
-	parsed := parser.Parse(content.FormattedBody, parseCtx)
-	return string(parsed.String)
+	parseCtx := format.NewContext(ctx)
+	return parser.Parse(content.FormattedBody, parseCtx)
 }
