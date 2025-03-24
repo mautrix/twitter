@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
@@ -22,6 +23,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	charArr := []rune(msg.Text)
 	cursor := 0
 	sortedEntites := sortEntities(msg.Entities)
+	var mentions event.Mentions
 
 	for _, union := range sortedEntites {
 		switch entity := union.(type) {
@@ -46,23 +48,30 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			uid := mention.IDStr
 			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid))
 			if err != nil {
+				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost")
 				bodyHTML.WriteString("@" + mention.ScreenName)
 				continue
 			}
-
+			targetMXID := ghost.Intent.GetMXID()
+			login := portal.Bridge.GetCachedUserLoginByID(networkid.UserLoginID(uid))
+			if login != nil {
+				targetMXID = login.UserMXID
+			}
 			fmt.Fprintf(&bodyHTML,
 				`<a href="%s">%s</a>`,
-				ghost.Intent.GetMXID().URI().MatrixToURL(),
+				targetMXID.URI().MatrixToURL(),
 				ghost.Name,
 			)
+			mentions.Add(targetMXID)
 			cursor = end
 		}
 	}
 
 	body.WriteString(string(charArr[cursor:]))
 	content := &event.MessageEventContent{
-		MsgType: event.MsgText,
-		Body:    html.UnescapeString(body.String()),
+		MsgType:  event.MsgText,
+		Body:     html.UnescapeString(body.String()),
+		Mentions: &mentions,
 	}
 
 	if msg.Entities != nil {
