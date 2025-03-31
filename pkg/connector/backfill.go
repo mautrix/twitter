@@ -107,9 +107,10 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 				IsFromMe: msg.MessageData.SenderID == string(tc.userLogin.ID),
 				Sender:   networkid.UserID(msg.MessageData.SenderID),
 			},
-			ID:        networkid.MessageID(msg.MessageData.ID),
-			Timestamp: messageTS,
-			Reactions: tc.convertBackfillReactions(msg.MessageReactions),
+			ID:          networkid.MessageID(msg.MessageData.ID),
+			Timestamp:   messageTS,
+			Reactions:   tc.convertBackfillReactions(msg.MessageReactions),
+			StreamOrder: methods.ParseSnowflakeInt(msg.MessageData.ID),
 		}
 		converted = append(converted, convertedMsg)
 	}
@@ -138,6 +139,7 @@ func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReact
 			},
 			EmojiID: "",
 			Emoji:   reaction.EmojiReaction,
+			// StreamOrder: methods.ParseSnowflakeInt(reaction.ID),
 		}
 		backfillReactions = append(backfillReactions, backfillReaction)
 	}

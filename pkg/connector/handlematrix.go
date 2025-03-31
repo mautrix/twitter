@@ -12,6 +12,7 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/connector/matrixfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 var (
@@ -104,6 +105,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			SenderID:  networkid.UserID(tc.client.GetCurrentUserID()),
 			Timestamp: respMessageData.SentAt,
 		},
+		StreamOrder: methods.ParseSnowflakeInt(respMessageData.MessageID),
 	}, nil
 }
 

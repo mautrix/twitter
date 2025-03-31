@@ -10,6 +10,7 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/event"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
@@ -41,7 +42,8 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 					SenderLogin: networkid.UserLoginID(sender.IDStr),
 					Sender:      networkid.UserID(sender.IDStr),
 				},
-				Timestamp: evtData.CreatedAt,
+				StreamOrder: methods.ParseSnowflakeInt(evtData.MessageID),
+				Timestamp:   evtData.CreatedAt,
 			},
 			ID:            networkid.MessageID(evtData.MessageID),
 			TargetMessage: networkid.MessageID(evtData.MessageID),
@@ -113,6 +115,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 				},
 				PortalKey:    tc.MakePortalKey(evtData.Conversation),
 				CreatePortal: !evtData.Conversation.LowQuality,
+				StreamOrder:  methods.ParseSnowflakeInt(evtData.EventID),
 				Timestamp:    evtData.EventTime,
 			},
 			ChatInfoChange: &bridgev2.ChatInfoChange{
@@ -129,7 +132,8 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt any) {
 					return c.
 						Str("conversation_id", evtData.ConversationID)
 				},
-				Timestamp: evtData.DeletedAt,
+				StreamOrder: methods.ParseSnowflakeInt(evtData.EventID),
+				Timestamp:   evtData.DeletedAt,
 			},
 			OnlyForMe: true,
 		}
@@ -158,8 +162,9 @@ func (tc *TwitterClient) wrapReaction(data event.XEventReaction) *simplevent.Rea
 					Str("reaction_key", data.ReactionKey).
 					Str("emoji_reaction", data.EmojiReaction)
 			},
-			PortalKey: tc.MakePortalKey(data.Conversation),
-			Timestamp: data.Time,
+			PortalKey:   tc.MakePortalKey(data.Conversation),
+			Timestamp:   data.Time,
+			StreamOrder: methods.ParseSnowflakeInt(data.ID),
 			Sender: bridgev2.EventSender{
 				IsFromMe: data.SenderID == string(tc.userLogin.ID),
 				Sender:   networkid.UserID(data.SenderID),

@@ -14,12 +14,20 @@ import (
 
 const TwitterEpoch = 1288834974657
 
-func ParseSnowflake(msgID string) time.Time {
+func ParseSnowflakeInt(msgID string) int64 {
 	secs, err := strconv.ParseInt(msgID, 10, 64)
 	if err != nil {
+		return 0
+	}
+	return (secs >> 22) + TwitterEpoch
+}
+
+func ParseSnowflake(msgID string) time.Time {
+	msec := ParseSnowflakeInt(msgID)
+	if msec == 0 {
 		return time.Time{}
 	}
-	return time.UnixMilli((secs >> 22) + TwitterEpoch)
+	return time.UnixMilli(msec)
 }
 
 func SortConversationsByTimestamp(conversations map[string]types.Conversation) []types.Conversation {
