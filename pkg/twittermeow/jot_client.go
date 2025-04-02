@@ -8,7 +8,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 type JotClient struct {

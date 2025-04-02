@@ -16,7 +16,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte) (*response.FinalizedUploadMediaResponse, error) {

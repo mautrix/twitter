@@ -1,4 +1,4 @@
-package types
+package onboardingtypes
 
 type TaskResponse struct {
 	FlowToken string     `json:"flow_token,omitempty"`

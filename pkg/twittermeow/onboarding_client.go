@@ -1,21 +1,21 @@
 package twittermeow
 
 import (
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/onboardingtypes"
 )
 
 type OnboardingClient struct {
 	//lint:ignore U1000 TODO fix unused field
 	client       *Client
 	flowToken    string
-	currentTasks *types.TaskResponse
+	currentTasks *onboardingtypes.TaskResponse
 }
 
 //lint:ignore U1000 TODO fix unused method
 func (c *Client) newOnboardingClient() *OnboardingClient {
 	return &OnboardingClient{
 		client:       c,
-		currentTasks: &types.TaskResponse{},
+		currentTasks: &onboardingtypes.TaskResponse{},
 	}
 }
 
@@ -24,6 +24,6 @@ func (o *OnboardingClient) SetFlowToken(flowToken string) *OnboardingClient {
 	return o
 }
 
-func (o *OnboardingClient) SetCurrentTasks(tasks *types.TaskResponse) {
+func (o *OnboardingClient) SetCurrentTasks(tasks *onboardingtypes.TaskResponse) {
 	o.currentTasks = tasks
 }

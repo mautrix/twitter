@@ -20,8 +20,8 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
 
 	"github.com/rs/zerolog"
 	"golang.org/x/net/proxy"

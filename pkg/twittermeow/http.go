@@ -13,7 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 var MaxHTTPRetries = 5
