@@ -74,7 +74,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 		"sec-fetch-user":            "?1",
 		"sec-fetch-dest":            "document",
 	}
-	mainPageResp, mainPageRespBody, err := s.client.MakeRequest(url, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.NONE)
+	mainPageResp, mainPageRespBody, err := s.client.MakeRequest(url, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
 	if err != nil {
 		return fmt.Errorf("failed to send main page request: %w", err)
 	}
@@ -95,7 +95,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 			"sec-fetch-mode":            "navigate",
 			"sec-fetch-dest":            "document",
 		}
-		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.NONE)
+		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.ContentTypeNone)
 		if err != nil {
 			return fmt.Errorf("failed to send migration request: %w", err)
 		}
@@ -111,7 +111,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 			extraHeaders["origin"] = endpoints.TWITTER_BASE_URL
 
 			s.client.disableRedirects()
-			mainPageResp, _, err = s.client.MakeRequest(migrationFormURL, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
+			mainPageResp, _, err = s.client.MakeRequest(migrationFormURL, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
 			if err == nil || !errors.Is(err, ErrRedirectAttempted) {
 				return fmt.Errorf("failed to make request to main page, server did not respond with a redirect response")
 			}
@@ -119,7 +119,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 			s.client.cookies.UpdateFromResponse(mainPageResp) // update the cookies received from the redirected response headers
 
 			migrationFormURL = endpoints.BASE_URL + mainPageResp.Header.Get("Location")
-			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.FORM)
+			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
 			if err != nil {
 				return fmt.Errorf("failed to send main page request after migration: %w", err)
 			}

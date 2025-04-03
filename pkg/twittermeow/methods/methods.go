@@ -1,13 +1,12 @@
 package methods
 
 import (
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/exp/maps"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
@@ -30,17 +29,14 @@ func ParseSnowflake(msgID string) time.Time {
 	return time.UnixMilli(msec)
 }
 
-func SortConversationsByTimestamp(conversations map[string]types.Conversation) []types.Conversation {
-	conversationValues := maps.Values(conversations)
-	slices.SortFunc(conversationValues, func(a, b types.Conversation) int {
+func SortConversationsByTimestamp(conversations map[string]*types.Conversation) []*types.Conversation {
+	return slices.SortedFunc(maps.Values(conversations), func(a, b *types.Conversation) int {
 		return strings.Compare(a.SortTimestamp, b.SortTimestamp)
 	})
-
-	return conversationValues
 }
 
-func SortMessagesByTime(messages []types.Message) {
-	slices.SortFunc(messages, func(a, b types.Message) int {
+func SortMessagesByTime(messages []*types.Message) {
+	slices.SortFunc(messages, func(a, b *types.Message) int {
 		return strings.Compare(a.ID, b.ID)
 	})
 }

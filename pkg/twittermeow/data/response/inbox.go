@@ -1,137 +1,69 @@
 package response
 
 import (
-	"encoding/json"
-	"time"
+	"context"
+
+	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/event"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-type XInboxData struct {
-	Status                   types.PaginationStatus             `json:"status,omitempty"`
-	MinEntryID               string                             `json:"min_entry_id,omitempty"`
-	MaxEntryID               string                             `json:"max_entry_id,omitempty"`
-	LastSeenEventID          string                             `json:"last_seen_event_id,omitempty"`
-	TrustedLastSeenEventID   string                             `json:"trusted_last_seen_event_id,omitempty"`
-	UntrustedLastSeenEventID string                             `json:"untrusted_last_seen_event_id,omitempty"`
-	Cursor                   string                             `json:"cursor,omitempty"`
-	InboxTimelines           InboxTimelines                     `json:"inbox_timelines,omitempty"`
-	Entries                  []map[event.XEventType]interface{} `json:"entries,omitempty"`
-	Users                    map[string]types.User              `json:"users,omitempty"`
-	Conversations            map[string]types.Conversation      `json:"conversations,omitempty"`
-	KeyRegistryState         KeyRegistryState                   `json:"key_registry_state,omitempty"`
+type GetDMUserUpdatesResponse struct {
+	InboxInitialState *TwitterInboxData `json:"inbox_initial_state,omitempty"`
+	UserEvents        *TwitterInboxData `json:"user_events,omitempty"`
 }
 
-type XInboxConversationFeedData struct {
-	Conversation types.Conversation
-	Participants []types.User
-	// sorted by timestamp, first index is the most recent message
-	Messages []types.Message
+type TwitterInboxData struct {
+	Status                   types.PaginationStatus         `json:"status,omitempty"`
+	MinEntryID               string                         `json:"min_entry_id,omitempty"`
+	MaxEntryID               string                         `json:"max_entry_id,omitempty"`
+	LastSeenEventID          string                         `json:"last_seen_event_id,omitempty"`
+	TrustedLastSeenEventID   string                         `json:"trusted_last_seen_event_id,omitempty"`
+	UntrustedLastSeenEventID string                         `json:"untrusted_last_seen_event_id,omitempty"`
+	Cursor                   string                         `json:"cursor,omitempty"`
+	InboxTimelines           InboxTimelines                 `json:"inbox_timelines,omitempty"`
+	Entries                  []types.RawTwitterEvent        `json:"entries,omitempty"`
+	Users                    map[string]*types.User         `json:"users,omitempty"`
+	Conversations            map[string]*types.Conversation `json:"conversations,omitempty"`
+	KeyRegistryState         KeyRegistryState               `json:"key_registry_state,omitempty"`
 }
 
-func (data *XInboxData) Prettify() ([]XInboxConversationFeedData, error) {
-	conversationFeeds := make([]XInboxConversationFeedData, 0)
-	sortedConversations := methods.SortConversationsByTimestamp(data.Conversations)
-
-	for _, conv := range sortedConversations {
-		messages, err := data.GetMessageEntriesByConversationID(conv.ConversationID, true)
-		if err != nil {
-			return nil, err
-		}
-
-		feedData := XInboxConversationFeedData{
-			Conversation: conv,
-			Participants: data.GetParticipantUsers(conv.Participants),
-			Messages:     messages,
-		}
-		conversationFeeds = append(conversationFeeds, feedData)
+func (data *TwitterInboxData) GetUserByID(userID string) *types.User {
+	if data == nil {
+		return nil
 	}
-
-	return conversationFeeds, nil
-}
-
-type PrettifiedMessage struct {
-	EventID        string
-	ConversationID string
-	MessageID      string
-	Recipient      types.User
-	Sender         types.User
-	SentAt         time.Time
-	AffectsSort    bool
-	Text           string
-	Attachment     *types.Attachment
-	Entities       *types.Entities
-	Reactions      []types.MessageReaction
-}
-
-// TODO this function and struct are dumb, they should be deleted
-
-func (data *XInboxData) PrettifyMessages(conversationID string) ([]PrettifiedMessage, error) {
-	messages, err := data.GetMessageEntriesByConversationID(conversationID, true)
-	if err != nil {
-		return nil, err
+	if user, ok := data.Users[userID]; ok {
+		return user
 	}
-
-	prettifiedMessages := make([]PrettifiedMessage, 0)
-	for _, msg := range messages {
-		sentAt := methods.ParseSnowflake(msg.ID)
-
-		prettifiedMessage := PrettifiedMessage{
-			EventID:        msg.ID,
-			ConversationID: msg.ConversationID,
-			MessageID:      msg.MessageData.ID,
-			Sender:         data.GetUserByID(msg.MessageData.SenderID),
-			Recipient:      data.GetUserByID(msg.MessageData.RecipientID),
-			SentAt:         sentAt,
-			Text:           msg.MessageData.Text,
-			Attachment:     msg.MessageData.Attachment,
-			Entities:       msg.MessageData.Entities,
-			AffectsSort:    msg.AffectsSort,
-			Reactions:      msg.MessageReactions,
-		}
-		prettifiedMessages = append(prettifiedMessages, prettifiedMessage)
-	}
-
-	return prettifiedMessages, nil
+	return nil
 }
 
-func (data *XInboxData) GetParticipantUsers(participants []types.Participant) []types.User {
-	result := make([]types.User, 0)
-	for _, participant := range participants {
-		result = append(result, data.GetUserByID(participant.UserID))
+func (data *TwitterInboxData) GetConversationByID(conversationID string) *types.Conversation {
+	if data == nil {
+		return nil
 	}
-	return result
+	if conv, ok := data.Conversations[conversationID]; ok {
+		return conv
+	}
+	return nil
 }
 
-func (data *XInboxData) GetMessageEntriesByConversationID(conversationID string, sortByTimestamp bool) ([]types.Message, error) {
-	messages := make([]types.Message, 0)
+func (data *TwitterInboxData) SortedConversations() []*types.Conversation {
+	return methods.SortConversationsByTimestamp(data.Conversations)
+}
+
+func (data *TwitterInboxData) SortedMessages(ctx context.Context) map[string][]*types.Message {
+	conversations := make(map[string][]*types.Message)
+	log := zerolog.Ctx(ctx)
 	for _, entry := range data.Entries {
-		for entryType, entryData := range entry {
-			if entryType == event.XMessageEvent {
-				jsonEvData, err := json.Marshal(entryData)
-				if err != nil {
-					return nil, err
-				}
-				var message types.Message
-				err = json.Unmarshal(jsonEvData, &message)
-				if err != nil {
-					return nil, err
-				}
-
-				if message.ConversationID == conversationID {
-					messages = append(messages, message)
-				}
-			} else if entryType == event.XMessageEditEvent {
-				// todo: add edits and return them alongside messages
-			}
+		switch evt := entry.ParseWithErrorLog(log).(type) {
+		case *types.Message:
+			conversations[evt.ConversationID] = append(conversations[evt.ConversationID], evt)
 		}
 	}
-
-	if sortByTimestamp {
-		methods.SortMessagesByTime(messages)
+	for _, conv := range conversations {
+		methods.SortMessagesByTime(conv)
 	}
-
-	return messages, nil
+	return conversations
 }

@@ -127,7 +127,7 @@ func (c *Client) SetPushNotificationConfig(action PushNotificationConfigAction, 
 		Referer:        endpoints.BASE_NOTIFICATION_SETTINGS_URL,
 		Origin:         endpoints.BASE_URL,
 		Body:           encodedBody,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 	}
 	_, _, err = c.makeAPIRequest(apiRequestOpts)
 	return err

@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
+	"golang.org/x/net/proxy"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -22,9 +24,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
-
-	"github.com/rs/zerolog"
-	"golang.org/x/net/proxy"
 )
 
 type ClientOpts struct {
@@ -34,7 +33,9 @@ type ClientOpts struct {
 	EventHandler    EventHandler
 	WithJOTClient   bool
 }
-type EventHandler func(evt any)
+
+type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData)
+
 type Client struct {
 	Logger       zerolog.Logger
 	cookies      *cookies.Cookies
@@ -219,7 +220,7 @@ func (c *Client) fetchScript(url string) ([]byte, error) {
 		"sec-fetch-dest": "script",
 		"origin":         endpoints.BASE_URL,
 	}
-	_, scriptRespBody, err := c.MakeRequest(url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.NONE)
+	_, scriptRespBody, err := c.MakeRequest(url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.ContentTypeNone)
 	return scriptRespBody, err
 }
 

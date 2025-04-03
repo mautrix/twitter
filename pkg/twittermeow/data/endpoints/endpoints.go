@@ -1,5 +1,7 @@
 package endpoints
 
+// TODO fix variable name casing
+
 const (
 	TWITTER_BASE_HOST = "twitter.com"
 	TWITTER_BASE_URL  = "https://" + TWITTER_BASE_HOST

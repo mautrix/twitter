@@ -31,9 +31,9 @@ type Video struct {
 type ProcessingState string
 
 const (
-	PROCESSING_STATE_PENDING     ProcessingState = "pending"
-	PROCESSING_STATE_IN_PROGRESS ProcessingState = "in_progress"
-	PROCESSING_STATE_SUCCEEDED   ProcessingState = "succeeded"
+	ProcessingStatePending    ProcessingState = "pending"
+	ProcessingStateInProgress ProcessingState = "in_progress"
+	ProcessingStateSucceeded  ProcessingState = "succeeded"
 )
 
 type ProcessingInfo struct {

@@ -52,15 +52,13 @@ func (pc *PollingClient) startListening() {
 			continue
 		}
 
-		userEvents := userUpdatesResponse.UserEvents
-		if len(userEvents.Entries) > 0 {
-			err := pc.client.processEventEntries(userUpdatesResponse)
-			if err != nil {
-				pc.client.Logger.Err(err).Msg("Failed to process user events")
+		pc.client.eventHandler(nil, userUpdatesResponse.UserEvents)
+		for _, entry := range userUpdatesResponse.UserEvents.Entries {
+			parsed := entry.ParseWithErrorLog(&pc.client.Logger)
+			if parsed != nil {
+				pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents)
 			}
 		}
-
-		// pc.client.logger.Info().Any("user_events", userUpdatesResponse.UserEvents).Any("inbox_initial_state", userUpdatesResponse.InboxInitialState).Msg("Got polling update response")
 
 		pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
 	}
@@ -70,7 +68,6 @@ func (pc *PollingClient) SetCurrentCursor(cursor string) {
 	pc.currentCursor = cursor
 }
 
-//lint:ignore U1000 TODO fix unused method
 func (pc *PollingClient) stopPolling() error {
 	if pc.ticker == nil {
 		return ErrNotPollingUpdates

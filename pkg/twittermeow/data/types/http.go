@@ -3,7 +3,7 @@ package types
 type ContentType string
 
 const (
-	NONE ContentType = ""
-	JSON ContentType = "application/json"
-	FORM ContentType = "application/x-www-form-urlencoded"
+	ContentTypeNone ContentType = ""
+	ContentTypeJSON ContentType = "application/json"
+	ContentTypeForm ContentType = "application/x-www-form-urlencoded"
 )

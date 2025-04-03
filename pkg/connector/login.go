@@ -22,7 +22,6 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -106,19 +105,20 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	if err != nil {
 		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
 	}
-	selfUser := inboxState.InboxInitialState.GetUserByID(client.GetCurrentUserID())
-
-	id := networkid.UserLoginID(client.GetCurrentUserID())
+	remoteProfile := t.tc.makeRemoteProfile(ctx, client, client.GetCurrentUserID(), inboxState.InboxInitialState)
+	if remoteProfile == nil {
+		remoteProfile = &status.RemoteProfile{
+			Username: settings.ScreenName,
+		}
+	}
+	id := MakeUserLoginID(client.GetCurrentUserID())
 	ul, err := t.User.NewLogin(
 		ctx,
 		&database.UserLogin{
-			ID:         id,
-			Metadata:   meta,
-			RemoteName: settings.ScreenName,
-			RemoteProfile: status.RemoteProfile{
-				Username: settings.ScreenName,
-				Name:     selfUser.Name,
-			},
+			ID:            id,
+			Metadata:      meta,
+			RemoteName:    remoteProfile.Username,
+			RemoteProfile: *remoteProfile,
 		},
 		&bridgev2.NewLoginParams{
 			DeleteOnConflict:  true,
@@ -135,7 +135,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 
 	go func(ctx context.Context, client *TwitterClient, inboxState *response.InboxInitialStateResponse) {
-		client.syncChannels(ctx, inboxState)
+		client.syncChannels(ctx, inboxState.InboxInitialState)
 		client.startPolling(ctx)
 	}(context.WithoutCancel(ctx), ul.Client.(*TwitterClient), inboxState)
 

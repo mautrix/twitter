@@ -67,7 +67,7 @@ func (c *Client) MarkConversationRead(params *payload.MarkConversationReadQuery)
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Body:           encodedQueryBody,
-		ContentType:    types.FORM,
+		ContentType:    types.ContentTypeForm,
 	}
 	_, _, err = c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -120,7 +120,7 @@ func (c *Client) FetchTrustedThreads(params *payload.DMRequestQuery) (*response.
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) SendDirectMessage(pl *payload.SendDirectMessagePayload) (*response.XInboxData, error) {
+func (c *Client) SendDirectMessage(pl *payload.SendDirectMessagePayload) (*response.TwitterInboxData, error) {
 	if pl.RequestID == "" {
 		pl.RequestID = uuid.NewString()
 	}
@@ -139,14 +139,14 @@ func (c *Client) SendDirectMessage(pl *payload.SendDirectMessagePayload) (*respo
 		Body:           jsonBody,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, pl.ConversationID),
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	data := response.XInboxData{}
+	data := response.TwitterInboxData{}
 	return &data, json.Unmarshal(respBody, &data)
 }
 
@@ -167,7 +167,7 @@ func (c *Client) EditDirectMessage(payload *payload.EditDirectMessagePayload) (*
 		WithClientUUID: true,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.FORM,
+		ContentType:    types.ContentTypeForm,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -199,7 +199,7 @@ func (c *Client) SendTypingNotification(conversationID string) error {
 		WithClientUUID: true,
 		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, conversationID),
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 		Body:           jsonBody,
 	}
 	_, _, err = c.makeAPIRequest(apiRequestOpts)
@@ -229,7 +229,7 @@ func (c *Client) DeleteMessageForMe(variables *payload.DMMessageDeleteMutationVa
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -254,7 +254,7 @@ func (c *Client) DeleteConversation(conversationID string, payload *payload.DMRe
 		Body:           encodedQueryBody,
 		Referer:        endpoints.BASE_MESSAGES_URL,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.FORM,
+		ContentType:    types.ContentTypeForm,
 	}
 	resp, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -290,7 +290,7 @@ func (c *Client) PinConversation(conversationID string) (*response.PinConversati
 		Body:           jsonBody,
 		Referer:        endpoints.BASE_MESSAGES_URL,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -323,7 +323,7 @@ func (c *Client) UnpinConversation(conversationID string) (*response.UnpinConver
 		Body:           jsonBody,
 		Referer:        endpoints.BASE_MESSAGES_URL,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {
@@ -357,7 +357,7 @@ func (c *Client) React(reactionPayload *payload.ReactionActionPayload, remove bo
 		WithClientUUID: true,
 		Body:           jsonBody,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.JSON,
+		ContentType:    types.ContentTypeJSON,
 	}
 	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
 	if err != nil {

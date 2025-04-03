@@ -1,3 +1,19 @@
+// mautrix-twitter - A Matrix-Twitter puppeting bridge.
+// Copyright (C) 2025 Tulir Asokan
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 package connector
 
 import (
@@ -9,6 +25,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
@@ -49,18 +66,28 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		log.Debug().Msg("No anchor for forward backfill, fetching latest messages")
 	}
 
-	messageResp, err := tc.client.FetchConversationContext(conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
-	if err != nil {
-		return nil, err
+	var inbox *response.TwitterInboxData
+	var conv *types.Conversation
+	var messages []*types.Message
+	bundle, ok := params.BundledData.(*backfillDataBundle)
+	if ok && params.Forward && len(bundle.Messages) > 0 {
+		inbox = bundle.Inbox
+		conv = bundle.Conv
+		messages = bundle.Messages
+		// TODO support for fetching more messages
+	} else {
+		messageResp, err := tc.client.FetchConversationContext(conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
+		if err != nil {
+			return nil, err
+		}
+		inbox = messageResp.ConversationTimeline
+		conv = inbox.GetConversationByID(conversationID)
+		messages = messageResp.ConversationTimeline.SortedMessages(ctx)[conversationID]
 	}
 
-	messages, err := messageResp.ConversationTimeline.GetMessageEntriesByConversationID(conversationID, true)
-	if err != nil {
-		return nil, err
-	}
 	if len(messages) == 0 {
 		log.Debug().
-			Str("timeline_status", string(messageResp.ConversationTimeline.Status)).
+			Str("timeline_status", string(inbox.Status)).
 			Msg("No messages in backfill response")
 		return &bridgev2.FetchMessagesResponse{
 			Messages: make([]*bridgev2.BackfillMessage, 0),
@@ -70,14 +97,14 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 	}
 
 	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
-	lastReadID := messageResp.ConversationTimeline.GetConversationByID(conversationID).LastReadEventID
 	log.Debug().
+		Bool("is_bundled_data", bundle != nil).
 		Int("message_count", len(messages)).
 		Str("oldest_raw_ts", messages[0].Time).
 		Str("newest_raw_ts", messages[len(messages)-1].Time).
 		Str("oldest_id", messages[0].ID).
 		Str("newest_id", messages[len(messages)-1].ID).
-		Str("last_read_id", lastReadID).
+		Str("last_read_id", conv.LastReadEventID).
 		Msg("Fetched messages")
 	for _, msg := range messages {
 		messageTS := methods.ParseSnowflake(msg.ID)
@@ -103,26 +130,23 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		intent := tc.userLogin.Bridge.Matrix.BotIntent()
 		convertedMsg := &bridgev2.BackfillMessage{
 			ConvertedMessage: tc.convertToMatrix(ctx, params.Portal, intent, &msg.MessageData),
-			Sender: bridgev2.EventSender{
-				IsFromMe: msg.MessageData.SenderID == string(tc.userLogin.ID),
-				Sender:   networkid.UserID(msg.MessageData.SenderID),
-			},
-			ID:          networkid.MessageID(msg.MessageData.ID),
-			Timestamp:   messageTS,
-			Reactions:   tc.convertBackfillReactions(msg.MessageReactions),
-			StreamOrder: methods.ParseSnowflakeInt(msg.MessageData.ID),
+			Sender:           tc.MakeEventSender(msg.MessageData.SenderID),
+			ID:               networkid.MessageID(msg.MessageData.ID),
+			Timestamp:        messageTS,
+			Reactions:        tc.convertBackfillReactions(msg.MessageReactions),
+			StreamOrder:      methods.ParseSnowflakeInt(msg.MessageData.ID),
 		}
 		converted = append(converted, convertedMsg)
 	}
 
 	fetchMessagesResp := &bridgev2.FetchMessagesResponse{
 		Messages: converted,
-		HasMore:  messageResp.ConversationTimeline.Status == types.HAS_MORE,
+		HasMore:  bundle != nil || inbox.Status == types.PaginationStatusHasMore,
 		Forward:  params.Forward,
-		MarkRead: lastReadID == messages[len(messages)-1].ID,
+		MarkRead: conv.LastReadEventID == messages[len(messages)-1].ID,
 	}
 	if !params.Forward {
-		fetchMessagesResp.Cursor = networkid.PaginationCursor(messageResp.ConversationTimeline.MinEntryID)
+		fetchMessagesResp.Cursor = networkid.PaginationCursor(inbox.MinEntryID)
 	}
 
 	return fetchMessagesResp, nil
@@ -133,12 +157,9 @@ func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReact
 	for _, reaction := range reactions {
 		backfillReaction := &bridgev2.BackfillReaction{
 			Timestamp: methods.ParseSnowflake(reaction.ID),
-			Sender: bridgev2.EventSender{
-				IsFromMe: reaction.SenderID == string(tc.userLogin.ID),
-				Sender:   networkid.UserID(reaction.SenderID),
-			},
-			EmojiID: "",
-			Emoji:   reaction.EmojiReaction,
+			Sender:    tc.MakeEventSender(reaction.SenderID),
+			EmojiID:   "",
+			Emoji:     reaction.EmojiReaction,
 			// StreamOrder: methods.ParseSnowflakeInt(reaction.ID),
 		}
 		backfillReactions = append(backfillReactions, backfillReaction)

@@ -22,6 +22,8 @@ type Message struct {
 	MessageReactions []MessageReaction `json:"message_reactions,omitempty"`
 }
 
+type MessageEdit Message
+
 type ReplyData struct {
 	ID          string `json:"id,omitempty"`
 	Time        string `json:"time,omitempty"`
@@ -29,13 +31,6 @@ type ReplyData struct {
 	SenderID    string `json:"sender_id,omitempty"`
 	Text        string `json:"text,omitempty"`
 }
-
-type MessageReactionAction string
-
-const (
-	MessageReactionAdd    MessageReactionAction = "reaction_add"
-	MessageReactionRemove MessageReactionAction = "reaction_remove"
-)
 
 type MessageReaction struct {
 	ID             string `json:"id,omitempty"`
@@ -47,6 +42,9 @@ type MessageReaction struct {
 	SenderID       string `json:"sender_id,omitempty"`
 	AffectsSort    bool   `json:"affects_sort,omitempty"`
 }
+
+type MessageReactionCreate MessageReaction
+type MessageReactionDelete MessageReaction
 
 type ConversationRead struct {
 	ID              string `json:"id,omitempty"`
@@ -63,7 +61,7 @@ type ConversationMetadataUpdate struct {
 	ConversationID string `json:"conversation_id,omitempty"`
 }
 
-type ConversationCreatedData struct {
+type ConversationCreate struct {
 	ID             string `json:"id,omitempty"`
 	Time           string `json:"time,omitempty"`
 	AffectsSort    bool   `json:"affects_sort,omitempty"`
@@ -71,7 +69,7 @@ type ConversationCreatedData struct {
 	RequestID      string `json:"request_id,omitempty"`
 }
 
-type ConversationDeletedData struct {
+type ConversationDelete struct {
 	ID             string `json:"id,omitempty"`
 	Time           string `json:"time,omitempty"`
 	AffectsSort    bool   `json:"affects_sort,omitempty"`
@@ -79,7 +77,7 @@ type ConversationDeletedData struct {
 	LastEventID    string `json:"last_event_id,omitempty"`
 }
 
-type ConversationNameUpdateData struct {
+type ConversationNameUpdate struct {
 	ID               string `json:"id,omitempty"`
 	Time             string `json:"time,omitempty"`
 	ConversationID   string `json:"conversation_id,omitempty"`
@@ -88,7 +86,7 @@ type ConversationNameUpdateData struct {
 	AffectsSort      bool   `json:"affects_sort,omitempty"`
 }
 
-type ParticipantsJoinedData struct {
+type ParticipantsJoin struct {
 	ID             string        `json:"id,omitempty"`
 	Time           string        `json:"time,omitempty"`
 	AffectsSort    bool          `json:"affects_sort,omitempty"`
@@ -100,15 +98,15 @@ type ParticipantsJoinedData struct {
 type ConversationType string
 
 const (
-	ONE_TO_ONE ConversationType = "ONE_TO_ONE"
-	GROUP_DM   ConversationType = "GROUP_DM"
+	ConversationTypeOneToOne ConversationType = "ONE_TO_ONE"
+	ConversationTypeGroupDM  ConversationType = "GROUP_DM"
 )
 
 type PaginationStatus string
 
 const (
-	AT_END   PaginationStatus = "AT_END"
-	HAS_MORE PaginationStatus = "HAS_MORE"
+	PaginationStatusAtEnd   PaginationStatus = "AT_END"
+	PaginationStatusHasMore PaginationStatus = "HAS_MORE"
 )
 
 type Conversation struct {
@@ -122,7 +120,7 @@ type Conversation struct {
 	CreateTime                   string           `json:"create_time,omitempty"`
 	CreatedByUserID              string           `json:"created_by_user_id,omitempty"`
 	Participants                 []Participant    `json:"participants,omitempty"`
-	Nsfw                         bool             `json:"nsfw,omitempty"`
+	NSFW                         bool             `json:"nsfw,omitempty"`
 	NotificationsDisabled        bool             `json:"notifications_disabled,omitempty"`
 	MentionNotificationsDisabled bool             `json:"mention_notifications_disabled,omitempty"`
 	LastReadEventID              string           `json:"last_read_event_id,omitempty"`
@@ -151,7 +149,7 @@ type Participant struct {
 	JoinConversationEventID string `json:"join_conversation_event_id,omitempty"`
 }
 
-type MessageDeleted struct {
+type MessageDelete struct {
 	ID             string            `json:"id,omitempty"`
 	Time           string            `json:"time,omitempty"`
 	AffectsSort    bool              `json:"affects_sort,omitempty"`

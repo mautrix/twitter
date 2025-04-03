@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 )
 
 type TwitterConnector struct {
@@ -47,17 +46,5 @@ func (tc *TwitterConnector) GetName() bridgev2.BridgeName {
 		NetworkID:        "twitter",
 		BeeperBridgeType: "twitter",
 		DefaultPort:      29327,
-	}
-}
-
-func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
-	return database.MetaTypes{
-		Reaction: nil,
-		Portal:   nil,
-		Message:  nil,
-		Ghost:    nil,
-		UserLogin: func() any {
-			return &UserLoginMetadata{}
-		},
 	}
 }

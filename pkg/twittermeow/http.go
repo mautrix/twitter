@@ -85,7 +85,7 @@ func (c *Client) makeRequestDirect(url string, method string, headers http.Heade
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}
 
-	if contentType != types.NONE {
+	if contentType != types.ContentTypeNone {
 		headers.Set("content-type", string(contentType))
 	}
 

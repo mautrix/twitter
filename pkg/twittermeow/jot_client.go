@@ -64,7 +64,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		Extra:               extraHeaders,
 	}
 
-	clientLogResponse, _, err := jc.client.MakeRequest(endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost, jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.FORM)
+	clientLogResponse, _, err := jc.client.MakeRequest(endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost, jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.ContentTypeForm)
 	if err != nil {
 		return err
 	}

@@ -46,14 +46,14 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			}
 
 			uid := mention.IDStr
-			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid))
+			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid)) // TODO use MakeUserID
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost")
 				bodyHTML.WriteString("@" + mention.ScreenName)
 				continue
 			}
 			targetMXID := ghost.Intent.GetMXID()
-			login := portal.Bridge.GetCachedUserLoginByID(networkid.UserLoginID(uid))
+			login := portal.Bridge.GetCachedUserLoginByID(networkid.UserLoginID(uid)) // TODO use MakeUserLoginID
 			if login != nil {
 				targetMXID = login.UserMXID
 			}

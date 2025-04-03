@@ -48,7 +48,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	_, respBody, err := c.MakeRequest(url, http.MethodPost, headers, nil, types.NONE)
+	_, respBody, err := c.MakeRequest(url, http.MethodPost, headers, nil, types.ContentTypeNone)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		headers.Add("content-type", contentType)
 
 		url = fmt.Sprintf("%s?command=APPEND&media_id=%s&segment_index=0", endpoints.UPLOAD_MEDIA_URL, initUploadResponse.MediaIDString)
-		resp, respBody, err := c.MakeRequest(url, http.MethodPost, headers, appendMediaPayload, types.NONE)
+		resp, respBody, err := c.MakeRequest(url, http.MethodPost, headers, appendMediaPayload, types.ContentTypeNone)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +95,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 		url = fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
 		headers.Del("content-type")
-		resp, respBody, err = c.MakeRequest(url, http.MethodPost, headers, nil, types.NONE)
+		resp, respBody, err = c.MakeRequest(url, http.MethodPost, headers, nil, types.ContentTypeNone)
 		if err != nil {
 			return nil, err
 		}
@@ -118,9 +118,9 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		return nil, err
 	}
 
-	if finalizedMediaResult.ProcessingInfo.State == response.PROCESSING_STATE_PENDING || finalizedMediaResult.ProcessingInfo.State == response.PROCESSING_STATE_IN_PROGRESS {
+	if finalizedMediaResult.ProcessingInfo.State == response.ProcessingStatePending || finalizedMediaResult.ProcessingInfo.State == response.ProcessingStateInProgress {
 		// might need to check for error processing states here, I have not encountered any though so I wouldn't know what they look like/are
-		for finalizedMediaResult.ProcessingInfo.State != response.PROCESSING_STATE_SUCCEEDED {
+		for finalizedMediaResult.ProcessingInfo.State != response.ProcessingStateSucceeded {
 			finalizedMediaResult, _, err = c.GetMediaUploadStatus(finalizedMediaResult.MediaIDString, headers)
 			if err != nil {
 				return nil, err
@@ -140,7 +140,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 func (c *Client) GetMediaUploadStatus(mediaID string, h http.Header) (*response.FinalizedUploadMediaResponse, []byte, error) {
 	url := fmt.Sprintf("%s?command=STATUS&media_id=%s", endpoints.UPLOAD_MEDIA_URL, mediaID)
-	resp, respBody, err := c.MakeRequest(url, http.MethodGet, h, nil, types.NONE)
+	resp, respBody, err := c.MakeRequest(url, http.MethodGet, h, nil, types.ContentTypeNone)
 	if err != nil {
 		return nil, nil, err
 	}

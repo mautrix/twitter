@@ -1,3 +1,19 @@
+// mautrix-twitter - A Matrix-Twitter puppeting bridge.
+// Copyright (C) 2025 Tulir Asokan
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 package connector
 
 import (
@@ -9,116 +25,88 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exmime"
-	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	bridgeEvt "maunium.net/go/mautrix/event"
 
+	"go.mau.fi/mautrix-twitter/pkg/connector/twitterfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func RemoveEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
+func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
+	if ec := existing[0].Metadata.(*MessageMetadata).EditCount; ec >= data.EditCount {
+		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, ec, data.EditCount)
+	}
+	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
+	editPart := tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existing[0])
+	editPart.Part.Metadata = &MessageMetadata{EditCount: data.EditCount}
+	return &bridgev2.ConvertedEdit{
+		ModifiedParts: []*bridgev2.ConvertedEditPart{editPart},
+	}, nil
+}
+
+func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) *bridgev2.ConvertedMessage {
+	var replyTo *networkid.MessageOptionalPartID
+	if msg.ReplyData.ID != "" {
+		replyTo = &networkid.MessageOptionalPartID{
+			MessageID: networkid.MessageID(msg.ReplyData.ID),
+		}
+	}
+
+	textPart := &bridgev2.ConvertedMessagePart{
+		ID:      "",
+		Type:    bridgeEvt.EventMessage,
+		Content: twitterfmt.Parse(ctx, portal, msg),
+	}
+
+	parts := make([]*bridgev2.ConvertedMessagePart, 0)
+
+	if msg.Attachment != nil {
+		convertedAttachmentPart, indices, err := tc.twitterAttachmentToMatrix(ctx, portal, intent, msg)
+		if err != nil {
+			zerolog.Ctx(ctx).Err(err).Msg("Failed to convert attachment")
+			parts = append(parts, &bridgev2.ConvertedMessagePart{
+				ID:   "",
+				Type: bridgeEvt.EventMessage,
+				Content: &bridgeEvt.MessageEventContent{
+					MsgType: bridgeEvt.MsgNotice,
+					Body:    "Failed to convert attachment from Twitter",
+				},
+			})
+		} else {
+			if msg.Attachment.Card != nil || msg.Attachment.Tweet != nil {
+				textPart.Content.BeeperLinkPreviews = convertedAttachmentPart.Content.BeeperLinkPreviews
+			} else {
+				parts = append(parts, convertedAttachmentPart)
+				removeEntityLinkFromText(textPart, indices)
+			}
+		}
+	}
+
+	if len(textPart.Content.Body) > 0 {
+		parts = append(parts, textPart)
+	}
+	for _, part := range parts {
+		part.DBMetadata = &MessageMetadata{EditCount: msg.EditCount}
+	}
+
+	cm := &bridgev2.ConvertedMessage{
+		ReplyTo: replyTo,
+		Parts:   parts,
+	}
+	cm.MergeCaption()
+
+	return cm
+}
+
+func removeEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
 	start, end := indices[0], indices[1]
 	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
 }
 
-func (tc *TwitterClient) ConversationToChatInfo(conv *types.Conversation) *bridgev2.ChatInfo {
-	memberList := tc.ParticipantsToMemberList(conv.Participants)
-	var userLocal bridgev2.UserLocalPortalInfo
-	if conv.Muted {
-		userLocal.MutedUntil = ptr.Ptr(bridgeEvt.MutedForever)
-	} else {
-		userLocal.MutedUntil = ptr.Ptr(bridgev2.Unmuted)
-	}
-	return &bridgev2.ChatInfo{
-		Name:        &conv.Name,
-		Avatar:      tc.MakeAvatar(conv.AvatarImageHttps),
-		Members:     memberList,
-		Type:        tc.ConversationTypeToRoomType(conv.Type),
-		UserLocal:   &userLocal,
-		CanBackfill: true,
-	}
-}
-
-func (tc *TwitterClient) ConversationTypeToRoomType(convType types.ConversationType) *database.RoomType {
-	var roomType database.RoomType
-	switch convType {
-	case types.ONE_TO_ONE:
-		roomType = database.RoomTypeDM
-	case types.GROUP_DM:
-		roomType = database.RoomTypeGroupDM
-	}
-
-	return &roomType
-}
-
-func (tc *TwitterClient) UsersToMemberList(users []types.User) *bridgev2.ChatMemberList {
-	selfUserID := tc.client.GetCurrentUserID()
-
-	memberMap := map[networkid.UserID]bridgev2.ChatMember{}
-	for _, user := range users {
-		memberMap[networkid.UserID(user.IDStr)] = tc.UserToChatMember(user, user.IDStr == selfUserID)
-	}
-
-	return &bridgev2.ChatMemberList{
-		IsFull:           true,
-		TotalMemberCount: len(users),
-		MemberMap:        memberMap,
-	}
-}
-
-func (tc *TwitterClient) ParticipantsToMemberList(participants []types.Participant) *bridgev2.ChatMemberList {
-	selfUserID := tc.client.GetCurrentUserID()
-	memberMap := map[networkid.UserID]bridgev2.ChatMember{}
-	for _, participant := range participants {
-		memberMap[networkid.UserID(participant.UserID)] = tc.ParticipantToChatMember(participant, participant.UserID == selfUserID)
-	}
-
-	return &bridgev2.ChatMemberList{
-		IsFull:           true,
-		TotalMemberCount: len(participants),
-		MemberMap:        memberMap,
-	}
-}
-
-func (tc *TwitterClient) UserToChatMember(user types.User, isFromMe bool) bridgev2.ChatMember {
-	return bridgev2.ChatMember{
-		EventSender: bridgev2.EventSender{
-			IsFromMe: isFromMe,
-			Sender:   networkid.UserID(user.IDStr),
-		},
-		UserInfo: &bridgev2.UserInfo{
-			Name:   &user.Name,
-			Avatar: tc.MakeAvatar(user.ProfileImageURL),
-		},
-	}
-}
-
-func (tc *TwitterClient) ParticipantToChatMember(participant types.Participant, isFromMe bool) bridgev2.ChatMember {
-	return bridgev2.ChatMember{
-		EventSender: bridgev2.EventSender{
-			IsFromMe: isFromMe,
-			Sender:   networkid.UserID(participant.UserID),
-		},
-		UserInfo: tc.GetUserInfoBridge(participant.UserID),
-	}
-}
-
-func (tc *TwitterClient) GetUserInfoBridge(userID string) *bridgev2.UserInfo {
-	var userinfo *bridgev2.UserInfo
-	if userCacheEntry, ok := tc.userCache[userID]; ok {
-		userinfo = &bridgev2.UserInfo{
-			Name:        ptr.Ptr(tc.connector.Config.FormatDisplayname(userCacheEntry.ScreenName, userCacheEntry.Name)),
-			Avatar:      tc.MakeAvatar(userCacheEntry.ProfileImageURL),
-			Identifiers: []string{fmt.Sprintf("twitter:%s", userCacheEntry.ScreenName)},
-		}
-	}
-	return userinfo
-}
-
-func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
+func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
 	attachment := msg.Attachment
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
@@ -221,37 +209,25 @@ func (tc *TwitterClient) TwitterAttachmentToMatrix(ctx context.Context, portal *
 	}, attachmentInfo.Indices, nil
 }
 
-func (tc *TwitterClient) MakeAvatar(avatarURL string) *bridgev2.Avatar {
-	return &bridgev2.Avatar{
-		ID: networkid.AvatarID(avatarURL),
-		Get: func(ctx context.Context) ([]byte, error) {
-			resp, err := tc.downloadFile(ctx, avatarURL)
-			if err != nil {
-				return nil, err
-			}
-			data, err := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			return data, err
-		},
-		Remove: avatarURL == "",
-	}
-}
-
-func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Response, error) {
+func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare request: %w", err)
 	}
 
 	headers := twittermeow.BaseHeaders.Clone()
-	headers.Set("Cookie", tc.client.GetCookieString())
+	headers.Set("Cookie", cli.GetCookieString())
 	req.Header = headers
 
-	getResp, err := tc.client.HTTP.Do(req)
+	getResp, err := cli.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	return getResp, nil
+}
+
+func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Response, error) {
+	return downloadFile(ctx, tc.client, url)
 }
 
 func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *bridgeEvt.BeeperLinkPreview {
