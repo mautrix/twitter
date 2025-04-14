@@ -67,7 +67,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				CreatePortal: isFromMe || (conversation != nil && !conversation.LowQuality),
+				CreatePortal: isFromMe || (conversation != nil && !conversation.LowQuality && conversation.Trusted),
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
 				StreamOrder:  methods.ParseSnowflakeInt(evt.MessageData.ID),
 				Timestamp:    methods.ParseSnowflake(evt.MessageData.ID),
@@ -162,7 +162,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 						Int("total_new_members", len(evt.Participants))
 				},
 				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				CreatePortal: conversation != nil && !conversation.LowQuality,
+				CreatePortal: conversation != nil && !conversation.LowQuality && conversation.Trusted,
 				StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
 				Timestamp:    methods.ParseSnowflake(evt.ID),
 			},
