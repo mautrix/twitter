@@ -95,6 +95,10 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 			Forward:  params.Forward,
 		}, nil
 	}
+	var lastReadID string
+	if conv != nil {
+		lastReadID = conv.LastReadEventID
+	}
 
 	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
 	log.Debug().
@@ -104,7 +108,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		Str("newest_raw_ts", messages[len(messages)-1].Time).
 		Str("oldest_id", messages[0].ID).
 		Str("newest_id", messages[len(messages)-1].ID).
-		Str("last_read_id", conv.LastReadEventID).
+		Str("last_read_id", lastReadID).
 		Msg("Fetched messages")
 	for _, msg := range messages {
 		messageTS := methods.ParseSnowflake(msg.ID)
@@ -143,7 +147,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		Messages: converted,
 		HasMore:  bundle != nil || inbox.Status == types.PaginationStatusHasMore,
 		Forward:  params.Forward,
-		MarkRead: conv.LastReadEventID == messages[len(messages)-1].ID,
+		MarkRead: lastReadID == messages[len(messages)-1].ID,
 	}
 	if !params.Forward {
 		fetchMessagesResp.Cursor = networkid.PaginationCursor(inbox.MinEntryID)
