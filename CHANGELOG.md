@@ -1,3 +1,10 @@
+# v0.4.0 (2025-04-16)
+
+* Added support for own read status bridging.
+* Added support for sending mentions and intentional mentions in incoming messages.
+* Fixed newlines in incoming formatted messages.
+* Stopped creating portals for message requests automatically.
+
 # v0.3.0 (2025-03-16)
 
 * Added support for tweet attachments.
