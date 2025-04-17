@@ -414,3 +414,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 
 	return c.MakeRequest(ctx, apiRequestOpts.URL, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
 }
+
+func (c *Client) SetActiveConversation(conversationID string) {
+	c.polling.SetActiveConversation(conversationID)
+}
