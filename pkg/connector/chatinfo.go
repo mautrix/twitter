@@ -87,14 +87,21 @@ func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox 
 	} else {
 		userLocal.MutedUntil = ptr.Ptr(bridgev2.Unmuted)
 	}
-	return &bridgev2.ChatInfo{
-		Name:        &conv.Name,
-		Avatar:      makeAvatar(tc.client, conv.AvatarImageHttps),
+	chatInfo := &bridgev2.ChatInfo{
 		Members:     memberList,
 		Type:        tc.conversationTypeToRoomType(conv.Type),
 		UserLocal:   &userLocal,
 		CanBackfill: true,
 	}
+
+	if *chatInfo.Type != database.RoomTypeDM {
+		chatInfo.Name = &conv.Name
+		chatInfo.Avatar = makeAvatar(tc.client, conv.AvatarImageHttps)
+	} else {
+		chatInfo.Name = bridgev2.DefaultChatName
+	}
+
+	return chatInfo
 }
 
 func (tc *TwitterClient) conversationTypeToRoomType(convType types.ConversationType) *database.RoomType {
