@@ -30,6 +30,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	bridgeEvt "maunium.net/go/mautrix/event"
 
+	"go.mau.fi/util/ffmpeg"
+
 	"go.mau.fi/mautrix-twitter/pkg/connector/twitterfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -165,6 +167,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if err != nil {
 		return nil, nil, err
 	}
+	if attachment.Video != nil && attachment.Video.AudioOnly {
+		return tc.voiceMessageToMatrix(ctx, portal, intent, attachmentInfo, fileResp)
+	}
 	content := bridgeEvt.MessageEventContent{
 		Info: &bridgeEvt.FileInfo{
 			MimeType: mimeType,
@@ -285,4 +290,35 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	return &bridgeEvt.BeeperLinkPreview{
 		LinkPreview: linkPreview,
 	}
+}
+
+func (tc *TwitterClient) voiceMessageToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachmentInfo *types.AttachmentInfo, fileResp *http.Response) (*bridgev2.ConvertedMessagePart, []int, error) {
+	data, err := io.ReadAll(fileResp.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err = ffmpeg.ConvertBytes(ctx, data, ".ogg", []string{}, []string{"-c:a", "libopus"}, "video/mp4")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	mimeType := "audio/ogg"
+	content := bridgeEvt.MessageEventContent{
+		Info: &bridgeEvt.FileInfo{
+			MimeType: mimeType,
+			Duration: attachmentInfo.VideoInfo.DurationMillis,
+		},
+		MsgType: bridgeEvt.MsgAudio,
+	}
+
+	content.URL, content.File, err = intent.UploadMedia(ctx, portal.MXID, data, "", mimeType)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &bridgev2.ConvertedMessagePart{
+		ID:      networkid.PartID(""),
+		Type:    bridgeEvt.EventMessage,
+		Content: &content,
+	}, attachmentInfo.Indices, nil
 }
