@@ -93,7 +93,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		return
 	}
 
-	inboxState, _, err := tc.client.LoadMessagesPage()
+	inboxState, _, err := tc.client.LoadMessagesPage(ctx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to load messages page")
 		if twittermeow.IsAuthError(err) {
@@ -172,10 +172,7 @@ func (tc *TwitterClient) startPolling(ctx context.Context) {
 }
 
 func (tc *TwitterClient) Disconnect() {
-	err := tc.client.Disconnect()
-	if err != nil {
-		tc.userLogin.Log.Err(err).Msg("Failed to disconnect")
-	}
+	tc.client.Disconnect()
 }
 
 func (tc *TwitterClient) IsLoggedIn() bool {
@@ -184,7 +181,7 @@ func (tc *TwitterClient) IsLoggedIn() bool {
 
 func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
-	_, err := tc.client.Logout()
+	_, err := tc.client.Logout(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("error logging out")
 	}

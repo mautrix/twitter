@@ -1,6 +1,7 @@
 package twittermeow
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,7 +22,7 @@ func (c *Client) newJotClient() *JotClient {
 	}
 }
 
-func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory, debug bool, body []interface{}) error {
+func (jc *JotClient) sendClientLoggingEvent(ctx context.Context, category payload.JotLoggingCategory, debug bool, body []interface{}) error {
 	if true {
 		return nil
 	}
@@ -64,7 +65,7 @@ func (jc *JotClient) sendClientLoggingEvent(category payload.JotLoggingCategory,
 		Extra:               extraHeaders,
 	}
 
-	clientLogResponse, _, err := jc.client.MakeRequest(endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost, jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.ContentTypeForm)
+	clientLogResponse, _, err := jc.client.MakeRequest(ctx, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost, jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.ContentTypeForm)
 	if err != nil {
 		return err
 	}

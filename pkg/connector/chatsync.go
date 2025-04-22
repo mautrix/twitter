@@ -37,7 +37,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
 	if inbox == nil {
-		initialInboxState, err := tc.client.GetInitialInboxState(reqQuery)
+		initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to fetch initial inbox state:")
 			return
@@ -51,7 +51,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 
 	for paginationStatus == types.PaginationStatusHasMore && (tc.connector.Config.ConversationSyncLimit == -1 || len(inbox.Entries) < tc.connector.Config.ConversationSyncLimit) {
 		reqQuery.MaxID = cursor
-		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(reqQuery)
+		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(ctx, reqQuery)
 		if err != nil {
 			log.Error().Err(err).Msg(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s:", cursor))
 			return

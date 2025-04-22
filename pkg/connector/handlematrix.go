@@ -45,9 +45,9 @@ var (
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 )
 
-func (tc *TwitterClient) HandleMatrixTyping(_ context.Context, msg *bridgev2.MatrixTyping) error {
+func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if msg.IsTyping && msg.Type == bridgev2.TypingTypeText {
-		return tc.client.SendTypingNotification(string(msg.Portal.ID))
+		return tc.client.SendTypingNotification(ctx, string(msg.Portal.ID))
 	}
 	return nil
 }
@@ -96,7 +96,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			uploadMediaParams.MediaCategory = "dm_gif"
 		}
 
-		uploadedMediaResponse, err := tc.client.UploadMedia(uploadMediaParams, data)
+		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +109,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 	txnID := networkid.TransactionID(sendDMPayload.RequestID)
 	msg.AddPendingToIgnore(txnID)
-	resp, err := tc.client.SendDirectMessage(sendDMPayload)
+	resp, err := tc.client.SendDirectMessage(ctx, sendDMPayload)
 	if err != nil {
 		return nil, err
 	} else if len(resp.Entries) == 0 {
@@ -137,8 +137,8 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}, nil
 }
 
-func (tc *TwitterClient) HandleMatrixReactionRemove(_ context.Context, msg *bridgev2.MatrixReactionRemove) error {
-	return tc.doHandleMatrixReaction(true, string(msg.Portal.ID), string(msg.TargetReaction.MessageID), msg.TargetReaction.Emoji)
+func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
+	return tc.doHandleMatrixReaction(ctx, true, string(msg.Portal.ID), string(msg.TargetReaction.MessageID), msg.TargetReaction.Emoji)
 }
 
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
@@ -149,18 +149,18 @@ func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev
 	}, nil
 }
 
-func (tc *TwitterClient) HandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
-	return nil, tc.doHandleMatrixReaction(false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji)
+func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
+	return nil, tc.doHandleMatrixReaction(ctx, false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji)
 }
 
-func (tc *TwitterClient) doHandleMatrixReaction(remove bool, conversationID, messageID, emoji string) error {
+func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, conversationID, messageID, emoji string) error {
 	reactionPayload := &payload.ReactionActionPayload{
 		ConversationID: conversationID,
 		MessageID:      messageID,
 		ReactionTypes:  []string{"Emoji"},
 		EmojiReactions: []string{emoji},
 	}
-	reactionResponse, err := tc.client.React(reactionPayload, remove)
+	reactionResponse, err := tc.client.React(ctx, reactionPayload, remove)
 	if err != nil {
 		return err
 	}
@@ -184,11 +184,11 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 		params.LastReadEventID = string(lastMessage.ID)
 	}
 
-	return tc.client.MarkConversationRead(params)
+	return tc.client.MarkConversationRead(ctx, params)
 }
 
-func (tc *TwitterClient) HandleMatrixEdit(_ context.Context, edit *bridgev2.MatrixEdit) error {
-	resp, err := tc.client.EditDirectMessage(&payload.EditDirectMessagePayload{
+func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
+	resp, err := tc.client.EditDirectMessage(ctx, &payload.EditDirectMessagePayload{
 		ConversationID: string(edit.Portal.ID),
 		RequestID:      uuid.NewString(),
 		DMID:           string(edit.EditTarget.ID),

@@ -101,7 +101,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 	client := twittermeow.NewClient(clientOpts, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
-	inboxState, settings, err := client.LoadMessagesPage()
+	inboxState, settings, err := client.LoadMessagesPage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
 	}

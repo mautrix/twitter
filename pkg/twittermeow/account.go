@@ -1,6 +1,7 @@
 package twittermeow
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,15 +13,15 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func (c *Client) Login() error {
-	err := c.session.LoadPage(endpoints.BASE_LOGIN_URL)
+func (c *Client) Login(ctx context.Context) error {
+	err := c.session.LoadPage(ctx, endpoints.BASE_LOGIN_URL)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *Client) GetAccountSettings(params payload.AccountSettingsQuery) (*response.AccountSettingsResponse, error) {
+func (c *Client) GetAccountSettings(ctx context.Context, params payload.AccountSettingsQuery) (*response.AccountSettingsResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
 		return nil, err
@@ -30,7 +31,7 @@ func (c *Client) GetAccountSettings(params payload.AccountSettingsQuery) (*respo
 		URL:    url,
 		Method: http.MethodGet,
 	}
-	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func (c *Client) GetAccountSettings(params payload.AccountSettingsQuery) (*respo
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) GetDMPermissions(params payload.GetDMPermissionsQuery) (*response.GetDMPermissionsResponse, error) {
+func (c *Client) GetDMPermissions(ctx context.Context, params payload.GetDMPermissionsQuery) (*response.GetDMPermissionsResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func (c *Client) GetDMPermissions(params payload.GetDMPermissionsQuery) (*respon
 		Method:         http.MethodGet,
 		WithClientUUID: true,
 	}
-	_, respBody, err := c.makeAPIRequest(apiRequestOpts)
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +77,7 @@ const (
 	PushSave
 )
 
-func (c *Client) SetPushNotificationConfig(action PushNotificationConfigAction, config WebPushConfig) error {
+func (c *Client) SetPushNotificationConfig(ctx context.Context, action PushNotificationConfigAction, config WebPushConfig) error {
 	var url string
 	switch action {
 	case PushRegister:
@@ -129,6 +130,6 @@ func (c *Client) SetPushNotificationConfig(action PushNotificationConfigAction, 
 		Body:           encodedBody,
 		ContentType:    types.ContentTypeJSON,
 	}
-	_, _, err = c.makeAPIRequest(apiRequestOpts)
+	_, _, err = c.makeAPIRequest(ctx, apiRequestOpts)
 	return err
 }

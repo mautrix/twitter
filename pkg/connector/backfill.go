@@ -76,7 +76,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		messages = bundle.Messages
 		// TODO support for fetching more messages
 	} else {
-		messageResp, err := tc.client.FetchConversationContext(conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
+		messageResp, err := tc.client.FetchConversationContext(ctx, conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
 		if err != nil {
 			return nil, err
 		}

@@ -34,11 +34,11 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func (tc *TwitterClient) GetChatInfo(_ context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	conversationID := string(portal.PortalKey.ID)
 	queryConversationPayload := payload.DMRequestQuery{}.Default()
 	queryConversationPayload.IncludeConversationInfo = true
-	conversationData, err := tc.client.FetchConversationContext(conversationID, &queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
+	conversationData, err := tc.client.FetchConversationContext(ctx, conversationID, &queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {
 		return nil, err
 	}

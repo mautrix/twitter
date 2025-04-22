@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -19,7 +20,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte) (*response.FinalizedUploadMediaResponse, error) {
+func (c *Client) UploadMedia(ctx context.Context, params *payload.UploadMediaQuery, mediaBytes []byte) (*response.FinalizedUploadMediaResponse, error) {
 	params.Command = "INIT"
 	if mediaBytes != nil {
 		params.TotalBytes = len(mediaBytes)
@@ -48,7 +49,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	_, respBody, err := c.MakeRequest(url, http.MethodPost, headers, nil, types.ContentTypeNone)
+	_, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, nil, types.ContentTypeNone)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 		headers.Add("content-type", contentType)
 
 		url = fmt.Sprintf("%s?command=APPEND&media_id=%s&segment_index=0", endpoints.UPLOAD_MEDIA_URL, initUploadResponse.MediaIDString)
-		resp, respBody, err := c.MakeRequest(url, http.MethodPost, headers, appendMediaPayload, types.ContentTypeNone)
+		resp, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, appendMediaPayload, types.ContentTypeNone)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +96,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 		url = fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
 		headers.Del("content-type")
-		resp, respBody, err = c.MakeRequest(url, http.MethodPost, headers, nil, types.ContentTypeNone)
+		resp, respBody, err = c.MakeRequest(ctx, url, http.MethodPost, headers, nil, types.ContentTypeNone)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +107,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 
 		finalizedMediaResultBytes = respBody
 	} else {
-		_, finalizedMediaResultBytes, err = c.GetMediaUploadStatus(initUploadResponse.MediaIDString, headers)
+		_, finalizedMediaResultBytes, err = c.GetMediaUploadStatus(ctx, initUploadResponse.MediaIDString, headers)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +122,7 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 	if finalizedMediaResult.ProcessingInfo.State == response.ProcessingStatePending || finalizedMediaResult.ProcessingInfo.State == response.ProcessingStateInProgress {
 		// might need to check for error processing states here, I have not encountered any though so I wouldn't know what they look like/are
 		for finalizedMediaResult.ProcessingInfo.State != response.ProcessingStateSucceeded {
-			finalizedMediaResult, _, err = c.GetMediaUploadStatus(finalizedMediaResult.MediaIDString, headers)
+			finalizedMediaResult, _, err = c.GetMediaUploadStatus(ctx, finalizedMediaResult.MediaIDString, headers)
 			if err != nil {
 				return nil, err
 			}
@@ -138,9 +139,9 @@ func (c *Client) UploadMedia(params *payload.UploadMediaQuery, mediaBytes []byte
 	return finalizedMediaResult, nil
 }
 
-func (c *Client) GetMediaUploadStatus(mediaID string, h http.Header) (*response.FinalizedUploadMediaResponse, []byte, error) {
+func (c *Client) GetMediaUploadStatus(ctx context.Context, mediaID string, h http.Header) (*response.FinalizedUploadMediaResponse, []byte, error) {
 	url := fmt.Sprintf("%s?command=STATUS&media_id=%s", endpoints.UPLOAD_MEDIA_URL, mediaID)
-	resp, respBody, err := c.MakeRequest(url, http.MethodGet, h, nil, types.ContentTypeNone)
+	resp, respBody, err := c.MakeRequest(ctx, url, http.MethodGet, h, nil, types.ContentTypeNone)
 	if err != nil {
 		return nil, nil, err
 	}

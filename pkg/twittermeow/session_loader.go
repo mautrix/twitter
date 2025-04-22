@@ -1,6 +1,7 @@
 package twittermeow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -63,7 +64,7 @@ func (s *SessionLoader) isAuthenticated() bool {
 	return s.currentUser != nil /*&& s.currentUser.ScreenName != ""*/
 }
 
-func (s *SessionLoader) LoadPage(url string) error {
+func (s *SessionLoader) LoadPage(ctx context.Context, url string) error {
 	mainPageURL, err := neturl.Parse(url)
 	if err != nil {
 		return fmt.Errorf("failed to parse URL %q: %w", url, err)
@@ -74,7 +75,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 		"sec-fetch-user":            "?1",
 		"sec-fetch-dest":            "document",
 	}
-	mainPageResp, mainPageRespBody, err := s.client.MakeRequest(url, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
+	mainPageResp, mainPageRespBody, err := s.client.MakeRequest(ctx, url, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
 	if err != nil {
 		return fmt.Errorf("failed to send main page request: %w", err)
 	}
@@ -95,7 +96,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 			"sec-fetch-mode":            "navigate",
 			"sec-fetch-dest":            "document",
 		}
-		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.ContentTypeNone)
+		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(ctx, migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.ContentTypeNone)
 		if err != nil {
 			return fmt.Errorf("failed to send migration request: %w", err)
 		}
@@ -111,7 +112,7 @@ func (s *SessionLoader) LoadPage(url string) error {
 			extraHeaders["origin"] = endpoints.TWITTER_BASE_URL
 
 			s.client.disableRedirects()
-			mainPageResp, _, err = s.client.MakeRequest(migrationFormURL, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
+			mainPageResp, _, err = s.client.MakeRequest(ctx, migrationFormURL, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
 			if err == nil || !errors.Is(err, ErrRedirectAttempted) {
 				return fmt.Errorf("failed to make request to main page, server did not respond with a redirect response")
 			}
@@ -119,18 +120,18 @@ func (s *SessionLoader) LoadPage(url string) error {
 			s.client.cookies.UpdateFromResponse(mainPageResp) // update the cookies received from the redirected response headers
 
 			migrationFormURL = endpoints.BASE_URL + mainPageResp.Header.Get("Location")
-			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
+			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(ctx, migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
 			if err != nil {
 				return fmt.Errorf("failed to send main page request after migration: %w", err)
 			}
 
 			mainPageHTML := string(mainPageRespBody)
-			err = s.client.parseMainPageHTML(mainPageResp, mainPageHTML)
+			err = s.client.parseMainPageHTML(ctx, mainPageResp, mainPageHTML)
 			if err != nil {
 				return fmt.Errorf("failed to parse main page HTML after migration: %w", err)
 			}
 
-			err = s.doInitialClientLoggingEvents()
+			err = s.doInitialClientLoggingEvents(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to perform initial client logging events after migration: %w", err)
 			}
@@ -141,12 +142,12 @@ func (s *SessionLoader) LoadPage(url string) error {
 	} else {
 		// most likely means... already authenticated
 		mainPageHTML := string(mainPageRespBody)
-		err = s.client.parseMainPageHTML(mainPageResp, mainPageHTML)
+		err = s.client.parseMainPageHTML(ctx, mainPageResp, mainPageHTML)
 		if err != nil {
 			return fmt.Errorf("failed to parse main page HTML: %w", err)
 		}
 
-		err = s.doInitialClientLoggingEvents()
+		err = s.doInitialClientLoggingEvents(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to perform initial client logging events after migration: %w", err)
 		}
@@ -154,15 +155,15 @@ func (s *SessionLoader) LoadPage(url string) error {
 	return nil
 }
 
-func (s *SessionLoader) doCookiesMetaDataLoad() error {
+func (s *SessionLoader) doCookiesMetaDataLoad(ctx context.Context) error {
 	logData := []interface{}{
 		&payload.JotLogPayload{Description: "rweb:cookiesMetadata:load", Product: "rweb", EventValue: time.Until(time.UnixMilli(fetchedTime)).Milliseconds()},
 	}
-	return s.client.performJotClientEvent(payload.JotLoggingCategoryPerftown, false, logData)
+	return s.client.performJotClientEvent(ctx, payload.JotLoggingCategoryPerftown, false, logData)
 }
 
-func (s *SessionLoader) doInitialClientLoggingEvents() error {
-	err := s.doCookiesMetaDataLoad()
+func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error {
+	err := s.doCookiesMetaDataLoad(ctx)
 	if err != nil {
 		return err
 	}
@@ -224,7 +225,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents() error {
 			DurationMS:  422,
 		},
 	}
-	err = s.client.performJotClientEvent(payload.JotLoggingCategoryPerftown, false, logData)
+	err = s.client.performJotClientEvent(ctx, payload.JotLoggingCategoryPerftown, false, logData)
 	if err != nil {
 		return err
 	}
@@ -247,7 +248,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents() error {
 		},
 	}
 
-	err = s.client.performJotClientEvent("", true, logData)
+	err = s.client.performJotClientEvent(ctx, "", true, logData)
 	if err != nil {
 		return err
 	}

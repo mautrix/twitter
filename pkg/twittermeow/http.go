@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,61 +27,58 @@ var (
 	ErrMaxRetriesReached   = errors.New("maximum retries reached")
 )
 
-func (c *Client) MakeRequest(url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
+func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
+	log := zerolog.Ctx(ctx).With().
+		Str("url", url).
+		Str("method", method).
+		Str("function", "MakeRequest").
+		Logger()
 	var attempts int
 	for {
 		attempts++
 		start := time.Now()
-		resp, respDat, err := c.makeRequestDirect(url, method, headers, payload, contentType)
+		resp, respDat, err := c.makeRequestDirect(ctx, url, method, headers, payload, contentType)
 		dur := time.Since(start)
 		if err == nil {
 			var logEvt *zerolog.Event
 			if strings.HasPrefix(url, endpoints.DM_USER_UPDATES_URL) {
-				logEvt = c.Logger.Trace()
+				logEvt = log.Trace()
 			} else {
-				logEvt = c.Logger.Debug()
+				logEvt = log.Debug()
 			}
 			logEvt.
-				Str("url", url).
-				Str("method", method).
 				Dur("duration", dur).
 				Msg("Request successful")
 			return resp, respDat, nil
 		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 502 {
-			c.Logger.Err(err).
-				Str("url", url).
-				Str("method", method).
+			log.Err(err).
 				Dur("duration", dur).
 				Msg("Request failed")
 			return nil, nil, err
 		} else if attempts > MaxHTTPRetries {
-			c.Logger.Err(err).
-				Str("url", url).
-				Str("method", method).
+			log.Err(err).
 				Dur("duration", dur).
 				Msg("Request failed, giving up")
 			return nil, nil, fmt.Errorf("%w: %w", ErrMaxRetriesReached, err)
 		} else if errors.Is(err, ErrRedirectAttempted) {
 			location := resp.Header.Get("Location")
 			c.Logger.Err(err).
-				Str("url", url).
 				Str("location", location).
-				Str("method", method).
 				Dur("duration", dur).
 				Msg("Redirect attempted")
 			return resp, nil, err
+		} else if ctx.Err() != nil {
+			return resp, nil, ctx.Err()
 		}
-		c.Logger.Err(err).
-			Str("url", url).
-			Str("method", method).
+		log.Err(err).
 			Dur("duration", dur).
 			Msg("Request failed, retrying")
 		time.Sleep(time.Duration(attempts) * 3 * time.Second)
 	}
 }
 
-func (c *Client) makeRequestDirect(url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	newRequest, err := http.NewRequest(method, url, bytes.NewReader(payload))
+func (c *Client) makeRequestDirect(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
+	newRequest, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}

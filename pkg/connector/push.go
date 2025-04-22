@@ -77,12 +77,12 @@ func (tc *TwitterClient) RegisterPushNotifications(ctx context.Context, pushType
 			Auth:     meta.PushKeys.Auth,
 			P256DH:   meta.PushKeys.P256DH,
 		}
-		err := tc.client.SetPushNotificationConfig(twittermeow.PushRegister, pc)
+		err := tc.client.SetPushNotificationConfig(ctx, twittermeow.PushRegister, pc)
 		if err != nil {
 			return fmt.Errorf("failed to set push notification config: %w", err)
 		}
 		pc.Settings = pushSettings
-		err = tc.client.SetPushNotificationConfig(twittermeow.PushSave, pc)
+		err = tc.client.SetPushNotificationConfig(ctx, twittermeow.PushSave, pc)
 		if err != nil {
 			return fmt.Errorf("failed to set push notification preferences: %w", err)
 		}

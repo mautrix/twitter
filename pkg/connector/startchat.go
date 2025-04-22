@@ -17,7 +17,7 @@ var (
 )
 
 func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier string, startChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	response, err := tc.client.Search(payload.SearchQuery{
+	response, err := tc.client.Search(ctx, payload.SearchQuery{
 		Query:      identifier,
 		ResultType: payload.SEARCH_RESULT_TYPE_USERS,
 	})
@@ -37,7 +37,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 
 	var portalKey networkid.PortalKey
 	if startChat {
-		permissions, err := tc.client.GetDMPermissions(payload.GetDMPermissionsQuery{
+		permissions, err := tc.client.GetDMPermissions(ctx, payload.GetDMPermissionsQuery{
 			RecipientIDs: resolvedUser.IDStr,
 			DMUsers:      true,
 		})

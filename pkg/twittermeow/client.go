@@ -27,11 +27,10 @@ import (
 )
 
 type ClientOpts struct {
-	PollingInterval *time.Duration
-	Cookies         *cookies.Cookies
-	Session         *SessionLoader
-	EventHandler    EventHandler
-	WithJOTClient   bool
+	Cookies       *cookies.Cookies
+	Session       *SessionLoader
+	EventHandler  EventHandler
+	WithJOTClient bool
 }
 
 type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData)
@@ -63,7 +62,7 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 		Logger: logger,
 	}
 
-	cli.polling = cli.newPollingClient(opts.PollingInterval)
+	cli.polling = cli.newPollingClient()
 
 	if opts.WithJOTClient {
 		cli.jot = cli.newJotClient()
@@ -101,18 +100,19 @@ func (c *Client) Connect() error {
 		return ErrNotAuthenticatedYet
 	}
 
-	return c.polling.startPolling()
+	c.polling.startPolling(c.Logger.WithContext(context.Background()))
+	return nil
 }
 
-func (c *Client) Disconnect() error {
-	return c.polling.stopPolling()
+func (c *Client) Disconnect() {
+	c.polling.stopPolling()
 }
 
-func (c *Client) Logout() (bool, error) {
+func (c *Client) Logout(ctx context.Context) (bool, error) {
 	if !c.isAuthenticated() {
 		return false, ErrNotAuthenticatedYet
 	}
-	err := c.session.LoadPage(endpoints.BASE_LOGOUT_URL)
+	err := c.session.LoadPage(ctx, endpoints.BASE_LOGOUT_URL)
 	if err != nil {
 		return false, err
 	}
@@ -120,13 +120,13 @@ func (c *Client) Logout() (bool, error) {
 	return true, nil
 }
 
-func (c *Client) LoadMessagesPage() (*response.InboxInitialStateResponse, *response.AccountSettingsResponse, error) {
-	err := c.session.LoadPage(endpoints.BASE_MESSAGES_URL)
+func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialStateResponse, *response.AccountSettingsResponse, error) {
+	err := c.session.LoadPage(ctx, endpoints.BASE_MESSAGES_URL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
-	data, err := c.GetAccountSettings(payload.AccountSettingsQuery{
+	data, err := c.GetAccountSettings(ctx, payload.AccountSettingsQuery{
 		IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
 		IncludeMentionFilter:        true,
 		IncludeNSFWUserFlag:         true,
@@ -145,7 +145,7 @@ func (c *Client) LoadMessagesPage() (*response.InboxInitialStateResponse, *respo
 		data = &response.AccountSettingsResponse{}
 	}
 
-	initialInboxState, err := c.GetInitialInboxState(ptr.Ptr(payload.DMRequestQuery{}.Default()))
+	initialInboxState, err := c.GetInitialInboxState(ctx, ptr.Ptr(payload.DMRequestQuery{}.Default()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
 	}
@@ -212,7 +212,7 @@ func (c *Client) SetEventHandler(handler EventHandler) {
 	c.eventHandler = handler
 }
 
-func (c *Client) fetchScript(url string) ([]byte, error) {
+func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
 	extraHeaders := map[string]string{
 		"accept":         "*/*",
 		"sec-fetch-site": "cross-site",
@@ -220,12 +220,12 @@ func (c *Client) fetchScript(url string) ([]byte, error) {
 		"sec-fetch-dest": "script",
 		"origin":         endpoints.BASE_URL,
 	}
-	_, scriptRespBody, err := c.MakeRequest(url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.ContentTypeNone)
+	_, scriptRespBody, err := c.MakeRequest(ctx, url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.BASE_URL + "/"}), nil, types.ContentTypeNone)
 	return scriptRespBody, err
 }
 
-func (c *Client) fetchAndParseMainScript(scriptURL string) error {
-	scriptRespBody, err := c.fetchScript(scriptURL)
+func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) error {
+	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
 		return err
 	}
@@ -241,8 +241,8 @@ func (c *Client) fetchAndParseMainScript(scriptURL string) error {
 	return nil
 }
 
-func (c *Client) fetchAndParseSScript(scriptURL string) (*[4]int, error) {
-	scriptRespBody, err := c.fetchScript(scriptURL)
+func (c *Client) fetchAndParseSScript(ctx context.Context, scriptURL string) (*[4]int, error) {
+	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +264,7 @@ func (c *Client) fetchAndParseSScript(scriptURL string) (*[4]int, error) {
 
 var nonNumbers = regexp.MustCompile(`\D+`)
 
-func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML string) error {
+func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Response, mainPageHTML string) error {
 	country := methods.ParseCountry(mainPageHTML)
 	if country == "" {
 		return fmt.Errorf("country code not found (HTTP %d)", mainPageResp.StatusCode)
@@ -338,7 +338,7 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 		return fmt.Errorf("main script not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 
-	err = c.fetchAndParseMainScript(mainScriptURL)
+	err = c.fetchAndParseMainScript(ctx, mainScriptURL)
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 	ondemandS := methods.ParseOndemandS(mainPageHTML)
 	if ondemandS == "" {
 		c.Logger.Warn().Msg("ondemand.s not found in main page HTML")
-	} else if indexes, err := c.fetchAndParseSScript(fmt.Sprintf("https://abs.twimg.com/responsive-web/client-web/ondemand.s.%sa.js", ondemandS)); err != nil {
+	} else if indexes, err := c.fetchAndParseSScript(ctx, fmt.Sprintf("https://abs.twimg.com/responsive-web/client-web/ondemand.s.%sa.js", ondemandS)); err != nil {
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.SetVariableIndexes(indexes)
@@ -360,11 +360,11 @@ func (c *Client) parseMainPageHTML(mainPageResp *http.Response, mainPageHTML str
 	return nil
 }
 
-func (c *Client) performJotClientEvent(category payload.JotLoggingCategory, debug bool, body []interface{}) error {
+func (c *Client) performJotClientEvent(ctx context.Context, category payload.JotLoggingCategory, debug bool, body []interface{}) error {
 	if c.jot == nil {
 		return nil
 	}
-	return c.jot.sendClientLoggingEvent(category, debug, body)
+	return c.jot.sendClientLoggingEvent(ctx, category, debug, body)
 }
 
 func (c *Client) enableRedirects() {
@@ -387,7 +387,7 @@ type apiRequestOpts struct {
 	WithClientUUID bool
 }
 
-func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
+func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
 	clientTransactionID, err := crypto.SignTransaction(c.session.animationToken, c.session.verificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
 	if err != nil {
 		c.Logger.Trace().Err(err).Msg("Failed to create client transaction ID")
@@ -412,5 +412,5 @@ func (c *Client) makeAPIRequest(apiRequestOpts apiRequestOpts) (*http.Response, 
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	return c.MakeRequest(apiRequestOpts.URL, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
+	return c.MakeRequest(ctx, apiRequestOpts.URL, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
 }
