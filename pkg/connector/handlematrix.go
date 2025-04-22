@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -144,7 +145,7 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	return bridgev2.MatrixReactionPreResponse{
 		SenderID:     UserLoginIDToUserID(tc.userLogin.ID),
-		Emoji:        msg.Content.RelatesTo.Key,
+		Emoji:        variationselector.FullyQualify(msg.Content.RelatesTo.Key),
 		MaxReactions: 1,
 	}, nil
 }
@@ -164,8 +165,10 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 	if err != nil {
 		return err
 	}
-
 	tc.client.Logger.Debug().Any("reactionResponse", reactionResponse).Any("payload", reactionPayload).Msg("Reaction response")
+	if reactionResponse.Data.CreateDmReaction.Typename == "CreateDMReactionFailure" {
+		return fmt.Errorf("server rejected reaction")
+	}
 	return nil
 }
 
