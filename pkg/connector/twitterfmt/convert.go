@@ -35,7 +35,11 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 				bodyHTML.WriteString(string(charArr[cursor:start]))
 			}
 			body.WriteString(url.ExpandedURL)
-			bodyHTML.WriteString(url.ExpandedURL)
+			_, _ = fmt.Fprintf(&bodyHTML,
+				`<a href="%s">%s</a>`,
+				url.ExpandedURL,
+				url.DisplayURL,
+			)
 			cursor = end
 		case types.UserMention:
 			mention := entity
