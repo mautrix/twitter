@@ -49,7 +49,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid)) // TODO use MakeUserID
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost")
-				bodyHTML.WriteString("@" + mention.ScreenName)
+				bodyHTML.WriteString(string(charArr[start:end]))
 				continue
 			}
 			targetMXID := ghost.Intent.GetMXID()
@@ -57,10 +57,10 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			if login != nil {
 				targetMXID = login.UserMXID
 			}
-			fmt.Fprintf(&bodyHTML,
+			_, _ = fmt.Fprintf(&bodyHTML,
 				`<a href="%s">%s</a>`,
 				targetMXID.URI().MatrixToURL(),
-				ghost.Name,
+				string(charArr[start:end]),
 			)
 			mentions.Add(targetMXID)
 			cursor = end
