@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -167,9 +168,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if err != nil {
 		return nil, nil, err
 	}
-	if attachment.Video != nil && attachment.Video.AudioOnly {
-		return tc.voiceMessageToMatrix(ctx, portal, intent, attachmentInfo, fileResp)
-	}
 	content := bridgeEvt.MessageEventContent{
 		Info: &bridgeEvt.FileInfo{
 			MimeType: mimeType,
@@ -188,12 +186,31 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		content.Body += ext
 	}
 
-	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, true, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
+	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
 		n, err := io.Copy(file, fileResp.Body)
 		if err != nil {
 			return nil, err
 		}
-		content.Info.Size = int(n)
+		if audioOnly && ffmpeg.Supported() {
+			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-c:a", "libopus"}, false)
+			if err == nil {
+				mimeType = "audio/ogg"
+				content.Info.MimeType = mimeType
+				content.Info.Width = 0
+				content.Info.Height = 0
+				content.MsgType = bridgeEvt.MsgAudio
+				return &bridgev2.FileStreamResult{
+					ReplacementFile: outFile,
+					MimeType:        mimeType,
+					FileName:        content.Body + ".ogg",
+				}, nil
+			} else {
+				tc.client.Logger.Warn().Err(err).Msg("Failed to convert voice message to ogg")
+			}
+		} else {
+			content.Info.Size = int(n)
+		}
 		return &bridgev2.FileStreamResult{
 			MimeType: content.Info.MimeType,
 			FileName: content.Body,
@@ -204,6 +221,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		return nil, nil, err
 	}
 
+	if audioOnly {
+		content.MSC3245Voice = &bridgeEvt.MSC3245Voice{}
+	}
 	return &bridgev2.ConvertedMessagePart{
 		ID:      networkid.PartID(""),
 		Type:    bridgeEvt.EventMessage,
@@ -290,35 +310,4 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	return &bridgeEvt.BeeperLinkPreview{
 		LinkPreview: linkPreview,
 	}
-}
-
-func (tc *TwitterClient) voiceMessageToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachmentInfo *types.AttachmentInfo, fileResp *http.Response) (*bridgev2.ConvertedMessagePart, []int, error) {
-	data, err := io.ReadAll(fileResp.Body)
-	if err != nil {
-		return nil, nil, err
-	}
-	data, err = ffmpeg.ConvertBytes(ctx, data, ".ogg", []string{}, []string{"-c:a", "libopus"}, "video/mp4")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	mimeType := "audio/ogg"
-	content := bridgeEvt.MessageEventContent{
-		Info: &bridgeEvt.FileInfo{
-			MimeType: mimeType,
-			Duration: attachmentInfo.VideoInfo.DurationMillis,
-		},
-		MsgType: bridgeEvt.MsgAudio,
-	}
-
-	content.URL, content.File, err = intent.UploadMedia(ctx, portal.MXID, data, "", mimeType)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return &bridgev2.ConvertedMessagePart{
-		ID:      networkid.PartID(""),
-		Type:    bridgeEvt.EventMessage,
-		Content: &content,
-	}, attachmentInfo.Indices, nil
 }
