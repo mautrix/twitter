@@ -38,6 +38,7 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 	userUpdatesQuery := (&payload.DMRequestQuery{}).Default()
 	tick := time.NewTicker(defaultPollingInterval)
 	defer tick.Stop()
+	log := zerolog.Ctx(ctx)
 	for {
 		select {
 		case <-tick.C:
@@ -47,7 +48,7 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 
 			userUpdatesResponse, err := pc.client.GetDMUserUpdates(ctx, &userUpdatesQuery)
 			if err != nil {
-				zerolog.Ctx(ctx).Err(err).Msg("Failed to get user updates")
+				log.Err(err).Msg("Failed to get user updates")
 				time.Sleep(1 * time.Minute)
 				continue
 			}
@@ -62,7 +63,7 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 
 			pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
 		case <-ctx.Done():
-			zerolog.Ctx(ctx).Debug().Err(ctx.Err()).Msg("Polling context canceled")
+			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
 		}
 	}

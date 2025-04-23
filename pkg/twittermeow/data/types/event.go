@@ -98,6 +98,7 @@ func (rte *RawTwitterEvent) ParseWithErrorLog(log *zerolog.Logger) TwitterEvent 
 		}
 		logEvt.Msg("Unrecognized entry type")
 	} else {
+		log.Trace().RawJSON("entry_data", *rte).Msg("Parsed entry")
 		return evt
 	}
 	return nil
