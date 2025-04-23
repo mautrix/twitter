@@ -181,10 +181,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if content.Body == "" {
 		content.Body = strings.TrimPrefix(string(msgType), "m.")
 	}
-	ext := exmime.ExtensionFromMimetype(mimeType)
-	if !strings.HasSuffix(content.Body, ext) {
-		content.Body += ext
-	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
 	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
@@ -200,16 +196,21 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				content.Info.Width = 0
 				content.Info.Height = 0
 				content.MsgType = bridgeEvt.MsgAudio
+				content.Body += ".ogg"
 				return &bridgev2.FileStreamResult{
 					ReplacementFile: outFile,
 					MimeType:        mimeType,
-					FileName:        content.Body + ".ogg",
+					FileName:        content.Body,
 				}, nil
 			} else {
 				tc.client.Logger.Warn().Err(err).Msg("Failed to convert voice message to ogg")
 			}
 		} else {
 			content.Info.Size = int(n)
+		}
+		ext := exmime.ExtensionFromMimetype(mimeType)
+		if !strings.HasSuffix(content.Body, ext) {
+			content.Body += ext
 		}
 		return &bridgev2.FileStreamResult{
 			MimeType: content.Info.MimeType,
