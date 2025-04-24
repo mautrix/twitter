@@ -31,37 +31,11 @@ import (
 )
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *response.TwitterInboxData) {
-	for conversationID, conversation := range inbox.Conversations {
-		cache := tc.participantCache[conversationID]
-		for _, participant := range conversation.Participants {
-			if participant.UserID == string(tc.userLogin.ID) {
-				continue
-			}
-			var cachedParticipant *types.Participant
-			for _, p := range cache {
-				if p.UserID == participant.UserID {
-					cachedParticipant = &p
-					break
-				}
-			}
-			if cachedParticipant == nil || cachedParticipant.LastReadEventID < participant.LastReadEventID {
-				tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
-					EventMeta: simplevent.EventMeta{
-						Type:      bridgev2.RemoteEventReadReceipt,
-						PortalKey: tc.makePortalKeyFromInbox(conversationID, inbox),
-						Sender:    tc.MakeEventSender(participant.UserID),
-						Timestamp: methods.ParseSnowflake(participant.LastReadEventID),
-					},
-					LastTarget: networkid.MessageID(participant.LastReadEventID),
-				})
-			}
-		}
-		tc.participantCache[conversationID] = conversation.Participants
-	}
 	if rawEvt == nil {
 		tc.userCacheLock.Lock()
 		maps.Copy(tc.userCache, inbox.Users)
 		tc.userCacheLock.Unlock()
+		tc.updateTwitterReadReceipt(inbox)
 		return
 	}
 	isEdit := false
@@ -241,5 +215,35 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 		EmojiID:       "",
 		Emoji:         data.EmojiReaction,
 		TargetMessage: networkid.MessageID(data.MessageID),
+	}
+}
+
+func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxData) {
+	for conversationID, conversation := range inbox.Conversations {
+		cache := tc.participantCache[conversationID]
+		for _, participant := range conversation.Participants {
+			if participant.UserID == string(tc.userLogin.ID) {
+				continue
+			}
+			var cachedParticipant *types.Participant
+			for _, p := range cache {
+				if p.UserID == participant.UserID {
+					cachedParticipant = &p
+					break
+				}
+			}
+			if cachedParticipant == nil || cachedParticipant.LastReadEventID < participant.LastReadEventID {
+				tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
+					EventMeta: simplevent.EventMeta{
+						Type:      bridgev2.RemoteEventReadReceipt,
+						PortalKey: tc.makePortalKeyFromInbox(conversationID, inbox),
+						Sender:    tc.MakeEventSender(participant.UserID),
+						Timestamp: methods.ParseSnowflake(participant.LastReadEventID),
+					},
+					LastTarget: networkid.MessageID(participant.LastReadEventID),
+				})
+			}
+		}
+		tc.participantCache[conversationID] = conversation.Participants
 	}
 }

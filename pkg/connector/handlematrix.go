@@ -19,7 +19,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -210,12 +209,6 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 	conversationID := ""
 	if chat.Portal != nil {
 		conversationID = string(chat.Portal.ID)
-		if chat.Timeout.Seconds() > 0 {
-			go func() {
-				time.Sleep(chat.Timeout)
-				tc.client.SetActiveConversation("")
-			}()
-		}
 	}
 	tc.client.SetActiveConversation(conversationID)
 	return nil
