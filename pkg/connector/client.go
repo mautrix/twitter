@@ -43,6 +43,8 @@ type TwitterClient struct {
 	userCache     map[string]*types.User
 	userCacheLock sync.RWMutex
 
+	participantCache map[string][]types.Participant
+
 	matrixParser *format.HTMLParser
 }
 
@@ -50,10 +52,11 @@ var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
 
 func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, client *twittermeow.Client) *TwitterClient {
 	tc := &TwitterClient{
-		connector: connector,
-		client:    client,
-		userLogin: login,
-		userCache: make(map[string]*types.User),
+		connector:        connector,
+		client:           client,
+		userLogin:        login,
+		userCache:        make(map[string]*types.User),
+		participantCache: make(map[string][]types.Participant),
 	}
 	client.SetEventHandler(tc.HandleTwitterEvent)
 	tc.matrixParser = &format.HTMLParser{

@@ -44,6 +44,7 @@ var (
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
 )
 
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
@@ -201,5 +202,14 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		return err
 	}
 	edit.EditTarget.Metadata.(*MessageMetadata).EditCount = resp.MessageData.EditCount
+	return nil
+}
+
+func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *bridgev2.MatrixViewingChat) error {
+	conversationID := ""
+	if chat.Portal != nil {
+		conversationID = string(chat.Portal.ID)
+	}
+	tc.client.SetActiveConversation(conversationID)
 	return nil
 }

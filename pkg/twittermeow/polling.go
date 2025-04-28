@@ -13,9 +13,11 @@ import (
 var defaultPollingInterval = 10 * time.Second
 
 type PollingClient struct {
-	client        *Client
-	currentCursor string
-	stop          atomic.Pointer[context.CancelFunc]
+	client                *Client
+	currentCursor         string
+	stop                  atomic.Pointer[context.CancelFunc]
+	activeConversationID  string
+	includeConversationID bool
 }
 
 // interval is the delay inbetween checking for new updates
@@ -42,6 +44,12 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 	for {
 		select {
 		case <-tick.C:
+			if pc.includeConversationID {
+				userUpdatesQuery.ActiveConversationID = pc.activeConversationID
+			} else {
+				userUpdatesQuery.ActiveConversationID = ""
+			}
+			pc.includeConversationID = !pc.includeConversationID
 			if pc.currentCursor != "" {
 				userUpdatesQuery.Cursor = pc.currentCursor
 			}
@@ -77,4 +85,8 @@ func (pc *PollingClient) stopPolling() {
 	if cancel := pc.stop.Swap(nil); cancel != nil {
 		(*cancel)()
 	}
+}
+
+func (pc *PollingClient) SetActiveConversation(conversationID string) {
+	pc.activeConversationID = conversationID
 }
