@@ -222,7 +222,7 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 	for conversationID, conversation := range inbox.Conversations {
 		cache := tc.participantCache[conversationID]
 		for _, participant := range conversation.Participants {
-			if participant.UserID == string(tc.userLogin.ID) {
+			if participant.UserID == ParseUserLoginID(tc.userLogin.ID) {
 				continue
 			}
 			var cachedParticipant *types.Participant
