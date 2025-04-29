@@ -58,7 +58,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		userCache:        make(map[string]*types.User),
 		participantCache: make(map[string][]types.Participant),
 	}
-	client.SetEventHandler(tc.HandleTwitterEvent)
+	client.SetEventHandler(tc.HandleTwitterEvent, tc.HandleStreamEvent)
 	tc.matrixParser = &format.HTMLParser{
 		TabsToSpaces:   4,
 		Newline:        "\n",

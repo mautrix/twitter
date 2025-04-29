@@ -29,23 +29,26 @@ import (
 type ClientOpts struct {
 	Cookies       *cookies.Cookies
 	Session       *SessionLoader
-	EventHandler  EventHandler
 	WithJOTClient bool
 }
 
 type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData)
+type StreamEventHandler func(evt response.StreamEvent)
 
 type Client struct {
-	Logger       zerolog.Logger
-	cookies      *cookies.Cookies
-	session      *SessionLoader
-	HTTP         *http.Client
-	httpProxy    func(*http.Request) (*url.URL, error)
-	socksProxy   proxy.Dialer
-	eventHandler EventHandler
+	Logger     zerolog.Logger
+	cookies    *cookies.Cookies
+	session    *SessionLoader
+	HTTP       *http.Client
+	httpProxy  func(*http.Request) (*url.URL, error)
+	socksProxy proxy.Dialer
+
+	eventHandler       EventHandler
+	streamEventHandler StreamEventHandler
 
 	jot     *JotClient
 	polling *PollingClient
+	stream  *StreamClient
 }
 
 func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
@@ -63,13 +66,10 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 	}
 
 	cli.polling = cli.newPollingClient()
+	cli.stream = cli.newStreamClient()
 
 	if opts.WithJOTClient {
 		cli.jot = cli.newJotClient()
-	}
-
-	if opts.EventHandler != nil {
-		cli.SetEventHandler(opts.EventHandler)
 	}
 
 	if opts.Cookies != nil {
@@ -208,8 +208,9 @@ func (c *Client) isAuthenticated() bool {
 	return c.session.isAuthenticated()
 }
 
-func (c *Client) SetEventHandler(handler EventHandler) {
+func (c *Client) SetEventHandler(handler EventHandler, streamHandler StreamEventHandler) {
 	c.eventHandler = handler
+	c.streamEventHandler = streamHandler
 }
 
 func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
@@ -385,6 +386,7 @@ type apiRequestOpts struct {
 	Body           []byte
 	ContentType    types.ContentType
 	WithClientUUID bool
+	Headers        map[string]string
 }
 
 func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
@@ -394,6 +396,17 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 		clientTransactionID = base64.RawStdEncoding.EncodeToString([]byte("e:"))
 	}
 
+	extraHeaders := map[string]string{
+		"x-client-transaction-id": clientTransactionID,
+		"accept":                  "*/*",
+		"sec-fetch-dest":          "empty",
+		"sec-fetch-mode":          "cors",
+		"sec-fetch-site":          "same-origin",
+	}
+	for k, v := range apiRequestOpts.Headers {
+		extraHeaders[k] = v
+	}
+
 	headerOpts := HeaderOpts{
 		WithAuthBearer:      true,
 		WithCookies:         true,
@@ -401,14 +414,8 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 		WithXCsrfToken:      true,
 		Referer:             apiRequestOpts.Referer,
 		Origin:              apiRequestOpts.Origin,
-		Extra: map[string]string{
-			"x-client-transaction-id": clientTransactionID,
-			"accept":                  "*/*",
-			"sec-fetch-dest":          "empty",
-			"sec-fetch-mode":          "cors",
-			"sec-fetch-site":          "same-origin",
-		},
-		WithXClientUUID: apiRequestOpts.WithClientUUID,
+		Extra:               extraHeaders,
+		WithXClientUUID:     apiRequestOpts.WithClientUUID,
 	}
 	headers := c.buildHeaders(headerOpts)
 
@@ -417,4 +424,9 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 
 func (c *Client) SetActiveConversation(conversationID string) {
 	c.polling.SetActiveConversation(conversationID)
+	c.stream.startEventStream(conversationID)
+}
+
+func (c *Client) PollConversation(conversationID string) {
+	c.polling.pollConversation(conversationID)
 }

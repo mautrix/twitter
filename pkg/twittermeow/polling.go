@@ -71,7 +71,6 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 
 			pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
 		case <-ctx.Done():
-			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
 		}
 	}
@@ -89,4 +88,9 @@ func (pc *PollingClient) stopPolling() {
 
 func (pc *PollingClient) SetActiveConversation(conversationID string) {
 	pc.activeConversationID = conversationID
+}
+
+func (pc *PollingClient) pollConversation(conversationID string) {
+	pc.includeConversationID = true
+	pc.startPolling(context.Background())
 }

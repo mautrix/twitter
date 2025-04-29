@@ -39,6 +39,9 @@ const (
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"
 
+	PIPELINE_EVENTS_URL = API_BASE_URL + "/live_pipeline/events"
+	PIPELINE_UPDATE_URL = API_BASE_URL + "/1.1/live_pipeline/update_subscriptions"
+
 	UPLOAD_BASE_HOST = "upload.x.com"
 	UPLOAD_BASE_URL  = "https://" + UPLOAD_BASE_HOST
 	UPLOAD_MEDIA_URL = UPLOAD_BASE_URL + "/i/media/upload.json"
