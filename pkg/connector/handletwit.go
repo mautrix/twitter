@@ -32,7 +32,7 @@ import (
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *response.TwitterInboxData) {
 	if rawEvt == nil {
-		tc.updateTwitterChatInfo(inbox)
+		tc.updateTwitterUserInfo(inbox)
 		tc.updateTwitterReadReceipt(inbox)
 		tc.userCacheLock.Lock()
 		maps.Copy(tc.userCache, inbox.Users)
@@ -249,38 +249,17 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 	}
 }
 
-func (tc *TwitterClient) updateTwitterChatInfo(inbox *response.TwitterInboxData) {
-	if len(inbox.Conversations) == 0 {
-		return
-	}
-
-	var conversationID string
-	var conversation *types.Conversation
-	for id, conv := range inbox.Conversations {
-		conversationID = id
-		conversation = conv
-		break
-	}
-
-	var changedUserId string
+func (tc *TwitterClient) updateTwitterUserInfo(inbox *response.TwitterInboxData) {
+	ctx := context.Background()
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
 		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
-			changedUserId = userID
-			break
+			ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
+			if err != nil {
+				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost by ID")
+			} else {
+				ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
+			}
 		}
-	}
-
-	if changedUserId != "" {
-		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventChatInfoChange,
-				Sender:    tc.MakeEventSender(changedUserId),
-				PortalKey: tc.makePortalKeyFromInbox(conversationID, inbox),
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				ChatInfo: tc.conversationToChatInfo(conversation, inbox),
-			},
-		})
 	}
 }
