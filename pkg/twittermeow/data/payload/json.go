@@ -3,16 +3,17 @@ package payload
 import "encoding/json"
 
 type SendDirectMessagePayload struct {
-	ConversationID    string `json:"conversation_id,omitempty"`
-	MediaID           string `json:"media_id,omitempty"`
-	ReplyToDMID       string `json:"reply_to_dm_id,omitempty"`
-	RecipientIDs      bool   `json:"recipient_ids"`
-	RequestID         string `json:"request_id,omitempty"`
-	Text              string `json:"text"`
-	CardsPlatform     string `json:"cards_platform,omitempty"`
-	IncludeCards      int    `json:"include_cards,omitempty"`
-	IncludeQuoteCount bool   `json:"include_quote_count"`
-	DMUsers           bool   `json:"dm_users"`
+	ConversationID           string `json:"conversation_id,omitempty"`
+	MediaID                  string `json:"media_id,omitempty"`
+	ReplyToDMID              string `json:"reply_to_dm_id,omitempty"`
+	RecipientIDs             bool   `json:"recipient_ids"`
+	RequestID                string `json:"request_id,omitempty"`
+	Text                     string `json:"text"`
+	CardsPlatform            string `json:"cards_platform,omitempty"`
+	IncludeCards             int    `json:"include_cards,omitempty"`
+	IncludeQuoteCount        bool   `json:"include_quote_count"`
+	DMUsers                  bool   `json:"dm_users"`
+	AudioOnlyMediaAttachment bool   `json:"audio_only_media_attachment"`
 }
 
 func (p *SendDirectMessagePayload) Encode() ([]byte, error) {

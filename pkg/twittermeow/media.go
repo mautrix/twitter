@@ -6,12 +6,14 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"time"
 
+	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/random"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -184,4 +186,13 @@ func (c *Client) newMediaAppendPayload(mediaBytes []byte) ([]byte, string, error
 	}
 
 	return appendMediaPayload.Bytes(), writer.FormDataContentType(), nil
+}
+
+func (c *Client) ConvertAudioPayload(ctx context.Context, mediaBytes []byte, mimeType string) ([]byte, error) {
+	if !ffmpeg.Supported() {
+		return nil, errors.New("ffmpeg is required to send voice message")
+	}
+
+	// A video part is required to send voice message.
+	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".mp4", []string{"-f", "lavfi", "-i", "color=black:s=854x480:r=30"}, []string{"-c:v", "h264", "-c:a", "aac", "-tune", "stillimage", "-shortest"}, mimeType)
 }

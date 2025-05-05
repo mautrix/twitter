@@ -80,7 +80,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	switch content.MsgType {
 	case event.MsgText:
 		break
-	case event.MsgVideo, event.MsgImage:
+	case event.MsgVideo, event.MsgImage, event.MsgAudio:
 		if content.Body == content.FileName {
 			sendDMPayload.Text = ""
 		}
@@ -98,6 +98,18 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			uploadMediaParams.MediaCategory = "dm_gif"
 		}
 
+		if content.MsgType == event.MsgAudio {
+			sendDMPayload.AudioOnlyMediaAttachment = true
+			if content.Info.MimeType != "video/mp4" {
+				converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+				if err != nil {
+					return nil, err
+				} else {
+					data = converted
+					uploadMediaParams.MediaCategory = "dm_video"
+				}
+			}
+		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
 		if err != nil {
 			return nil, err

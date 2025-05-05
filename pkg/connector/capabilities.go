@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -31,14 +32,21 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 2
+	return 1, 3
 }
 
 const MaxTextLength = 10000
 
+func supportedIfFFmpeg() event.CapabilitySupportLevel {
+	if ffmpeg.Supported() {
+		return event.CapLevelPartialSupport
+	}
+	return event.CapLevelRejected
+}
+
 func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
 	return &event.RoomFeatures{
-		ID: "fi.mau.twitter.capabilities.2025_02_05",
+		ID: "fi.mau.twitter.capabilities.2025_05_05",
 		//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 		//	event.FmtUserLink: event.CapLevelFullySupported,
 		//},
@@ -62,6 +70,16 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) 
 				Caption:          event.CapLevelFullySupported,
 				MaxCaptionLength: MaxTextLength,
 				MaxSize:          15 * 1024 * 1024,
+			},
+			event.CapMsgVoice: {
+				MimeTypes: map[string]event.CapabilitySupportLevel{
+					"audio/aac": supportedIfFFmpeg(),
+					"audio/ogg": supportedIfFFmpeg(),
+					"video/mp4": event.CapLevelFullySupported,
+				},
+				Caption:          event.CapLevelFullySupported,
+				MaxCaptionLength: MaxTextLength,
+				MaxSize:          5 * 1024 * 1024,
 			},
 			event.CapMsgGIF: {
 				MimeTypes: map[string]event.CapabilitySupportLevel{
