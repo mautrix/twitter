@@ -32,10 +32,11 @@ import (
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *response.TwitterInboxData) {
 	if rawEvt == nil {
+		tc.updateTwitterUserInfo(inbox)
+		tc.updateTwitterReadReceipt(inbox)
 		tc.userCacheLock.Lock()
 		maps.Copy(tc.userCache, inbox.Users)
 		tc.userCacheLock.Unlock()
-		tc.updateTwitterReadReceipt(inbox)
 		return
 	}
 	isEdit := false
@@ -245,5 +246,20 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 			}
 		}
 		tc.participantCache[conversationID] = conversation.Participants
+	}
+}
+
+func (tc *TwitterClient) updateTwitterUserInfo(inbox *response.TwitterInboxData) {
+	ctx := tc.userLogin.Log.With().Str("action", "update user info").Logger().WithContext(context.Background())
+	for userID, user := range inbox.Users {
+		cached := tc.userCache[userID]
+		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
+			ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
+			if err != nil {
+				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost by ID")
+			} else {
+				ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
+			}
+		}
 	}
 }
