@@ -99,13 +99,15 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 
 		if content.MsgType == event.MsgAudio {
-			converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
-			if err != nil {
-				return nil, err
-			} else {
-				data = converted
-				sendDMPayload.AudioOnlyMediaAttachment = true
-				uploadMediaParams.MediaCategory = "dm_video"
+			sendDMPayload.AudioOnlyMediaAttachment = true
+			if content.Info.MimeType != "video/mp4" {
+				converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+				if err != nil {
+					return nil, err
+				} else {
+					data = converted
+					uploadMediaParams.MediaCategory = "dm_video"
+				}
 			}
 		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
