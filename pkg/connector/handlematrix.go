@@ -99,15 +99,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 
 		if content.MsgType == event.MsgAudio {
-			user := tc.getCachedUserInfo(ParseUserLoginID(tc.userLogin.ID))
-			var userAvatar []byte
-			if user != nil {
-				userAvatar, err = user.Avatar.Get(ctx)
-				if err != nil {
-					return nil, err
-				}
-			}
-			converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType, userAvatar)
+			converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
 			if err != nil {
 				return nil, err
 			} else {

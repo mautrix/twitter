@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"os"
 	"time"
 
 	"go.mau.fi/util/ffmpeg"
@@ -189,24 +188,11 @@ func (c *Client) newMediaAppendPayload(mediaBytes []byte) ([]byte, string, error
 	return appendMediaPayload.Bytes(), writer.FormDataContentType(), nil
 }
 
-func (c *Client) ConvertAudioPayload(ctx context.Context, mediaBytes []byte, mimeType string, userAvatar []byte) ([]byte, error) {
+func (c *Client) ConvertAudioPayload(ctx context.Context, mediaBytes []byte, mimeType string) ([]byte, error) {
 	if !ffmpeg.Supported() {
 		return nil, errors.New("ffmpeg is required to send voice message")
 	}
-	tempFile, err := os.CreateTemp("", "mautrix-twitter-*")
-	if err != nil {
-		err = fmt.Errorf("failed to create temporary file: %w", err)
-		return nil, err
-	}
-	defer func() {
-		tempFile.Close()
-		os.Remove(tempFile.Name())
-	}()
-	_, err = tempFile.Write(userAvatar)
-	if err != nil {
-		return nil, err
-	}
 
 	// A video part is required to send voice message.
-	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".mp4", []string{"-loop", "1", "-i", tempFile.Name()}, []string{"-c:v", "libopenh264", "-c:a", "aac", "-tune", "stillimage", "-shortest"}, mimeType)
+	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".mp4", []string{"-f", "lavfi", "-i", "color=black:s=854x480:r=30"}, []string{"-c:v", "h264", "-c:a", "aac", "-tune", "stillimage", "-shortest"}, mimeType)
 }

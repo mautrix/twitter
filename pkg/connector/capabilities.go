@@ -46,7 +46,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 
 func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
 	return &event.RoomFeatures{
-		ID: "fi.mau.twitter.capabilities.2025_02_05",
+		ID: "fi.mau.twitter.capabilities.2025_05_05",
 		//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 		//	event.FmtUserLink: event.CapLevelFullySupported,
 		//},
@@ -75,6 +75,7 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) 
 				MimeTypes: map[string]event.CapabilitySupportLevel{
 					"audio/aac": supportedIfFFmpeg(),
 					"audio/ogg": supportedIfFFmpeg(),
+					"video/mp4": event.CapLevelFullySupported,
 				},
 				Caption:          event.CapLevelFullySupported,
 				MaxCaptionLength: MaxTextLength,
