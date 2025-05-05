@@ -424,7 +424,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 
 func (c *Client) SetActiveConversation(conversationID string) {
 	c.polling.SetActiveConversation(conversationID)
-	c.stream.startEventStream(conversationID)
+	c.stream.startOrUpdateEventStream(conversationID)
 }
 
 func (c *Client) PollConversation(conversationID string) {

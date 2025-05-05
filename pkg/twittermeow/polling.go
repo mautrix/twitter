@@ -18,13 +18,15 @@ type PollingClient struct {
 	stop                  atomic.Pointer[context.CancelFunc]
 	activeConversationID  string
 	includeConversationID bool
+	shortCircuit          chan struct{}
 }
 
 // interval is the delay inbetween checking for new updates
 // default interval will be 10s
 func (c *Client) newPollingClient() *PollingClient {
 	return &PollingClient{
-		client: c,
+		client:       c,
+		shortCircuit: make(chan struct{}, 1),
 	}
 }
 
@@ -37,43 +39,52 @@ func (pc *PollingClient) startPolling(ctx context.Context) {
 }
 
 func (pc *PollingClient) doPoll(ctx context.Context) {
-	userUpdatesQuery := (&payload.DMRequestQuery{}).Default()
 	tick := time.NewTicker(defaultPollingInterval)
 	defer tick.Stop()
 	log := zerolog.Ctx(ctx)
 	for {
 		select {
 		case <-tick.C:
-			if pc.includeConversationID {
-				userUpdatesQuery.ActiveConversationID = pc.activeConversationID
-			} else {
-				userUpdatesQuery.ActiveConversationID = ""
-			}
-			pc.includeConversationID = !pc.includeConversationID
-			if pc.currentCursor != "" {
-				userUpdatesQuery.Cursor = pc.currentCursor
-			}
-
-			userUpdatesResponse, err := pc.client.GetDMUserUpdates(ctx, &userUpdatesQuery)
-			if err != nil {
-				log.Err(err).Msg("Failed to get user updates")
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-
-			pc.client.eventHandler(nil, userUpdatesResponse.UserEvents)
-			for _, entry := range userUpdatesResponse.UserEvents.Entries {
-				parsed := entry.ParseWithErrorLog(&pc.client.Logger)
-				if parsed != nil {
-					pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents)
-				}
-			}
-
-			pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
+			pc.poll(ctx)
+		case <-pc.shortCircuit:
+			tick.Reset(defaultPollingInterval)
+			pc.poll(ctx)
 		case <-ctx.Done():
+			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
 		}
 	}
+}
+
+func (pc *PollingClient) poll(ctx context.Context) {
+	userUpdatesQuery := (&payload.DMRequestQuery{}).Default()
+	log := zerolog.Ctx(ctx)
+	if pc.includeConversationID {
+		userUpdatesQuery.ActiveConversationID = pc.activeConversationID
+	} else {
+		userUpdatesQuery.ActiveConversationID = ""
+	}
+	pc.includeConversationID = !pc.includeConversationID
+	if pc.currentCursor != "" {
+		userUpdatesQuery.Cursor = pc.currentCursor
+	}
+
+	userUpdatesResponse, err := pc.client.GetDMUserUpdates(ctx, &userUpdatesQuery)
+	if err != nil {
+		log.Err(err).Msg("Failed to get user updates")
+		time.Sleep(1 * time.Minute)
+		return
+	}
+
+	pc.client.eventHandler(nil, userUpdatesResponse.UserEvents)
+	for _, entry := range userUpdatesResponse.UserEvents.Entries {
+		parsed := entry.ParseWithErrorLog(&pc.client.Logger)
+		if parsed != nil {
+			pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents)
+		}
+	}
+
+	pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
 }
 
 func (pc *PollingClient) SetCurrentCursor(cursor string) {
@@ -88,9 +99,16 @@ func (pc *PollingClient) stopPolling() {
 
 func (pc *PollingClient) SetActiveConversation(conversationID string) {
 	pc.activeConversationID = conversationID
+	pc.pollConversation(conversationID)
 }
 
 func (pc *PollingClient) pollConversation(conversationID string) {
-	pc.includeConversationID = true
-	pc.startPolling(context.Background())
+	if pc.activeConversationID == conversationID {
+		pc.includeConversationID = true
+		select {
+		case <-pc.shortCircuit:
+		default:
+		}
+		pc.shortCircuit <- struct{}{}
+	}
 }

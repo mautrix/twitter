@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
@@ -19,41 +19,52 @@ import (
 type StreamClient struct {
 	client *Client
 
-	stopStream        atomic.Pointer[context.CancelFunc]
-	stopHeartbeat     atomic.Pointer[context.CancelFunc]
+	oldConversationID string
+	conversationID    string
+	sessionID         string
 	heartbeatInterval time.Duration
+	shortCircuit      chan struct{}
 }
 
 func (c *Client) newStreamClient() *StreamClient {
 	return &StreamClient{
 		client:            c,
 		heartbeatInterval: 25 * time.Second,
+		shortCircuit:      make(chan struct{}, 1),
 	}
 }
 
-func (sc *StreamClient) startEventStream(conversationID string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	if oldCancel := sc.stopStream.Swap(&cancel); oldCancel != nil {
-		(*oldCancel)()
+func (sc *StreamClient) startOrUpdateEventStream(conversationID string) {
+	ctx := sc.client.Logger.With().Str("action", "event stream").Logger().WithContext(context.Background())
+	if sc.conversationID == "" {
+		sc.conversationID = conversationID
+		go sc.start(ctx)
+	} else {
+		sc.oldConversationID = sc.conversationID
+		sc.conversationID = conversationID
+		select {
+		case <-sc.shortCircuit:
+		default:
+		}
+		sc.shortCircuit <- struct{}{}
 	}
-	go sc.subscribe(ctx, conversationID)
 }
 
-func (sc *StreamClient) subscribe(ctx context.Context, conversationID string) {
+func (sc *StreamClient) start(ctx context.Context) {
 	eventsURL, err := url.Parse(endpoints.PIPELINE_EVENTS_URL)
 	if err != nil {
-		sc.client.Logger.Err(err)
+		zerolog.Ctx(ctx).Err(err)
 		return
 	}
 
 	q := url.Values{
-		"topic": []string{getSubscriptionTopic(conversationID)},
+		"topic": []string{getSubscriptionTopic(sc.conversationID)},
 	}
 	eventsURL.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, eventsURL.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, eventsURL.String(), nil)
 	if err != nil {
-		sc.client.Logger.Err(err)
+		zerolog.Ctx(ctx).Err(err)
 		return
 	}
 
@@ -69,13 +80,13 @@ func (sc *StreamClient) subscribe(ctx context.Context, conversationID string) {
 
 	resp, err := sc.client.HTTP.Do(req)
 	if err != nil {
-		sc.client.Logger.Err(err).Msg("failed to connect to event stream")
+		zerolog.Ctx(ctx).Err(err).Msg("failed to connect to event stream")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		sc.client.Logger.Debug().Int("code", resp.StatusCode).Str("status", resp.Status).Msg("failed to connect to event stream")
+		zerolog.Ctx(ctx).Debug().Int("code", resp.StatusCode).Str("status", resp.Status).Msg("failed to connect to event stream")
 		return
 	}
 	scanner := bufio.NewScanner(resp.Body)
@@ -88,16 +99,16 @@ func (sc *StreamClient) subscribe(ctx context.Context, conversationID string) {
 		field := line[:index]
 		value := line[index+1:]
 		if field != "data" {
-			sc.client.Logger.Warn().Str("field", field).Str("value", value).Msg("unhandled stream event")
+			zerolog.Ctx(ctx).Warn().Str("field", field).Str("value", value).Msg("unhandled stream event")
 			continue
 		}
 		var evt response.StreamEvent
 		err := json.Unmarshal([]byte(value), &evt)
 		if err != nil {
-			sc.client.Logger.Err(err).Str("value", value).Msg("error decoding stream event")
+			zerolog.Ctx(ctx).Err(err).Str("value", value).Msg("error decoding stream event")
 			continue
 		}
-		sc.client.Logger.Trace().Any("evt", evt).Msg("stream event")
+		zerolog.Ctx(ctx).Trace().Any("evt", evt).Msg("stream event")
 
 		config := evt.Payload.Config
 		if config != nil {
@@ -105,7 +116,11 @@ func (sc *StreamClient) subscribe(ctx context.Context, conversationID string) {
 				sc.heartbeatInterval = time.Duration(config.HeartbeatMillis) * time.Millisecond
 			}
 			if config.SessionID != "" {
-				go sc.startHeartbeat(config.SessionID, conversationID)
+				noHeartbeat := sc.sessionID == ""
+				sc.sessionID = config.SessionID
+				if noHeartbeat {
+					go sc.startHeartbeat(ctx)
+				}
 			}
 		} else {
 			sc.client.streamEventHandler(evt)
@@ -117,33 +132,35 @@ func getSubscriptionTopic(conversationID string) string {
 	return "/dm_update/" + conversationID + ",/dm_typing/" + conversationID
 }
 
-func (sc *StreamClient) startHeartbeat(sessionID, conversationID string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	if oldCancel := sc.stopHeartbeat.Swap(&cancel); oldCancel != nil {
-		(*oldCancel)()
-	}
-
-	tick := time.NewTicker(defaultPollingInterval)
+func (sc *StreamClient) startHeartbeat(ctx context.Context) {
+	tick := time.NewTicker(sc.heartbeatInterval)
 	defer tick.Stop()
 
-	sc.heartbeat(ctx, sessionID, conversationID)
+	sc.heartbeat(ctx)
 	for {
 		select {
 		case <-tick.C:
-			sc.heartbeat(ctx, sessionID, conversationID)
+			sc.heartbeat(ctx)
+		case <-sc.shortCircuit:
+			tick.Reset(sc.heartbeatInterval)
+			sc.heartbeat(ctx)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (sc *StreamClient) heartbeat(ctx context.Context, sessionID, conversationID string) {
+func (sc *StreamClient) heartbeat(ctx context.Context) {
 	payload := &payload.UpdateSubscriptionsPayload{
-		SubTopics: getSubscriptionTopic(conversationID),
+		SubTopics:   getSubscriptionTopic(sc.conversationID),
+		UnsubTopics: getSubscriptionTopic(sc.oldConversationID),
+	}
+	if sc.oldConversationID != "" {
+		sc.oldConversationID = ""
 	}
 	encodedPayload, err := payload.Encode()
 	if err != nil {
-		sc.client.Logger.Err(err)
+		zerolog.Ctx(ctx).Err(err)
 		return
 	}
 
@@ -153,10 +170,10 @@ func (sc *StreamClient) heartbeat(ctx context.Context, sessionID, conversationID
 		ContentType: types.ContentTypeForm,
 		Body:        encodedPayload,
 		Headers: map[string]string{
-			"livepipeline-session": sessionID,
+			"livepipeline-session": sc.sessionID,
 		},
 	})
 	if err != nil {
-		sc.client.Logger.Err(err)
+		zerolog.Ctx(ctx).Err(err)
 	}
 }
