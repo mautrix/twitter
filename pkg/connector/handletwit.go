@@ -250,7 +250,7 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 }
 
 func (tc *TwitterClient) updateTwitterUserInfo(inbox *response.TwitterInboxData) {
-	ctx := context.Background()
+	ctx := tc.userLogin.Log.With().Str("action", "update user info").Logger().WithContext(context.Background())
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
 		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
