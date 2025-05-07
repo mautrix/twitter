@@ -172,6 +172,8 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 				MemberChanges: tc.participantsToMemberList(evt.Participants, inbox),
 			},
 		}
+		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.IsFull = false
+		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.TotalMemberCount = len(conversation.Participants)
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, portalMembersAddedRemoteEvent)
 	case *types.ConversationDelete:
 		portalDeleteRemoteEvent := &simplevent.ChatDelete{
