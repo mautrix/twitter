@@ -28,6 +28,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
+	"maunium.net/go/mautrix/id"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -47,11 +48,17 @@ var (
 	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
 )
 
+var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
+
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if msg.IsTyping && msg.Type == bridgev2.TypingTypeText {
 		return tc.client.SendTypingNotification(ctx, string(msg.Portal.ID))
 	}
 	return nil
+}
+
+func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.RoomID, eventType event.Type) networkid.RawTransactionID {
+	return networkid.RawTransactionID(uuid.NewString())
 }
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
@@ -63,7 +70,10 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		RecipientIDs:      false,
 		DMUsers:           false,
 		CardsPlatform:     "Web-12",
-		RequestID:         uuid.NewString(),
+		RequestID:         string(msg.InputTransactionID),
+	}
+	if sendDMPayload.RequestID == "" {
+		sendDMPayload.RequestID = uuid.NewString()
 	}
 
 	if msg.ReplyTo != nil {
@@ -204,12 +214,16 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 }
 
 func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
-	resp, err := tc.client.EditDirectMessage(ctx, &payload.EditDirectMessagePayload{
+	req := &payload.EditDirectMessagePayload{
 		ConversationID: string(edit.Portal.ID),
-		RequestID:      uuid.NewString(),
+		RequestID:      string(edit.InputTransactionID),
 		DMID:           string(edit.EditTarget.ID),
 		Text:           edit.Content.Body,
-	})
+	}
+	if req.RequestID == "" {
+		req.RequestID = uuid.NewString()
+	}
+	resp, err := tc.client.EditDirectMessage(ctx, req)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,7 @@ module go.mau.fi/mautrix-twitter
 
 go 1.23.0
 
-toolchain go1.24.2
+toolchain go1.24.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
@@ -10,10 +10,10 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.10.0
-	go.mau.fi/util v0.8.6
+	go.mau.fi/util v0.8.7-0.20250427215252-d2d18a7e463c
 	golang.org/x/net v0.39.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.23.4-0.20250423154658-33f3ccd6aef0
+	maunium.net/go/mautrix v0.23.4-0.20250508122520-376fa1f36898
 )
 
 require (
