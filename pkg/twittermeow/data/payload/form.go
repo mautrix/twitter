@@ -271,3 +271,16 @@ func (p *EditDirectMessagePayload) Encode() ([]byte, error) {
 	}
 	return []byte(values.Encode()), nil
 }
+
+type UpdateSubscriptionsPayload struct {
+	SubTopics   string `url:"sub_topics"`
+	UnsubTopics string `url:"unsub_topics"`
+}
+
+func (p *UpdateSubscriptionsPayload) Encode() ([]byte, error) {
+	values, err := query.Values(p)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(values.Encode()), nil
+}

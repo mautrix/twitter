@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"maps"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -263,5 +264,25 @@ func (tc *TwitterClient) updateTwitterUserInfo(inbox *response.TwitterInboxData)
 				ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
 			}
 		}
+	}
+}
+
+func (tc *TwitterClient) HandleStreamEvent(evt response.StreamEvent) {
+	updateData := evt.Payload.DmUpdate
+	typingData := evt.Payload.DmTyping
+
+	if updateData != nil {
+		tc.client.PollConversation(updateData.ConversationID)
+	}
+
+	if typingData != nil {
+		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventTyping,
+				PortalKey: tc.MakePortalKeyFromID(typingData.ConversationID),
+				Sender:    tc.MakeEventSender(typingData.UserID),
+			},
+			Timeout: 3 * time.Second,
+		})
 	}
 }
