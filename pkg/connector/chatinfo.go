@@ -135,10 +135,14 @@ func (tc *TwitterClient) participantToChatMember(participant types.Participant, 
 	} else {
 		userInfo = tc.getCachedUserInfo(participant.UserID)
 	}
-	return bridgev2.ChatMember{
+	member := bridgev2.ChatMember{
 		EventSender: tc.MakeEventSender(participant.UserID),
 		UserInfo:    userInfo,
 	}
+	if participant.UserID == ParseUserLoginID(tc.userLogin.ID) {
+		member.PowerLevel = ptr.Ptr(50)
+	}
+	return member
 }
 
 func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
