@@ -23,6 +23,7 @@ func (*ParticipantsJoin) isTwitterEvent()           {}
 func (*ConversationMetadataUpdate) isTwitterEvent() {}
 func (*ConversationNameUpdate) isTwitterEvent()     {}
 func (*ConversationRead) isTwitterEvent()           {}
+func (*TrustConversation) isTwitterEvent()          {}
 
 type RawTwitterEvent []byte
 
@@ -43,6 +44,7 @@ type twitterEventContainer struct {
 	ConversationMetadataUpdate *ConversationMetadataUpdate `json:"conversation_metadata_update,omitempty"`
 	ConversationNameUpdate     *ConversationNameUpdate     `json:"conversation_name_update,omitempty"`
 	ConversationRead           *ConversationRead           `json:"conversation_read,omitempty"`
+	TrustConversation          *TrustConversation          `json:"trust_conversation,omitempty"`
 	// DisableNotifications       *types.DisableNotifications       `json:"disable_notifications,omitempty"`
 }
 
