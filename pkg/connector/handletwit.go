@@ -192,6 +192,16 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		}
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, portalDeleteRemoteEvent)
 		tc.client.Logger.Info().Any("data", evt).Msg("Deleted conversation")
+	case *types.TrustConversation:
+		conversation := inbox.GetConversationByID(evt.ConversationID)
+		tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.ChatResync{
+			EventMeta: simplevent.EventMeta{
+				Type:         bridgev2.RemoteEventChatResync,
+				PortalKey:    tc.MakePortalKey(conversation),
+				CreatePortal: !conversation.LowQuality && conversation.Trusted,
+			},
+			ChatInfo: tc.conversationToChatInfo(conversation, inbox),
+		})
 	default:
 		tc.client.Logger.Warn().
 			Type("event_data_type", rawEvt).

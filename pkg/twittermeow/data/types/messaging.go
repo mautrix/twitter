@@ -162,3 +162,11 @@ type MessagesDeleted struct {
 	MessageID            string `json:"message_id,omitempty"`
 	MessageCreateEventID string `json:"message_create_event_id,omitempty"`
 }
+
+type TrustConversation struct {
+	ID             string `json:"id,omitempty"`
+	Time           string `json:"time,omitempty"`
+	AffectsSort    bool   `json:"affects_sort,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
