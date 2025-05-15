@@ -17,6 +17,8 @@
 package connector
 
 import (
+	"encoding/json"
+	"log"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -87,4 +89,27 @@ func (tc *TwitterClient) MakeEventSender(userID string) bridgev2.EventSender {
 		SenderLogin: MakeUserLoginID(userID),
 		Sender:      MakeUserID(userID),
 	}
+}
+
+type MediaInfo struct {
+	UserID networkid.UserLoginID
+	URL    string
+}
+
+func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
+	info := &MediaInfo{
+		UserID: userID,
+		URL:    URL,
+	}
+	id, err := json.Marshal(info)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return id
+}
+
+func ParseMediaID(mediaID networkid.MediaID) (MediaInfo, error) {
+	var info MediaInfo
+	err := json.Unmarshal(mediaID, &info)
+	return info, err
 }

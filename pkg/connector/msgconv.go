@@ -38,19 +38,19 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
+func (tc *TwitterConnector) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, cli *twittermeow.Client, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
 	if ec := existing[0].Metadata.(*MessageMetadata).EditCount; ec >= data.EditCount {
 		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, ec, data.EditCount)
 	}
 	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
-	editPart := tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existing[0])
+	editPart := tc.convertToMatrix(ctx, portal, intent, cli, data).Parts[0].ToEditPart(existing[0])
 	editPart.Part.Metadata = &MessageMetadata{EditCount: data.EditCount}
 	return &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{editPart},
 	}, nil
 }
 
-func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) *bridgev2.ConvertedMessage {
+func (tc *TwitterConnector) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, cli *twittermeow.Client, msg *types.MessageData) *bridgev2.ConvertedMessage {
 	var replyTo *networkid.MessageOptionalPartID
 	if msg.ReplyData.ID != "" {
 		replyTo = &networkid.MessageOptionalPartID{
@@ -67,7 +67,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	parts := make([]*bridgev2.ConvertedMessagePart, 0)
 
 	if msg.Attachment != nil {
-		convertedAttachmentPart, indices, err := tc.twitterAttachmentToMatrix(ctx, portal, intent, msg)
+		convertedAttachmentPart, indices, err := tc.twitterAttachmentToMatrix(ctx, portal, intent, cli, msg)
 		if err != nil {
 			zerolog.Ctx(ctx).Err(err).Msg("Failed to convert attachment")
 			parts = append(parts, &bridgev2.ConvertedMessagePart{
@@ -109,7 +109,7 @@ func removeEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []
 	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
 }
 
-func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
+func (tc *TwitterConnector) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, cli *twittermeow.Client, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
 	attachment := msg.Attachment
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
@@ -153,7 +153,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	} else if attachment.Tweet != nil {
 		content := bridgeEvt.MessageEventContent{
 			MsgType:            bridgeEvt.MsgText,
-			BeeperLinkPreviews: []*bridgeEvt.BeeperLinkPreview{tc.attachmentTweetToMatrix(ctx, portal, intent, attachment.Tweet)},
+			BeeperLinkPreviews: []*bridgeEvt.BeeperLinkPreview{tc.attachmentTweetToMatrix(ctx, portal, intent, cli, attachment.Tweet)},
 		}
 		return &bridgev2.ConvertedMessagePart{
 			ID:      networkid.PartID(""),
@@ -164,7 +164,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		return nil, nil, fmt.Errorf("unsupported attachment type")
 	}
 
-	fileResp, err := tc.downloadFile(ctx, attachmentURL)
+	fileResp, err := tc.downloadFile(ctx, cli, attachmentURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -183,41 +183,44 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
-	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-		n, err := io.Copy(file, fileResp.Body)
-		if err != nil {
-			return nil, err
-		}
-		if audioOnly && ffmpeg.Supported() {
-			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-c:a", "libopus"}, false)
-			if err == nil {
-				mimeType = "audio/ogg"
-				content.Info.MimeType = mimeType
-				content.Info.Width = 0
-				content.Info.Height = 0
-				content.MsgType = bridgeEvt.MsgAudio
-				content.Body += ".ogg"
-				return &bridgev2.FileStreamResult{
-					ReplacementFile: outFile,
-					MimeType:        mimeType,
-					FileName:        content.Body,
-				}, nil
-			} else {
-				tc.client.Logger.Warn().Err(err).Msg("Failed to convert voice message to ogg")
+	if tc.directMedia {
+		content.URL, err = tc.br.Matrix.GenerateContentURI(ctx, MakeMediaID(portal.Receiver, attachmentURL))
+	} else {
+		content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+			n, err := io.Copy(file, fileResp.Body)
+			if err != nil {
+				return nil, err
 			}
-		} else {
-			content.Info.Size = int(n)
-		}
-		ext := exmime.ExtensionFromMimetype(mimeType)
-		if !strings.HasSuffix(content.Body, ext) {
-			content.Body += ext
-		}
-		return &bridgev2.FileStreamResult{
-			MimeType: content.Info.MimeType,
-			FileName: content.Body,
-		}, nil
-	})
-
+			if audioOnly && ffmpeg.Supported() {
+				outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-c:a", "libopus"}, false)
+				if err == nil {
+					mimeType = "audio/ogg"
+					content.Info.MimeType = mimeType
+					content.Info.Width = 0
+					content.Info.Height = 0
+					content.MsgType = bridgeEvt.MsgAudio
+					content.Body += ".ogg"
+					return &bridgev2.FileStreamResult{
+						ReplacementFile: outFile,
+						MimeType:        mimeType,
+						FileName:        content.Body,
+					}, nil
+				} else {
+					zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
+				}
+			} else {
+				content.Info.Size = int(n)
+			}
+			ext := exmime.ExtensionFromMimetype(mimeType)
+			if !strings.HasSuffix(content.Body, ext) {
+				content.Body += ext
+			}
+			return &bridgev2.FileStreamResult{
+				MimeType: content.Info.MimeType,
+				FileName: content.Body,
+			}, nil
+		})
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -252,11 +255,11 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	return getResp, nil
 }
 
-func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Response, error) {
-	return downloadFile(ctx, tc.client, url)
+func (tc *TwitterConnector) downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*http.Response, error) {
+	return downloadFile(ctx, cli, url)
 }
 
-func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *bridgeEvt.BeeperLinkPreview {
+func (tc *TwitterConnector) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *bridgeEvt.BeeperLinkPreview {
 	canonicalURL := card.BindingValues.CardURL.StringValue
 	for _, url := range urls {
 		if url.URL == canonicalURL {
@@ -274,7 +277,7 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types
 	return preview
 }
 
-func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, tweet *types.AttachmentTweet) *bridgeEvt.BeeperLinkPreview {
+func (tc *TwitterConnector) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, cli *twittermeow.Client, tweet *types.AttachmentTweet) *bridgeEvt.BeeperLinkPreview {
 	linkPreview := bridgeEvt.LinkPreview{
 		CanonicalURL: tweet.ExpandedURL,
 		Title:        tweet.Status.User.Name + " on X",
@@ -284,7 +287,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	if len(medias) > 0 {
 		media := medias[0]
 		if media.Type == "photo" {
-			resp, err := tc.downloadFile(ctx, media.MediaURLHTTPS)
+			resp, err := tc.downloadFile(ctx, cli, media.MediaURLHTTPS)
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {
