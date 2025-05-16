@@ -70,7 +70,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				CreatePortal: isFromMe || (conversation != nil && !conversation.LowQuality && conversation.Trusted),
+				CreatePortal: isFromMe || (conversation != nil && conversation.Trusted),
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
 				StreamOrder:  methods.ParseSnowflakeInt(evt.MessageData.ID),
 				Timestamp:    methods.ParseSnowflake(evt.MessageData.ID),
@@ -165,7 +165,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 						Int("total_new_members", len(evt.Participants))
 				},
 				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				CreatePortal: conversation != nil && !conversation.LowQuality && conversation.Trusted,
+				CreatePortal: conversation != nil && conversation.Trusted,
 				StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
 				Timestamp:    methods.ParseSnowflake(evt.ID),
 			},
@@ -198,7 +198,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			EventMeta: simplevent.EventMeta{
 				Type:         bridgev2.RemoteEventChatResync,
 				PortalKey:    tc.MakePortalKey(conversation),
-				CreatePortal: !conversation.LowQuality && conversation.Trusted,
+				CreatePortal: conversation != nil && conversation.Trusted,
 			},
 			ChatInfo: tc.conversationToChatInfo(conversation, inbox),
 		})

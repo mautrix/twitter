@@ -95,7 +95,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 						Bool("conv_trusted", conv.Trusted)
 				},
 				PortalKey:    tc.MakePortalKey(conv),
-				CreatePortal: !conv.LowQuality && conv.Trusted,
+				CreatePortal: conv.Trusted,
 			},
 			ChatInfo: tc.conversationToChatInfo(conv, inbox),
 			BundledBackfillData: &backfillDataBundle{
