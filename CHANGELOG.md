@@ -1,3 +1,12 @@
+# v0.4.1 (2025-05-16)
+
+* Added support for voice messages in both directions.
+* Fixed certain reactions not being bridged to Twitter.
+* Fixed private chats having explicit names/avatars even if the bridge wasn't
+  configured to set them.
+* Fixed mention bridging not including the mentioned user displayname.
+* Fixed handling member join events from Twitter.
+
 # v0.4.0 (2025-04-16)
 
 * Added support for own read status bridging.
