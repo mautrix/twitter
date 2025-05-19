@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -97,52 +98,49 @@ type MediaInfo struct {
 	URL    string
 }
 
-func MakeMediaID(userID networkid.UserLoginID, URL string) (networkid.MediaID, error) {
-	mediaID, err := binary.Append(nil, binary.BigEndian, byte(1))
+func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
+	mediaID := []byte{1}
+	uID, err := strconv.ParseUint(ParseUserLoginID(userID), 10, 64)
 	if err != nil {
-		return nil, err
+		panic(err)
+	}
+	mediaID = binary.AppendUvarint(mediaID, uID)
+
+	bs := []byte(URL)
+	mediaID = binary.AppendUvarint(mediaID, uint64(len(bs)))
+	mediaID, err = binary.Append(mediaID, binary.BigEndian, bs)
+	if err != nil {
+		panic(err)
 	}
 
-	for _, val := range []string{ParseUserLoginID(userID), URL} {
-		bs := []byte(val)
-		mediaID = binary.AppendUvarint(mediaID, uint64(len(bs)))
-		mediaID, err = binary.Append(mediaID, binary.BigEndian, bs)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return mediaID, nil
+	return mediaID
 }
 
 func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
 	buf := bytes.NewReader(mediaID)
-	var version byte
-	if err := binary.Read(buf, binary.BigEndian, &version); err != nil {
+	version := make([]byte, 1)
+	_, err := io.ReadFull(buf, version)
+	if err != nil {
 		return nil, err
 	}
-	i := 0
+
 	mediaInfo := &MediaInfo{}
-	for {
-		size, err := binary.ReadUvarint(buf)
-		if err != nil {
-			return nil, err
-		}
-		bs := make([]byte, size)
-		_, err = io.ReadFull(buf, bs)
-		if err != nil {
-			return nil, err
-		}
-		switch i {
-		case 0:
-			mediaInfo.UserID = MakeUserLoginID(string(bs))
-		case 1:
-			mediaInfo.URL = string(bs)
-		}
-		if i == 1 {
-			break
-		}
-		i++
+	uID, err := binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
 	}
+	mediaInfo.UserID = MakeUserLoginID(strconv.FormatUint(uID, 10))
+
+	size, err := binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	bs := make([]byte, size)
+	_, err = io.ReadFull(buf, bs)
+	if err != nil {
+		return nil, err
+	}
+	mediaInfo.URL = string(bs)
+
 	return mediaInfo, nil
 }

@@ -2,7 +2,7 @@ package connector
 
 import (
 	"context"
-	"io"
+	"fmt"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -23,14 +23,17 @@ func (tc *TwitterConnector) Download(ctx context.Context, mediaID networkid.Medi
 	}
 	zerolog.Ctx(ctx).Trace().Any("mediaInfo", mediaInfo).Any("err", err).Msg("download direct media")
 	ul := tc.br.GetCachedUserLoginByID(mediaInfo.UserID)
+	if ul == nil || !ul.Client.IsLoggedIn() {
+		return nil, fmt.Errorf("no logged in user found")
+	}
 	client := ul.Client.(*TwitterClient)
-	return &mediaproxy.GetMediaResponseCallback{
-		Callback: func(w io.Writer) (int64, error) {
-			resp, err := client.downloadFile(ctx, mediaInfo.URL)
-			if err != nil {
-				return 0, err
-			}
-			return io.Copy(w, resp.Body)
-		},
+	resp, err := client.downloadFile(ctx, mediaInfo.URL)
+	if err != nil {
+		return nil, err
+	}
+	return &mediaproxy.GetMediaResponseData{
+		Reader:        resp.Body,
+		ContentType:   resp.Header.Get("content-type"),
+		ContentLength: resp.ContentLength,
 	}, nil
 }

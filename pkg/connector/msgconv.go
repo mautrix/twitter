@@ -183,15 +183,8 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
-	var mediaID networkid.MediaID
 	if tc.connector.directMedia {
-		mediaID, err = MakeMediaID(portal.Receiver, attachmentURL)
-		if err != nil {
-			zerolog.Ctx(ctx).Err(err).Msg("Failed to make mediaID")
-		}
-	}
-	if len(mediaID) != 0 {
-		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, mediaID)
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(portal.Receiver, attachmentURL))
 	} else {
 		content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
 			n, err := io.Copy(file, fileResp.Body)
