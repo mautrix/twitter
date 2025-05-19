@@ -19,6 +19,7 @@ package connector
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -122,6 +123,9 @@ func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
 	_, err := io.ReadFull(buf, version)
 	if err != nil {
 		return nil, err
+	}
+	if version[0] != byte(1) {
+		return nil, fmt.Errorf("unknown mediaID version: %v", version)
 	}
 
 	mediaInfo := &MediaInfo{}
