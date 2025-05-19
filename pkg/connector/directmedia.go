@@ -26,7 +26,7 @@ func (tc *TwitterConnector) Download(ctx context.Context, mediaID networkid.Medi
 	client := ul.Client.(*TwitterClient)
 	return &mediaproxy.GetMediaResponseCallback{
 		Callback: func(w io.Writer) (int64, error) {
-			resp, err := tc.downloadFile(ctx, client.client, mediaInfo.URL)
+			resp, err := client.downloadFile(ctx, mediaInfo.URL)
 			if err != nil {
 				return 0, err
 			}

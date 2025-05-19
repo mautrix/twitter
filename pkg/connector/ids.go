@@ -17,8 +17,9 @@
 package connector
 
 import (
-	"encoding/json"
-	"log"
+	"bytes"
+	"encoding/binary"
+	"io"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -96,20 +97,52 @@ type MediaInfo struct {
 	URL    string
 }
 
-func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
-	info := &MediaInfo{
-		UserID: userID,
-		URL:    URL,
-	}
-	id, err := json.Marshal(info)
+func MakeMediaID(userID networkid.UserLoginID, URL string) (networkid.MediaID, error) {
+	mediaID, err := binary.Append(nil, binary.BigEndian, byte(1))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return id
+
+	for _, val := range []string{ParseUserLoginID(userID), URL} {
+		bs := []byte(val)
+		mediaID = binary.AppendUvarint(mediaID, uint64(len(bs)))
+		mediaID, err = binary.Append(mediaID, binary.BigEndian, bs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return mediaID, nil
 }
 
-func ParseMediaID(mediaID networkid.MediaID) (MediaInfo, error) {
-	var info MediaInfo
-	err := json.Unmarshal(mediaID, &info)
-	return info, err
+func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
+	buf := bytes.NewReader(mediaID)
+	var version byte
+	if err := binary.Read(buf, binary.BigEndian, &version); err != nil {
+		return nil, err
+	}
+	i := 0
+	mediaInfo := &MediaInfo{}
+	for {
+		size, err := binary.ReadUvarint(buf)
+		if err != nil {
+			return nil, err
+		}
+		bs := make([]byte, size)
+		_, err = io.ReadFull(buf, bs)
+		if err != nil {
+			return nil, err
+		}
+		switch i {
+		case 0:
+			mediaInfo.UserID = MakeUserLoginID(string(bs))
+		case 1:
+			mediaInfo.URL = string(bs)
+		}
+		if i == 1 {
+			break
+		}
+		i++
+	}
+	return mediaInfo, nil
 }

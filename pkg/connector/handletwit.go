@@ -23,7 +23,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
@@ -81,11 +80,9 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			TargetMessage: networkid.MessageID(evt.MessageData.ID),
 			Data:          &evt.MessageData,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
-				return tc.connector.convertToMatrix(ctx, portal, intent, tc.client, data), nil
+				return tc.convertToMatrix(ctx, portal, intent, data), nil
 			},
-			ConvertEditFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
-				return tc.connector.convertEditToMatrix(ctx, portal, intent, tc.client, existing, data)
-			},
+			ConvertEditFunc: tc.convertEditToMatrix,
 		})
 	case *types.ConversationRead:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{

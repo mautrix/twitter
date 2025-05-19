@@ -133,7 +133,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		// TODO get correct intent
 		intent := tc.userLogin.Bridge.Matrix.BotIntent()
 		convertedMsg := &bridgev2.BackfillMessage{
-			ConvertedMessage: tc.connector.convertToMatrix(ctx, params.Portal, intent, tc.client, &msg.MessageData),
+			ConvertedMessage: tc.convertToMatrix(ctx, params.Portal, intent, &msg.MessageData),
 			Sender:           tc.MakeEventSender(msg.MessageData.SenderID),
 			ID:               networkid.MessageID(msg.MessageData.ID),
 			Timestamp:        messageTS,
