@@ -25,7 +25,8 @@ import (
 type TwitterConnector struct {
 	br *bridgev2.Bridge
 
-	Config Config
+	Config      Config
+	directMedia bool
 }
 
 var _ bridgev2.NetworkConnector = (*TwitterConnector)(nil)

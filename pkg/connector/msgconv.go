@@ -183,41 +183,44 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
-	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-		n, err := io.Copy(file, fileResp.Body)
-		if err != nil {
-			return nil, err
-		}
-		if audioOnly && ffmpeg.Supported() {
-			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-c:a", "libopus"}, false)
-			if err == nil {
-				mimeType = "audio/ogg"
-				content.Info.MimeType = mimeType
-				content.Info.Width = 0
-				content.Info.Height = 0
-				content.MsgType = bridgeEvt.MsgAudio
-				content.Body += ".ogg"
-				return &bridgev2.FileStreamResult{
-					ReplacementFile: outFile,
-					MimeType:        mimeType,
-					FileName:        content.Body,
-				}, nil
-			} else {
-				tc.client.Logger.Warn().Err(err).Msg("Failed to convert voice message to ogg")
+	if tc.connector.directMedia {
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(portal.Receiver, attachmentURL))
+	} else {
+		content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+			n, err := io.Copy(file, fileResp.Body)
+			if err != nil {
+				return nil, err
 			}
-		} else {
-			content.Info.Size = int(n)
-		}
-		ext := exmime.ExtensionFromMimetype(mimeType)
-		if !strings.HasSuffix(content.Body, ext) {
-			content.Body += ext
-		}
-		return &bridgev2.FileStreamResult{
-			MimeType: content.Info.MimeType,
-			FileName: content.Body,
-		}, nil
-	})
-
+			if audioOnly && ffmpeg.Supported() {
+				outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-c:a", "libopus"}, false)
+				if err == nil {
+					mimeType = "audio/ogg"
+					content.Info.MimeType = mimeType
+					content.Info.Width = 0
+					content.Info.Height = 0
+					content.MsgType = bridgeEvt.MsgAudio
+					content.Body += ".ogg"
+					return &bridgev2.FileStreamResult{
+						ReplacementFile: outFile,
+						MimeType:        mimeType,
+						FileName:        content.Body,
+					}, nil
+				} else {
+					zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
+				}
+			} else {
+				content.Info.Size = int(n)
+			}
+			ext := exmime.ExtensionFromMimetype(mimeType)
+			if !strings.HasSuffix(content.Body, ext) {
+				content.Body += ext
+			}
+			return &bridgev2.FileStreamResult{
+				MimeType: content.Info.MimeType,
+				FileName: content.Body,
+			}, nil
+		})
+	}
 	if err != nil {
 		return nil, nil, err
 	}

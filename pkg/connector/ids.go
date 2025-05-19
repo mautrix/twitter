@@ -17,6 +17,11 @@
 package connector
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"strconv"
 	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -87,4 +92,59 @@ func (tc *TwitterClient) MakeEventSender(userID string) bridgev2.EventSender {
 		SenderLogin: MakeUserLoginID(userID),
 		Sender:      MakeUserID(userID),
 	}
+}
+
+type MediaInfo struct {
+	UserID networkid.UserLoginID
+	URL    string
+}
+
+func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
+	mediaID := []byte{1}
+	uID, err := strconv.ParseUint(ParseUserLoginID(userID), 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	mediaID = binary.AppendUvarint(mediaID, uID)
+
+	bs := []byte(URL)
+	mediaID = binary.AppendUvarint(mediaID, uint64(len(bs)))
+	mediaID, err = binary.Append(mediaID, binary.BigEndian, bs)
+	if err != nil {
+		panic(err)
+	}
+
+	return mediaID
+}
+
+func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
+	buf := bytes.NewReader(mediaID)
+	version := make([]byte, 1)
+	_, err := io.ReadFull(buf, version)
+	if err != nil {
+		return nil, err
+	}
+	if version[0] != byte(1) {
+		return nil, fmt.Errorf("unknown mediaID version: %v", version)
+	}
+
+	mediaInfo := &MediaInfo{}
+	uID, err := binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	mediaInfo.UserID = MakeUserLoginID(strconv.FormatUint(uID, 10))
+
+	size, err := binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	bs := make([]byte, size)
+	_, err = io.ReadFull(buf, bs)
+	if err != nil {
+		return nil, err
+	}
+	mediaInfo.URL = string(bs)
+
+	return mediaInfo, nil
 }
