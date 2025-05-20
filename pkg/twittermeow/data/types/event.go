@@ -76,6 +76,8 @@ func (rte *RawTwitterEvent) Parse() (TwitterEvent, map[string]any, error) {
 		return tec.ConversationNameUpdate, nil, nil
 	case tec.ConversationRead != nil:
 		return tec.ConversationRead, nil, nil
+	case tec.TrustConversation != nil:
+		return tec.TrustConversation, nil, nil
 	default:
 		var unrecognized map[string]any
 		if err := json.Unmarshal(*rte, &unrecognized); err != nil {
