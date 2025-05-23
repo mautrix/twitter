@@ -176,6 +176,7 @@ func (tc *TwitterClient) startPolling(ctx context.Context) {
 
 func (tc *TwitterClient) Disconnect() {
 	tc.client.Disconnect()
+	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateTransientDisconnect})
 }
 
 func (tc *TwitterClient) IsLoggedIn() bool {
