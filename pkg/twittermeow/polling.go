@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 var defaultPollingInterval = 10 * time.Second
@@ -42,23 +43,35 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 	tick := time.NewTicker(defaultPollingInterval)
 	defer tick.Stop()
 	log := zerolog.Ctx(ctx)
+	var failing bool
+	backoffInterval := defaultPollingInterval / 2
 	for {
 		select {
 		case <-tick.C:
-			pc.poll(ctx)
 		case <-pc.shortCircuit:
 			tick.Reset(defaultPollingInterval)
-			pc.poll(ctx)
 		case <-ctx.Done():
 			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
 		}
+		err := pc.poll(ctx)
+		if err != nil {
+			log.Err(err).Msg("Failed to poll for updates")
+			pc.client.eventHandler(&types.PollingError{Error: err}, nil)
+			failing = true
+			backoffInterval = min(backoffInterval*2, 180*time.Second)
+			tick.Reset(backoffInterval)
+		} else if failing {
+			failing = false
+			pc.client.eventHandler(&types.PollingError{}, nil)
+			backoffInterval = defaultPollingInterval / 2
+			tick.Reset(defaultPollingInterval)
+		}
 	}
 }
 
-func (pc *PollingClient) poll(ctx context.Context) {
+func (pc *PollingClient) poll(ctx context.Context) error {
 	userUpdatesQuery := (&payload.DMRequestQuery{}).Default()
-	log := zerolog.Ctx(ctx)
 	if pc.includeConversationID {
 		userUpdatesQuery.ActiveConversationID = pc.activeConversationID
 	} else {
@@ -71,9 +84,7 @@ func (pc *PollingClient) poll(ctx context.Context) {
 
 	userUpdatesResponse, err := pc.client.GetDMUserUpdates(ctx, &userUpdatesQuery)
 	if err != nil {
-		log.Err(err).Msg("Failed to get user updates")
-		time.Sleep(1 * time.Minute)
-		return
+		return err
 	}
 
 	pc.client.eventHandler(nil, userUpdatesResponse.UserEvents)
@@ -85,6 +96,7 @@ func (pc *PollingClient) poll(ctx context.Context) {
 	}
 
 	pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
+	return nil
 }
 
 func (pc *PollingClient) SetCurrentCursor(cursor string) {

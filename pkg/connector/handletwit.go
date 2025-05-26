@@ -25,6 +25,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
+	"maunium.net/go/mautrix/bridgev2/status"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -32,7 +33,7 @@ import (
 )
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *response.TwitterInboxData) {
-	if rawEvt == nil {
+	if rawEvt == nil && inbox != nil {
 		tc.updateTwitterUserInfo(inbox)
 		tc.updateTwitterReadReceipt(inbox)
 		tc.userCacheLock.Lock()
@@ -46,6 +47,18 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		isEdit = true
 	}
 	switch evt := rawEvt.(type) {
+	case *types.PollingError:
+		if evt.Error != nil {
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateTransientDisconnect,
+				Error:      "twitter-polling-error",
+				Info: map[string]any{
+					"go_error": evt.Error.Error(),
+				},
+			})
+		} else {
+			tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
+		}
 	case *types.Message:
 		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
 		msgType := bridgev2.RemoteEventMessage

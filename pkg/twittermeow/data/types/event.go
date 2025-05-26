@@ -24,6 +24,11 @@ func (*ConversationMetadataUpdate) isTwitterEvent() {}
 func (*ConversationNameUpdate) isTwitterEvent()     {}
 func (*ConversationRead) isTwitterEvent()           {}
 func (*TrustConversation) isTwitterEvent()          {}
+func (*PollingError) isTwitterEvent()               {}
+
+type PollingError struct {
+	Error error
+}
 
 type RawTwitterEvent []byte
 
