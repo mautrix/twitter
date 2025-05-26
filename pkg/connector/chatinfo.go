@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"strings"
 
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -53,9 +54,16 @@ func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Porta
 	return tc.conversationToChatInfo(conversation, conversationData.ConversationTimeline), nil
 }
 
-func (tc *TwitterClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
+func (tc *TwitterClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	userInfo := tc.getCachedUserInfo(string(ghost.ID))
 	if userInfo == nil {
+		if len(ghost.Identifiers) > 0 {
+			user := tc.client.GetUserByScreenName(ctx, identifierToScreenName(ghost.Identifiers[0]))
+			if user != nil {
+				tc.userCache[user.IDStr] = user
+				return tc.connector.wrapUserInfo(tc.client, user), nil
+			}
+		}
 		return nil, fmt.Errorf("failed to find user info in cache by id: %s", ghost.ID)
 	}
 	return userInfo, nil
@@ -77,6 +85,10 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 		Avatar:      makeAvatar(cli, user.ProfileImageURL),
 		Identifiers: []string{fmt.Sprintf("twitter:%s", user.ScreenName)},
 	}
+}
+
+func identifierToScreenName(identifier string) string {
+	return strings.TrimPrefix(identifier, "twitter:")
 }
 
 func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
