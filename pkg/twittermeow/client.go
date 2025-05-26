@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -429,4 +430,48 @@ func (c *Client) SetActiveConversation(conversationID string) {
 
 func (c *Client) PollConversation(conversationID string) {
 	c.polling.pollConversation(conversationID)
+}
+
+func (c *Client) GetUserByScreenName(ctx context.Context, screenName string) *types.User {
+	endpoint, err := url.Parse(endpoints.USER_BY_SCREEN_NAME)
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err)
+		return nil
+	}
+
+	q := url.Values{
+		"variables":    []string{fmt.Sprintf(`{"screen_name":"%s"}`, screenName)},
+		"features":     []string{`{"hidden_profile_subscriptions_enabled":true,"profile_label_improvements_pcf_label_in_post_enabled":true,"rweb_tipjar_consumption_enabled":true,"verified_phone_label_enabled":false,"subscriptions_verification_info_is_identity_verified_enabled":true,"subscriptions_verification_info_verified_since_enabled":true,"highlights_tweets_tab_ui_enabled":true,"responsive_web_twitter_article_notes_tab_enabled":true,"subscriptions_feature_can_gift_premium":true,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"responsive_web_graphql_timeline_navigation_enabled":true}`},
+		"fieldToggles": []string{`{"withAuxiliaryUserLabels":true}`},
+	}
+	endpoint.RawQuery = q.Encode()
+	opts := apiRequestOpts{
+		URL:    endpoint.String(),
+		Method: http.MethodGet,
+	}
+	_, body, err := c.makeAPIRequest(ctx, opts)
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err)
+		return nil
+	}
+
+	var res response.UserByScreenNameResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		zerolog.Ctx(ctx).Err(err)
+		return nil
+	}
+
+	user := res.Data.User.Result
+	userID, err := strconv.ParseInt(user.RestID, 10, 64)
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err)
+		return nil
+	}
+	return &types.User{
+		ID:                   userID,
+		IDStr:                user.RestID,
+		Name:                 user.Core.Name,
+		ScreenName:           user.Core.ScreenName,
+		ProfileImageURLHTTPS: user.Avatar.ImageURL,
+	}
 }

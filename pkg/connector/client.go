@@ -18,7 +18,6 @@ package connector
 
 import (
 	"context"
-	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -73,7 +72,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 				return displayname
 			}
 			id := ghost.Identifiers[0]
-			return "@" + strings.TrimPrefix(id, "twitter:")
+			return "@" + identifierToScreenName(id)
 		},
 	}
 	return tc

@@ -35,6 +35,7 @@ const (
 	ADD_REACTION_URL                  = BASE_URL + "/i/api/graphql/VyDyV9pC2oZEj6g52hgnhA/useDMReactionMutationAddMutation"
 	REMOVE_REACTION_URL               = BASE_URL + "/i/api/graphql/bV_Nim3RYHsaJwMkTXJ6ew/useDMReactionMutationRemoveMutation"
 	SEND_TYPING_NOTIFICATION          = BASE_URL + "/i/api/graphql/HL96-xZ3Y81IEzAdczDokg/useTypingNotifierMutation"
+	USER_BY_SCREEN_NAME               = BASE_URL + "/i/api/graphql/xWw45l6nX7DP2FKRyePXSw/UserByScreenName"
 
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"
