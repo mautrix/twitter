@@ -29,7 +29,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-	bridgeEvt "maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/util/ffmpeg"
 
@@ -60,7 +60,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 
 	textPart := &bridgev2.ConvertedMessagePart{
 		ID:      "",
-		Type:    bridgeEvt.EventMessage,
+		Type:    event.EventMessage,
 		Content: twitterfmt.Parse(ctx, portal, msg),
 	}
 
@@ -72,9 +72,9 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 			zerolog.Ctx(ctx).Err(err).Msg("Failed to convert attachment")
 			parts = append(parts, &bridgev2.ConvertedMessagePart{
 				ID:   "",
-				Type: bridgeEvt.EventMessage,
-				Content: &bridgeEvt.MessageEventContent{
-					MsgType: bridgeEvt.MsgNotice,
+				Type: event.EventMessage,
+				Content: &event.MessageEventContent{
+					MsgType: event.MsgNotice,
 					Body:    "Failed to convert attachment from Twitter",
 				},
 			})
@@ -114,12 +114,12 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
 	var mimeType string
-	var msgType bridgeEvt.MessageType
+	var msgType event.MessageType
 	extraInfo := map[string]any{}
 	if attachment.Photo != nil {
 		attachmentInfo = attachment.Photo
 		mimeType = "image/jpeg" // attachment doesn't include this specifically
-		msgType = bridgeEvt.MsgImage
+		msgType = event.MsgImage
 		attachmentURL = attachmentInfo.MediaURLHTTPS
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
 		if attachment.AnimatedGif != nil {
@@ -133,7 +133,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			attachmentInfo = attachment.Video
 		}
 		mimeType = "video/mp4"
-		msgType = bridgeEvt.MsgVideo
+		msgType = event.MsgVideo
 
 		highestBitRateVariant, err := attachmentInfo.VideoInfo.GetHighestBitrateVariant()
 		if err != nil {
@@ -141,23 +141,23 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		}
 		attachmentURL = highestBitRateVariant.URL
 	} else if attachment.Card != nil {
-		content := bridgeEvt.MessageEventContent{
-			MsgType:            bridgeEvt.MsgText,
-			BeeperLinkPreviews: []*bridgeEvt.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, attachment.Card, msg.Entities.URLs)},
+		content := event.MessageEventContent{
+			MsgType:            event.MsgText,
+			BeeperLinkPreviews: []*event.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, attachment.Card, msg.Entities.URLs)},
 		}
 		return &bridgev2.ConvertedMessagePart{
 			ID:      networkid.PartID(""),
-			Type:    bridgeEvt.EventMessage,
+			Type:    event.EventMessage,
 			Content: &content,
 		}, []int{0, 0}, nil
 	} else if attachment.Tweet != nil {
-		content := bridgeEvt.MessageEventContent{
-			MsgType:            bridgeEvt.MsgText,
-			BeeperLinkPreviews: []*bridgeEvt.BeeperLinkPreview{tc.attachmentTweetToMatrix(ctx, portal, intent, attachment.Tweet)},
+		content := event.MessageEventContent{
+			MsgType:            event.MsgText,
+			BeeperLinkPreviews: []*event.BeeperLinkPreview{tc.attachmentTweetToMatrix(ctx, portal, intent, attachment.Tweet)},
 		}
 		return &bridgev2.ConvertedMessagePart{
 			ID:      networkid.PartID(""),
-			Type:    bridgeEvt.EventMessage,
+			Type:    event.EventMessage,
 			Content: &content,
 		}, []int{0, 0}, nil
 	} else {
@@ -168,8 +168,8 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if err != nil {
 		return nil, nil, err
 	}
-	content := bridgeEvt.MessageEventContent{
-		Info: &bridgeEvt.FileInfo{
+	content := event.MessageEventContent{
+		Info: &event.FileInfo{
 			MimeType: mimeType,
 			Width:    attachmentInfo.OriginalInfo.Width,
 			Height:   attachmentInfo.OriginalInfo.Height,
@@ -198,7 +198,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 					content.Info.MimeType = mimeType
 					content.Info.Width = 0
 					content.Info.Height = 0
-					content.MsgType = bridgeEvt.MsgAudio
+					content.MsgType = event.MsgAudio
 					content.Body += ".ogg"
 					return &bridgev2.FileStreamResult{
 						ReplacementFile: outFile,
@@ -226,11 +226,11 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	if audioOnly {
-		content.MSC3245Voice = &bridgeEvt.MSC3245Voice{}
+		content.MSC3245Voice = &event.MSC3245Voice{}
 	}
 	return &bridgev2.ConvertedMessagePart{
 		ID:      networkid.PartID(""),
-		Type:    bridgeEvt.EventMessage,
+		Type:    event.EventMessage,
 		Content: &content,
 		Extra: map[string]any{
 			"info": extraInfo,
@@ -259,7 +259,7 @@ func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Re
 	return downloadFile(ctx, tc.client, url)
 }
 
-func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *bridgeEvt.BeeperLinkPreview {
+func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *event.BeeperLinkPreview {
 	canonicalURL := card.BindingValues.CardURL.StringValue
 	for _, url := range urls {
 		if url.URL == canonicalURL {
@@ -267,8 +267,8 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types
 			break
 		}
 	}
-	preview := &bridgeEvt.BeeperLinkPreview{
-		LinkPreview: bridgeEvt.LinkPreview{
+	preview := &event.BeeperLinkPreview{
+		LinkPreview: event.LinkPreview{
 			CanonicalURL: canonicalURL,
 			Title:        card.BindingValues.Title.StringValue,
 			Description:  card.BindingValues.Description.StringValue,
@@ -277,8 +277,8 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types
 	return preview
 }
 
-func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, tweet *types.AttachmentTweet) *bridgeEvt.BeeperLinkPreview {
-	linkPreview := bridgeEvt.LinkPreview{
+func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, tweet *types.AttachmentTweet) *event.BeeperLinkPreview {
+	linkPreview := event.LinkPreview{
 		CanonicalURL: tweet.ExpandedURL,
 		Title:        tweet.Status.User.Name + " on X",
 		Description:  tweet.Status.FullText,
@@ -292,9 +292,9 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {
 				linkPreview.ImageType = "image/jpeg"
-				linkPreview.ImageWidth = media.OriginalInfo.Width
-				linkPreview.ImageHeight = media.OriginalInfo.Height
-				linkPreview.ImageSize = int(resp.ContentLength)
+				linkPreview.ImageWidth = event.IntOrString(media.OriginalInfo.Width)
+				linkPreview.ImageHeight = event.IntOrString(media.OriginalInfo.Height)
+				linkPreview.ImageSize = event.IntOrString(resp.ContentLength)
 				linkPreview.ImageURL, _, err = intent.UploadMediaStream(ctx, portal.MXID, resp.ContentLength, false, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
 					_, err := io.Copy(file, resp.Body)
 					if err != nil {
@@ -311,7 +311,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 			}
 		}
 	}
-	return &bridgeEvt.BeeperLinkPreview{
+	return &event.BeeperLinkPreview{
 		LinkPreview: linkPreview,
 	}
 }
