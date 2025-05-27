@@ -19,6 +19,9 @@ func SignTransaction(animationToken, verificationToken, url, method string) (str
 	if err != nil {
 		return "", fmt.Errorf("failed to decode verification token: %w", err)
 	}
+	if len(verificationTokenBytes) < 9 {
+		return "", fmt.Errorf("invalid verification token: %s", verificationToken)
+	}
 	parsedURL, err := neturl.Parse(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL %q: %w", url, err)
