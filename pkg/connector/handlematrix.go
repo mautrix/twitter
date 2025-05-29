@@ -91,7 +91,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	case event.MsgText:
 		break
 	case event.MsgVideo, event.MsgImage, event.MsgAudio:
-		if content.Body == content.FileName {
+		if content.FileName == "" || content.Body == content.FileName {
 			sendDMPayload.Text = ""
 		}
 
