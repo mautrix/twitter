@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"time"
 
 	"go.mau.fi/util/ffmpeg"
@@ -62,21 +63,25 @@ func (c *Client) UploadMedia(ctx context.Context, params *payload.UploadMediaQue
 		return nil, err
 	}
 
+	segmentIndex := 0
 	if mediaBytes != nil {
-		appendMediaPayload, contentType, err := c.newMediaAppendPayload(mediaBytes)
-		if err != nil {
-			return nil, err
-		}
-		headers.Add("content-type", contentType)
+		for chunk := range slices.Chunk(mediaBytes, 6*1024*1024) {
+			appendMediaPayload, contentType, err := c.newMediaAppendPayload(chunk)
+			if err != nil {
+				return nil, err
+			}
+			headers.Add("content-type", contentType)
 
-		url = fmt.Sprintf("%s?command=APPEND&media_id=%s&segment_index=0", endpoints.UPLOAD_MEDIA_URL, initUploadResponse.MediaIDString)
-		resp, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, appendMediaPayload, types.ContentTypeNone)
-		if err != nil {
-			return nil, err
-		}
+			url = fmt.Sprintf("%s?command=APPEND&media_id=%s&segment_index=%d", endpoints.UPLOAD_MEDIA_URL, initUploadResponse.MediaIDString, segmentIndex)
+			resp, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, appendMediaPayload, types.ContentTypeNone)
+			if err != nil {
+				return nil, err
+			}
 
-		if resp.StatusCode > 204 {
-			return nil, fmt.Errorf("failed to append media bytes for media with id %s (status_code=%d, response_body=%s)", initUploadResponse.MediaIDString, resp.StatusCode, string(respBody))
+			if resp.StatusCode > 204 {
+				return nil, fmt.Errorf("failed to append media bytes for media with id %s (status_code=%d, response_body=%s)", initUploadResponse.MediaIDString, resp.StatusCode, string(respBody))
+			}
+			segmentIndex++
 		}
 
 		var originalMd5 string
@@ -98,7 +103,7 @@ func (c *Client) UploadMedia(ctx context.Context, params *payload.UploadMediaQue
 
 		url = fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
 		headers.Del("content-type")
-		resp, respBody, err = c.MakeRequest(ctx, url, http.MethodPost, headers, nil, types.ContentTypeNone)
+		resp, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, nil, types.ContentTypeNone)
 		if err != nil {
 			return nil, err
 		}
