@@ -54,6 +54,10 @@ func (sc *StreamClient) startOrUpdateEventStream(conversationID string) {
 }
 
 func (sc *StreamClient) start(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	if oldCancel := sc.stop.Swap(&cancel); oldCancel != nil {
+		(*oldCancel)()
+	}
 	eventsURL, err := url.Parse(endpoints.PIPELINE_EVENTS_URL)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err)
@@ -136,10 +140,6 @@ func getSubscriptionTopic(conversationID string) string {
 }
 
 func (sc *StreamClient) startHeartbeat(ctx context.Context) {
-	ctx, cancel := context.WithCancel(ctx)
-	if oldCancel := sc.stop.Swap(&cancel); oldCancel != nil {
-		(*oldCancel)()
-	}
 	tick := time.NewTicker(sc.heartbeatInterval)
 	defer tick.Stop()
 
