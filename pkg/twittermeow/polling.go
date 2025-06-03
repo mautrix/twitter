@@ -107,6 +107,7 @@ func (pc *PollingClient) stopPolling() {
 	if cancel := pc.stop.Swap(nil); cancel != nil {
 		(*cancel)()
 	}
+	pc.activeConversationID = ""
 }
 
 func (pc *PollingClient) SetActiveConversation(conversationID string) {

@@ -106,6 +106,7 @@ func (c *Client) Connect() error {
 
 func (c *Client) Disconnect() {
 	c.polling.stopPolling()
+	c.stream.stopStream()
 }
 
 func (c *Client) Logout(ctx context.Context) (bool, error) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -20,6 +21,7 @@ import (
 type StreamClient struct {
 	client *Client
 
+	stop              atomic.Pointer[context.CancelFunc]
 	oldConversationID string
 	conversationID    string
 	sessionID         string
@@ -134,6 +136,10 @@ func getSubscriptionTopic(conversationID string) string {
 }
 
 func (sc *StreamClient) startHeartbeat(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	if oldCancel := sc.stop.Swap(&cancel); oldCancel != nil {
+		(*oldCancel)()
+	}
 	tick := time.NewTicker(sc.heartbeatInterval)
 	defer tick.Stop()
 
@@ -177,4 +183,12 @@ func (sc *StreamClient) heartbeat(ctx context.Context) {
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err)
 	}
+}
+
+func (sc *StreamClient) stopStream() {
+	if cancel := sc.stop.Swap(nil); cancel != nil {
+		(*cancel)()
+	}
+	sc.conversationID = ""
+	sc.sessionID = ""
 }
