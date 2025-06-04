@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -98,6 +99,14 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 	var lastReadID string
 	if conv != nil {
 		lastReadID = conv.LastReadEventID
+		if lastReadID == "" {
+			for _, participant := range conv.Participants {
+				if participant.UserID == ParseUserLoginID(tc.userLogin.ID) {
+					lastReadID = participant.LastReadEventID
+					break
+				}
+			}
+		}
 	}
 
 	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
@@ -147,7 +156,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		Messages: converted,
 		HasMore:  bundle != nil || inbox.Status == types.PaginationStatusHasMore,
 		Forward:  params.Forward,
-		MarkRead: lastReadID == messages[len(messages)-1].ID,
+		MarkRead: shouldMarkRead(lastReadID, messages[len(messages)-1].ID),
 	}
 	if !params.Forward {
 		fetchMessagesResp.Cursor = networkid.PaginationCursor(inbox.MinEntryID)
@@ -169,4 +178,16 @@ func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReact
 		backfillReactions = append(backfillReactions, backfillReaction)
 	}
 	return backfillReactions
+}
+
+func shouldMarkRead(lastReadID, messageID string) bool {
+	parsedReadID, err := strconv.ParseInt(lastReadID, 10, 64)
+	if err != nil {
+		return false
+	}
+	parsedMessageID, err := strconv.ParseInt(messageID, 10, 64)
+	if err != nil {
+		return false
+	}
+	return parsedReadID >= parsedMessageID
 }
