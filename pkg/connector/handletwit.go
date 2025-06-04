@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/bridgev2/status"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -214,6 +216,43 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 				CreatePortal: conversation != nil && conversation.Trusted,
 			},
 			ChatInfo: tc.conversationToChatInfo(conversation, inbox),
+		})
+	case *types.EndAVBroadcast:
+		conversation := inbox.GetConversationByID(evt.ConversationID)
+		tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.Message[string]{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventMessage,
+				PortalKey: tc.MakePortalKey(conversation),
+				Timestamp: methods.ParseSnowflake(evt.ID),
+			},
+			ID:   networkid.MessageID(evt.ID),
+			Data: evt.CallType,
+			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, callType string) (*bridgev2.ConvertedMessage, error) {
+				body := "Video"
+				if callType == "AUDIO_ONLY" {
+					body = "Audio"
+				}
+				if evt.EndReason == "HUNG_UP" {
+					body += " call ended"
+				} else if evt.IsCaller {
+					body += " call"
+				} else {
+					body = "video"
+					if callType == "AUDIO_ONLY" {
+						body = "audio"
+					}
+					body = fmt.Sprintf("Missed %s call", body)
+				}
+				return &bridgev2.ConvertedMessage{
+					Parts: []*bridgev2.ConvertedMessagePart{{
+						Type: event.EventMessage,
+						Content: &event.MessageEventContent{
+							MsgType: event.MsgNotice,
+							Body:    body,
+						},
+					}},
+				}, nil
+			},
 		})
 	default:
 		tc.client.Logger.Warn().
