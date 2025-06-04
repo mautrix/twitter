@@ -228,11 +228,21 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			ID:   networkid.MessageID(evt.ID),
 			Data: evt.CallType,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, callType string) (*bridgev2.ConvertedMessage, error) {
-				text := "video"
+				body := "Video"
 				if callType == "AUDIO_ONLY" {
-					text = "audio"
+					body = "Audio"
 				}
-				body := fmt.Sprintf("Missed %s call", text)
+				if evt.EndReason == "HUNG_UP" {
+					body += " call ended"
+				} else if evt.IsCaller {
+					body += " call"
+				} else {
+					body = "video"
+					if callType == "AUDIO_ONLY" {
+						body = "audio"
+					}
+					body = fmt.Sprintf("Missed %s call", body)
+				}
 				return &bridgev2.ConvertedMessage{
 					Parts: []*bridgev2.ConvertedMessagePart{{
 						Type: event.EventMessage,
