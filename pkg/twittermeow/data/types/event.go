@@ -24,6 +24,7 @@ func (*ConversationMetadataUpdate) isTwitterEvent() {}
 func (*ConversationNameUpdate) isTwitterEvent()     {}
 func (*ConversationRead) isTwitterEvent()           {}
 func (*TrustConversation) isTwitterEvent()          {}
+func (*EndAVBroadcast) isTwitterEvent()             {}
 func (*PollingError) isTwitterEvent()               {}
 
 type PollingError struct {
@@ -50,6 +51,7 @@ type twitterEventContainer struct {
 	ConversationNameUpdate     *ConversationNameUpdate     `json:"conversation_name_update,omitempty"`
 	ConversationRead           *ConversationRead           `json:"conversation_read,omitempty"`
 	TrustConversation          *TrustConversation          `json:"trust_conversation,omitempty"`
+	EndAVBroadcast             *EndAVBroadcast             `json:"end_av_broadcast,omitempty"`
 	// DisableNotifications       *types.DisableNotifications       `json:"disable_notifications,omitempty"`
 }
 
@@ -83,6 +85,8 @@ func (rte *RawTwitterEvent) Parse() (TwitterEvent, map[string]any, error) {
 		return tec.ConversationRead, nil, nil
 	case tec.TrustConversation != nil:
 		return tec.TrustConversation, nil, nil
+	case tec.EndAVBroadcast != nil:
+		return tec.EndAVBroadcast, nil, nil
 	default:
 		var unrecognized map[string]any
 		if err := json.Unmarshal(*rte, &unrecognized); err != nil {

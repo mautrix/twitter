@@ -170,3 +170,15 @@ type TrustConversation struct {
 	ConversationID string `json:"conversation_id,omitempty"`
 	Reason         string `json:"reason,omitempty"`
 }
+
+type EndAVBroadcast struct {
+	ID             string `json:"id,omitempty"`
+	Time           string `json:"time,omitempty"`
+	AffectsSort    bool   `json:"affects_sort,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	IsCaller       bool   `json:"is_caller,omitempty"`
+	StartedAtMs    string `json:"started_at_ms,omitempty"`
+	EndedAtMs      string `json:"ended_at_ms,omitempty"`
+	EndReason      string `json:"end_reason,omitempty"`
+	CallType       string `json:"call_type,omitempty"`
+}
