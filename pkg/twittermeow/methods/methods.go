@@ -40,13 +40,13 @@ func CompareSnowflake(a, b string) int {
 
 func SortConversationsByTimestamp(conversations map[string]*types.Conversation) []*types.Conversation {
 	return slices.SortedFunc(maps.Values(conversations), func(a, b *types.Conversation) int {
-		return strings.Compare(a.SortTimestamp, b.SortTimestamp)
+		return CompareSnowflake(a.SortTimestamp, b.SortTimestamp)
 	})
 }
 
 func SortMessagesByTime(messages []*types.Message) {
 	slices.SortFunc(messages, func(a, b *types.Message) int {
-		return strings.Compare(a.ID, b.ID)
+		return CompareSnowflake(a.ID, b.ID)
 	})
 }
 
