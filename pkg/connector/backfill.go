@@ -155,7 +155,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		Messages: converted,
 		HasMore:  bundle != nil || inbox.Status == types.PaginationStatusHasMore,
 		Forward:  params.Forward,
-		MarkRead: lastReadID != "" && methods.ParseSnowflakeInt(lastReadID) >= methods.ParseSnowflakeInt(messages[len(messages)-1].ID),
+		MarkRead: lastReadID != "" && methods.CompareSnowflake(lastReadID, messages[len(messages)-1].ID) >= 0,
 	}
 	if !params.Forward {
 		fetchMessagesResp.Cursor = networkid.PaginationCursor(inbox.MinEntryID)

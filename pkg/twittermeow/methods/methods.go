@@ -29,6 +29,15 @@ func ParseSnowflake(msgID string) time.Time {
 	return time.UnixMilli(msec)
 }
 
+func CompareSnowflake(a, b string) int {
+	if len(a) < len(b) {
+		return -1
+	} else if len(a) > len(b) {
+		return 1
+	}
+	return strings.Compare(a, b)
+}
+
 func SortConversationsByTimestamp(conversations map[string]*types.Conversation) []*types.Conversation {
 	return slices.SortedFunc(maps.Values(conversations), func(a, b *types.Conversation) int {
 		return strings.Compare(a.SortTimestamp, b.SortTimestamp)
