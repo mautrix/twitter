@@ -98,6 +98,14 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 	var lastReadID string
 	if conv != nil {
 		lastReadID = conv.LastReadEventID
+		if lastReadID == "" {
+			for _, participant := range conv.Participants {
+				if participant.UserID == ParseUserLoginID(tc.userLogin.ID) {
+					lastReadID = participant.LastReadEventID
+					break
+				}
+			}
+		}
 	}
 
 	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
@@ -147,7 +155,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		Messages: converted,
 		HasMore:  bundle != nil || inbox.Status == types.PaginationStatusHasMore,
 		Forward:  params.Forward,
-		MarkRead: lastReadID == messages[len(messages)-1].ID,
+		MarkRead: lastReadID != "" && methods.CompareSnowflake(lastReadID, messages[len(messages)-1].ID) >= 0,
 	}
 	if !params.Forward {
 		fetchMessagesResp.Cursor = networkid.PaginationCursor(inbox.MinEntryID)
