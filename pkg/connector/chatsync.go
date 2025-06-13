@@ -49,6 +49,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 	cursor := trustedInbox.MinEntryID
 	paginationStatus := trustedInbox.Status
 
+	pageCount := 1
 	for paginationStatus == types.PaginationStatusHasMore && (tc.connector.Config.ConversationSyncLimit == -1 || len(inbox.Entries) < tc.connector.Config.ConversationSyncLimit) {
 		reqQuery.MaxID = cursor
 		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(ctx, reqQuery)
@@ -71,7 +72,16 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 
 		cursor = nextInboxTimelineResponse.InboxTimeline.MinEntryID
 		paginationStatus = nextInboxTimelineResponse.InboxTimeline.Status
+		pageCount++
 	}
+	log.Info().
+		Int("page_count", pageCount).
+		Int("user_count", len(inbox.Users)).
+		Int("conversation_count", len(inbox.Conversations)).
+		Int("entry_count", len(inbox.Entries)).
+		Str("pagination_status", string(paginationStatus)).
+		Str("min_entry_id", cursor).
+		Msg("Got initial inbox state")
 
 	tc.userCacheLock.Lock()
 	maps.Copy(tc.userCache, inbox.Users)
