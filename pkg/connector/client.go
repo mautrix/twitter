@@ -109,7 +109,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			tc.userLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateUnknownError,
 				Error:      "twitter-load-error",
-				Message:    err.Error()
+				Info: map[string]interface{}{
+					"go_error": err.Error(),
+				},
 			})
 		}
 		return
