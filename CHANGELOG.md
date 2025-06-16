@@ -1,3 +1,13 @@
+# v0.4.2 (2025-06-16)
+
+* Added notice about missed calls.
+* Added basic support for direct media.
+* Updated Docker image to Alpine 3.22.
+* Fixed sending attachments with no caption.
+* Fixed management room notices not being sent if polling Twitter failed.
+* Fixed portals not being created after accepting message request that Twitter
+  had marked as "low quality".
+
 # v0.4.1 (2025-05-16)
 
 * Added support for voice messages in both directions.
