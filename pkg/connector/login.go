@@ -135,8 +135,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 
 	go func(ctx context.Context, client *TwitterClient, inboxState *response.InboxInitialStateResponse) {
-		client.syncChannels(ctx, inboxState.InboxInitialState)
-		client.startPolling(ctx)
+		client.DoConnect(ctx, inboxState)
 	}(context.WithoutCancel(ctx), ul.Client.(*TwitterClient), inboxState)
 
 	return &bridgev2.LoginStep{
