@@ -68,22 +68,13 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	var inbox *response.TwitterInboxData
 	var conv *types.Conversation
-	var messages []*types.Message
-	bundle, ok := params.BundledData.(*backfillDataBundle)
-	if ok && params.Forward && len(bundle.Messages) > 0 {
-		inbox = bundle.Inbox
-		conv = bundle.Conv
-		messages = bundle.Messages
-		// TODO support for fetching more messages
-	} else {
-		messageResp, err := tc.client.FetchConversationContext(ctx, conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
-		if err != nil {
-			return nil, err
-		}
-		inbox = messageResp.ConversationTimeline
-		conv = inbox.GetConversationByID(conversationID)
-		messages = messageResp.ConversationTimeline.SortedMessages(ctx)[conversationID]
+	messageResp, err := tc.client.FetchConversationContext(ctx, conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
+	if err != nil {
+		return nil, err
 	}
+	inbox = messageResp.ConversationTimeline
+	conv = inbox.GetConversationByID(conversationID)
+	messages := messageResp.ConversationTimeline.SortedMessages(ctx)[conversationID]
 
 	if len(messages) == 0 {
 		log.Debug().
@@ -110,7 +101,6 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	converted := make([]*bridgev2.BackfillMessage, 0, len(messages))
 	log.Debug().
-		Bool("is_bundled_data", bundle != nil).
 		Int("message_count", len(messages)).
 		Str("oldest_raw_ts", messages[0].Time).
 		Str("newest_raw_ts", messages[len(messages)-1].Time).
@@ -153,7 +143,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 
 	fetchMessagesResp := &bridgev2.FetchMessagesResponse{
 		Messages: converted,
-		HasMore:  bundle != nil || inbox.Status == types.PaginationStatusHasMore,
+		HasMore:  inbox.Status == types.PaginationStatusHasMore,
 		Forward:  params.Forward,
 		MarkRead: lastReadID != "" && methods.CompareSnowflake(lastReadID, messages[len(messages)-1].ID) >= 0,
 	}
