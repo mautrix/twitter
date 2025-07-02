@@ -113,7 +113,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 				log.Debug().Int("page", page).Any("size", chunkSize).Msg("FetchConversationContext chunk")
 				moreMessages = append(moreMessages, chunk...)
 				maxID := chunk[chunkSize-1].ID
-				if len(moreMessages)+len(messages) >= params.Count || methods.ParseSnowflake(maxID).After(minMessageTS) {
+				if chunkSize == 0 || len(moreMessages)+len(messages) >= params.Count || methods.ParseSnowflake(maxID).After(minMessageTS) {
 					break
 				}
 				page++
