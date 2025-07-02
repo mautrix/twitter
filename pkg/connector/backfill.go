@@ -100,7 +100,6 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 		anchorTS := params.AnchorMessage.Timestamp
 		minMessageTS := methods.ParseSnowflake(messages[0].ID)
 		if minMessageTS.After(anchorTS) {
-			var moreMessages []*types.Message
 			for {
 				messageResp, err := tc.client.FetchConversationContext(ctx, conversationID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
 				if err != nil {
@@ -111,15 +110,25 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, params bridgev2.Fetc
 				chunk := messageResp.ConversationTimeline.SortedMessages(ctx)[conversationID]
 				chunkSize := len(chunk)
 				log.Debug().Int("page", page).Any("size", chunkSize).Msg("FetchConversationContext chunk")
-				moreMessages = append(moreMessages, chunk...)
-				maxID := chunk[chunkSize-1].ID
-				if chunkSize == 0 || len(moreMessages)+len(messages) >= params.Count || methods.ParseSnowflake(maxID).After(minMessageTS) {
+				if chunkSize == 0 {
+					break
+				}
+				done := false
+				for _, msg := range chunk {
+					if methods.ParseSnowflake(msg.ID).Before(minMessageTS) {
+						messages = append(messages, msg)
+					} else {
+						done = true
+						break
+					}
+				}
+				if done || len(messages) >= params.Count {
 					break
 				}
 				page++
-				reqQuery.MinID = maxID
+				reqQuery.MinID = chunk[chunkSize-1].ID
 			}
-			messages = append(moreMessages, messages...)
+			methods.SortMessagesByTime(messages)
 		}
 	}
 
