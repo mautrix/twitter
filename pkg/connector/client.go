@@ -113,6 +113,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		}
 		return
 	}
+	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 
 	currentUserID := tc.client.GetCurrentUserID()
 	if MakeUserLoginID(currentUserID) != tc.userLogin.ID {
@@ -173,8 +174,6 @@ func (tc *TwitterClient) startPolling(ctx context.Context) {
 			StateEvent: status.StateUnknownError,
 			Error:      "twitter-connect-error",
 		})
-	} else {
-		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 	}
 }
 
