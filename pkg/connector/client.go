@@ -138,7 +138,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 }
 
 func (tc *TwitterClient) DoConnect(ctx context.Context, inboxState *response.InboxInitialStateResponse) {
-	go tc.syncChannels(ctx, inboxState.InboxInitialState)
+	tc.syncChannels(ctx, inboxState.InboxInitialState)
 	tc.startPolling(ctx)
 }
 
