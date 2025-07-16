@@ -192,7 +192,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				return nil, err
 			}
 			if audioOnly && ffmpeg.Supported() {
-				outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-c:a", "libopus"}, false)
+				outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
 				if err == nil {
 					mimeType = "audio/ogg"
 					content.Info.MimeType = mimeType
