@@ -1,3 +1,7 @@
+# v0.4.3 (2025-07-16)
+
+* Fixed forward backfill not fetching more messages if there's a large gap.
+
 # v0.4.2 (2025-06-16)
 
 * Added notice about missed calls.
