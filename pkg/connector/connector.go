@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/id"
 )
 
 type TwitterConnector struct {
@@ -40,10 +41,16 @@ func (tc *TwitterConnector) Start(_ context.Context) error {
 }
 
 func (tc *TwitterConnector) GetName() bridgev2.BridgeName {
+	networkIcon := "mxc://maunium.net/HVHcnusJkQcpVcsVGZRELLCn"
+	displayName := "Twitter"
+	if tc.Config.X {
+		displayName = "X"
+		networkIcon = "mxc://maunium.net/kbYtMeRPvXehbHXZtvOnUcyu"
+	}
 	return bridgev2.BridgeName{
-		DisplayName:      "Twitter",
-		NetworkURL:       "https://twitter.com",
-		NetworkIcon:      "mxc://maunium.net/HVHcnusJkQcpVcsVGZRELLCn",
+		DisplayName:      displayName,
+		NetworkURL:       "https://x.com",
+		NetworkIcon:      id.ContentURIString(networkIcon),
 		NetworkID:        "twitter",
 		BeeperBridgeType: "twitter",
 		DefaultPort:      29327,

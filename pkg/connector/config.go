@@ -20,6 +20,8 @@ type Config struct {
 
 	ConversationSyncLimit int `yaml:"conversation_sync_limit"`
 
+	X bool `yaml:"x"`
+
 	displaynameTemplate *template.Template `yaml:"-"`
 }
 
@@ -44,6 +46,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str|up.Null, "get_proxy_url")
 	helper.Copy(up.Str, "displayname_template")
 	helper.Copy(up.Int, "conversation_sync_limit")
+	helper.Copy(up.Bool, "x")
 }
 
 type DisplaynameParams struct {

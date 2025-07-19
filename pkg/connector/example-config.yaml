@@ -10,3 +10,7 @@ displayname_template: "{{ .DisplayName }} (Twitter)"
 
 # Maximum number of conversations to sync on startup
 conversation_sync_limit: 20
+
+# Should the bridge use "X" instead of "Twitter" in certain places,
+# such as the management room welcome message and MSC2346 bridge info?
+x: false
