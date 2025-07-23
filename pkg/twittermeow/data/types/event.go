@@ -19,7 +19,9 @@ func (*MessageReactionCreate) isTwitterEvent()      {}
 func (*MessageReactionDelete) isTwitterEvent()      {}
 func (*ConversationCreate) isTwitterEvent()         {}
 func (*ConversationDelete) isTwitterEvent()         {}
+func (*ConversationJoin) isTwitterEvent()           {}
 func (*ParticipantsJoin) isTwitterEvent()           {}
+func (*ParticipantsLeave) isTwitterEvent()          {}
 func (*ConversationMetadataUpdate) isTwitterEvent() {}
 func (*ConversationNameUpdate) isTwitterEvent()     {}
 func (*ConversationRead) isTwitterEvent()           {}
@@ -46,7 +48,9 @@ type twitterEventContainer struct {
 	ReactionDelete             *MessageReactionDelete      `json:"reaction_delete,omitempty"`
 	ConversationCreate         *ConversationCreate         `json:"conversation_create,omitempty"`
 	ConversationDelete         *ConversationDelete         `json:"remove_conversation,omitempty"`
+	ConversationJoin           *ConversationJoin           `json:"conversation_join,omitempty"`
 	ParticipantsJoin           *ParticipantsJoin           `json:"participants_join,omitempty"`
+	ParticipantsLeave          *ParticipantsLeave          `json:"participants_leave,omitempty"`
 	ConversationMetadataUpdate *ConversationMetadataUpdate `json:"conversation_metadata_update,omitempty"`
 	ConversationNameUpdate     *ConversationNameUpdate     `json:"conversation_name_update,omitempty"`
 	ConversationRead           *ConversationRead           `json:"conversation_read,omitempty"`
@@ -75,8 +79,12 @@ func (rte *RawTwitterEvent) Parse() (TwitterEvent, map[string]any, error) {
 		return tec.ConversationCreate, nil, nil
 	case tec.ConversationDelete != nil:
 		return tec.ConversationDelete, nil, nil
+	case tec.ConversationJoin != nil:
+		return tec.ConversationJoin, nil, nil
 	case tec.ParticipantsJoin != nil:
 		return tec.ParticipantsJoin, nil, nil
+	case tec.ParticipantsLeave != nil:
+		return tec.ParticipantsLeave, nil, nil
 	case tec.ConversationMetadataUpdate != nil:
 		return tec.ConversationMetadataUpdate, nil, nil
 	case tec.ConversationNameUpdate != nil:

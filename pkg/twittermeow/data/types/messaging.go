@@ -95,6 +95,16 @@ type ParticipantsJoin struct {
 	Participants   []Participant `json:"participants,omitempty"`
 }
 
+type ParticipantsLeave struct {
+	ID             string        `json:"id,omitempty"`
+	Time           string        `json:"time,omitempty"`
+	AffectsSort    bool          `json:"affects_sort,omitempty"`
+	ConversationID string        `json:"conversation_id,omitempty"`
+	Participants   []Participant `json:"participants,omitempty"`
+}
+
+type ConversationJoin ParticipantsJoin
+
 type ConversationType string
 
 const (

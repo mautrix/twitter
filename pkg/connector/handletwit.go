@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -162,6 +163,8 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, portalUpdateRemoteEvent)
 	case *types.ConversationMetadataUpdate:
 		tc.client.Logger.Warn().Any("data", evt).Msg("Unhandled conversation metadata update event")
+	case *types.ConversationJoin:
+		// TODO handle
 	case *types.ParticipantsJoin:
 		conversation := inbox.GetConversationByID(evt.ConversationID)
 		portalMembersAddedRemoteEvent := &simplevent.ChatInfoChange{
@@ -191,6 +194,35 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.IsFull = false
 		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.TotalMemberCount = len(conversation.Participants)
 		tc.connector.br.QueueRemoteEvent(tc.userLogin, portalMembersAddedRemoteEvent)
+	case *types.ParticipantsLeave:
+		conversation := inbox.GetConversationByID(evt.ConversationID)
+		memberChanges := tc.participantsToMemberList(evt.Participants, inbox)
+		for _, member := range memberChanges.MemberMap {
+			member.Membership = event.MembershipLeave
+		}
+		conversation.Participants = slices.DeleteFunc(conversation.Participants, func(pcp types.Participant) bool {
+			_, remove := memberChanges.MemberMap[MakeUserID(pcp.UserID)]
+			return remove
+		})
+		memberChanges.IsFull = false
+		memberChanges.TotalMemberCount = len(conversation.Participants)
+		tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventChatInfoChange,
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.
+						Str("conversation_id", evt.ConversationID).
+						Int("total_left_members", len(evt.Participants))
+				},
+				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
+				CreatePortal: false,
+				StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
+				Timestamp:    methods.ParseSnowflake(evt.ID),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				MemberChanges: memberChanges,
+			},
+		})
 	case *types.ConversationDelete:
 		portalDeleteRemoteEvent := &simplevent.ChatDelete{
 			EventMeta: simplevent.EventMeta{
