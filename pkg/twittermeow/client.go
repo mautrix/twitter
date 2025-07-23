@@ -91,7 +91,7 @@ func (c *Client) GetCookieString() string {
 	return c.cookies.String()
 }
 
-func (c *Client) Connect() error {
+func (c *Client) Connect(ctx context.Context) error {
 	if c.eventHandler == nil {
 		return ErrConnectSetEventHandler
 	}
@@ -100,7 +100,7 @@ func (c *Client) Connect() error {
 		return ErrNotAuthenticatedYet
 	}
 
-	c.polling.startPolling(c.Logger.WithContext(context.Background()))
+	c.polling.startPolling(c.Logger.WithContext(ctx))
 	return nil
 }
 

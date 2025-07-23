@@ -89,6 +89,10 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 
 	messages := inbox.SortedMessages(ctx)
 	for _, conv := range inbox.SortedConversations() {
+		if ctx.Err() != nil {
+			log.Warn().Err(ctx.Err()).Msg("Context canceled while syncing conversations")
+			return
+		}
 		convMessages := messages[conv.ConversationID]
 		if len(convMessages) == 0 {
 			continue
@@ -115,7 +119,11 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 			},
 			LatestMessageTS: latestMessageTS,
 		}
-		tc.connector.br.QueueRemoteEvent(tc.userLogin, evt)
+		res := tc.connector.br.QueueRemoteEvent(tc.userLogin, evt)
+		if !res.Success {
+			log.Warn().Msg("Chat sync interrupted by failed QueueRemoteEvent")
+			return
+		}
 	}
 }
 

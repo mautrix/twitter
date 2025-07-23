@@ -167,7 +167,10 @@ func (tc *TwitterConnector) makeRemoteProfile(ctx context.Context, cli *twitterm
 }
 
 func (tc *TwitterClient) startPolling(ctx context.Context) {
-	err := tc.client.Connect()
+	if ctx.Err() != nil {
+		return
+	}
+	err := tc.client.Connect(tc.connector.br.BackgroundCtx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to start polling")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
