@@ -54,7 +54,7 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 		reqQuery.MaxID = cursor
 		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(ctx, reqQuery)
 		if err != nil {
-			log.Error().Err(err).Msg(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s:", cursor))
+			log.Err(err).Msg(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s:", cursor))
 			return
 		} else if len(nextInboxTimelineResponse.InboxTimeline.Entries) == 0 {
 			break
@@ -119,12 +119,13 @@ func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.Twitt
 			},
 			LatestMessageTS: latestMessageTS,
 		}
-		res := tc.connector.br.QueueRemoteEvent(tc.userLogin, evt)
+		res := tc.userLogin.QueueRemoteEvent(evt)
 		if !res.Success {
 			log.Warn().Msg("Chat sync interrupted by failed QueueRemoteEvent")
 			return
 		}
 	}
+	log.Info().Msg("Finished syncing conversations")
 }
 
 type backfillDataBundle struct {
