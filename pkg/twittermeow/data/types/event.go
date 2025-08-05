@@ -48,7 +48,7 @@ type twitterEventContainer struct {
 	ReactionDelete             *MessageReactionDelete      `json:"reaction_delete,omitempty"`
 	ConversationCreate         *ConversationCreate         `json:"conversation_create,omitempty"`
 	ConversationDelete         *ConversationDelete         `json:"remove_conversation,omitempty"`
-	ConversationJoin           *ConversationJoin           `json:"conversation_join,omitempty"`
+	ConversationJoin           *ConversationJoin           `json:"join_conversation,omitempty"`
 	ParticipantsJoin           *ParticipantsJoin           `json:"participants_join,omitempty"`
 	ParticipantsLeave          *ParticipantsLeave          `json:"participants_leave,omitempty"`
 	ConversationMetadataUpdate *ConversationMetadataUpdate `json:"conversation_metadata_update,omitempty"`
