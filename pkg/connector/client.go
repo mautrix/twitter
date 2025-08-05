@@ -96,6 +96,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		return
 	}
 
+	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
 	inboxState, _, err := tc.client.LoadMessagesPage(ctx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to load messages page")
@@ -170,6 +171,7 @@ func (tc *TwitterClient) startPolling(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	zerolog.Ctx(ctx).Info().Msg("Starting polling")
 	err := tc.client.Connect(tc.connector.br.BackgroundCtx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to start polling")
