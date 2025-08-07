@@ -84,12 +84,15 @@ func (c *Client) GetSession() *CachedSession {
 	return c.session
 }
 
-func (c *Client) Connect(ctx context.Context) {
+func (c *Client) Connect(ctx context.Context, cached bool) {
 	if c.eventHandler == nil {
 		panic(ErrConnectSetEventHandler)
 	}
 
 	c.polling.startPolling(c.Logger.WithContext(ctx))
+	if cached {
+		c.polling.doShortCircuit()
+	}
 }
 
 func (c *Client) Disconnect() {

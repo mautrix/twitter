@@ -139,13 +139,16 @@ func (pc *PollingClient) SetActiveConversation(conversationID string) {
 	pc.pollConversation(conversationID)
 }
 
+func (pc *PollingClient) doShortCircuit() {
+	select {
+	case pc.shortCircuit <- struct{}{}:
+	default:
+	}
+}
+
 func (pc *PollingClient) pollConversation(conversationID string) {
 	if pc.activeConversationID == conversationID {
 		pc.includeConversationID = true
-		select {
-		case <-pc.shortCircuit:
-		default:
-		}
-		pc.shortCircuit <- struct{}{}
+		pc.doShortCircuit()
 	}
 }

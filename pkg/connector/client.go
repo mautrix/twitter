@@ -103,7 +103,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			Time("session_ts", meta.SessionTS).
 			Msg("Connecting with cached session")
 		tc.client.SetSession(meta.Session)
-		tc.startPolling(ctx)
+		tc.startPolling(ctx, true)
 		return
 	}
 
@@ -151,7 +151,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 func (tc *TwitterClient) DoConnect(ctx context.Context, inboxState *response.InboxInitialStateResponse) {
 	tc.syncChannels(ctx, inboxState.InboxInitialState)
 	tc.HandleCursorChange(ctx)
-	tc.startPolling(ctx)
+	tc.startPolling(ctx, false)
 }
 
 func (tc *TwitterClient) HandleCursorChange(ctx context.Context) {
@@ -191,12 +191,12 @@ func (tc *TwitterConnector) makeRemoteProfile(ctx context.Context, cli *twitterm
 	}
 }
 
-func (tc *TwitterClient) startPolling(ctx context.Context) {
+func (tc *TwitterClient) startPolling(ctx context.Context, cached bool) {
 	if ctx.Err() != nil {
 		return
 	}
 	zerolog.Ctx(ctx).Info().Msg("Starting polling")
-	tc.client.Connect(tc.connector.br.BackgroundCtx)
+	tc.client.Connect(tc.connector.br.BackgroundCtx, cached)
 }
 
 func (tc *TwitterClient) Disconnect() {
