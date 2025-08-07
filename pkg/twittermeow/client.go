@@ -143,7 +143,7 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialSt
 		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
 	}
 
-	c.polling.SetCurrentCursor(initialInboxState.InboxInitialState.Cursor)
+	c.session.PollingCursor = initialInboxState.InboxInitialState.Cursor
 
 	c.Logger.Info().
 		Str("screen_name", data.ScreenName).

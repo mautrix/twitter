@@ -15,7 +15,6 @@ var defaultPollingInterval = 10 * time.Second
 
 type PollingClient struct {
 	client                *Client
-	currentCursor         string
 	stop                  atomic.Pointer[context.CancelFunc]
 	activeConversationID  string
 	includeConversationID bool
@@ -78,9 +77,7 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 		userUpdatesQuery.ActiveConversationID = ""
 	}
 	pc.includeConversationID = !pc.includeConversationID
-	if pc.currentCursor != "" {
-		userUpdatesQuery.Cursor = pc.currentCursor
-	}
+	userUpdatesQuery.Cursor = pc.client.session.PollingCursor
 
 	userUpdatesResponse, err := pc.client.GetDMUserUpdates(ctx, &userUpdatesQuery)
 	if err != nil {
@@ -95,12 +92,8 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 		}
 	}
 
-	pc.SetCurrentCursor(userUpdatesResponse.UserEvents.Cursor)
+	pc.client.session.PollingCursor = userUpdatesResponse.UserEvents.Cursor
 	return nil
-}
-
-func (pc *PollingClient) SetCurrentCursor(cursor string) {
-	pc.currentCursor = cursor
 }
 
 func (pc *PollingClient) stopPolling() {
