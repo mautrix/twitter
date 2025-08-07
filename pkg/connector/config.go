@@ -16,9 +16,9 @@ type Config struct {
 	Proxy       string `yaml:"proxy"`
 	GetProxyURL string `yaml:"get_proxy_url"`
 
-	DisplaynameTemplate string `yaml:"displayname_template"`
-
-	ConversationSyncLimit int `yaml:"conversation_sync_limit"`
+	DisplaynameTemplate   string `yaml:"displayname_template"`
+	ConversationSyncLimit int    `yaml:"conversation_sync_limit"`
+	CacheSession          bool   `yaml:"cache_session"`
 
 	X bool `yaml:"x"`
 
@@ -46,6 +46,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str|up.Null, "get_proxy_url")
 	helper.Copy(up.Str, "displayname_template")
 	helper.Copy(up.Int, "conversation_sync_limit")
+	helper.Copy(up.Bool, "cache_session")
 	helper.Copy(up.Bool, "x")
 }
 

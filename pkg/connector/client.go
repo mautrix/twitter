@@ -98,7 +98,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
-	if meta.Session != nil && meta.SessionTS.Add(24*time.Hour).After(time.Now()) {
+	if tc.connector.Config.CacheSession && meta.Session != nil && meta.SessionTS.Add(24*time.Hour).After(time.Now()) {
 		zerolog.Ctx(ctx).Debug().
 			Time("session_ts", meta.SessionTS).
 			Msg("Connecting with cached session")
@@ -155,6 +155,9 @@ func (tc *TwitterClient) DoConnect(ctx context.Context, inboxState *response.Inb
 }
 
 func (tc *TwitterClient) HandleCursorChange(ctx context.Context) {
+	if !tc.connector.Config.CacheSession {
+		return
+	}
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
 	meta.Session = tc.client.GetSession()
 	meta.SessionTS = time.Now()
