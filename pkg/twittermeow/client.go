@@ -40,6 +40,7 @@ type Client struct {
 
 	eventHandler       EventHandler
 	streamEventHandler StreamEventHandler
+	onCursorChanged    func(ctx context.Context)
 
 	jot     *JotClient
 	polling *PollingClient
@@ -83,13 +84,12 @@ func (c *Client) GetSession() *CachedSession {
 	return c.session
 }
 
-func (c *Client) Connect(ctx context.Context) error {
+func (c *Client) Connect(ctx context.Context) {
 	if c.eventHandler == nil {
-		return ErrConnectSetEventHandler
+		panic(ErrConnectSetEventHandler)
 	}
 
 	c.polling.startPolling(c.Logger.WithContext(ctx))
-	return nil
 }
 
 func (c *Client) Disconnect() {
@@ -195,9 +195,10 @@ func (c *Client) IsLoggedIn() bool {
 	return !c.cookies.IsCookieEmpty(cookies.XAuthToken)
 }
 
-func (c *Client) SetEventHandler(handler EventHandler, streamHandler StreamEventHandler) {
+func (c *Client) SetEventHandler(handler EventHandler, streamHandler StreamEventHandler, onCursorChanged func(context.Context)) {
 	c.eventHandler = handler
 	c.streamEventHandler = streamHandler
+	c.onCursorChanged = onCursorChanged
 }
 
 func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {

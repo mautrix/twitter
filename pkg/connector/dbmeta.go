@@ -19,10 +19,13 @@ package connector
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"time"
 
 	"go.mau.fi/util/exerrors"
 	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2/database"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 )
 
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
@@ -42,6 +45,9 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 type UserLoginMetadata struct {
 	Cookies  string    `json:"cookies"`
 	PushKeys *PushKeys `json:"push_keys,omitempty"`
+
+	SessionTS time.Time                  `json:"session_ts,omitempty"`
+	Session   *twittermeow.CachedSession `json:"session,omitempty"`
 }
 
 type MessageMetadata struct {

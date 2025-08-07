@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -58,7 +59,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		userCache:        make(map[string]*types.User),
 		participantCache: make(map[string][]types.Participant),
 	}
-	client.SetEventHandler(tc.HandleTwitterEvent, tc.HandleStreamEvent)
+	client.SetEventHandler(tc.HandleTwitterEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
 	tc.matrixParser = &format.HTMLParser{
 		TabsToSpaces:   4,
 		Newline:        "\n",
@@ -96,6 +97,16 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	}
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	if meta.Session != nil && meta.SessionTS.Add(24*time.Hour).After(time.Now()) {
+		zerolog.Ctx(ctx).Debug().
+			Time("session_ts", meta.SessionTS).
+			Msg("Connecting with cached session")
+		tc.client.SetSession(meta.Session)
+		tc.startPolling(ctx)
+		return
+	}
+
 	inboxState, _, err := tc.client.LoadMessagesPage(ctx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to load messages page")
@@ -139,7 +150,18 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 func (tc *TwitterClient) DoConnect(ctx context.Context, inboxState *response.InboxInitialStateResponse) {
 	tc.syncChannels(ctx, inboxState.InboxInitialState)
+	tc.HandleCursorChange(ctx)
 	tc.startPolling(ctx)
+}
+
+func (tc *TwitterClient) HandleCursorChange(ctx context.Context) {
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	meta.Session = tc.client.GetSession()
+	meta.SessionTS = time.Now()
+	err := tc.userLogin.Save(ctx)
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to save user login after cursor change")
+	}
 }
 
 func (tc *TwitterConnector) makeRemoteProfile(ctx context.Context, cli *twittermeow.Client, currentUserID string, inbox *response.TwitterInboxData) *status.RemoteProfile {
@@ -171,14 +193,7 @@ func (tc *TwitterClient) startPolling(ctx context.Context) {
 		return
 	}
 	zerolog.Ctx(ctx).Info().Msg("Starting polling")
-	err := tc.client.Connect(tc.connector.br.BackgroundCtx)
-	if err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to start polling")
-		tc.userLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateUnknownError,
-			Error:      "twitter-connect-error",
-		})
-	}
+	tc.client.Connect(tc.connector.br.BackgroundCtx)
 }
 
 func (tc *TwitterClient) Disconnect() {

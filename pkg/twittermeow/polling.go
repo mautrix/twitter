@@ -104,7 +104,10 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 			pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents)
 		}
 	}
-	pc.client.session.PollingCursor = userUpdatesResponse.UserEvents.Cursor
+	if userUpdatesResponse.UserEvents.Cursor != pc.client.session.PollingCursor {
+		pc.client.session.PollingCursor = userUpdatesResponse.UserEvents.Cursor
+		pc.client.onCursorChanged(ctx)
+	}
 	return nil
 }
 

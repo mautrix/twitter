@@ -37,6 +37,9 @@ import (
 
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *response.TwitterInboxData) {
 	if rawEvt == nil && inbox != nil {
+		if tc.userLogin.BridgeState.GetPrevUnsent().StateEvent == "" {
+			tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
+		}
 		tc.updateTwitterUserInfo(inbox)
 		tc.updateTwitterReadReceipt(inbox)
 		tc.userCacheLock.Lock()
