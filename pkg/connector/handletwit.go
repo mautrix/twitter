@@ -73,7 +73,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			msgType = bridgev2.RemoteEventEdit
 		}
 		conversation := inbox.GetConversationByID(evt.ConversationID)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.Message[*types.MessageData]{
+		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: msgType,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -117,11 +117,11 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 	case *types.MessageReactionCreate:
 		portalKey := tc.makePortalKeyFromInbox(evt.ConversationID, inbox)
 		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReaction)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, wrappedEvt).Success
+		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.MessageReactionDelete:
 		portalKey := tc.makePortalKeyFromInbox(evt.ConversationID, inbox)
 		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReactionRemove)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, wrappedEvt).Success
+		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.ConversationCreate:
 		// honestly not sure when this is ever called... ? might be when they initialize the conversation with me?
 		tc.client.Logger.Warn().Any("data", evt).Msg("Unhandled conversation create event")
@@ -143,7 +143,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 				},
 				TargetMessage: networkid.MessageID(deletedMsg.MessageID),
 			}
-			allSuccess = tc.connector.br.QueueRemoteEvent(tc.userLogin, messageDeleteRemoteEvent).Success && allSuccess
+			allSuccess = tc.userLogin.QueueRemoteEvent(messageDeleteRemoteEvent).Success && allSuccess
 		}
 		return allSuccess
 	case *types.ConversationNameUpdate:
@@ -167,7 +167,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 				},
 			},
 		}
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, portalUpdateRemoteEvent).Success
+		return tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent).Success
 	case *types.ConversationMetadataUpdate:
 		tc.client.Logger.Warn().Any("data", evt).Msg("Unhandled conversation metadata update event")
 		return true
@@ -202,7 +202,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		}
 		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.IsFull = false
 		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.TotalMemberCount = len(conversation.Participants)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, portalMembersAddedRemoteEvent).Success
+		return tc.userLogin.QueueRemoteEvent(portalMembersAddedRemoteEvent).Success
 	case *types.ParticipantsLeave:
 		conversation := inbox.GetConversationByID(evt.ConversationID)
 		memberChanges := tc.participantsToMemberList(evt.Participants, inbox)
@@ -215,7 +215,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		})
 		memberChanges.IsFull = false
 		memberChanges.TotalMemberCount = len(conversation.Participants)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.ChatInfoChange{
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventChatInfoChange,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -247,10 +247,10 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			OnlyForMe: true,
 		}
 		tc.client.Logger.Info().Any("data", evt).Msg("Deleted conversation")
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, portalDeleteRemoteEvent).Success
+		return tc.userLogin.QueueRemoteEvent(portalDeleteRemoteEvent).Success
 	case *types.TrustConversation:
 		conversation := inbox.GetConversationByID(evt.ConversationID)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.ChatResync{
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
 				Type:         bridgev2.RemoteEventChatResync,
 				PortalKey:    tc.MakePortalKey(conversation),
@@ -260,7 +260,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		}).Success
 	case *types.EndAVBroadcast:
 		conversation := inbox.GetConversationByID(evt.ConversationID)
-		return tc.connector.br.QueueRemoteEvent(tc.userLogin, &simplevent.Message[string]{
+		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[string]{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventMessage,
 				PortalKey: tc.MakePortalKey(conversation),
