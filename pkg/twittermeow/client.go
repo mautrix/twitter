@@ -27,12 +27,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-type ClientOpts struct {
-	Cookies       *cookies.Cookies
-	Session       *CachedSession
-	WithJOTClient bool
-}
-
 type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData)
 type StreamEventHandler func(evt response.StreamEvent)
 
@@ -52,7 +46,7 @@ type Client struct {
 	stream  *StreamClient
 }
 
-func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
+func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
 	cli := Client{
 		HTTP: &http.Client{
 			Transport: &http.Transport{
@@ -68,23 +62,10 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 
 	cli.polling = cli.newPollingClient()
 	cli.stream = cli.newStreamClient()
-
-	if opts.WithJOTClient {
-		cli.jot = cli.newJotClient()
-	}
-
-	if opts.Cookies != nil {
-		cli.cookies = opts.Cookies
-	} else {
-		cli.cookies = cookies.NewCookies(nil)
-	}
-
-	if opts.Session != nil {
-		cli.session = opts.Session
-	} else {
-		cli.session = &CachedSession{
-			ClientUUID: uuid.NewString(),
-		}
+	cli.jot = cli.newJotClient()
+	cli.cookies = cookies
+	cli.session = &CachedSession{
+		ClientUUID: uuid.NewString(),
 	}
 
 	return &cli
@@ -92,6 +73,14 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 
 func (c *Client) GetCookieString() string {
 	return c.cookies.String()
+}
+
+func (c *Client) SetSession(sess *CachedSession) {
+	c.session = sess
+}
+
+func (c *Client) GetSession() *CachedSession {
+	return c.session
 }
 
 func (c *Client) Connect(ctx context.Context) error {

@@ -95,11 +95,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		Cookies: cookieStruct.String(),
 	}
 
-	clientOpts := &twittermeow.ClientOpts{
-		Cookies:       cookieStruct,
-		WithJOTClient: true,
-	}
-	client := twittermeow.NewClient(clientOpts, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+	client := twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
 	inboxState, settings, err := client.LoadMessagesPage(ctx)
 	if err != nil {

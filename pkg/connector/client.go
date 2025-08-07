@@ -80,10 +80,9 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 }
 
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	login.Client = NewTwitterClient(login, tc, twittermeow.NewClient(&twittermeow.ClientOpts{
-		Cookies:       cookies.NewCookiesFromString(login.Metadata.(*UserLoginMetadata).Cookies),
-		WithJOTClient: true,
-	}, login.Log.With().Str("component", "twitter_client").Logger()))
+	c := cookies.NewCookiesFromString(login.Metadata.(*UserLoginMetadata).Cookies)
+	log := login.Log.With().Str("component", "twitter_client").Logger()
+	login.Client = NewTwitterClient(login, tc, twittermeow.NewClient(c, log))
 	return nil
 }
 
