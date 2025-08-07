@@ -192,9 +192,9 @@ func (tc *TwitterClient) IsLoggedIn() bool {
 
 func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
-	_, err := tc.client.Logout(ctx)
+	err := tc.client.Logout(ctx)
 	if err != nil {
-		log.Error().Err(err).Msg("error logging out")
+		log.Err(err).Msg("Failed to log out")
 	}
 }
 

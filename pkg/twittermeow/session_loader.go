@@ -12,12 +12,10 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 
 	"github.com/google/go-querystring/query"
-	"github.com/google/uuid"
 )
 
 var (
@@ -28,43 +26,22 @@ var (
 const fetchedTime = 1661971138705
 
 type SessionAuthTokens struct {
-	authenticated    string
-	notAuthenticated string
+	Authenticated    string `json:"authenticated"`
+	NotAuthenticated string `json:"not_authenticated"`
 }
 
-type SessionLoader struct {
-	client            *Client
-	currentUser       *response.AccountSettingsResponse
-	verificationToken string
-	loadingAnims      *[4][16][11]int
-	variableIndexes   *[4]int
-	animationToken    string
-	country           string
-	clientUUID        string
-	authTokens        *SessionAuthTokens
+type CachedSession struct {
+	VerificationToken string            `json:"verification_token"`
+	AnimationToken    string            `json:"animation_token"`
+	Country           string            `json:"country"`
+	ClientUUID        string            `json:"client_uuid"`
+	AuthTokens        SessionAuthTokens `json:"auth_tokens"`
+
+	loadingAnims    *[4][16][11]int
+	variableIndexes *[4]int
 }
 
-func (c *Client) newSessionLoader() *SessionLoader {
-	return &SessionLoader{
-		client:     c,
-		clientUUID: uuid.NewString(),
-		authTokens: &SessionAuthTokens{},
-	}
-}
-
-func (s *SessionLoader) SetCurrentUser(data *response.AccountSettingsResponse) {
-	s.currentUser = data
-}
-
-func (s *SessionLoader) GetCurrentUser() *response.AccountSettingsResponse {
-	return s.currentUser
-}
-
-func (s *SessionLoader) isAuthenticated() bool {
-	return s.currentUser != nil /*&& s.currentUser.ScreenName != ""*/
-}
-
-func (s *SessionLoader) LoadPage(ctx context.Context, url string) error {
+func (c *Client) loadPage(ctx context.Context, url string) error {
 	mainPageURL, err := neturl.Parse(url)
 	if err != nil {
 		return fmt.Errorf("failed to parse URL %q: %w", url, err)
@@ -75,28 +52,28 @@ func (s *SessionLoader) LoadPage(ctx context.Context, url string) error {
 		"sec-fetch-user":            "?1",
 		"sec-fetch-dest":            "document",
 	}
-	mainPageResp, mainPageRespBody, err := s.client.MakeRequest(ctx, url, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
+	mainPageResp, mainPageRespBody, err := c.MakeRequest(ctx, url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
 	if err != nil {
 		return fmt.Errorf("failed to send main page request: %w", err)
 	}
 
-	s.client.cookies.UpdateFromResponse(mainPageResp)
-	if s.client.cookies.IsCookieEmpty(cookies.XGuestID) {
-		s.client.Logger.Err(errCookieGuestIDNotFound).Msg("No GuestID found in response headers")
+	c.cookies.UpdateFromResponse(mainPageResp)
+	if c.cookies.IsCookieEmpty(cookies.XGuestID) {
+		c.Logger.Err(errCookieGuestIDNotFound).Msg("No GuestID found in response headers")
 		return errCookieGuestIDNotFound
 	}
 
 	mainPageHTML := string(mainPageRespBody)
 	migrationURL, migrationRequired := methods.ParseMigrateURL(mainPageHTML)
 	if migrationRequired {
-		s.client.Logger.Debug().Msg("Migrating session from twitter.com")
+		c.Logger.Debug().Msg("Migrating session from twitter.com")
 		extraHeaders = map[string]string{
 			"upgrade-insecure-requests": "1",
 			"sec-fetch-site":            "cross-site",
 			"sec-fetch-mode":            "navigate",
 			"sec-fetch-dest":            "document",
 		}
-		migrationPageResp, migrationPageRespBody, err := s.client.MakeRequest(ctx, migrationURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.ContentTypeNone)
+		migrationPageResp, migrationPageRespBody, err := c.MakeRequest(ctx, migrationURL, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: fmt.Sprintf("https://%s/", mainPageURL.Host), WithCookies: true}), nil, types.ContentTypeNone)
 		if err != nil {
 			return fmt.Errorf("failed to send migration request: %w", err)
 		}
@@ -111,27 +88,27 @@ func (s *SessionLoader) LoadPage(ctx context.Context, url string) error {
 			migrationPayload := []byte(migrationForm.Encode())
 			extraHeaders["origin"] = endpoints.TWITTER_BASE_URL
 
-			s.client.disableRedirects()
-			mainPageResp, _, err = s.client.MakeRequest(ctx, migrationFormURL, http.MethodPost, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
+			c.disableRedirects()
+			mainPageResp, _, err = c.MakeRequest(ctx, migrationFormURL, http.MethodPost, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
 			if err == nil || !errors.Is(err, ErrRedirectAttempted) {
 				return fmt.Errorf("failed to make request to main page, server did not respond with a redirect response")
 			}
-			s.client.enableRedirects()
-			s.client.cookies.UpdateFromResponse(mainPageResp) // update the cookies received from the redirected response headers
+			c.enableRedirects()
+			c.cookies.UpdateFromResponse(mainPageResp) // update the cookies received from the redirected response headers
 
 			migrationFormURL = endpoints.BASE_URL + mainPageResp.Header.Get("Location")
-			mainPageResp, mainPageRespBody, err = s.client.MakeRequest(ctx, migrationFormURL, http.MethodGet, s.client.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
+			mainPageResp, mainPageRespBody, err = c.MakeRequest(ctx, migrationFormURL, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, Referer: endpoints.TWITTER_BASE_URL + "/", WithCookies: true}), migrationPayload, types.ContentTypeForm)
 			if err != nil {
 				return fmt.Errorf("failed to send main page request after migration: %w", err)
 			}
 
 			mainPageHTML := string(mainPageRespBody)
-			err = s.client.parseMainPageHTML(ctx, mainPageResp, mainPageHTML)
+			err = c.parseMainPageHTML(ctx, mainPageResp, mainPageHTML)
 			if err != nil {
 				return fmt.Errorf("failed to parse main page HTML after migration: %w", err)
 			}
 
-			err = s.doInitialClientLoggingEvents(ctx)
+			err = c.doInitialClientLoggingEvents(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to perform initial client logging events after migration: %w", err)
 			}
@@ -142,12 +119,12 @@ func (s *SessionLoader) LoadPage(ctx context.Context, url string) error {
 	} else {
 		// most likely means... already authenticated
 		mainPageHTML := string(mainPageRespBody)
-		err = s.client.parseMainPageHTML(ctx, mainPageResp, mainPageHTML)
+		err = c.parseMainPageHTML(ctx, mainPageResp, mainPageHTML)
 		if err != nil {
 			return fmt.Errorf("failed to parse main page HTML: %w", err)
 		}
 
-		err = s.doInitialClientLoggingEvents(ctx)
+		err = c.doInitialClientLoggingEvents(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to perform initial client logging events after migration: %w", err)
 		}
@@ -155,19 +132,18 @@ func (s *SessionLoader) LoadPage(ctx context.Context, url string) error {
 	return nil
 }
 
-func (s *SessionLoader) doCookiesMetaDataLoad(ctx context.Context) error {
+func (c *Client) doCookiesMetaDataLoad(ctx context.Context) error {
 	logData := []interface{}{
 		&payload.JotLogPayload{Description: "rweb:cookiesMetadata:load", Product: "rweb", EventValue: time.Until(time.UnixMilli(fetchedTime)).Milliseconds()},
 	}
-	return s.client.performJotClientEvent(ctx, payload.JotLoggingCategoryPerftown, false, logData)
+	return c.performJotClientEvent(ctx, payload.JotLoggingCategoryPerftown, false, logData)
 }
 
-func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error {
-	err := s.doCookiesMetaDataLoad(ctx)
+func (c *Client) doInitialClientLoggingEvents(ctx context.Context) error {
+	err := c.doCookiesMetaDataLoad(ctx)
 	if err != nil {
 		return err
 	}
-	country := s.GetCountry()
 	logData := []interface{}{
 		&payload.JotLogPayload{
 			Description: "rweb:init:storePrepare",
@@ -180,7 +156,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 			DurationMS:  1,
 		},
 		&payload.JotLogPayload{
-			Description: "rweb:ttft:perfSupported:" + country,
+			Description: "rweb:ttft:perfSupported:" + c.session.Country,
 			Product:     "rweb",
 			DurationMS:  1,
 		},
@@ -190,7 +166,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 			DurationMS:  165,
 		},
 		&payload.JotLogPayload{
-			Description: "rweb:ttft:connect:" + country,
+			Description: "rweb:ttft:connect:" + c.session.Country,
 			Product:     "rweb",
 			DurationMS:  165,
 		},
@@ -200,7 +176,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 			DurationMS:  177,
 		},
 		&payload.JotLogPayload{
-			Description: "rweb:ttft:process:" + country,
+			Description: "rweb:ttft:process:" + c.session.Country,
 			Product:     "rweb",
 			DurationMS:  177,
 		},
@@ -210,7 +186,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 			DurationMS:  212,
 		},
 		&payload.JotLogPayload{
-			Description: "rweb:ttft:response:" + country,
+			Description: "rweb:ttft:response:" + c.session.Country,
 			Product:     "rweb",
 			DurationMS:  212,
 		},
@@ -220,12 +196,12 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 			DurationMS:  422,
 		},
 		&payload.JotLogPayload{
-			Description: "rweb:ttft:interactivity:" + country,
+			Description: "rweb:ttft:interactivity:" + c.session.Country,
 			Product:     "rweb",
 			DurationMS:  422,
 		},
 	}
-	err = s.client.performJotClientEvent(ctx, payload.JotLoggingCategoryPerftown, false, logData)
+	err = c.performJotClientEvent(ctx, payload.JotLoggingCategoryPerftown, false, logData)
 	if err != nil {
 		return err
 	}
@@ -248,7 +224,7 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 		},
 	}
 
-	err = s.client.performJotClientEvent(ctx, "", true, logData)
+	err = c.performJotClientEvent(ctx, "", true, logData)
 	if err != nil {
 		return err
 	}
@@ -256,38 +232,8 @@ func (s *SessionLoader) doInitialClientLoggingEvents(ctx context.Context) error 
 	return nil
 }
 
-func (s *SessionLoader) GetCountry() string {
-	return s.country
-}
-
-func (s *SessionLoader) SetCountry(country string) {
-	s.country = country
-}
-
-func (s *SessionLoader) SetVerificationToken(verificationToken string, anims *[4][16][11]int) {
-	s.verificationToken = verificationToken
-	s.loadingAnims = anims
-}
-
-func (s *SessionLoader) SetVariableIndexes(indexes *[4]int) {
-	s.variableIndexes = indexes
-}
-
-func (s *SessionLoader) CalculateAnimationToken() {
-	if s.variableIndexes != nil && s.loadingAnims != nil && s.verificationToken != "" {
-		s.animationToken = crypto.GenerateAnimationState(s.variableIndexes, s.loadingAnims, s.verificationToken)
+func (c *Client) calculateAnimationToken() {
+	if c.session.variableIndexes != nil && c.session.loadingAnims != nil && c.session.VerificationToken != "" {
+		c.session.AnimationToken = crypto.GenerateAnimationState(c.session.variableIndexes, c.session.loadingAnims, c.session.VerificationToken)
 	}
-}
-
-func (s *SessionLoader) GetVerificationToken() string {
-	return s.verificationToken
-}
-
-func (s *SessionLoader) SetAuthTokens(authenticatedToken, notAuthenticatedToken string) {
-	s.authTokens.authenticated = authenticatedToken
-	s.authTokens.notAuthenticated = notAuthenticatedToken
-}
-
-func (s *SessionLoader) GetAuthTokens() *SessionAuthTokens {
-	return s.authTokens
 }

@@ -14,7 +14,7 @@ import (
 )
 
 func (c *Client) Login(ctx context.Context) error {
-	err := c.session.LoadPage(ctx, endpoints.BASE_LOGIN_URL)
+	err := c.loadPage(ctx, endpoints.BASE_LOGIN_URL)
 	if err != nil {
 		return err
 	}

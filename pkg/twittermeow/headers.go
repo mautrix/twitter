@@ -62,15 +62,14 @@ func (c *Client) buildHeaders(opts HeaderOpts) http.Header {
 	}
 
 	if opts.WithAuthBearer || opts.WithNonAuthBearer {
-		authTokens := c.session.GetAuthTokens()
 		// check if client is authenticated here
 		// var bearerToken string
 		// if c.isAuthenticated() && !opts.WithNonAuthBearer {
-		// 	bearerToken = authTokens.authenticated
+		// 	bearerToken = c.session.AuthTokens.Authenticated
 		// } else {
-		// 	bearerToken = authTokens.notAuthenticated
+		// 	bearerToken = c.session.AuthTokens.NotAuthenticated
 		// }
-		opts.Extra["authorization"] = authTokens.notAuthenticated
+		opts.Extra["authorization"] = c.session.AuthTokens.NotAuthenticated
 	}
 
 	if opts.WithXGuestToken {
@@ -78,7 +77,7 @@ func (c *Client) buildHeaders(opts HeaderOpts) http.Header {
 	}
 
 	if opts.WithXClientUUID {
-		opts.Extra["x-client-uuid"] = c.session.clientUUID
+		opts.Extra["x-client-uuid"] = c.session.ClientUUID
 	}
 
 	if opts.WithXTwitterHeaders {

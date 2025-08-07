@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"golang.org/x/net/proxy"
@@ -28,7 +29,7 @@ import (
 
 type ClientOpts struct {
 	Cookies       *cookies.Cookies
-	Session       *SessionLoader
+	Session       *CachedSession
 	WithJOTClient bool
 }
 
@@ -38,7 +39,7 @@ type StreamEventHandler func(evt response.StreamEvent)
 type Client struct {
 	Logger     zerolog.Logger
 	cookies    *cookies.Cookies
-	session    *SessionLoader
+	session    *CachedSession
 	HTTP       *http.Client
 	httpProxy  func(*http.Request) (*url.URL, error)
 	socksProxy proxy.Dialer
@@ -81,7 +82,9 @@ func NewClient(opts *ClientOpts, logger zerolog.Logger) *Client {
 	if opts.Session != nil {
 		cli.session = opts.Session
 	} else {
-		cli.session = cli.newSessionLoader()
+		cli.session = &CachedSession{
+			ClientUUID: uuid.NewString(),
+		}
 	}
 
 	return &cli
@@ -96,10 +99,6 @@ func (c *Client) Connect(ctx context.Context) error {
 		return ErrConnectSetEventHandler
 	}
 
-	if !c.isAuthenticated() {
-		return ErrNotAuthenticatedYet
-	}
-
 	c.polling.startPolling(c.Logger.WithContext(ctx))
 	return nil
 }
@@ -109,20 +108,13 @@ func (c *Client) Disconnect() {
 	c.stream.stopStream()
 }
 
-func (c *Client) Logout(ctx context.Context) (bool, error) {
-	if !c.isAuthenticated() {
-		return false, ErrNotAuthenticatedYet
-	}
-	err := c.session.LoadPage(ctx, endpoints.BASE_LOGOUT_URL)
-	if err != nil {
-		return false, err
-	}
-	c.cookies.Set(cookies.XAuthToken, "")
-	return true, nil
+func (c *Client) Logout(ctx context.Context) error {
+	defer c.cookies.Set(cookies.XAuthToken, "")
+	return c.loadPage(ctx, endpoints.BASE_LOGOUT_URL)
 }
 
 func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialStateResponse, *response.AccountSettingsResponse, error) {
-	err := c.session.LoadPage(ctx, endpoints.BASE_MESSAGES_URL)
+	err := c.loadPage(ctx, endpoints.BASE_MESSAGES_URL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
 	}
@@ -151,7 +143,6 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialSt
 		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
 	}
 
-	c.session.SetCurrentUser(data)
 	c.polling.SetCurrentCursor(initialInboxState.InboxInitialState.Cursor)
 
 	c.Logger.Info().
@@ -160,10 +151,6 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialSt
 		Msg("Successfully loaded and authenticated as user")
 
 	return initialInboxState, data, nil
-}
-
-func (c *Client) GetCurrentUser() *response.AccountSettingsResponse {
-	return c.session.GetCurrentUser()
 }
 
 func (c *Client) GetCurrentUserID() string {
@@ -205,10 +192,6 @@ func (c *Client) IsLoggedIn() bool {
 	return !c.cookies.IsCookieEmpty(cookies.XAuthToken)
 }
 
-func (c *Client) isAuthenticated() bool {
-	return c.session.isAuthenticated()
-}
-
 func (c *Client) SetEventHandler(handler EventHandler, streamHandler StreamEventHandler) {
 	c.eventHandler = handler
 	c.streamEventHandler = streamHandler
@@ -237,8 +220,7 @@ func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) 
 		return fmt.Errorf("failed to find auth tokens in main script response body")
 	}
 
-	authenticatedToken, notAuthenticatedToken := authTokens[0], authTokens[1]
-	c.session.SetAuthTokens(string(authenticatedToken), string(notAuthenticatedToken))
+	c.session.AuthTokens.Authenticated, c.session.AuthTokens.NotAuthenticated = string(authTokens[0]), string(authTokens[1])
 
 	return nil
 }
@@ -322,8 +304,9 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 			Msg("Found loading animations and verification token")
 	}
 
-	c.session.SetCountry(country)
-	c.session.SetVerificationToken(verificationToken, loadingAnims)
+	c.session.Country = country
+	c.session.VerificationToken = verificationToken
+	c.session.loadingAnims = loadingAnims
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {
@@ -351,13 +334,13 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	} else if indexes, err := c.fetchAndParseSScript(ctx, fmt.Sprintf("https://abs.twimg.com/responsive-web/client-web/ondemand.s.%sa.js", ondemandS)); err != nil {
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
-		c.session.SetVariableIndexes(indexes)
+		c.session.variableIndexes = indexes
 		c.Logger.Trace().
 			Any("variable_indexes", indexes[:]).
 			Msg("Found variable indexes")
 	}
 
-	c.session.CalculateAnimationToken()
+	c.calculateAnimationToken()
 
 	return nil
 }
@@ -391,7 +374,7 @@ type apiRequestOpts struct {
 }
 
 func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
-	clientTransactionID, err := crypto.SignTransaction(c.session.animationToken, c.session.verificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
+	clientTransactionID, err := crypto.SignTransaction(c.session.AnimationToken, c.session.VerificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
 	if err != nil {
 		c.Logger.Trace().Err(err).Msg("Failed to create client transaction ID")
 		clientTransactionID = base64.RawStdEncoding.EncodeToString([]byte("e:"))
