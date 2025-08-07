@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/exsync"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -19,15 +20,19 @@ type PollingClient struct {
 	activeConversationID  string
 	includeConversationID bool
 	shortCircuit          chan struct{}
+	pollingStopped        *exsync.Event
 }
 
 // interval is the delay inbetween checking for new updates
 // default interval will be 10s
 func (c *Client) newPollingClient() *PollingClient {
-	return &PollingClient{
-		client:       c,
-		shortCircuit: make(chan struct{}, 1),
+	pc := &PollingClient{
+		client:         c,
+		shortCircuit:   make(chan struct{}, 1),
+		pollingStopped: exsync.NewEvent(),
 	}
+	pc.pollingStopped.Set()
+	return pc
 }
 
 func (pc *PollingClient) startPolling(ctx context.Context) {
@@ -35,7 +40,15 @@ func (pc *PollingClient) startPolling(ctx context.Context) {
 	if oldCancel := pc.stop.Swap(&cancel); oldCancel != nil {
 		(*oldCancel)()
 	}
-	go pc.doPoll(ctx)
+	pc.pollingStopped.Clear()
+	go func() {
+		defer func() {
+			if pc.stop.Load() == &cancel {
+				pc.pollingStopped.Set()
+			}
+		}()
+		pc.doPoll(ctx)
+	}()
 }
 
 func (pc *PollingClient) doPoll(ctx context.Context) {
@@ -91,13 +104,12 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 			pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents)
 		}
 	}
-
 	pc.client.session.PollingCursor = userUpdatesResponse.UserEvents.Cursor
 	return nil
 }
 
 func (pc *PollingClient) stopPolling() {
-	if cancel := pc.stop.Swap(nil); cancel != nil {
+	if cancel := pc.stop.Load(); cancel != nil {
 		(*cancel)()
 	}
 	pc.activeConversationID = ""

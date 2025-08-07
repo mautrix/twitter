@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/exsync"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -27,14 +28,18 @@ type StreamClient struct {
 	sessionID         string
 	heartbeatInterval time.Duration
 	shortCircuit      chan struct{}
+	streamStopped     *exsync.Event
 }
 
 func (c *Client) newStreamClient() *StreamClient {
-	return &StreamClient{
+	sc := &StreamClient{
 		client:            c,
 		heartbeatInterval: 25 * time.Second,
 		shortCircuit:      make(chan struct{}, 1),
+		streamStopped:     exsync.NewEvent(),
 	}
+	sc.streamStopped.Set()
+	return sc
 }
 
 func (sc *StreamClient) startOrUpdateEventStream(conversationID string) {
@@ -58,6 +63,12 @@ func (sc *StreamClient) start(ctx context.Context) {
 	if oldCancel := sc.stop.Swap(&cancel); oldCancel != nil {
 		(*oldCancel)()
 	}
+	sc.streamStopped.Clear()
+	defer func() {
+		if sc.stop.Load() == &cancel {
+			sc.streamStopped.Set()
+		}
+	}()
 	eventsURL, err := url.Parse(endpoints.PIPELINE_EVENTS_URL)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err)
@@ -186,7 +197,7 @@ func (sc *StreamClient) heartbeat(ctx context.Context) {
 }
 
 func (sc *StreamClient) stopStream() {
-	if cancel := sc.stop.Swap(nil); cancel != nil {
+	if cancel := sc.stop.Load(); cancel != nil {
 		(*cancel)()
 	}
 	sc.conversationID = ""

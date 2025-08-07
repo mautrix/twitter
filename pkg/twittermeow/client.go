@@ -95,6 +95,20 @@ func (c *Client) Connect(ctx context.Context) error {
 func (c *Client) Disconnect() {
 	c.polling.stopPolling()
 	c.stream.stopStream()
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := c.polling.pollingStopped.Wait(timeoutCtx)
+	if err != nil {
+		c.Logger.Warn().Msg("Timed out waiting for polling to stop")
+		return
+	}
+	err = c.stream.streamStopped.Wait(timeoutCtx)
+	if err != nil {
+		c.Logger.Warn().Msg("Timed out waiting for stream to stop")
+		return
+	}
+	c.Logger.Debug().Msg("Polling and stream clients stopped")
 }
 
 func (c *Client) Logout(ctx context.Context) error {
