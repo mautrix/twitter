@@ -63,13 +63,13 @@ func (c *Client) buildHeaders(opts HeaderOpts) http.Header {
 
 	if opts.WithAuthBearer || opts.WithNonAuthBearer {
 		// check if client is authenticated here
-		// var bearerToken string
-		// if c.isAuthenticated() && !opts.WithNonAuthBearer {
-		// 	bearerToken = c.session.AuthTokens.Authenticated
-		// } else {
-		// 	bearerToken = c.session.AuthTokens.NotAuthenticated
-		// }
-		opts.Extra["authorization"] = c.session.AuthTokens.NotAuthenticated
+		var bearerToken string
+		if c.IsLoggedIn() && !opts.WithNonAuthBearer {
+			bearerToken = c.session.AuthTokens.Authenticated
+		} else {
+			bearerToken = c.session.AuthTokens.NotAuthenticated
+		}
+		opts.Extra["authorization"] = bearerToken
 	}
 
 	if opts.WithXGuestToken {
