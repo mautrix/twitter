@@ -27,7 +27,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData)
+type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool
 type StreamEventHandler func(evt response.StreamEvent)
 
 type Client struct {

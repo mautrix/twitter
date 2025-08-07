@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -67,7 +68,10 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 			return
 		}
 		err := pc.poll(ctx)
-		if err != nil {
+		if ctx.Err() != nil {
+			log.Debug().Err(err).Msg("Polling context canceled during event handling")
+			return
+		} else if err != nil {
 			log.Err(err).Msg("Failed to poll for updates")
 			pc.client.eventHandler(&types.PollingError{Error: err}, nil)
 			failing = true
@@ -81,6 +85,8 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 		}
 	}
 }
+
+var errEventHandlerFailed = errors.New("event handler failed")
 
 func (pc *PollingClient) poll(ctx context.Context) error {
 	userUpdatesQuery := (&payload.DMRequestQuery{}).Default()
@@ -97,12 +103,22 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 		return err
 	}
 
-	pc.client.eventHandler(nil, userUpdatesResponse.UserEvents)
+	if !pc.client.eventHandler(nil, userUpdatesResponse.UserEvents) {
+		return errEventHandlerFailed
+	}
 	for _, entry := range userUpdatesResponse.UserEvents.Entries {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		parsed := entry.ParseWithErrorLog(&pc.client.Logger)
 		if parsed != nil {
-			pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents)
+			if !pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents) {
+				return errEventHandlerFailed
+			}
 		}
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if userUpdatesResponse.UserEvents.Cursor != pc.client.session.PollingCursor {
 		pc.client.session.PollingCursor = userUpdatesResponse.UserEvents.Cursor
