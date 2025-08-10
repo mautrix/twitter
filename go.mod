@@ -10,10 +10,10 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.10.0
-	go.mau.fi/util v0.8.9-0.20250723171559-474867266038
+	go.mau.fi/util v0.8.9-0.20250808135321-09699c48d2fa
 	golang.org/x/net v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.24.3-0.20250801084753-196164ed6749
+	maunium.net/go/mautrix v0.24.3-0.20250809144234-87d599c491fe
 )
 
 require (
