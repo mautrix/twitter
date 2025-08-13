@@ -87,6 +87,11 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 	return nil
 }
 
+const (
+	sessionMaxTimeSinceSave = 24 * time.Hour
+	sessionMaxTimeSinceInit = 48 * time.Hour
+)
+
 func (tc *TwitterClient) Connect(ctx context.Context) {
 	if tc.client == nil {
 		tc.userLogin.BridgeState.Send(status.BridgeState{
@@ -98,9 +103,13 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
-	if tc.connector.Config.CacheSession && meta.Session != nil && meta.SessionTS.Add(24*time.Hour).After(time.Now()) {
+	if tc.connector.Config.CacheSession &&
+		meta.Session != nil &&
+		meta.Session.LastSaved.Add(sessionMaxTimeSinceSave).After(time.Now()) &&
+		meta.Session.InitializedAt.Add(48*time.Hour).After(time.Now()) {
 		zerolog.Ctx(ctx).Debug().
-			Time("session_ts", meta.SessionTS).
+			Time("session_ts", meta.Session.LastSaved).
+			Time("session_init_ts", meta.Session.InitializedAt).
 			Msg("Connecting with cached session")
 		tc.client.SetSession(meta.Session)
 		tc.startPolling(ctx, true)
@@ -160,7 +169,7 @@ func (tc *TwitterClient) HandleCursorChange(ctx context.Context) {
 	}
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
 	meta.Session = tc.client.GetSession()
-	meta.SessionTS = time.Now()
+	meta.Session.LastSaved = time.Now()
 	err := tc.userLogin.Save(ctx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to save user login after cursor change")

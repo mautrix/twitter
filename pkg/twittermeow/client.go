@@ -150,6 +150,7 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialSt
 	}
 
 	c.session.PollingCursor = initialInboxState.InboxInitialState.Cursor
+	c.session.InitializedAt = time.Now()
 
 	c.Logger.Info().
 		Str("screen_name", data.ScreenName).

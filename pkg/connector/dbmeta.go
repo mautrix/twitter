@@ -19,7 +19,6 @@ package connector
 import (
 	"crypto/ecdh"
 	"crypto/rand"
-	"time"
 
 	"go.mau.fi/util/exerrors"
 	"go.mau.fi/util/random"
@@ -46,8 +45,7 @@ type UserLoginMetadata struct {
 	Cookies  string    `json:"cookies"`
 	PushKeys *PushKeys `json:"push_keys,omitempty"`
 
-	SessionTS time.Time                  `json:"session_ts,omitempty"`
-	Session   *twittermeow.CachedSession `json:"session,omitempty"`
+	Session *twittermeow.CachedSession `json:"session,omitempty"`
 }
 
 type MessageMetadata struct {

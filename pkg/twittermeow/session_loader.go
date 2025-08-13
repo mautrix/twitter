@@ -31,7 +31,9 @@ type SessionAuthTokens struct {
 }
 
 type CachedSession struct {
-	PollingCursor string `json:"polling_cursor"`
+	InitializedAt time.Time `json:"initialized_at"`
+	LastSaved     time.Time `json:"last_saved"`
+	PollingCursor string    `json:"polling_cursor"`
 
 	VerificationToken string            `json:"verification_token"`
 	AnimationToken    string            `json:"animation_token"`
