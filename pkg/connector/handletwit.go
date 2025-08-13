@@ -205,17 +205,19 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.TotalMemberCount = len(conversation.Participants)
 		return tc.userLogin.QueueRemoteEvent(portalMembersAddedRemoteEvent).Success
 	case *types.ParticipantsLeave:
-		conversation := inbox.GetConversationByID(evt.ConversationID)
 		memberChanges := tc.participantsToMemberList(evt.Participants, inbox)
 		for _, member := range memberChanges.MemberMap {
 			member.Membership = event.MembershipLeave
 		}
-		conversation.Participants = slices.DeleteFunc(conversation.Participants, func(pcp types.Participant) bool {
-			_, remove := memberChanges.MemberMap[MakeUserID(pcp.UserID)]
-			return remove
-		})
+		conversation := inbox.GetConversationByID(evt.ConversationID)
+		if conversation != nil {
+			conversation.Participants = slices.DeleteFunc(conversation.Participants, func(pcp types.Participant) bool {
+				_, remove := memberChanges.MemberMap[MakeUserID(pcp.UserID)]
+				return remove
+			})
+			memberChanges.TotalMemberCount = len(conversation.Participants)
+		}
 		memberChanges.IsFull = false
-		memberChanges.TotalMemberCount = len(conversation.Participants)
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventChatInfoChange,
