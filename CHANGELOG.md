@@ -1,3 +1,12 @@
+# v0.5.0 (2025-08-16)
+
+* Deprecated legacy provisioning API. The `/_matrix/provision/v1` endpoints will
+  be deleted in the next release.
+* Bumped minimum Go version to 1.24.
+* Added option to reconnect faster after restart by caching connection state.
+* Added support for bridging group chat participant leaves from Twitter.
+* Fixed ogg voice messages converted from Twitter including a video stream.
+
 # v0.4.3 (2025-07-16)
 
 * Fixed forward backfill not fetching more messages if there's a large gap.
