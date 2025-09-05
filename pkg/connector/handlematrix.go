@@ -46,6 +46,7 @@ var (
 	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
+	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -237,5 +238,14 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 		conversationID = string(chat.Portal.ID)
 	}
 	tc.client.SetActiveConversation(conversationID)
+	return nil
+}
+
+func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridgev2.MatrixDeleteChat) error {
+	if chat.Portal != nil {
+		conversationID := string(chat.Portal.ID)
+		reqQuery := payload.DMRequestQuery{}.Default()
+		return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
+	}
 	return nil
 }
