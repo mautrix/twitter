@@ -202,7 +202,9 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			},
 		}
 		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.IsFull = false
-		portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.TotalMemberCount = len(conversation.Participants)
+		if conversation != nil {
+			portalMembersAddedRemoteEvent.ChatInfoChange.MemberChanges.TotalMemberCount = len(conversation.Participants)
+		}
 		return tc.userLogin.QueueRemoteEvent(portalMembersAddedRemoteEvent).Success
 	case *types.ParticipantsLeave:
 		memberChanges := tc.participantsToMemberList(evt.Participants, inbox)
