@@ -28,7 +28,15 @@ import (
 )
 
 func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
-	return &bridgev2.NetworkGeneralCapabilities{}
+	return &bridgev2.NetworkGeneralCapabilities{
+		Provisioning: bridgev2.ProvisioningCapabilities{
+			ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
+				CreateDM:       true,
+				LookupUsername: true,
+				Search:         false, // TODO allow search
+			},
+		},
+	}
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
