@@ -246,10 +246,7 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	if chat.Content.DeleteForEveryone {
 		return errors.New("delete for everyone is not supported")
 	}
-	if chat.Portal != nil {
-		conversationID := string(chat.Portal.ID)
-		reqQuery := payload.DMRequestQuery{}.Default()
-		return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
-	}
-	return nil
+	conversationID := string(chat.Portal.ID)
+	reqQuery := payload.DMRequestQuery{}.Default()
+	return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
 }
