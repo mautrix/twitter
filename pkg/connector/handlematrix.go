@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ var (
 	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
+	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -238,4 +240,13 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 	}
 	tc.client.SetActiveConversation(conversationID)
 	return nil
+}
+
+func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridgev2.MatrixDeleteChat) error {
+	if chat.Content.DeleteForEveryone {
+		return errors.New("delete for everyone is not supported")
+	}
+	conversationID := string(chat.Portal.ID)
+	reqQuery := payload.DMRequestQuery{}.Default()
+	return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
 }
