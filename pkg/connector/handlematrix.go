@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -242,6 +243,9 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 }
 
 func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridgev2.MatrixDeleteChat) error {
+	if chat.Content.DeleteForEveryone {
+		return errors.New("delete for everyone is not supported")
+	}
 	if chat.Portal != nil {
 		conversationID := string(chat.Portal.ID)
 		reqQuery := payload.DMRequestQuery{}.Default()

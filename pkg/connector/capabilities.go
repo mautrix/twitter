@@ -42,7 +42,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 3
+	return 1, 4
 }
 
 const MaxTextLength = 10000
@@ -56,7 +56,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 
 func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
 	return &event.RoomFeatures{
-		ID: "fi.mau.twitter.capabilities.2025_05_05",
+		ID: "fi.mau.twitter.capabilities.2025_09_22",
 		//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 		//	event.FmtUserLink: event.CapLevelFullySupported,
 		//},
@@ -111,5 +111,8 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) 
 		EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
 		Reaction:      event.CapLevelFullySupported,
 		ReactionCount: 1,
+
+		DeleteChat:            true,
+		DeleteChatForEveryone: false,
 	}
 }
