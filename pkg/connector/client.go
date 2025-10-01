@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -47,6 +48,8 @@ type TwitterClient struct {
 	participantCache map[string][]types.Participant
 
 	matrixParser *format.HTMLParser
+
+	reconnectAttempted atomic.Bool
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -226,4 +229,10 @@ func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
 
 func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) bool {
 	return UserLoginIDToUserID(tc.userLogin.ID) == userID
+}
+
+func (tc *TwitterClient) FullReconnect() {
+	tc.Disconnect()
+	tc.userLogin.Metadata.(*UserLoginMetadata).Session = nil
+	tc.Connect(tc.userLogin.Log.WithContext(tc.connector.br.BackgroundCtx))
 }

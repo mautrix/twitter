@@ -25,6 +25,7 @@ var (
 	ErrAccountSuspended         error = TwitterError{Code: 63}
 	ErrNotActive                error = TwitterError{Code: 141}
 	ErrAccountTemporarilyLocked error = TwitterError{Code: 326}
+	ErrCSRFMismatch             error = TwitterError{Code: 353}
 )
 
 func IsAuthError(err error) bool {

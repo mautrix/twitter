@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -30,6 +31,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
@@ -63,6 +65,10 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 					"go_error": evt.Error.Error(),
 				},
 			})
+			if errors.Is(evt.Error, twittermeow.ErrCSRFMismatch) && !tc.reconnectAttempted.Swap(true) {
+				tc.userLogin.Log.Info().Msg("Doing full reconnect due to 353 error")
+				go tc.FullReconnect()
+			}
 		} else {
 			tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 		}
