@@ -43,8 +43,8 @@ func ParseMainScriptURL(html string) string {
 	return match[0]
 }
 
-func ParseBearerTokens(js []byte) [][]byte {
-	return bearerTokenRegex.FindAll(js, -1)
+func ParseBearerToken(js []byte) [][]byte {
+	return bearerTokenRegex.FindSubmatch(js)
 }
 
 func ParseVariableIndexes(js []byte) [][]byte {

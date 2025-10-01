@@ -25,21 +25,17 @@ var (
 // retrieved from main page resp, its a 2 year old timestamp; looks constant
 const fetchedTime = 1661971138705
 
-type SessionAuthTokens struct {
-	Authenticated    string `json:"authenticated"`
-	NotAuthenticated string `json:"not_authenticated"`
-}
-
 type CachedSession struct {
 	InitializedAt time.Time `json:"initialized_at"`
 	LastSaved     time.Time `json:"last_saved"`
 	PollingCursor string    `json:"polling_cursor"`
 
-	VerificationToken string            `json:"verification_token"`
-	AnimationToken    string            `json:"animation_token"`
-	Country           string            `json:"country"`
-	ClientUUID        string            `json:"client_uuid"`
-	AuthTokens        SessionAuthTokens `json:"auth_tokens"`
+	VerificationToken string `json:"verification_token"`
+	AnimationToken    string `json:"animation_token"`
+	Country           string `json:"country"`
+	ClientUUID        string `json:"client_uuid"`
+
+	bearerToken string
 
 	loadingAnims    *[4][16][11]int
 	variableIndexes *[4]int

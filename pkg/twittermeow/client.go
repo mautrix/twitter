@@ -217,20 +217,22 @@ func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
 	return scriptRespBody, err
 }
 
-func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) error {
+func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) {
 	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
-		return err
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch main script")
+		return
 	}
-
-	authTokens := methods.ParseBearerTokens(scriptRespBody)
-	if len(authTokens) < 2 {
-		return fmt.Errorf("failed to find auth tokens in main script response body")
+	authToken := methods.ParseBearerToken(scriptRespBody)
+	if len(authToken) == 0 {
+		zerolog.Ctx(ctx).Warn().Msg("No bearer token found in main script, using default")
+		return
 	}
-
-	c.session.AuthTokens.Authenticated, c.session.AuthTokens.NotAuthenticated = string(authTokens[0]), string(authTokens[1])
-
-	return nil
+	c.session.bearerToken = string(authToken[1])
+	if c.session.bearerToken != BearerToken {
+		zerolog.Ctx(ctx).Warn().Str("bearer_token", c.session.bearerToken).
+			Msg("Hardcoded token doesn't match fetched one")
+	}
 }
 
 func (c *Client) fetchAndParseSScript(ctx context.Context, scriptURL string) (*[4]int, error) {
@@ -328,12 +330,9 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 
 	mainScriptURL := methods.ParseMainScriptURL(mainPageHTML)
 	if mainScriptURL == "" {
-		return fmt.Errorf("main script not found (HTTP %d)", mainPageResp.StatusCode)
-	}
-
-	err = c.fetchAndParseMainScript(ctx, mainScriptURL)
-	if err != nil {
-		return err
+		zerolog.Ctx(ctx).Warn().Int("status_code", mainPageResp.StatusCode).Msg("Main script URL not found in main page HTML")
+	} else {
+		c.fetchAndParseMainScript(ctx, mainScriptURL)
 	}
 
 	ondemandS := methods.ParseOndemandS(mainPageHTML)

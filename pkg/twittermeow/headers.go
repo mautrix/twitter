@@ -51,6 +51,8 @@ type HeaderOpts struct {
 	Extra               map[string]string
 }
 
+const BearerToken = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+
 func (c *Client) buildHeaders(opts HeaderOpts) http.Header {
 	if opts.Extra == nil {
 		opts.Extra = make(map[string]string)
@@ -62,14 +64,11 @@ func (c *Client) buildHeaders(opts HeaderOpts) http.Header {
 	}
 
 	if opts.WithAuthBearer || opts.WithNonAuthBearer {
-		// check if client is authenticated here
-		var bearerToken string
-		if c.IsLoggedIn() && !opts.WithNonAuthBearer {
-			bearerToken = c.session.AuthTokens.Authenticated
+		if c.session.bearerToken != "" {
+			opts.Extra["authorization"] = c.session.bearerToken
 		} else {
-			bearerToken = c.session.AuthTokens.NotAuthenticated
+			opts.Extra["authorization"] = BearerToken
 		}
-		opts.Extra["authorization"] = bearerToken
 	}
 
 	if opts.WithXGuestToken {
