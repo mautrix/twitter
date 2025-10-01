@@ -10,7 +10,7 @@ var (
 	metaTagRegex           = regexp.MustCompile(`<meta\s+http-equiv=["']refresh["']\s+content=["'][^;]+;\s*url\s*=\s*([^"']+)["']\s*/?>`)
 	migrateFormDataRegex   = regexp.MustCompile(`<form[^>]* action="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="tok" value="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="data" value="([^"]+)"[^>]*>`)
 	mainScriptURLRegex     = regexp.MustCompile(`https:\/\/(?:[A-Za-z0-9.-]+)\/responsive-web\/client-web\/main\.[0-9A-Za-z]+\.js`)
-	bearerTokenRegex       = regexp.MustCompile(`(Bearer\s[A-Za-z0-9%]{16,})`)
+	bearerTokenRegex       = regexp.MustCompile(`Bearer\s[A-Za-z0-9%]{16,}`)
 	guestTokenRegex        = regexp.MustCompile(`gt=([0-9]+)`)
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
@@ -44,7 +44,7 @@ func ParseMainScriptURL(html string) string {
 }
 
 func ParseBearerToken(js []byte) [][]byte {
-	return bearerTokenRegex.FindSubmatch(js)
+	return bearerTokenRegex.FindAll(js, -1)
 }
 
 func ParseVariableIndexes(js []byte) [][]byte {

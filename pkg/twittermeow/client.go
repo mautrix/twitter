@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/exslices"
 	"go.mau.fi/util/ptr"
 	"golang.org/x/net/proxy"
 
@@ -223,15 +225,21 @@ func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) 
 		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch main script")
 		return
 	}
-	authToken := methods.ParseBearerToken(scriptRespBody)
-	if len(authToken) == 0 {
+	authTokenBytes := methods.ParseBearerToken(scriptRespBody)
+	authTokens := exslices.CastFunc(authTokenBytes, func(from []byte) string {
+		return string(from)
+	})
+	if len(authTokens) == 0 {
 		zerolog.Ctx(ctx).Warn().Msg("No bearer token found in main script, using default")
-		return
-	}
-	c.session.bearerToken = string(authToken[1])
-	if c.session.bearerToken != BearerToken {
-		zerolog.Ctx(ctx).Warn().Str("bearer_token", c.session.bearerToken).
+	} else if len(authTokens) > 1 {
+		zerolog.Ctx(ctx).Warn().Strs("tokens", authTokens).Msg("Multiple bearer tokens found")
+		if !slices.Contains(authTokens, BearerToken) {
+			c.session.bearerToken = authTokens[0]
+		}
+	} else if authTokens[0] != BearerToken {
+		zerolog.Ctx(ctx).Warn().Str("bearer_token", authTokens[0]).
 			Msg("Hardcoded token doesn't match fetched one")
+		c.session.bearerToken = authTokens[0]
 	}
 }
 
