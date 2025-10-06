@@ -17,7 +17,6 @@
 package main
 
 import (
-	"maunium.net/go/mautrix/bridgev2/bridgeconfig"
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
 
 	"go.mau.fi/mautrix-twitter/pkg/connector"
@@ -31,33 +30,15 @@ var (
 	BuildTime = "unknown"
 )
 
-var c = &connector.TwitterConnector{}
 var m = mxmain.BridgeMain{
 	Name:        "mautrix-twitter",
 	URL:         "https://github.com/mautrix/twitter",
 	Description: "A Matrix-Twitter puppeting bridge.",
 	Version:     "0.5.0",
-	Connector:   c,
+	Connector:   &connector.TwitterConnector{},
 }
 
 func main() {
-	bridgeconfig.HackyMigrateLegacyNetworkConfig = migrateLegacyConfig
-	m.PostInit = func() {
-		m.CheckLegacyDB(
-			8,
-			"v0.1.0",
-			"v0.2.0",
-			m.LegacyMigrateSimple(legacyMigrateRenameTables, legacyMigrateCopyData, 18),
-			true,
-		)
-	}
-	m.PostStart = func() {
-		if m.Matrix.Provisioning != nil {
-			m.Matrix.Provisioning.Router.HandleFunc("POST /v1/api/login", legacyProvLogin)
-			m.Matrix.Provisioning.Router.HandleFunc("POST /v1/api/logout", legacyProvLogout)
-		}
-	}
-
 	m.InitVersion(Tag, Commit, BuildTime)
 	m.Run()
 }
