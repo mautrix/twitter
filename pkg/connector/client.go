@@ -109,7 +109,8 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	if tc.connector.Config.CacheSession &&
 		meta.Session != nil &&
 		meta.Session.LastSaved.Add(sessionMaxTimeSinceSave).After(time.Now()) &&
-		meta.Session.InitializedAt.Add(48*time.Hour).After(time.Now()) {
+		meta.Session.InitializedAt.Add(48*time.Hour).After(time.Now()) &&
+		meta.Session.CacheVersion == twittermeow.CurrentCacheVersion {
 		zerolog.Ctx(ctx).Debug().
 			Time("session_ts", meta.Session.LastSaved).
 			Time("session_init_ts", meta.Session.InitializedAt).

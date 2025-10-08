@@ -24,11 +24,13 @@ var (
 
 // retrieved from main page resp, its a 2 year old timestamp; looks constant
 const fetchedTime = 1661971138705
+const CurrentCacheVersion = 1
 
 type CachedSession struct {
 	InitializedAt time.Time `json:"initialized_at"`
 	LastSaved     time.Time `json:"last_saved"`
 	PollingCursor string    `json:"polling_cursor"`
+	CacheVersion  int       `json:"cache_version"`
 
 	VerificationToken string `json:"verification_token"`
 	AnimationToken    string `json:"animation_token"`
