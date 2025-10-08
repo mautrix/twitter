@@ -15,7 +15,7 @@ var (
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
 	ondemandSRegex         = regexp.MustCompile(`"ondemand.s":"([a-f0-9]+)"`)
-	variableIndexesRegex   = regexp.MustCompile(`const\[\w{1,2},\w{1,2}]=\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
+	variableIndexesRegex   = regexp.MustCompile(`\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
 )
 
 func ParseMigrateURL(html string) (string, bool) {
