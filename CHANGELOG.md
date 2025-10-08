@@ -1,3 +1,14 @@
+# v25.10 (unreleased)
+
+* Switched to calendar versioning.
+* Removed legacy provisioning API and database legacy migration.
+  Upgrading directly from versions prior to v0.2.0 is not supported.
+  * If you've been using the bridge since before v0.2.0 and have prevented the
+    bridge from writing to the config, you must either update the config
+    manually or allow the bridge to update it for you **before** upgrading to
+    this release (i.e. run v0.5.0 once with config writing allowed).
+* Fixed parsing static auth tokens from Twitter index page.
+
 # v0.5.0 (2025-08-16)
 
 * Deprecated legacy provisioning API. The `/_matrix/provision/v1` endpoints will
