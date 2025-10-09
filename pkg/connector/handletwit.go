@@ -58,13 +58,19 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 	switch evt := rawEvt.(type) {
 	case *types.PollingError:
 		if evt.Error != nil {
-			tc.userLogin.BridgeState.Send(status.BridgeState{
+			stateEvt := status.BridgeState{
 				StateEvent: status.StateTransientDisconnect,
 				Error:      "twitter-polling-error",
 				Info: map[string]any{
 					"go_error": evt.Error.Error(),
 				},
-			})
+			}
+			if evt.IsAuth {
+				stateEvt.StateEvent = status.StateBadCredentials
+				stateEvt.Error = "twitter-invalid-credentials"
+				tc.Disconnect()
+			}
+			tc.userLogin.BridgeState.Send(stateEvt)
 			if errors.Is(evt.Error, twittermeow.ErrCSRFMismatch) && !tc.reconnectAttempted.Swap(true) {
 				tc.userLogin.Log.Info().Msg("Doing full reconnect due to 353 error")
 				go tc.FullReconnect()

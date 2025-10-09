@@ -30,7 +30,8 @@ func (*EndAVBroadcast) isTwitterEvent()             {}
 func (*PollingError) isTwitterEvent()               {}
 
 type PollingError struct {
-	Error error
+	Error  error
+	IsAuth bool
 }
 
 type RawTwitterEvent []byte

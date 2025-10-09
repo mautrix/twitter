@@ -73,9 +73,16 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 			return
 		} else if err != nil {
 			log.Err(err).Msg("Failed to poll for updates")
-			pc.client.eventHandler(&types.PollingError{Error: err}, nil)
+			authError := IsAuthError(err)
+			pc.client.eventHandler(&types.PollingError{Error: err, IsAuth: authError}, nil)
+			if authError {
+				return
+			}
 			failing = true
 			backoffInterval = min(backoffInterval*2, 180*time.Second)
+			if errors.Is(err, ErrRatelimitExceeded) {
+				backoffInterval *= 2
+			}
 			tick.Reset(backoffInterval)
 		} else if failing {
 			failing = false
