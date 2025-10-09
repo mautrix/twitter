@@ -68,7 +68,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			if evt.IsAuth {
 				stateEvt.StateEvent = status.StateBadCredentials
 				stateEvt.Error = "twitter-invalid-credentials"
-				tc.Disconnect()
+				go tc.Disconnect()
 			}
 			tc.userLogin.BridgeState.Send(stateEvt)
 			if errors.Is(evt.Error, twittermeow.ErrCSRFMismatch) && !tc.reconnectAttempted.Swap(true) {
