@@ -65,7 +65,7 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 		StepID:       LoginStepIDCookies,
 		Instructions: "Open the Login URL in an Incognito/Private browsing mode. Then, extract the cookies as a JSON object/cURL command copied from the Network tab of your browser's DevTools. After that, close the browser **before** pasting the cookies.\n\nFor example: `{\"ct0\":\"123466-...\",\"auth_token\":\"abcde-...\"}`",
 		CookiesParams: &bridgev2.LoginCookiesParams{
-			URL:       "https://x.com",
+			URL:       "https://x.com/i/flow/login",
 			UserAgent: "",
 			Fields: []bridgev2.LoginCookieField{
 				{
