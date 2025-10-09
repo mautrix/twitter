@@ -89,7 +89,7 @@ type DMRequestQuery struct {
 	SupportsEdit                        bool        `url:"supports_edit"`
 	IncludeExtEditControl               bool        `url:"include_ext_edit_control"`
 	IncludeExtBusinessAffiliationsLabel bool        `url:"include_ext_business_affiliations_label"`
-	IncludeExtHasParodyProfileLabel     bool        `url:"include_ext_has_parody_profile_label"`
+	IncludeParodyCommentaryFanLabel     bool        `url:"include_ext_parody_commentary_fan_label"`
 	Ext                                 string      `url:"ext"`
 }
 
@@ -119,7 +119,7 @@ func (p DMRequestQuery) Default() DMRequestQuery {
 		IncludeExtProfileImageShape:         1,
 		SkipStatus:                          1,
 		DMSecretConversationsEnabled:        false,
-		KRSRegistrationEnabled:              true,
+		KRSRegistrationEnabled:              false,
 		CardsPlatform:                       "Web-12",
 		IncludeCards:                        1,
 		IncludeExtAltText:                   true,
@@ -136,8 +136,8 @@ func (p DMRequestQuery) Default() DMRequestQuery {
 		SupportsEdit:                        true,
 		IncludeExtEditControl:               true,
 		IncludeExtBusinessAffiliationsLabel: true,
-		IncludeExtHasParodyProfileLabel:     true,
-		Ext:                                 "mediaColor,altText,mediaStats,highlightedLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
+		IncludeParodyCommentaryFanLabel:     true,
+		Ext:                                 "mediaColor,altText,businessAffiliationsLabel,mediaStats,highlightedLabel,parodyCommentaryFanLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
 	}
 }
 
