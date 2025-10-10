@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -15,10 +13,10 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/google/uuid"
+	"github.com/imroc/req/v3"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exslices"
 	"go.mau.fi/util/ptr"
-	"golang.org/x/net/proxy"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -33,12 +31,10 @@ type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData)
 type StreamEventHandler func(evt response.StreamEvent)
 
 type Client struct {
-	Logger     zerolog.Logger
-	cookies    *cookies.Cookies
-	session    *CachedSession
-	HTTP       *http.Client
-	httpProxy  func(*http.Request) (*url.URL, error)
-	socksProxy proxy.Dialer
+	Logger  zerolog.Logger
+	cookies *cookies.Cookies
+	session *CachedSession
+	HTTP    *http.Client
 
 	eventHandler       EventHandler
 	streamEventHandler StreamEventHandler
@@ -52,13 +48,8 @@ type Client struct {
 func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
 	cli := Client{
 		HTTP: &http.Client{
-			Transport: &http.Transport{
-				DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ResponseHeaderTimeout: 40 * time.Second,
-				ForceAttemptHTTP2:     true,
-			},
-			Timeout: 60 * time.Second,
+			Transport: req.NewClient().ImpersonateChrome().DisableHTTP3().GetTransport(),
+			Timeout:   60 * time.Second,
 		},
 		Logger: logger,
 	}
@@ -166,36 +157,6 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialSt
 func (c *Client) GetCurrentUserID() string {
 	twid := c.cookies.Get(cookies.XTwid)
 	return strings.Replace(strings.Replace(twid, "u%3D", "", -1), "u=", "", -1)
-}
-
-func (c *Client) SetProxy(proxyAddr string) error {
-	proxyParsed, err := url.Parse(proxyAddr)
-	if err != nil {
-		return err
-	}
-
-	if proxyParsed.Scheme == "http" || proxyParsed.Scheme == "https" {
-		c.httpProxy = http.ProxyURL(proxyParsed)
-		c.HTTP.Transport.(*http.Transport).Proxy = c.httpProxy
-	} else if proxyParsed.Scheme == "socks5" {
-		c.socksProxy, err = proxy.FromURL(proxyParsed, &net.Dialer{Timeout: 20 * time.Second})
-		if err != nil {
-			return err
-		}
-		c.HTTP.Transport.(*http.Transport).DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
-			return c.socksProxy.Dial(network, addr)
-		}
-		contextDialer, ok := c.socksProxy.(proxy.ContextDialer)
-		if ok {
-			c.HTTP.Transport.(*http.Transport).DialContext = contextDialer.DialContext
-		}
-	}
-
-	c.Logger.Debug().
-		Str("scheme", proxyParsed.Scheme).
-		Str("host", proxyParsed.Host).
-		Msg("Using proxy")
-	return nil
 }
 
 func (c *Client) IsLoggedIn() bool {
