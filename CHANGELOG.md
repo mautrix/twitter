@@ -7,7 +7,8 @@
     bridge from writing to the config, you must either update the config
     manually or allow the bridge to update it for you **before** upgrading to
     this release (i.e. run v0.5.0 once with config writing allowed).
-* Fixed parsing static auth tokens from Twitter index page.
+* Fixed parsing data from Twitter index page.
+* Fixed handling auth errors while polling for new messages.
 
 # v0.5.0 (2025-08-16)
 
