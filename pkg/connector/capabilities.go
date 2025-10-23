@@ -42,7 +42,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 4
+	return 1, 5
 }
 
 const MaxTextLength = 10000
@@ -56,7 +56,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 
 func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
 	return &event.RoomFeatures{
-		ID: "fi.mau.twitter.capabilities.2025_09_22",
+		ID: "fi.mau.twitter.capabilities.2025_10_23",
 		//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 		//	event.FmtUserLink: event.CapLevelFullySupported,
 		//},
@@ -90,6 +90,7 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) 
 				Caption:          event.CapLevelFullySupported,
 				MaxCaptionLength: MaxTextLength,
 				MaxSize:          5 * 1024 * 1024,
+				MaxDuration:      ptr.Ptr(jsontime.S(140 * time.Second)),
 			},
 			event.CapMsgGIF: {
 				MimeTypes: map[string]event.CapabilitySupportLevel{
