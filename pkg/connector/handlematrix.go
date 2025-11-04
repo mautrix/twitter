@@ -48,6 +48,7 @@ var (
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
 	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
+	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -249,4 +250,35 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	conversationID := string(chat.Portal.ID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
+}
+
+func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
+	if msg.Portal.RoomType == database.RoomTypeDM {
+		return false, errors.New("cannot set room avatar for DM")
+	}
+
+	if msg.Content.URL != "" || msg.Content.MSC3414File != nil {
+		data, err := msg.Portal.Bridge.Bot.DownloadMedia(ctx, msg.Content.URL, msg.Content.MSC3414File)
+		if err != nil {
+			return false, fmt.Errorf("failed to download avatar: %w", err)
+		}
+
+		uploadMediaParams := &payload.UploadMediaQuery{
+			MediaType: msg.Content.Info.MimeType,
+		}
+		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
+		if err != nil {
+			return false, err
+		}
+
+		updateAvatarParams := &payload.DMRequestQuery{
+			AvatarID: uploadedMediaResponse.MediaIDString,
+		}
+		err = tc.client.UpdateConversationAvatar(ctx, string(msg.Portal.ID), updateAvatarParams)
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, errors.New("avatar not found")
 }

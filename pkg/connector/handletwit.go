@@ -181,6 +181,61 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			},
 		}
 		return tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent).Success
+	case *types.ConversationAvatarUpdate:
+		chatInfo := &bridgev2.ChatInfo{
+			Avatar: makeAvatar(tc.client, evt.ConversationAvatarImageHttps),
+		}
+		success := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventChatInfoChange,
+				PortalKey:   tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
+				Timestamp:   methods.ParseSnowflake(evt.ID),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: chatInfo,
+			},
+		}).Success
+		conversation := inbox.GetConversationByID(evt.ConversationID)
+		return success && tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.ConversationAvatarUpdate]{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventMessage,
+				PortalKey: tc.MakePortalKey(conversation),
+				Timestamp: methods.ParseSnowflake(evt.ID),
+			},
+			ID:   networkid.MessageID(evt.ID),
+			Data: evt,
+			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, update *types.ConversationAvatarUpdate) (*bridgev2.ConvertedMessage, error) {
+				ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(update.ByUserID))
+				var body string
+				if err != nil {
+					zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost by ID")
+				} else {
+					body = ghost.Name + " "
+				}
+				body += "changed the group photo"
+				content := &event.MessageEventContent{
+					Info: &event.FileInfo{
+						MimeType: "image/jpeg",
+						Width:    update.Avatar.Image.OriginalInfo.Width,
+						Height:   update.Avatar.Image.OriginalInfo.Height,
+					},
+					MsgType: event.MsgNotice,
+					Body:    body,
+				}
+				parts := []*bridgev2.ConvertedMessagePart{{
+					Type:    event.EventMessage,
+					Content: content,
+				}}
+				content.URL, _, err = chatInfo.Avatar.Reupload(ctx, intent, [32]byte{}, "")
+				if err != nil {
+					zerolog.Ctx(ctx).Err(err).Msg("Failed to get conversation avatar")
+				}
+				return &bridgev2.ConvertedMessage{
+					Parts: parts,
+				}, nil
+			},
+		}).Success
 	case *types.ConversationMetadataUpdate:
 		tc.client.Logger.Warn().Any("data", evt).Msg("Unhandled conversation metadata update event")
 		return true

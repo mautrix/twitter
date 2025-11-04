@@ -22,6 +22,7 @@ func (*ConversationDelete) isTwitterEvent()         {}
 func (*ConversationJoin) isTwitterEvent()           {}
 func (*ParticipantsJoin) isTwitterEvent()           {}
 func (*ParticipantsLeave) isTwitterEvent()          {}
+func (*ConversationAvatarUpdate) isTwitterEvent()   {}
 func (*ConversationMetadataUpdate) isTwitterEvent() {}
 func (*ConversationNameUpdate) isTwitterEvent()     {}
 func (*ConversationRead) isTwitterEvent()           {}
@@ -52,6 +53,7 @@ type twitterEventContainer struct {
 	ConversationJoin           *ConversationJoin           `json:"join_conversation,omitempty"`
 	ParticipantsJoin           *ParticipantsJoin           `json:"participants_join,omitempty"`
 	ParticipantsLeave          *ParticipantsLeave          `json:"participants_leave,omitempty"`
+	ConversationAvatarUpdate   *ConversationAvatarUpdate   `json:"conversation_avatar_update,omitempty"`
 	ConversationMetadataUpdate *ConversationMetadataUpdate `json:"conversation_metadata_update,omitempty"`
 	ConversationNameUpdate     *ConversationNameUpdate     `json:"conversation_name_update,omitempty"`
 	ConversationRead           *ConversationRead           `json:"conversation_read,omitempty"`
@@ -86,6 +88,8 @@ func (rte *RawTwitterEvent) Parse() (TwitterEvent, map[string]any, error) {
 		return tec.ParticipantsJoin, nil, nil
 	case tec.ParticipantsLeave != nil:
 		return tec.ParticipantsLeave, nil, nil
+	case tec.ConversationAvatarUpdate != nil:
+		return tec.ConversationAvatarUpdate, nil, nil
 	case tec.ConversationMetadataUpdate != nil:
 		return tec.ConversationMetadataUpdate, nil, nil
 	case tec.ConversationNameUpdate != nil:
