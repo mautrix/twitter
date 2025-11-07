@@ -66,3 +66,12 @@ type ReactionResponse struct {
 		} `json:"create_dm_reaction,omitempty"`
 	} `json:"data,omitempty"`
 }
+
+type AddParticipantsResponse struct {
+	Data struct {
+		AddParticipants struct {
+			Typename   string   `json:"__typename,omitempty"`
+			AddedUsers []string `json:"added_users,omitempty"`
+		} `json:"add_participants,omitempty"`
+	} `json:"data,omitempty"`
+}

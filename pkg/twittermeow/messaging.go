@@ -374,3 +374,32 @@ func (c *Client) UpdateConversationAvatar(ctx context.Context, conversationID st
 
 	return nil
 }
+
+func (c *Client) AddParticipants(ctx context.Context, variables *payload.AddParticipantsPayload) (*response.AddParticipantsResponse, error) {
+	graphQlPayload := payload.GraphQLPayload{
+		Variables: variables,
+		QueryID:   "oBwyQ0_xVbAQ8FAyG0pCRA",
+	}
+
+	url := endpoints.ADD_PARTICIPANTS_URL
+
+	jsonBody, err := graphQlPayload.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Body:           jsonBody,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.AddParticipantsResponse{}
+	return &data, json.Unmarshal(respBody, &data)
+}

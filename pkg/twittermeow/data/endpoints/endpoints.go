@@ -33,6 +33,7 @@ const (
 	PIN_CONVERSATION_URL              = BASE_URL + "/i/api/graphql/o0aymgGiJY-53Y52YSUGVA/DMPinnedInboxAppend_Mutation"
 	UNPIN_CONVERSATION_URL            = BASE_URL + "/i/api/graphql/_TQxP2Rb0expwVP9ktGrTQ/DMPinnedInboxDelete_Mutation"
 	GET_PINNED_CONVERSATIONS_URL      = BASE_URL + "/i/api/graphql/_gBQBgClVuMQb8efxWkbbQ/DMPinnedInboxQuery"
+	ADD_PARTICIPANTS_URL              = BASE_URL + "/i/api/graphql/oBwyQ0_xVbAQ8FAyG0pCRA/AddParticipantsMutation"
 	ADD_REACTION_URL                  = BASE_URL + "/i/api/graphql/VyDyV9pC2oZEj6g52hgnhA/useDMReactionMutationAddMutation"
 	REMOVE_REACTION_URL               = BASE_URL + "/i/api/graphql/bV_Nim3RYHsaJwMkTXJ6ew/useDMReactionMutationRemoveMutation"
 	SEND_TYPING_NOTIFICATION          = BASE_URL + "/i/api/graphql/HL96-xZ3Y81IEzAdczDokg/useTypingNotifierMutation"

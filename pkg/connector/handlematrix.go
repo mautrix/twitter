@@ -49,6 +49,7 @@ var (
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
 	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
+	_ bridgev2.MembershipHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
 )
 
@@ -289,4 +290,29 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		return true, nil
 	}
 	return false, errors.New("avatar not found")
+}
+
+func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (bool, error) {
+	if msg.Type != bridgev2.Invite {
+		return false, errors.New("unsupported membership change type")
+	}
+	if msg.Portal.RoomType == database.RoomTypeDM {
+		return false, errors.New("cannot change members for DM")
+	}
+
+	var participantID string
+	switch target := msg.Target.(type) {
+	case *bridgev2.Ghost:
+		participantID = string(target.ID)
+	case *bridgev2.UserLogin:
+		participantID = string(target.ID)
+	}
+	_, err := tc.client.AddParticipants(ctx, &payload.AddParticipantsPayload{
+		ConversationID:    string(msg.Portal.ID),
+		AddedParticipants: []string{participantID},
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
