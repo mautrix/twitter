@@ -214,25 +214,14 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 					body = ghost.Name + " "
 				}
 				body += "changed the group photo"
-				content := &event.MessageEventContent{
-					Info: &event.FileInfo{
-						MimeType: "image/jpeg",
-						Width:    update.Avatar.Image.OriginalInfo.Width,
-						Height:   update.Avatar.Image.OriginalInfo.Height,
-					},
-					MsgType: event.MsgNotice,
-					Body:    body,
-				}
-				parts := []*bridgev2.ConvertedMessagePart{{
-					Type:    event.EventMessage,
-					Content: content,
-				}}
-				content.URL, _, err = chatInfo.Avatar.Reupload(ctx, intent, [32]byte{}, "")
-				if err != nil {
-					zerolog.Ctx(ctx).Err(err).Msg("Failed to get conversation avatar")
-				}
 				return &bridgev2.ConvertedMessage{
-					Parts: parts,
+					Parts: []*bridgev2.ConvertedMessagePart{{
+						Type: event.EventMessage,
+						Content: &event.MessageEventContent{
+							MsgType: event.MsgNotice,
+							Body:    body,
+						},
+					}},
 				}, nil
 			},
 		}).Success
