@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -263,8 +264,15 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 			return false, fmt.Errorf("failed to download avatar: %w", err)
 		}
 
+		var mediaType string
+		if msg.Content.Info != nil {
+			mediaType = msg.Content.Info.MimeType
+		} else {
+			mediaType = http.DetectContentType(data)
+		}
+
 		uploadMediaParams := &payload.UploadMediaQuery{
-			MediaType: msg.Content.Info.MimeType,
+			MediaType: mediaType,
 		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
 		if err != nil {

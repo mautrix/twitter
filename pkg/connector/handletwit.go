@@ -188,6 +188,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		success := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
 				Type:        bridgev2.RemoteEventChatInfoChange,
+				Sender:      tc.MakeEventSender(evt.ByUserID),
 				PortalKey:   tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
 				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
 				Timestamp:   methods.ParseSnowflake(evt.ID),
