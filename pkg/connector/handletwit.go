@@ -196,35 +196,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 				ChatInfo: chatInfo,
 			},
 		}).Success
-		conversation := inbox.GetConversationByID(evt.ConversationID)
-		return success && tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.ConversationAvatarUpdate]{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventMessage,
-				PortalKey: tc.MakePortalKey(conversation),
-				Timestamp: methods.ParseSnowflake(evt.ID),
-			},
-			ID:   networkid.MessageID(evt.ID),
-			Data: evt,
-			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, update *types.ConversationAvatarUpdate) (*bridgev2.ConvertedMessage, error) {
-				ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(update.ByUserID))
-				var body string
-				if err != nil {
-					zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost by ID")
-				} else {
-					body = ghost.Name + " "
-				}
-				body += "changed the group photo"
-				return &bridgev2.ConvertedMessage{
-					Parts: []*bridgev2.ConvertedMessagePart{{
-						Type: event.EventMessage,
-						Content: &event.MessageEventContent{
-							MsgType: event.MsgNotice,
-							Body:    body,
-						},
-					}},
-				}, nil
-			},
-		}).Success
+		return success
 	case *types.ConversationMetadataUpdate:
 		tc.client.Logger.Warn().Any("data", evt).Msg("Unhandled conversation metadata update event")
 		return true
