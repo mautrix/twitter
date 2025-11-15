@@ -49,6 +49,7 @@ const (
 )
 
 type DMRequestQuery struct {
+	AvatarID                            string      `url:"avatar_id,omitempty"`
 	ActiveConversationID                string      `url:"active_conversation_id,omitempty"`
 	Cursor                              string      `url:"cursor,omitempty"`
 	Count                               int         `url:"count,omitempty"`

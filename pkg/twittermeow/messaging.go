@@ -348,3 +348,29 @@ func (c *Client) React(ctx context.Context, reactionPayload *payload.ReactionAct
 	data := response.ReactionResponse{}
 	return &data, json.Unmarshal(respBody, &data)
 }
+
+func (c *Client) UpdateConversationAvatar(ctx context.Context, conversationID string, payload *payload.DMRequestQuery) error {
+	encodedQueryBody, err := payload.Encode()
+	if err != nil {
+		return err
+	}
+
+	resp, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            fmt.Sprintf(endpoints.UPDATE_CONVERSATION_AVATAR_URL, conversationID),
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Body:           encodedQueryBody,
+		Referer:        endpoints.BASE_MESSAGES_URL,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode > 204 {
+		return fmt.Errorf("failed to update conversation avatar id=%s (status_code=%d, response_body=%s)", conversationID, resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}

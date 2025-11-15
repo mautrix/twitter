@@ -54,6 +54,16 @@ type ConversationRead struct {
 	LastReadEventID string `json:"last_read_event_id,omitempty"`
 }
 
+type ConversationAvatarUpdate struct {
+	ID                           string `json:"id,omitempty"`
+	Time                         string `json:"time,omitempty"`
+	AffectsSort                  bool   `json:"affects_sort,omitempty"`
+	ConversationID               string `json:"conversation_id,omitempty"`
+	ConversationAvatarImageHttps string `json:"conversation_avatar_image_https,omitempty"`
+	Avatar                       Avatar `json:"avatar,omitempty"`
+	ByUserID                     string `json:"by_user_id,omitempty"`
+}
+
 type ConversationMetadataUpdate struct {
 	ID             string `json:"id,omitempty"`
 	Time           string `json:"time,omitempty"`

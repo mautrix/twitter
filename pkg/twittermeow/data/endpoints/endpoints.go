@@ -29,6 +29,7 @@ const (
 	SEARCH_TYPEAHEAD_URL              = BASE_URL + "/i/api/1.1/search/typeahead.json"
 	DM_PERMISSIONS_URL                = BASE_URL + "/i/api/1.1/dm/permissions.json"
 	DELETE_CONVERSATION_URL           = BASE_URL + "/i/api/1.1/dm/conversation/%s/delete.json"
+	UPDATE_CONVERSATION_AVATAR_URL    = BASE_URL + "/i/api/1.1/dm/conversation/%s/update_avatar.json"
 	PIN_CONVERSATION_URL              = BASE_URL + "/i/api/graphql/o0aymgGiJY-53Y52YSUGVA/DMPinnedInboxAppend_Mutation"
 	UNPIN_CONVERSATION_URL            = BASE_URL + "/i/api/graphql/_TQxP2Rb0expwVP9ktGrTQ/DMPinnedInboxDelete_Mutation"
 	GET_PINNED_CONVERSATIONS_URL      = BASE_URL + "/i/api/graphql/_gBQBgClVuMQb8efxWkbbQ/DMPinnedInboxQuery"

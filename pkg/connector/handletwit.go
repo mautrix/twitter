@@ -181,6 +181,23 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			},
 		}
 		return tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent).Success
+	case *types.ConversationAvatarUpdate:
+		chatInfo := &bridgev2.ChatInfo{
+			Avatar: makeAvatar(tc.client, evt.ConversationAvatarImageHttps),
+		}
+		success := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventChatInfoChange,
+				Sender:      tc.MakeEventSender(evt.ByUserID),
+				PortalKey:   tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
+				Timestamp:   methods.ParseSnowflake(evt.ID),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: chatInfo,
+			},
+		}).Success
+		return success
 	case *types.ConversationMetadataUpdate:
 		tc.client.Logger.Warn().Any("data", evt).Msg("Unhandled conversation metadata update event")
 		return true
