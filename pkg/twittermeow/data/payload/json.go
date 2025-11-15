@@ -50,6 +50,11 @@ type PinAndUnpinConversationVariables struct {
 	Label          LabelType `json:"label,omitempty"`
 }
 
+type AddParticipantsPayload struct {
+	ConversationID    string   `json:"conversationId"`
+	AddedParticipants []string `json:"addedParticipants"`
+}
+
 type ReactionActionPayload struct {
 	ConversationID string   `json:"conversationId"`
 	MessageID      string   `json:"messageId"`
