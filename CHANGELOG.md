@@ -1,3 +1,8 @@
+# v25.11
+
+* Added support for group chat avatar changes.
+* Added support for inviting users to group chats.
+
 # v25.10
 
 * Switched to calendar versioning.
