@@ -56,6 +56,7 @@ type DMRequestQuery struct {
 	Context                             ContextInfo `url:"context,omitempty"`
 	MaxID                               string      `url:"max_id,omitempty"` // when fetching messages, this is the message id
 	MinID                               string      `url:"min_id,omitempty"`
+	Name                                string      `url:"name,omitempty"`
 	NSFWFilteringEnabled                bool        `url:"nsfw_filtering_enabled"`
 	FilterLowQuality                    bool        `url:"filter_low_quality"`
 	IncludeQuality                      string      `url:"include_quality"`

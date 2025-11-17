@@ -375,6 +375,32 @@ func (c *Client) UpdateConversationAvatar(ctx context.Context, conversationID st
 	return nil
 }
 
+func (c *Client) UpdateConversationName(ctx context.Context, conversationID string, payload *payload.DMRequestQuery) error {
+	encodedQueryBody, err := payload.Encode()
+	if err != nil {
+		return err
+	}
+
+	resp, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            fmt.Sprintf(endpoints.UPDATE_CONVERSATION_NAME_URL, conversationID),
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Body:           encodedQueryBody,
+		Referer:        endpoints.BASE_MESSAGES_URL,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode > 204 {
+		return fmt.Errorf("failed to update conversation name id=%s (status_code=%d, response_body=%s)", conversationID, resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 func (c *Client) AddParticipants(ctx context.Context, variables *payload.AddParticipantsPayload) (*response.AddParticipantsResponse, error) {
 	graphQlPayload := payload.GraphQLPayload{
 		Variables: variables,
