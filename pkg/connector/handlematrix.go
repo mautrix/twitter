@@ -51,6 +51,7 @@ var (
 	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.MembershipHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
+	_ bridgev2.RoomNameHandlingNetworkAPI    = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -290,6 +291,21 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		return true, nil
 	}
 	return false, errors.New("avatar not found")
+}
+
+func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
+	if msg.Portal.RoomType == database.RoomTypeDM {
+		return false, errors.New("cannot set room name for DM")
+	}
+
+	updateNameParams := &payload.DMRequestQuery{
+		Name: msg.Content.Name,
+	}
+	err := tc.client.UpdateConversationName(ctx, string(msg.Portal.ID), updateNameParams)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (bool, error) {
