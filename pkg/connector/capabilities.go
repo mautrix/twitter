@@ -24,6 +24,7 @@ import (
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/event"
 )
 
@@ -42,7 +43,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 5
+	return 1, 6
 }
 
 const MaxTextLength = 10000
@@ -54,66 +55,86 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 	return event.CapLevelRejected
 }
 
-func (tc *TwitterClient) GetCapabilities(_ context.Context, _ *bridgev2.Portal) *event.RoomFeatures {
-	return &event.RoomFeatures{
-		ID: "fi.mau.twitter.capabilities.2025_10_23",
-		//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
-		//	event.FmtUserLink: event.CapLevelFullySupported,
-		//},
-		File: event.FileFeatureMap{
-			event.MsgImage: {
-				MimeTypes: map[string]event.CapabilitySupportLevel{
-					"image/jpeg": event.CapLevelFullySupported,
-					"image/png":  event.CapLevelFullySupported,
-					"image/gif":  event.CapLevelFullySupported,
-					"image/webp": event.CapLevelFullySupported,
-				},
-				Caption:          event.CapLevelFullySupported,
-				MaxCaptionLength: MaxTextLength,
-				MaxSize:          5 * 1024 * 1024,
+var groupCaps = &event.RoomFeatures{
+	ID: "fi.mau.twitter.capabilities.2025_11_19",
+	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
+	//	event.FmtUserLink: event.CapLevelFullySupported,
+	//},
+	File: event.FileFeatureMap{
+		event.MsgImage: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"image/jpeg": event.CapLevelFullySupported,
+				"image/png":  event.CapLevelFullySupported,
+				"image/gif":  event.CapLevelFullySupported,
+				"image/webp": event.CapLevelFullySupported,
 			},
-			event.MsgVideo: {
-				MimeTypes: map[string]event.CapabilitySupportLevel{
-					"video/mp4":       event.CapLevelFullySupported,
-					"video/quicktime": event.CapLevelFullySupported,
-				},
-				Caption:          event.CapLevelFullySupported,
-				MaxCaptionLength: MaxTextLength,
-				MaxSize:          15 * 1024 * 1024,
-			},
-			event.CapMsgVoice: {
-				MimeTypes: map[string]event.CapabilitySupportLevel{
-					"audio/aac": supportedIfFFmpeg(),
-					"audio/ogg": supportedIfFFmpeg(),
-					"video/mp4": event.CapLevelFullySupported,
-				},
-				Caption:          event.CapLevelFullySupported,
-				MaxCaptionLength: MaxTextLength,
-				MaxSize:          5 * 1024 * 1024,
-				MaxDuration:      ptr.Ptr(jsontime.S(140 * time.Second)),
-			},
-			event.CapMsgGIF: {
-				MimeTypes: map[string]event.CapabilitySupportLevel{
-					"image/gif": event.CapLevelFullySupported,
-					"video/mp4": event.CapLevelFullySupported,
-				},
-				Caption:          event.CapLevelFullySupported,
-				MaxCaptionLength: MaxTextLength,
-				MaxSize:          5 * 1024 * 1024,
-			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: MaxTextLength,
+			MaxSize:          5 * 1024 * 1024,
 		},
+		event.MsgVideo: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"video/mp4":       event.CapLevelFullySupported,
+				"video/quicktime": event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: MaxTextLength,
+			MaxSize:          15 * 1024 * 1024,
+		},
+		event.CapMsgVoice: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"audio/aac": supportedIfFFmpeg(),
+				"audio/ogg": supportedIfFFmpeg(),
+				"video/mp4": event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: MaxTextLength,
+			MaxSize:          5 * 1024 * 1024,
+			MaxDuration:      ptr.Ptr(jsontime.S(140 * time.Second)),
+		},
+		event.CapMsgGIF: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"image/gif": event.CapLevelFullySupported,
+				"video/mp4": event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: MaxTextLength,
+			MaxSize:          5 * 1024 * 1024,
+		},
+	},
+	MemberActions: map[event.MemberAction]event.CapabilitySupportLevel{
+		event.MemberActionInvite: event.CapLevelFullySupported,
+	},
+	State: event.StateFeatureMap{
+		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
+	},
 
-		MaxTextLength: MaxTextLength,
+	MaxTextLength: MaxTextLength,
 
-		Reply: event.CapLevelFullySupported,
+	Reply: event.CapLevelFullySupported,
 
-		Edit:          event.CapLevelFullySupported,
-		EditMaxCount:  10,
-		EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
-		Reaction:      event.CapLevelFullySupported,
-		ReactionCount: 1,
+	Edit:          event.CapLevelFullySupported,
+	EditMaxCount:  10,
+	EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
+	Reaction:      event.CapLevelFullySupported,
+	ReactionCount: 1,
 
-		DeleteChat:            true,
-		DeleteChatForEveryone: false,
+	DeleteChat:            true,
+	DeleteChatForEveryone: false,
+}
+
+var dmCaps = ptr.Clone(groupCaps)
+
+func init() {
+	dmCaps.State = nil
+	dmCaps.MemberActions = nil
+	dmCaps.ID += "+dm"
+}
+
+func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	if portal.RoomType == database.RoomTypeDM {
+		return dmCaps
 	}
+	return groupCaps
 }
