@@ -308,12 +308,12 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 	return true, nil
 }
 
-func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (bool, error) {
+func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (*bridgev2.MatrixMembershipResult, error) {
 	if msg.Type != bridgev2.Invite {
-		return false, errors.New("unsupported membership change type")
+		return nil, errors.New("unsupported membership change type")
 	}
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return false, errors.New("cannot change members for DM")
+		return nil, errors.New("cannot change members for DM")
 	}
 
 	var participantID string
@@ -328,7 +328,7 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 		AddedParticipants: []string{participantID},
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return true, nil
+	return nil, nil
 }
