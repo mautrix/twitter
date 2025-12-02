@@ -25,8 +25,17 @@ app.innerHTML = `
           <textarea id="token-input" name="token" rows="4" required class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40">${defaultToken}</textarea>
         </label>
 
-        <label class="block space-y-2">
-          <span class="text-sm font-medium text-slate-200">Decryption key (base64)</span>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-slate-200">Decryption key (base64)</span>
+            <button
+              id="save-key-btn"
+              type="button"
+              class="rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-100 hover:border-sky-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+            >
+              Save key
+            </button>
+          </div>
           <input
             id="key-input"
             name="key"
@@ -35,7 +44,33 @@ app.innerHTML = `
             required
             class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
           />
-        </label>
+          <p id="key-preview" class="text-xs text-slate-400 font-mono">Length: - | hex: -</p>
+          <label class="block space-y-1">
+            <span class="text-xs font-medium text-slate-300">Optional public key (base64)</span>
+            <input
+              id="pubkey-input"
+              name="pubkey"
+              type="text"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs font-medium text-slate-300">Saved keys</span>
+            <div class="flex items-center gap-2">
+              <select
+                id="key-select"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+              ></select>
+              <button
+                id="delete-key-btn"
+                type="button"
+                class="whitespace-nowrap rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-rose-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+              >
+                Delete
+              </button>
+            </div>
+          </label>
+        </div>
 
         <div class="flex items-center gap-3">
           <button
@@ -51,7 +86,7 @@ app.innerHTML = `
 
       <pre id="status-log" class="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">Waiting to connect...</pre>
 
-      <section class="grid gap-4 lg:grid-cols-2">
+      <section class="grid gap-4 lg:grid-cols-2 w-full">
         <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20">
           <div class="mb-2 flex items-center justify-between">
             <h2 class="text-lg font-semibold text-slate-100">Latest event JSON</h2>
@@ -67,6 +102,68 @@ app.innerHTML = `
           <pre id="decrypted-output" class="h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100">No decrypted payload yet.</pre>
         </div>
       </section>
+
+      <section class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20 w-full">
+        <div class="mb-3 space-y-1">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">Manual decode</p>
+          <h2 class="text-lg font-semibold text-slate-100">Paste a base64 payload</h2>
+          <p class="text-sm text-slate-300">Base64-decodes the payload and parses it with the generic struct parser into JSON (no decryption attempted).</p>
+        </div>
+        <form id="manual-form" class="space-y-3">
+          <label class="block space-y-2">
+            <span class="text-sm font-medium text-slate-200">Ciphertext bundle (base64)</span>
+            <textarea
+              id="manual-input"
+              name="ciphertext"
+              rows="3"
+              placeholder="Paste base64-encoded ciphertext bundle here"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+            ></textarea>
+          </label>
+          <div class="flex items-center gap-3">
+            <button
+              id="manual-decrypt-btn"
+              type="submit"
+              class="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50"
+            >
+              Parse message
+            </button>
+            <p class="text-xs text-slate-400">We will base64-decode and parse to JSON below.</p>
+          </div>
+        </form>
+        <pre id="manual-output" class="mt-4 h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100">Awaiting ciphertext...</pre>
+      </section>
+
+      <section class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20 w-full">
+        <div class="mb-3 space-y-1">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">Conversation key event</p>
+          <h2 class="text-lg font-semibold text-slate-100">Decrypt conversation keys from event JSON</h2>
+          <p class="text-sm text-slate-300">Paste the full event JSON (or base64 of it). We will extract blobs at 7→3→2[*]→2 and secretbox-decrypt them with the selected 32-byte key (nonce|ciphertext|mac).</p>
+        </div>
+        <form id="conv-event-form" class="space-y-3">
+          <label class="block space-y-2">
+            <span class="text-sm font-medium text-slate-200">Event JSON or base64-encoded JSON</span>
+            <textarea
+              id="conv-event-input"
+              name="conv-event"
+              rows="6"
+              placeholder="Paste the event JSON here"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+            ></textarea>
+          </label>
+          <div class="flex items-center gap-3">
+            <button
+              id="conv-event-btn"
+              type="submit"
+              class="inline-flex items-center justify-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50"
+            >
+              Decrypt event blobs
+            </button>
+            <p class="text-xs text-slate-400">Uses the selected key (32-byte secret or 64-byte priv+pub).</p>
+          </div>
+        </form>
+        <pre id="conv-event-output" class="mt-4 h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100">Awaiting event JSON...</pre>
+      </section>
     </div>
   </main>
 `;
@@ -74,12 +171,23 @@ app.innerHTML = `
 const form = document.querySelector<HTMLFormElement>('#connect-form');
 const tokenInput = document.querySelector<HTMLTextAreaElement>('#token-input');
 const keyInput = document.querySelector<HTMLInputElement>('#key-input');
+const pubKeyInput = document.querySelector<HTMLInputElement>('#pubkey-input');
+const keyPreview = document.querySelector<HTMLParagraphElement>('#key-preview');
 const statusLog = document.querySelector<HTMLPreElement>('#status-log');
 const connectButton = document.querySelector<HTMLButtonElement>('#connect-btn');
+const keySelect = document.querySelector<HTMLSelectElement>('#key-select');
+const saveKeyButton = document.querySelector<HTMLButtonElement>('#save-key-btn');
+const deleteKeyButton = document.querySelector<HTMLButtonElement>('#delete-key-btn');
 const eventOutput = document.querySelector<HTMLPreElement>('#event-output');
 const decryptedOutput = document.querySelector<HTMLPreElement>('#decrypted-output');
+const manualForm = document.querySelector<HTMLFormElement>('#manual-form');
+const manualInput = document.querySelector<HTMLTextAreaElement>('#manual-input');
+const manualOutput = document.querySelector<HTMLPreElement>('#manual-output');
+const convEventForm = document.querySelector<HTMLFormElement>('#conv-event-form');
+const convEventInput = document.querySelector<HTMLTextAreaElement>('#conv-event-input');
+const convEventOutput = document.querySelector<HTMLPreElement>('#conv-event-output');
 
-if (!form || !tokenInput || !keyInput || !statusLog || !connectButton || !eventOutput || !decryptedOutput) {
+if (!form || !tokenInput || !keyInput || !pubKeyInput || !keyPreview || !statusLog || !connectButton || !keySelect || !saveKeyButton || !deleteKeyButton || !eventOutput || !decryptedOutput || !manualForm || !manualInput || !manualOutput || !convEventForm || !convEventInput || !convEventOutput) {
 	throw new Error("Failed to initialize app controls");
 }
 
@@ -89,6 +197,93 @@ const logStatus = (message: string) => {
 	console.info(message);
 };
 
+const STORAGE_KEYS = "xchatSavedKeys";
+
+type SavedKey = {
+	priv: string;
+	pub?: string;
+};
+
+const loadSavedKeys = (): SavedKey[] => {
+	const raw = localStorage.getItem(STORAGE_KEYS);
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.map((item) => {
+				if (typeof item === "string") return { priv: item };
+				if (item && typeof item.priv === "string") {
+					return { priv: String(item.priv), pub: item.pub ? String(item.pub) : undefined };
+				}
+				return null;
+			})
+			.filter((v): v is SavedKey => Boolean(v && v.priv));
+	} catch {
+		return [];
+	}
+};
+
+const persistKeys = (keys: SavedKey[]) => {
+	localStorage.setItem(STORAGE_KEYS, JSON.stringify(keys));
+};
+
+let savedKeys = loadSavedKeys();
+if (!savedKeys.length) savedKeys = [{ priv: defaultKeyB64 }];
+
+const renderSavedKeyOptions = (activeIndex = 0) => {
+	keySelect.innerHTML = "";
+	const frag = document.createDocumentFragment();
+	const preview = (val: string) => (val.length > 14 ? `${val.slice(0, 8)}…${val.slice(-6)}` : val);
+
+	if (!savedKeys.length) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.textContent = "No saved keys";
+		frag.appendChild(opt);
+		keySelect.disabled = true;
+		deleteKeyButton.disabled = true;
+		keyInput.value = "";
+		pubKeyInput.value = "";
+	} else {
+		keySelect.disabled = false;
+		deleteKeyButton.disabled = false;
+		savedKeys.forEach((k, idx) => {
+			const opt = document.createElement("option");
+			opt.value = String(idx);
+			opt.textContent = k.pub ? `Priv ${preview(k.priv)} | Pub ${preview(k.pub)}` : `Priv ${preview(k.priv)}`;
+			frag.appendChild(opt);
+		});
+		const safeIndex = activeIndex < savedKeys.length ? activeIndex : 0;
+		keySelect.value = String(safeIndex);
+		const activeKey = savedKeys[safeIndex];
+		if (activeKey) {
+			keyInput.value = activeKey.priv;
+			pubKeyInput.value = activeKey.pub ?? "";
+		}
+	}
+
+	keySelect.appendChild(frag);
+};
+
+const upsertKey = (privB64: string, pubB64?: string) => {
+	const trimmed = privB64.trim();
+	if (!trimmed) return;
+	const entry: SavedKey = { priv: trimmed, pub: pubB64?.trim() || undefined };
+	// Replace existing entry with same priv if found
+	const idx = savedKeys.findIndex((k) => k.priv === entry.priv);
+	if (idx >= 0) {
+		savedKeys[idx] = entry;
+		renderSavedKeyOptions(idx);
+	} else {
+		savedKeys = [entry, ...savedKeys];
+		renderSavedKeyOptions(0);
+	}
+	persistKeys(savedKeys);
+};
+
+renderSavedKeyOptions(0);
+
 const jsonReplacer = (_key: string, value: unknown) => (typeof value === "bigint" ? value.toString() : value);
 const renderEventJson = (json: string) => {
 	eventOutput.textContent = json;
@@ -96,8 +291,80 @@ const renderEventJson = (json: string) => {
 const renderDecryptedPayload = (text: string) => {
 	decryptedOutput.textContent = text;
 };
+const renderManualPayload = (text: string) => {
+	manualOutput.textContent = text;
+};
+const updateKeyPreview = () => {
+	const value = keyInput.value.trim();
+	if (!value) {
+		keyPreview.textContent = "Length: 0 | hex: (empty)";
+		return;
+	}
+	try {
+		const bytes = base64ToUint8Array(value);
+		keyPreview.textContent = `Length: ${bytes.length} | hex: ${bytesToHex(bytes)}`;
+	} catch {
+		keyPreview.textContent = "Invalid base64 (cannot decode)";
+	}
+};
+const renderConvEventOutput = (text: string) => {
+	convEventOutput.textContent = text;
+};
 
 let activeSocket: WebSocket | null = null;
+
+keyInput.addEventListener('input', updateKeyPreview);
+updateKeyPreview();
+
+keySelect.addEventListener('change', () => {
+	const idx = Number(keySelect.value);
+	const entry = savedKeys[idx];
+	if (entry) {
+		keyInput.value = entry.priv;
+		pubKeyInput.value = entry.pub ?? "";
+	}
+	updateKeyPreview();
+});
+
+saveKeyButton.addEventListener('click', () => {
+	const keyValue = keyInput.value.trim();
+	const pubValue = pubKeyInput.value.trim();
+	if (!keyValue) {
+		logStatus("Enter a base64 decryption key before saving.");
+		return;
+	}
+	try {
+		base64ToUint8Array(keyValue);
+	} catch {
+		logStatus("Key must be valid base64.");
+		return;
+	}
+	if (pubValue) {
+		try {
+			base64ToUint8Array(pubValue);
+		} catch {
+			logStatus("Public key must be valid base64.");
+			return;
+		}
+	}
+	upsertKey(keyValue, pubValue || undefined);
+	logStatus("Key saved.");
+	updateKeyPreview();
+});
+
+deleteKeyButton.addEventListener('click', () => {
+	const idx = Number(keySelect.value);
+	if (Number.isNaN(idx) || idx < 0 || idx >= savedKeys.length) {
+		logStatus("No saved key selected to delete.");
+		return;
+	}
+	savedKeys.splice(idx, 1);
+	persistKeys(savedKeys);
+	const nextIdx = Math.max(0, Math.min(idx, savedKeys.length - 1));
+	renderSavedKeyOptions(nextIdx);
+	logStatus("Key deleted.");
+	updateKeyPreview();
+});
 
 form.addEventListener('submit', async (event) => {
 	event.preventDefault();
@@ -132,9 +399,252 @@ form.addEventListener('submit', async (event) => {
 	}
 });
 
+manualForm.addEventListener('submit', async (event) => {
+	event.preventDefault();
+
+	const ciphertextB64 = manualInput.value.trim();
+
+	if (!ciphertextB64) {
+		renderManualPayload("Please paste the base64 payload (same as websocket binary, base64-encoded).");
+		return;
+	}
+
+	const bytes = base64ToUint8Array(ciphertextB64);
+
+	try {
+		const decoder = new Decoder(bytes);
+		const obj = decoder.readStruct(xchatEventSchema);
+		const bodyJson = JSON.stringify(obj, jsonReplacer, 2);
+		renderManualPayload(bodyJson);
+		return;
+	} catch (err) {
+	}
+
+	try {
+		const decoder = new Decoder(bytes);
+		const obj = decoder.readStructGeneric();
+		const bodyJson = JSON.stringify(obj, jsonReplacer, 2);
+		renderManualPayload(bodyJson);
+	} catch (err) {
+		renderManualPayload(`Parse Error: ${err}`);
+	}
+});
+
+convEventForm.addEventListener('submit', async (event) => {
+	event.preventDefault();
+
+	const privScalarB64 = keyInput.value.trim();
+	const raw = convEventInput.value.trim();
+	if (!raw) {
+		renderConvEventOutput("Please paste an event JSON or base64-encoded JSON.");
+		return;
+	}
+
+	if (!privScalarB64) {
+		renderConvEventOutput("Provide your 32-byte P-256 private scalar in the key field above.");
+		return;
+	}
+
+	let eventJson: any = null;
+	const tryParseJson = (text: string) => {
+		try {
+			return JSON.parse(text);
+		} catch {
+			return null;
+		}
+	};
+
+	eventJson = tryParseJson(raw);
+
+	if (!eventJson) {
+			const bytes = base64ToUint8Array(raw);
+
+				const decoder = new Decoder(bytes);
+				eventJson = decoder.readStruct(xchatEventSchema)
+
+			// Fallback: treat base64 as JSON string.
+			if (!eventJson) {
+				try {
+					const decoded = new TextDecoder().decode(bytes);
+					eventJson = tryParseJson(decoded);
+				} catch {
+					/* ignore */
+				}
+			}
+	}
+
+	if (!eventJson) {
+		renderConvEventOutput("Could not parse JSON (neither plain nor base64).");
+		return;
+	}
+
+	const evt = eventJson.event ?? eventJson;
+
+	console.log(evt);
+
+	const payloads = evt?.payload?.encryptedConversationKey?.encryptedKeyPayload;
+
+	if (!Array.isArray(payloads) || payloads.length === 0) {
+		renderConvEventOutput("No encrypted conversation key payloads found at payload.encryptedConversationKey.encryptedKeyPayload.");
+		return;
+	}
+
+	const lines: string[] = [];
+	for (const entry of payloads) {
+		const label = entry?.userId ?? "(unknown user)";
+		const keyB64 = entry?.keyB64;
+		if (!keyB64 || typeof keyB64 !== "string") {
+			lines.push(`✗ ${label}: missing keyB64`);
+			continue;
+		}
+
+		try {
+			const ck = await unwrapConversationKey(keyB64, privScalarB64);
+			const ckB64 = bytesToBase64(ck);
+			lines.push(`✓ ${label}: ${ckB64}`);
+		} catch (err) {
+			console.error(err);
+			const msg = err instanceof Error ? err.message : String(err);
+			lines.push(`✗ ${label}: ${msg}`);
+		}
+	}
+
+	renderConvEventOutput(lines.join("\n"));
+});
+
+function bytesToBase64(bytes: Uint8Array) {
+	let bin = "";
+	for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+	return btoa(bin);
+}
+
+async function importP256PrivateKeyFromScalar(scalarB64: string) {
+	const privBytes = base64ToUint8Array(scalarB64);
+	if (privBytes.length !== 32) {
+		throw new Error(`Expected 32-byte scalar, got ${privBytes.length}`);
+	}
+	const pkcs8 = buildP256Pkcs8FromScalar(privBytes);
+	return crypto.subtle.importKey("pkcs8", pkcs8, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+}
+
+function concatBytes(...parts: Uint8Array[]) {
+	const len = parts.reduce((n, p) => n + p.length, 0);
+	const out = new Uint8Array(len);
+	let o = 0;
+	for (const p of parts) {
+		out.set(p, o);
+		o += p.length;
+	}
+	return out;
+}
+
+function asArrayBuffer(view: Uint8Array) {
+	return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+}
+
+function derLen(len: number): Uint8Array {
+	if (len < 128) return Uint8Array.of(len);
+	const bytes: number[] = [];
+	let n = len;
+	while (n > 0) {
+		bytes.unshift(n & 0xff);
+		n >>>= 8;
+	}
+	return Uint8Array.of(0x80 | bytes.length, ...bytes);
+}
+
+function derNode(tag: number, content: Uint8Array) {
+	return concatBytes(Uint8Array.of(tag), derLen(content.length), content);
+}
+
+function derSeq(...parts: Uint8Array[]) {
+	return derNode(0x30, concatBytes(...parts));
+}
+
+function derOctetString(bytes: Uint8Array) {
+	return derNode(0x04, bytes);
+}
+
+function derInteger(value: number) {
+	return Uint8Array.of(0x02, 0x01, value & 0xff);
+}
+
+function buildP256Pkcs8FromScalar(priv: Uint8Array) {
+	// OIDs
+	const oidEcPublicKey = Uint8Array.from([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]);
+	const oidPrime256v1 = Uint8Array.from([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]);
+
+	// ECPrivateKey ::= SEQUENCE { version, privateKey, [0] parameters }
+	const ecPrivateKey = derSeq(derInteger(1), derOctetString(priv), derNode(0xa0, oidPrime256v1));
+
+	// PrivateKeyInfo ::= SEQUENCE { version, algorithm, privateKey }
+	const algorithmId = derSeq(oidEcPublicKey, oidPrime256v1);
+	return derSeq(derInteger(0), algorithmId, derOctetString(ecPrivateKey));
+}
+
+async function sha256(bytes: Uint8Array) {
+	const digest = await crypto.subtle.digest("SHA-256", asArrayBuffer(bytes));
+	return new Uint8Array(digest);
+}
+
+async function kdf2Sha256(shared: Uint8Array, other: Uint8Array, length: number) {
+	const chunks: Uint8Array[] = [];
+	let counter = 1;
+	let total = 0;
+	while (total < length) {
+		const counterBytes = new Uint8Array(4);
+		new DataView(counterBytes.buffer).setUint32(0, counter, false);
+		const digest = await sha256(concatBytes(shared, counterBytes, other));
+		chunks.push(digest);
+		total += digest.length;
+		counter += 1;
+	}
+	const material = concatBytes(...chunks);
+	return material.slice(0, length);
+}
+
+async function unwrapConversationKey(keyB64: string, privScalarB64: string) {
+	const blob = base64ToUint8Array(keyB64);
+	if (blob.length < 65 + 16) {
+		throw new Error(`Unexpected keyB64 length=${blob.length}`);
+	}
+
+	const ephPub = blob.slice(0, 65);
+	const cipherAndTag = blob.slice(65);
+
+	const privKey = await importP256PrivateKeyFromScalar(privScalarB64);
+	const pubKey = await crypto.subtle.importKey("raw", ephPub, { name: "ECDH", namedCurve: "P-256" }, false, []);
+
+	const sharedBits = await crypto.subtle.deriveBits({ name: "ECDH", public: pubKey }, privKey, 256);
+	const shared = new Uint8Array(sharedBits);
+
+	const keyNonce = await kdf2Sha256(shared, ephPub, 32);
+	const aesKeyBytes = keyNonce.slice(0, 16);
+	const iv = keyNonce.slice(16);
+
+	const aesKey = await crypto.subtle.importKey("raw", asArrayBuffer(aesKeyBytes), "AES-GCM", false, ["decrypt"]);
+
+	let plaintext: Uint8Array;
+	try {
+		const plaintextBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: asArrayBuffer(iv), tagLength: 128 }, aesKey, asArrayBuffer(cipherAndTag));
+		plaintext = new Uint8Array(plaintextBuf);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(`AES-GCM decrypt failed (check key/iv/payload): ${msg}`);
+	}
+
+	if (plaintext.length !== 32) {
+		throw new Error(`Unexpected conversation key length: ${plaintext.length}`);
+	}
+
+	return plaintext;
+}
+
 function base64ToUint8Array(b64: string) {
-	// Normalize base64url
-	b64 = b64.replace(/-/g, "+").replace(/_/g, "/");
+	// Normalize base64url, strip whitespace, and fix padding.
+	b64 = b64.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+	const pad = b64.length % 4;
+	if (pad > 0) b64 += "=".repeat(4 - pad); // be permissive; let atob validate
 	const binary = atob(b64);
 	const bytes = new Uint8Array(binary.length);
 	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i) & 0xff;
@@ -146,6 +656,12 @@ function utf8ToBase64(s: string) {
 	let binary = "";
 	for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
 	return btoa(binary);
+}
+
+function bytesToHex(bytes: Uint8Array) {
+	return Array.from(bytes)
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
 }
 
 function decryptAfterExtractingNonce(nc: Uint8Array, key: Uint8Array) {
@@ -170,33 +686,34 @@ function trimBinaryEdges(bytes: Uint8Array) {
 }
 
 // ---- Thrift decoder helpers (unchanged structure, but binary-safe strings) ----
-export enum T {
-	STOP = 0,
-	BOOL = 2,
-	BYTE = 3,
-	DOUBLE = 4,
-	I16 = 6,
-	I32 = 8,
-	I64 = 10,
-	STRING = 11,
-	STRUCT = 12,
-	MAP = 13,
-	SET = 14,
-	LIST = 15,
-	UTF8 = 16,
-	UTF16 = 17,
-}
+export const T = {
+	STOP: 0,
+	BOOL: 2,
+	BYTE: 3,
+	DOUBLE: 4,
+	I16: 6,
+	I32: 8,
+	I64: 10,
+	STRING: 11,
+	STRUCT: 12,
+	MAP: 13,
+	SET: 14,
+	LIST: 15,
+	UTF8: 16,
+	UTF16: 17,
+} as const;
+export type TCode = (typeof T)[keyof typeof T];
 
 export type FieldSchema = {
 	id: number;
 	key: string;
-	type: T;
+	type: TCode;
 	schema?: FieldSchema[];
-	elemType?: T;
+	elemType?: TCode;
 	elemSchema?: FieldSchema[];
-	keyType?: T;
+	keyType?: TCode;
 	keySchema?: FieldSchema[];
-	valType?: T;
+	valType?: TCode;
 	valSchema?: FieldSchema[];
 	encodeElem?: (v: any) => Uint8Array;
 	encodeKey?: (v: any) => Uint8Array;
@@ -242,12 +759,12 @@ const enc = {
 	},
 };
 
-const field = (type: T, id: number, valBytes: Uint8Array) =>
+const field = (type: TCode, id: number, valBytes: Uint8Array) =>
 	concat(Uint8Array.of(type), enc.i16(id), valBytes);
 
 const stop = () => Uint8Array.of(T.STOP);
 
-const defaultEncode = (t: T) => (v: any): Uint8Array => {
+const defaultEncode = (t: TCode) => (v: any): Uint8Array => {
 	switch (t) {
 		case T.STRING:
 		case T.UTF8:
@@ -359,16 +876,17 @@ export function encodeStruct(obj: any, schema: FieldSchema[]): Uint8Array {
 	return concat(...chunks);
 }
 
-export enum MsgType {
-	CALL = 1,
-	REPLY = 2,
-	EXCEPTION = 3,
-	ONEWAY = 4,
-}
+export const MsgType = {
+	CALL: 1,
+	REPLY: 2,
+	EXCEPTION: 3,
+	ONEWAY: 4,
+} as const;
+export type MsgTypeCode = (typeof MsgType)[keyof typeof MsgType];
 
 export type MessageBegin = {
 	name: string;
-	type: MsgType;
+	type: MsgTypeCode;
 	seqid: number;
 };
 
@@ -447,7 +965,7 @@ export class Decoder {
 		if (version !== 0x80010000) {
 			throw new Error(`Not a strict Thrift message (version word: 0x${word.toString(16)})`);
 		}
-		const type = (word & 0x000000ff) as MsgType;
+		const type = (word & 0x000000ff) as MsgTypeCode;
 		const nameLen = this.readI32();
 		if (nameLen < 0) throw new Error(`Negative method name length: ${nameLen}`);
 		this.ensure(nameLen);
@@ -470,15 +988,15 @@ export class Decoder {
 			const id = this.readI16();
 			const f = schema.find((x) => x.id === id);
 			if (!f) {
-				this.skip(t as T);
+				this.skip(t as TCode);
 				continue;
 			}
-			out[f.key] = this.readValue(t as T, f);
+			out[f.key] = this.readValue(t as TCode, f);
 		}
 		return out;
 	}
 
-	private readValue(t: T, f: FieldSchema): any {
+	private readValue(t: TCode, f: FieldSchema): any {
 		switch (t) {
 			case T.BOOL:
 				return this.readByte() !== 0;
@@ -500,7 +1018,7 @@ export class Decoder {
 				return this.readStruct(f.schema || []);
 			case T.LIST:
 			case T.SET: {
-				const etWire = this.readByte() as T;
+				const etWire = this.readByte() as TCode;
 				const count = this.readI32();
 				if (f.elemType !== undefined && f.elemType !== etWire) {
 					throw new Error(`Element type mismatch: schema=${f.elemType}, wire=${etWire} (field=${f.key})`);
@@ -517,8 +1035,8 @@ export class Decoder {
 				return arr;
 			}
 			case T.MAP: {
-				const ktWire = this.readByte() as T;
-				const vtWire = this.readByte() as T;
+				const ktWire = this.readByte() as TCode;
+				const vtWire = this.readByte() as TCode;
 				const count = this.readI32();
 				if (f.keyType !== undefined && f.keyType !== ktWire) {
 					throw new Error(`Map key type mismatch: schema=${f.keyType}, wire=${ktWire} (field=${f.key})`);
@@ -539,7 +1057,7 @@ export class Decoder {
 		}
 	}
 
-	private skip(t: T) {
+	private skip(t: TCode) {
 		this.readValue(t, { id: 0, key: "", type: t } as FieldSchema);
 	}
 
@@ -549,13 +1067,13 @@ export class Decoder {
 			const t = this.readByte();
 			if (t === T.STOP) break;
 			const id = this.readI16();
-			const val = this.readValueAny(t as T);
+			const val = this.readValueAny(t as TCode);
 			out[id] = val;
 		}
 		return out;
 	}
 
-	private readValueAny(t: T): any {
+	private readValueAny(t: TCode): any {
 		switch (t) {
 			case T.BOOL:
 				return this.readByte() !== 0;
@@ -577,15 +1095,15 @@ export class Decoder {
 				return this.readStructGeneric();
 			case T.LIST:
 			case T.SET: {
-				const et = this.readByte() as T;
+				const et = this.readByte() as TCode;
 				const count = this.readI32();
 				const arr: any[] = [];
 				for (let i = 0; i < count; i++) arr.push(this.readValueAny(et));
 				return arr;
 			}
 			case T.MAP: {
-				const kt = this.readByte() as T;
-				const vt = this.readByte() as T;
+				const kt = this.readByte() as TCode;
+				const vt = this.readByte() as TCode;
 				const count = this.readI32();
 				const obj: any = {};
 				for (let i = 0; i < count; i++) {
@@ -631,9 +1149,17 @@ export async function websocketReverseEngineering(
 		const mdata = m.data as Blob;
 		const d = await mdata.arrayBuffer();
 
+
 		const decoder = new Decoder(new Uint8Array(d));
-		const { event } = decoder.readStruct(xchatRootSchema);
-		onEvent?.(event);
+		const event = decoder.readStruct(xchatRootSchema)?.event;
+
+		if (!event) {
+			const genericDecoder = new Decoder(new Uint8Array(d));
+
+			onEvent?.(genericDecoder.readStructGeneric());
+		} else {
+			onEvent?.(event);
+		}
 
 		const eventJson = JSON.stringify(event, jsonReplacer, 2);
 
@@ -721,6 +1247,18 @@ export const xchatReceiptSchema: FieldSchema[] = [
 	{ id: 2, key: "ackTimestampMs", type: T.STRING },
 ];
 
+export const xchatEncryptedKeyPayload: FieldSchema[] = [
+	{ id: 1, key: "userId", type: T.STRING },
+	{ id: 2, key: "keyB64", type: T.STRING },
+	{ id: 3, key: "keyCreatedAtMs", type: T.STRING }
+];
+
+export const xchatEncryptedConversationKeySchema: FieldSchema[] = [
+	{ id: 1, key: "eventTimestamp", type: T.STRING },
+
+	{ id: 2, key: "encryptedKeyPayload", type: T.LIST, elemType: T.STRUCT, elemSchema: xchatEncryptedKeyPayload },
+];
+
 // Field 7: union-ish payload wrapper (only one of these is present at a time)
 export const xchatPayloadSchema: FieldSchema[] = [
 	{
@@ -729,6 +1267,14 @@ export const xchatPayloadSchema: FieldSchema[] = [
 		type: T.STRUCT,
 		schema: xchatEncryptedPayloadSchema,
 	},
+
+	{
+		id: 3,
+		key: "encryptedConversationKey",
+		type: T.STRUCT,
+		schema: xchatEncryptedConversationKeySchema
+	},
+
 	{
 		id: 6,
 		key: "conversationState",
