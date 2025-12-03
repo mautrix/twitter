@@ -1,5 +1,11 @@
 import './style.css';
+import 'highlight.js/styles/github-dark-dimmed.css';
+import hljs from "highlight.js/lib/core";
+import jsonLang from "highlight.js/lib/languages/json";
+import { Client, Configuration, RecoverErrorReason } from "juicebox-sdk";
 import sodium from "libsodium-wrappers";
+
+hljs.registerLanguage("json", jsonLang);
 
 const defaultToken = "eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJYIiwic3ViIjoiMTM3NDg2NDcxODU5MTA5ODg4NiIsImV4cCI6IjE3NjQ0NTU2MDMiLCJuYmYiOiIxNzY0NDU1MzAzIiwidWEiOiJNb3ppbGxhXC81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXRcLzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZVwvMTQyLjAuMC4wIFNhZmFyaVwvNTM3LjM2In0.cHQXTovky-wueJJaWUEZBf-xXAangd0e4daweiTIKO4";
 const defaultKeyB64 = "ST4hdGP1V3A5az3dM4GgjvoPRiaBl9TZUwGkfPy9/0E=";
@@ -18,6 +24,58 @@ app.innerHTML = `
         <h1 class="text-3xl font-semibold">Reverse XChat</h1>
         <p class="text-slate-300">Provide your token and decryption key, then click connect to start the websocket.</p>
       </div>
+      <div class="flex items-center justify-end">
+        <label class="inline-flex items-center gap-2 text-xs text-slate-300 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+          <input id="mask-key-toggle" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-900/80 text-sky-500 focus:ring-sky-500" />
+          <span>Hide private key everywhere</span>
+        </label>
+      </div>
+
+      <section class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20 w-full space-y-3">
+        <div class="space-y-1">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">Juicebox</p>
+          <h2 class="text-lg font-semibold text-slate-100">Import key from GetPublicKeysResult</h2>
+          <p class="text-sm text-slate-300">Paste the GraphQL result (or base64 of it), enter your PIN, and we will recover the secret key with juicebox-sdk and stash it in your saved keys.</p>
+        </div>
+        <form id="juicebox-form" class="space-y-3">
+          <label class="block space-y-2">
+            <span class="text-sm font-medium text-slate-200">GetPublicKeysResult JSON</span>
+            <textarea
+              id="juicebox-json-input"
+              name="juicebox-json"
+              rows="7"
+              placeholder="Paste the JSON (or base64-encoded JSON) here"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+            ></textarea>
+          </label>
+          <div class="grid gap-3 md:grid-cols-2">
+            <label class="block space-y-1">
+              <span class="text-xs font-medium text-slate-300">PIN (4 digits)</span>
+              <input
+                id="juicebox-pin-input"
+                name="juicebox-pin"
+                type="password"
+                inputmode="numeric"
+                pattern="\\d{4}"
+                maxlength="4"
+                placeholder="1234"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+            </label>
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              id="juicebox-submit-btn"
+              type="submit"
+              class="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50"
+            >
+              Recover & Save Key
+            </button>
+            <p class="text-xs text-slate-400">We extract key_store_token_map_json + token_map → juicebox → saved key.</p>
+          </div>
+        </form>
+        <pre id="juicebox-output" class="json-output h-44 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100 font-mono leading-relaxed">Awaiting Juicebox input...</pre>
+      </section>
 
       <form id="connect-form" class="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg shadow-sky-900/30 backdrop-blur">
         <label class="block space-y-2">
@@ -26,7 +84,7 @@ app.innerHTML = `
         </label>
 
         <div class="space-y-2">
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-3">
             <span class="text-sm font-medium text-slate-200">Decryption key (base64)</span>
             <button
               id="save-key-btn"
@@ -92,14 +150,14 @@ app.innerHTML = `
             <h2 class="text-lg font-semibold text-slate-100">Latest event JSON</h2>
             <span class="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300">Raw</span>
           </div>
-          <pre id="event-output" class="h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100">No event received yet.</pre>
+          <pre id="event-output" class="json-output h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100 font-mono leading-relaxed">No event received yet.</pre>
         </div>
         <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20">
           <div class="mb-2 flex items-center justify-between">
             <h2 class="text-lg font-semibold text-slate-100">Decrypted payload</h2>
             <span class="rounded-full bg-emerald-800/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100">Plaintext</span>
           </div>
-          <pre id="decrypted-output" class="h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100">No decrypted payload yet.</pre>
+          <pre id="decrypted-output" class="json-output h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100 font-mono leading-relaxed">No decrypted payload yet.</pre>
         </div>
       </section>
 
@@ -131,7 +189,38 @@ app.innerHTML = `
             <p class="text-xs text-slate-400">We will base64-decode and parse to JSON below.</p>
           </div>
         </form>
-        <pre id="manual-output" class="mt-4 h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100">Awaiting ciphertext...</pre>
+        <pre id="manual-output" class="json-output mt-4 h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100 font-mono leading-relaxed">Awaiting ciphertext...</pre>
+      </section>
+
+      <section class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20 w-full">
+        <div class="mb-3 space-y-1">
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Blob decrypt</p>
+          <h2 class="text-lg font-semibold text-slate-100">Decrypt a base64 blob</h2>
+          <p class="text-sm text-slate-300">UI only: paste any base64 blob and click decrypt. Hook your decryption logic in the handler later.</p>
+        </div>
+        <form id="blob-form" class="space-y-3">
+          <label class="block space-y-2">
+            <span class="text-sm font-medium text-slate-200">Base64 blob</span>
+            <textarea
+              id="blob-input"
+              name="blob"
+              rows="3"
+              placeholder="Paste the base64 blob here"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+            ></textarea>
+          </label>
+          <div class="flex items-center gap-3">
+            <button
+              id="blob-submit-btn"
+              type="submit"
+              class="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50"
+            >
+              Decrypt blob
+            </button>
+            <p class="text-xs text-slate-400">Outputs a stub message; add your decryption later.</p>
+          </div>
+        </form>
+        <pre id="blob-output" class="mt-4 h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-xs text-slate-100 font-mono leading-relaxed">Awaiting blob...</pre>
       </section>
 
       <section class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm shadow-sky-900/20 w-full">
@@ -173,6 +262,7 @@ const tokenInput = document.querySelector<HTMLTextAreaElement>('#token-input');
 const keyInput = document.querySelector<HTMLInputElement>('#key-input');
 const pubKeyInput = document.querySelector<HTMLInputElement>('#pubkey-input');
 const keyPreview = document.querySelector<HTMLParagraphElement>('#key-preview');
+const maskKeyToggle = document.querySelector<HTMLInputElement>('#mask-key-toggle');
 const statusLog = document.querySelector<HTMLPreElement>('#status-log');
 const connectButton = document.querySelector<HTMLButtonElement>('#connect-btn');
 const keySelect = document.querySelector<HTMLSelectElement>('#key-select');
@@ -186,8 +276,16 @@ const manualOutput = document.querySelector<HTMLPreElement>('#manual-output');
 const convEventForm = document.querySelector<HTMLFormElement>('#conv-event-form');
 const convEventInput = document.querySelector<HTMLTextAreaElement>('#conv-event-input');
 const convEventOutput = document.querySelector<HTMLPreElement>('#conv-event-output');
+const juiceboxForm = document.querySelector<HTMLFormElement>('#juicebox-form');
+const juiceboxJsonInput = document.querySelector<HTMLTextAreaElement>('#juicebox-json-input');
+const juiceboxPinInput = document.querySelector<HTMLInputElement>('#juicebox-pin-input');
+const juiceboxOutput = document.querySelector<HTMLPreElement>('#juicebox-output');
+const juiceboxSubmitBtn = document.querySelector<HTMLButtonElement>('#juicebox-submit-btn');
+const base64BlobForm = document.querySelector<HTMLFormElement>('#blob-form');
+const base64BlobInput = document.querySelector<HTMLTextAreaElement>('#blob-input');
+const base64BlobOutput = document.querySelector<HTMLPreElement>('#blob-output');
 
-if (!form || !tokenInput || !keyInput || !pubKeyInput || !keyPreview || !statusLog || !connectButton || !keySelect || !saveKeyButton || !deleteKeyButton || !eventOutput || !decryptedOutput || !manualForm || !manualInput || !manualOutput || !convEventForm || !convEventInput || !convEventOutput) {
+if (!form || !tokenInput || !keyInput || !pubKeyInput || !keyPreview || !maskKeyToggle || !statusLog || !connectButton || !keySelect || !saveKeyButton || !deleteKeyButton || !eventOutput || !decryptedOutput || !manualForm || !manualInput || !manualOutput || !convEventForm || !convEventInput || !convEventOutput || !juiceboxForm || !juiceboxJsonInput || !juiceboxPinInput || !juiceboxOutput || !juiceboxSubmitBtn || !base64BlobForm || !base64BlobInput || !base64BlobOutput) {
 	throw new Error("Failed to initialize app controls");
 }
 
@@ -203,6 +301,12 @@ type SavedKey = {
 	priv: string;
 	pub?: string;
 };
+
+declare global {
+	interface Window {
+		JuiceboxGetAuthToken?: (realmId: Uint8Array) => Promise<string> | string;
+	}
+}
 
 const loadSavedKeys = (): SavedKey[] => {
 	const raw = localStorage.getItem(STORAGE_KEYS);
@@ -231,6 +335,9 @@ const persistKeys = (keys: SavedKey[]) => {
 let savedKeys = loadSavedKeys();
 if (!savedKeys.length) savedKeys = [{ priv: defaultKeyB64 }];
 
+let hidePrivateKeys = false;
+let lastJuiceboxPayload = "";
+
 const renderSavedKeyOptions = (activeIndex = 0) => {
 	keySelect.innerHTML = "";
 	const frag = document.createDocumentFragment();
@@ -251,7 +358,11 @@ const renderSavedKeyOptions = (activeIndex = 0) => {
 		savedKeys.forEach((k, idx) => {
 			const opt = document.createElement("option");
 			opt.value = String(idx);
-			opt.textContent = k.pub ? `Priv ${preview(k.priv)} | Pub ${preview(k.pub)}` : `Priv ${preview(k.priv)}`;
+			if (hidePrivateKeys) {
+				opt.textContent = k.pub ? `Pub ${preview(k.pub)} | Key hidden` : `Key ${idx + 1} (hidden)`;
+			} else {
+				opt.textContent = k.pub ? `Priv ${preview(k.priv)} | Pub ${preview(k.pub)}` : `Priv ${preview(k.priv)}`;
+			}
 			frag.appendChild(opt);
 		});
 		const safeIndex = activeIndex < savedKeys.length ? activeIndex : 0;
@@ -285,17 +396,98 @@ const upsertKey = (privB64: string, pubB64?: string) => {
 renderSavedKeyOptions(0);
 
 const jsonReplacer = (_key: string, value: unknown) => (typeof value === "bigint" ? value.toString() : value);
-const renderEventJson = (json: string) => {
-	eventOutput.textContent = json;
+const tryParseJson = (text: string) => {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return null;
+	}
 };
-const renderDecryptedPayload = (text: string) => {
-	decryptedOutput.textContent = text;
+const tryParseJsonOrBase64Json = (text: string) => {
+	const parsed = tryParseJson(text);
+	if (parsed !== null) return parsed;
+	try {
+		const decoded = new TextDecoder().decode(base64ToUint8Array(text));
+		return tryParseJson(decoded);
+	} catch {
+		return null;
+	}
 };
-const renderManualPayload = (text: string) => {
-	manualOutput.textContent = text;
+const extractJuiceboxBundle = (root: any) => {
+	const pkList = root?.public_keys_with_token_map;
+	if (!Array.isArray(pkList) || !pkList.length) {
+		throw new Error("public_keys_with_token_map missing or empty");
+	}
+	const tokenMapNode = pkList[0]?.token_map ?? pkList[0];
+	const rawConfig = tokenMapNode?.key_store_token_map_json ?? tokenMapNode?.key_store_token_map_json_string ?? tokenMapNode?.key_store_token_map_json_json;
+	let configObj: any = null;
+	if (typeof rawConfig === "string") {
+		configObj = tryParseJson(rawConfig);
+	}
+	if (!configObj && rawConfig && typeof rawConfig === "object") {
+		configObj = rawConfig;
+	}
+	if (!configObj) {
+		throw new Error("key_store_token_map_json missing or invalid");
+	}
+
+	const tokenEntries = tokenMapNode?.token_map;
+	const tokenMap: Record<string, string> = {};
+	if (Array.isArray(tokenEntries)) {
+		for (const entry of tokenEntries) {
+			const k = entry?.key;
+			const token = entry?.value?.token;
+			if (typeof k === "string" && typeof token === "string") {
+				tokenMap[k.toLowerCase()] = token;
+			}
+		}
+	}
+	if (!Object.keys(tokenMap).length) {
+		throw new Error("token_map missing or empty");
+	}
+
+	return { configObj, tokenMap };
+};
+const highlightJson = (target: HTMLPreElement, text: string) => {
+	target.classList.add("hljs");
+	target.classList.add("language-json");
+	const highlighted = hljs.highlight(text, { language: "json", ignoreIllegals: true }).value;
+	target.innerHTML = highlighted;
+};
+const renderJsonSection = (target: HTMLPreElement, text: string) => {
+	if (!text) {
+		target.textContent = "";
+		return;
+	}
+	const parsed = tryParseJson(text);
+	if (parsed !== null) {
+		const pretty = JSON.stringify(parsed, jsonReplacer, 2);
+		highlightJson(target, pretty);
+		return;
+	}
+	target.textContent = text;
+};
+const renderEventJson = (json: string) => renderJsonSection(eventOutput, json);
+const renderDecryptedPayload = (text: string) => renderJsonSection(decryptedOutput, text);
+const renderManualPayload = (text: string) => renderJsonSection(manualOutput, text);
+const renderJuiceboxPayload = (text: string) => {
+	lastJuiceboxPayload = text;
+	const parsed = tryParseJson(text);
+	if (hidePrivateKeys && parsed && typeof parsed === "object") {
+		const clone = JSON.parse(JSON.stringify(parsed));
+		if ("savedPrivKeyB64" in clone) clone.savedPrivKeyB64 = "[hidden]";
+		if ("savedKeyB64" in clone) clone.savedKeyB64 = "[hidden]";
+		renderJsonSection(juiceboxOutput, JSON.stringify(clone, jsonReplacer, 2));
+		return;
+	}
+	renderJsonSection(juiceboxOutput, text);
 };
 const updateKeyPreview = () => {
 	const value = keyInput.value.trim();
+	if (hidePrivateKeys) {
+		keyPreview.textContent = value ? "Hidden while \"Hide private key\" is on." : "Length: 0 | hidden";
+		return;
+	}
 	if (!value) {
 		keyPreview.textContent = "Length: 0 | hex: (empty)";
 		return;
@@ -310,11 +502,32 @@ const updateKeyPreview = () => {
 const renderConvEventOutput = (text: string) => {
 	convEventOutput.textContent = text;
 };
+const renderBlobOutput = (text: string) => {
+	base64BlobOutput.textContent = text;
+};
+const describeRecoverError = (err: unknown) => {
+	if (err && typeof err === "object" && "reason" in err) {
+		const reason = (err as any).reason as RecoverErrorReason;
+		const reasonLabel = RecoverErrorReason[reason] ?? `Reason ${reason}`;
+		const guesses = (err as any).guesses_remaining;
+		return guesses !== undefined ? `${reasonLabel} (guesses remaining: ${guesses})` : reasonLabel;
+	}
+	return err instanceof Error ? err.message : String(err);
+};
 
 let activeSocket: WebSocket | null = null;
 
 keyInput.addEventListener('input', updateKeyPreview);
 updateKeyPreview();
+
+maskKeyToggle.addEventListener('change', () => {
+	hidePrivateKeys = maskKeyToggle.checked;
+	keyInput.type = hidePrivateKeys ? "password" : "text";
+	const currentIdx = Number(keySelect.value) || 0;
+	renderSavedKeyOptions(currentIdx);
+	updateKeyPreview();
+	if (lastJuiceboxPayload) renderJuiceboxPayload(lastJuiceboxPayload);
+});
 
 keySelect.addEventListener('change', () => {
 	const idx = Number(keySelect.value);
@@ -324,6 +537,13 @@ keySelect.addEventListener('change', () => {
 		pubKeyInput.value = entry.pub ?? "";
 	}
 	updateKeyPreview();
+});
+
+juiceboxPinInput.addEventListener('input', () => {
+	const digits = juiceboxPinInput.value.replace(/\D/g, "").slice(0, 4);
+	if (digits !== juiceboxPinInput.value) {
+		juiceboxPinInput.value = digits;
+	}
 });
 
 saveKeyButton.addEventListener('click', () => {
@@ -430,6 +650,104 @@ manualForm.addEventListener('submit', async (event) => {
 	}
 });
 
+juiceboxForm.addEventListener('submit', async (event) => {
+	event.preventDefault();
+
+	const raw = juiceboxJsonInput.value.trim();
+	const pinDigits = (juiceboxPinInput.value ?? "").replace(/\D/g, "").slice(0, 4);
+	const info = "";
+
+	juiceboxPinInput.value = pinDigits;
+
+	if (!raw) {
+		renderJuiceboxPayload("Please paste the GetPublicKeysResult JSON or base64-encoded JSON.");
+		return;
+	}
+
+	if (!/^\d{4}$/.test(pinDigits)) {
+		renderJuiceboxPayload("Enter your 4-digit PIN to recover the secret.");
+		return;
+	}
+
+	const parsed = tryParseJsonOrBase64Json(raw);
+	if (!parsed) {
+		renderJuiceboxPayload("Could not parse JSON (neither plain nor base64).");
+		return;
+	}
+
+	let bundle: { configObj: any; tokenMap: Record<string, string> };
+	try {
+		bundle = extractJuiceboxBundle(parsed);
+	} catch (err) {
+		renderJuiceboxPayload(`Parse error: ${err instanceof Error ? err.message : String(err)}`);
+		return;
+	}
+
+	try {
+		juiceboxSubmitBtn.disabled = true;
+		renderJuiceboxPayload("Recovering key via Juicebox…");
+
+		const configuration = new Configuration(bundle.configObj);
+
+		window.JuiceboxGetAuthToken = async (realmId: Uint8Array) => {
+			const realmIdHex = bytesToHex(realmId).toLowerCase();
+			const token = bundle.tokenMap[realmIdHex];
+			if (!token) {
+				throw new Error(`No token found for realm ${realmIdHex}`);
+			}
+			return token;
+		};
+
+		const client = new Client(configuration, []);
+		const encoder = new TextEncoder();
+		const recovered = new Uint8Array(await client.recover(encoder.encode(pinDigits), encoder.encode(info)));
+
+		let privBytes: Uint8Array;
+		let pubBytes: Uint8Array | undefined;
+
+		if (recovered.length >= 64 && recovered.length % 2 === 0) {
+			const half = recovered.length / 2;
+			privBytes = recovered.slice(0, half);
+			pubBytes = recovered.slice(half);
+		} else if (recovered.length > 32) {
+			privBytes = recovered.slice(0, 32);
+			pubBytes = recovered.slice(32);
+		} else {
+			privBytes = recovered;
+		}
+
+		const privKeyB64 = bytesToBase64(privBytes);
+		const pubKeyB64 = pubBytes ? bytesToBase64(pubBytes) : undefined;
+
+		upsertKey(privKeyB64, pubKeyB64);
+		updateKeyPreview();
+
+		renderJuiceboxPayload(JSON.stringify({ savedPrivKeyB64: privKeyB64, savedPubKeyB64: pubKeyB64, config: bundle.configObj, tokenMap: bundle.tokenMap }, jsonReplacer, 2));
+		logStatus("Recovered keypair from Juicebox and saved to your saved keys.");
+	} catch (err) {
+		renderJuiceboxPayload(`Juicebox recovery failed: ${describeRecoverError(err)}`);
+	} finally {
+		juiceboxSubmitBtn.disabled = false;
+	}
+});
+
+base64BlobForm.addEventListener('submit', (event) => {
+	event.preventDefault();
+
+	const blob = base64BlobInput.value.trim();
+	if (!blob) {
+		renderBlobOutput("Paste a base64 blob above.");
+		return;
+	}
+
+	try {
+		const bytes = base64ToUint8Array(blob);
+		renderBlobOutput(`Received ${bytes.length} bytes. Add your decryption logic here.`);
+	} catch (err) {
+		renderBlobOutput(`Invalid base64: ${err instanceof Error ? err.message : String(err)}`);
+	}
+});
+
 convEventForm.addEventListener('submit', async (event) => {
 	event.preventDefault();
 
@@ -445,32 +763,34 @@ convEventForm.addEventListener('submit', async (event) => {
 		return;
 	}
 
-	let eventJson: any = null;
-	const tryParseJson = (text: string) => {
-		try {
-			return JSON.parse(text);
-		} catch {
-			return null;
-		}
-	};
-
-	eventJson = tryParseJson(raw);
+	let eventJson: any = tryParseJson(raw);
 
 	if (!eventJson) {
-			const bytes = base64ToUint8Array(raw);
+		const bytes = base64ToUint8Array(raw);
+		try {
+			const decoder = new Decoder(bytes);
+			eventJson = decoder.readStruct(xchatEventSchema);
+		} catch {
+			/* ignore */
+		}
 
-				const decoder = new Decoder(bytes);
-				eventJson = decoder.readStruct(xchatEventSchema)
-
-			// Fallback: treat base64 as JSON string.
-			if (!eventJson) {
-				try {
-					const decoded = new TextDecoder().decode(bytes);
-					eventJson = tryParseJson(decoded);
-				} catch {
-					/* ignore */
-				}
+		if (!eventJson) {
+			try {
+				const genericDecoder = new Decoder(bytes);
+				eventJson = genericDecoder.readStructGeneric();
+			} catch {
+				/* ignore */
 			}
+		}
+
+		if (!eventJson) {
+			try {
+				const decoded = new TextDecoder().decode(bytes);
+				eventJson = tryParseJson(decoded);
+			} catch {
+				/* ignore */
+			}
+		}
 	}
 
 	if (!eventJson) {

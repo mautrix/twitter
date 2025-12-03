@@ -12,3 +12,29 @@ body {
 #app {
   min-height: 100vh;
 }
+
+.json-output {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  line-height: 1.5;
+}
+
+.json-output .json-key {
+  color: #38bdf8;
+}
+
+.json-output .json-string {
+  color: #c084fc;
+}
+
+.json-output .json-number {
+  color: #fbbf24;
+}
+
+.json-output .json-boolean {
+  color: #f97316;
+}
+
+.json-output .json-null {
+  color: #94a3b8;
+  font-style: italic;
+}
