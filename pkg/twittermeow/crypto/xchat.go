@@ -63,12 +63,12 @@ func SecretboxDecrypt(nonceCiphertext, key []byte) ([]byte, error) {
 }
 
 // UnwrapConversationKey mirrors the WebCrypto flow in reverse-xchat:
-//  1) keyB64 = base64(pub(65 bytes) || AES-GCM(ct||tag))
-//  2) privScalarB64 = base64(32-byte P-256 private scalar)
-//  3) derive shared = ECDH(priv, ephPub) (32-byte x coordinate)
-//  4) KDF2-SHA256(shared || counter || ephPub) → 32 bytes
+//  1. keyB64 = base64(pub(65 bytes) || AES-GCM(ct||tag))
+//  2. privScalarB64 = base64(32-byte P-256 private scalar)
+//  3. derive shared = ECDH(priv, ephPub) (32-byte x coordinate)
+//  4. KDF2-SHA256(shared || counter || ephPub) → 32 bytes
 //     first 16 = AES key, last 16 = IV
-//  5) AES-GCM decrypt ciphertext, expecting a 32-byte conversation key.
+//  5. AES-GCM decrypt ciphertext, expecting a 32-byte conversation key.
 func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 	blob, err := decodeBase64Flexible(keyB64)
 	if err != nil {
@@ -132,7 +132,7 @@ func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 func kdf2SHA256(shared, other []byte, length int) ([]byte, error) {
 	var (
 		counter uint32 = 1
-		out             = make([]byte, 0, length)
+		out            = make([]byte, 0, length)
 	)
 	for len(out) < length {
 		counterBytes := []byte{0, 0, 0, 0}

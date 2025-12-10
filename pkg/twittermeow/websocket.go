@@ -198,7 +198,7 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 			case <-pingCtx.Done():
 				return
 			case <-pingTicker.C:
-				instruction := payload.Message {
+				instruction := payload.Message{
 					MessageInstruction: &payload.MessageInstruction{
 						KeepAliveInstruction: &payload.KeepAliveInstruction{},
 					},

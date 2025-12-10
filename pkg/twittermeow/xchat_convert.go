@@ -38,6 +38,7 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	return &types.Message{
 		ID:             ptr.Val(evt.SequenceId),
 		Time:           ptr.Val(evt.CreatedAtMsec),
+		RequestID:      ptr.Val(evt.MessageId),
 		ConversationID: ptr.Val(evt.ConversationId),
 		MessageData:    msgData,
 	}

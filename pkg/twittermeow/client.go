@@ -448,4 +448,3 @@ func (c *Client) SetActiveConversation(conversationID string) {
 func (c *Client) PollConversation(conversationID string) {
 	c.polling.pollConversation(conversationID)
 }
-

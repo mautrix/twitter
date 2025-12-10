@@ -87,6 +87,13 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			msgType = bridgev2.RemoteEventEdit
 		}
 		conversation := inbox.GetConversationByID(evt.ConversationID)
+		if isFromMe {
+			tc.userLogin.Log.Debug().
+				Str("sequence_id", evt.ID).
+				Str("message_id", evt.MessageData.ID).
+				Str("request_id", evt.RequestID).
+				Msg("Received self XChat message")
+		}
 		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: msgType,
@@ -106,8 +113,8 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
 				CreatePortal: isFromMe || (conversation != nil && (conversation.Trusted || !conversation.LowQuality)),
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
-				StreamOrder:  methods.ParseSnowflakeInt(evt.MessageData.ID),
-				Timestamp:    methods.ParseSnowflake(evt.MessageData.ID),
+				StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
+				Timestamp:    methods.ParseSnowflake(evt.ID),
 			},
 			ID:            networkid.MessageID(evt.MessageData.ID),
 			TransactionID: networkid.TransactionID(evt.RequestID),
