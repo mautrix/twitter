@@ -286,3 +286,90 @@ func (p *UpdateSubscriptionsPayload) Encode() ([]byte, error) {
 	}
 	return []byte(values.Encode()), nil
 }
+
+var XCHAT_MESSAGE_PULL_VERSION int = 1761251295
+
+type QuerySettings struct {
+	InboxConversationEventLimit int `url:"inbox_conversation_event_limit"`
+	InboxConversationLimit      int `url:"inbox_conversation_limit"`
+	ConversationEventLimit      int `url:"conversation_event_limit"`
+	UserEventLimit              int `url:"user_event_limit"`
+}
+
+func DefaultQuerySettings() *QuerySettings {
+	return &QuerySettings{
+		InboxConversationEventLimit: 5,
+		InboxConversationLimit:      20,
+		ConversationEventLimit:      200,
+		UserEventLimit:              500,
+	}
+}
+
+func (p *QuerySettings) Encode() ([]byte, error) {
+	values, err := query.Values(p)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(values.Encode()), nil
+}
+
+type XChatCursor struct {
+	CursorId        string `url:"cursor_id,omitempty"`
+	GraphSnapshotId string `url:"graph_snapshot_id,omitempty"`
+}
+
+func (p *XChatCursor) Encode() ([]byte, error) {
+	values, err := query.Values(p)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(values.Encode()), nil
+}
+
+type GetInitialXChatPageQueryVariables struct {
+	MaxLocalSequenceId string         `url:"max_local_sequence_id,omitempty"`
+	QuerySettings      *QuerySettings `url:"query_settings"`
+	MessagePullVersion *int           `url:"message_pull_version,omitempty"`
+	ContinueCursor     *XChatCursor   `url:"continue_cursor,omitempty"`
+}
+
+func NewInitialXChatPageQueryVariables(
+	maxLocalSequenceId string,
+) *GetInitialXChatPageQueryVariables {
+	return &GetInitialXChatPageQueryVariables{
+		MaxLocalSequenceId: maxLocalSequenceId,
+		QuerySettings:      DefaultQuerySettings(),
+		MessagePullVersion: &XCHAT_MESSAGE_PULL_VERSION,
+	}
+}
+
+func NewInitialXChatPageQueryVariablesWithCursor(
+	cursor *XChatCursor,
+) *GetInitialXChatPageQueryVariables {
+	return &GetInitialXChatPageQueryVariables{
+		ContinueCursor: cursor,
+		QuerySettings:  DefaultQuerySettings(),
+	}
+}
+
+func (p *GetInitialXChatPageQueryVariables) Encode() ([]byte, error) {
+	values, err := query.Values(p)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(values.Encode()), nil
+}
+
+type GetInboxPageRequestQueryVariables struct {
+	ContinueCursor *XChatCursor   `url:"continue_cursor,omitempty"`
+	QuerySettings  *QuerySettings `url:"query_settings"`
+}
+
+func NewInboxPageRequestQueryVariables(
+	cursor *XChatCursor,
+) *GetInboxPageRequestQueryVariables {
+	return &GetInboxPageRequestQueryVariables{
+		ContinueCursor: cursor,
+		QuerySettings:  DefaultQuerySettings(),
+	}
+}

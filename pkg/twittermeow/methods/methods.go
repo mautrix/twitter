@@ -29,6 +29,21 @@ func ParseSnowflake(msgID string) time.Time {
 	return time.UnixMilli(msec)
 }
 
+// ParseMsecTimestamp parses a milliseconds-since-epoch string to time.Time.
+func ParseMsecTimestamp(msec string) time.Time {
+	ms, err := strconv.ParseInt(msec, 10, 64)
+	if err != nil || ms == 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
+}
+
+// ParseInt64 parses a string to int64 for sequence IDs.
+func ParseInt64(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
+}
+
 func CompareSnowflake(a, b string) int {
 	if len(a) < len(b) {
 		return -1
@@ -52,5 +67,5 @@ func SortMessagesByTime(messages []*types.Message) {
 
 func CreateConversationID(conversationIDs []string) string {
 	sort.Strings(conversationIDs)
-	return strings.Join(conversationIDs, "-")
+	return strings.Join(conversationIDs, ":")
 }

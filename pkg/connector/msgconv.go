@@ -105,7 +105,15 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 }
 
 func removeEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
+	if len(indices) < 2 {
+		return
+	}
+
 	start, end := indices[0], indices[1]
+	if start <= 0 || end <= start || end > len(msgPart.Content.Body) {
+		return
+	}
+
 	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
 }
 

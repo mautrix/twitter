@@ -32,6 +32,7 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 		Str("url", url).
 		Str("method", method).
 		Str("function", "MakeRequest").
+		Str("request_body", string(payload)).
 		Logger()
 	var attempts int
 	for {
@@ -53,8 +54,9 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			log.Err(err).
 				Dur("duration", dur).
+				Str("response_body", string(respDat)).
 				Msg("Request failed")
-			return nil, nil, err
+			return nil, respDat, err
 		} else if attempts > MaxHTTPRetries {
 			log.Err(err).
 				Dur("duration", dur).
@@ -65,6 +67,7 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 			c.Logger.Err(err).
 				Str("location", location).
 				Dur("duration", dur).
+				Str("request_body", string(payload)).
 				Msg("Redirect attempted")
 			return resp, nil, err
 		} else if ctx.Err() != nil {
@@ -72,6 +75,7 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 		}
 		log.Err(err).
 			Dur("duration", dur).
+			Str("response_body", string(respDat)).
 			Msg("Request failed, retrying")
 		time.Sleep(time.Duration(attempts) * 3 * time.Second)
 	}
@@ -106,6 +110,10 @@ func (c *Client) makeRequestDirect(ctx context.Context, url string, method strin
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrResponseReadFailed, err)
 	}
+	c.Logger.Trace().
+		Int("status_code", response.StatusCode).
+		Str("response_body", string(responseBody)).
+		Msg("Raw HTTP response")
 	if response.StatusCode >= 400 {
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {

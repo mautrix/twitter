@@ -75,3 +75,14 @@ type AddParticipantsResponse struct {
 		} `json:"add_participants,omitempty"`
 	} `json:"data,omitempty"`
 }
+
+type SendMessageMutationResponse struct {
+	Data struct {
+		SendMessage struct {
+			Typename string `json:"__typename,omitempty"`
+		} `json:"send_message,omitempty"`
+	} `json:"data,omitempty"`
+	Errors []struct {
+		Message string `json:"message,omitempty"`
+	} `json:"errors,omitempty"`
+}

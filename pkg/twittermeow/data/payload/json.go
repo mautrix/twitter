@@ -1,6 +1,10 @@
 package payload
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+)
 
 type SendDirectMessagePayload struct {
 	ConversationID           string `json:"conversation_id,omitempty"`
@@ -106,4 +110,85 @@ type WebPushConfigPayload struct {
 
 type PushConfigPayloadWrapper struct {
 	PushDeviceInfo *WebPushConfigPayload `json:"push_device_info"`
+}
+
+type SendMessageMutationVariables struct {
+	ConversationID               string `json:"conversation_id"`
+	MessageID                    string `json:"message_id"`
+	ConversationToken            string `json:"conversation_token"`
+	EncodedMessageCreateEvent    string `json:"encoded_message_create_event"`
+	EncodedMessageEventSignature string `json:"encoded_message_event_signature"`
+}
+
+type SendMessageMutationPayload struct {
+	Variables SendMessageMutationVariables `json:"variables"`
+	QueryId   string                       `json:"queryId,omitempty"`
+}
+
+func NewSendMessageMutationPayload(vars SendMessageMutationVariables) *SendMessageMutationPayload {
+	return &SendMessageMutationPayload{
+		Variables: vars,
+	}
+}
+
+type GenerateXChatTokenMutationPayload struct {
+	Variables  map[string]any `json:"variables"`
+	Features   map[string]any `json:"features,omitempty"`
+	Extensions struct {
+		PersistedQuery struct {
+			Version    int    `json:"version"`
+			Sha256Hash string `json:"sha256Hash"`
+		} `json:"persistedQuery"`
+	} `json:"extensions"`
+}
+
+func (p *GenerateXChatTokenMutationPayload) Default() *GenerateXChatTokenMutationPayload {
+	p.Variables = map[string]any{}
+	p.Extensions.PersistedQuery.Version = 1
+	return p
+}
+
+// EncodeJSONQuery serializes the inbox page request variables to JSON and wraps
+// them in a query string suitable for ?variables=... on GraphQL GET requests.
+func (p *GetInboxPageRequestQueryVariables) EncodeJSONQuery() (string, error) {
+	if p.ContinueCursor == nil {
+		return "", fmt.Errorf("continue_cursor is required")
+	}
+
+	type gqlCursor struct {
+		CursorID        string `json:"cursor_id,omitempty"`
+		GraphSnapshotID string `json:"graph_snapshot_id,omitempty"`
+	}
+	type gqlSettings struct {
+		InboxConversationEventLimit int `json:"inbox_conversation_event_limit"`
+		InboxConversationLimit      int `json:"inbox_conversation_limit"`
+		ConversationEventLimit      int `json:"conversation_event_limit"`
+		UserEventLimit              int `json:"user_event_limit"`
+	}
+	type gqlVars struct {
+		ContinueCursor *gqlCursor   `json:"continue_cursor"`
+		QuerySettings  *gqlSettings `json:"query_settings"`
+	}
+
+	vars := gqlVars{
+		ContinueCursor: &gqlCursor{
+			CursorID:        p.ContinueCursor.CursorId,
+			GraphSnapshotID: p.ContinueCursor.GraphSnapshotId,
+		},
+		QuerySettings: &gqlSettings{
+			InboxConversationEventLimit: p.QuerySettings.InboxConversationEventLimit,
+			InboxConversationLimit:      p.QuerySettings.InboxConversationLimit,
+			ConversationEventLimit:      p.QuerySettings.ConversationEventLimit,
+			UserEventLimit:              p.QuerySettings.UserEventLimit,
+		},
+	}
+
+	jsonVars, err := json.Marshal(vars)
+	if err != nil {
+		return "", err
+	}
+
+	values := url.Values{}
+	values.Set("variables", string(jsonVars))
+	return values.Encode(), nil
 }

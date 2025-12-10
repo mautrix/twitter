@@ -18,118 +18,197 @@ package connector
 
 import (
 	"context"
-	"fmt"
-	"maps"
+	"encoding/base64"
+	"time"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-func (tc *TwitterClient) syncChannels(ctx context.Context, inbox *response.TwitterInboxData) {
+// syncXChatChannel syncs a single conversation from XChat inbox data.
+// Creates the portal synchronously if it doesn't exist.
+func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) {
 	log := zerolog.Ctx(ctx)
 
-	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
-	if inbox == nil {
-		initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to fetch initial inbox state:")
-			return
-		}
-		inbox = initialInboxState.InboxInitialState
+	conv := tc.xchatItemToConversation(ctx, item, users)
+	if conv == nil {
+		return
 	}
 
-	trustedInbox := inbox.InboxTimelines.Trusted
-	cursor := trustedInbox.MinEntryID
-	paginationStatus := trustedInbox.Status
+	portalKey := tc.MakePortalKey(conv)
 
-	pageCount := 1
-	for paginationStatus == types.PaginationStatusHasMore && (tc.connector.Config.ConversationSyncLimit == -1 || len(inbox.Entries) < tc.connector.Config.ConversationSyncLimit) {
-		reqQuery.MaxID = cursor
-		nextInboxTimelineResponse, err := tc.client.FetchTrustedThreads(ctx, reqQuery)
-		if err != nil {
-			log.Err(err).Msg(fmt.Sprintf("failed to fetch threads in trusted inbox using cursor %s:", cursor))
-			return
-		} else if len(nextInboxTimelineResponse.InboxTimeline.Entries) == 0 {
-			break
-		}
-
-		if inbox.Conversations == nil {
-			inbox.Conversations = map[string]*types.Conversation{}
-		}
-		if inbox.Users == nil {
-			inbox.Users = map[string]*types.User{}
-		}
-		maps.Copy(inbox.Conversations, nextInboxTimelineResponse.InboxTimeline.Conversations)
-		maps.Copy(inbox.Users, nextInboxTimelineResponse.InboxTimeline.Users)
-		inbox.Entries = append(inbox.Entries, nextInboxTimelineResponse.InboxTimeline.Entries...)
-
-		cursor = nextInboxTimelineResponse.InboxTimeline.MinEntryID
-		paginationStatus = nextInboxTimelineResponse.InboxTimeline.Status
-		pageCount++
+	// Get or create portal in database
+	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("conversation_id", conv.ConversationID).
+			Msg("Failed to get/create portal")
+		return
 	}
-	log.Info().
-		Int("page_count", pageCount).
-		Int("user_count", len(inbox.Users)).
-		Int("conversation_count", len(inbox.Conversations)).
-		Int("entry_count", len(inbox.Entries)).
-		Str("pagination_status", string(paginationStatus)).
-		Str("min_entry_id", cursor).
-		Msg("Got initial inbox state")
 
-	tc.userCacheLock.Lock()
-	maps.Copy(tc.userCache, inbox.Users)
-	tc.userCacheLock.Unlock()
-
-	messages := inbox.SortedMessages(ctx)
-	for _, conv := range inbox.SortedConversations() {
-		if ctx.Err() != nil {
-			log.Warn().Err(ctx.Err()).Msg("Context canceled while syncing conversations")
+	// Create Matrix room if it doesn't exist
+	if portal.MXID == "" {
+		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
+		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", conv.ConversationID).
+				Msg("Failed to create Matrix room")
 			return
 		}
-		convMessages := messages[conv.ConversationID]
-		if len(convMessages) == 0 {
-			continue
-		}
-		latestMessage := convMessages[len(convMessages)-1]
-		latestMessageTS := methods.ParseSnowflake(latestMessage.MessageData.ID)
-		evt := &simplevent.ChatResync{
-			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventChatResync,
-				LogContext: func(c zerolog.Context) zerolog.Context {
-					return c.
-						Str("conversation_id", conv.ConversationID).
-						Bool("conv_low_quality", conv.LowQuality).
-						Bool("conv_trusted", conv.Trusted)
+	} else {
+		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
+		if (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil {
+			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+				EventMeta: simplevent.EventMeta{
+					Type:      bridgev2.RemoteEventChatInfoChange,
+					PortalKey: portal.PortalKey,
+					Timestamp: time.Now(),
 				},
-				PortalKey:    tc.MakePortalKey(conv),
-				CreatePortal: conv.Trusted || !conv.LowQuality,
-			},
-			ChatInfo: tc.conversationToChatInfo(conv, inbox),
-			BundledBackfillData: &backfillDataBundle{
-				Conv:     conv,
-				Messages: convMessages,
-				Inbox:    inbox,
-			},
-			LatestMessageTS: latestMessageTS,
-		}
-		res := tc.userLogin.QueueRemoteEvent(evt)
-		if !res.Success {
-			log.Warn().Msg("Chat sync interrupted by failed QueueRemoteEvent")
-			return
+				ChatInfoChange: &bridgev2.ChatInfoChange{
+					ChatInfo: chatInfo,
+				},
+			})
 		}
 	}
-	log.Info().Msg("Finished syncing conversations")
+
+	log.Debug().
+		Str("conversation_id", conv.ConversationID).
+		Str("portal_mxid", string(portal.MXID)).
+		Msg("XChat channel synced")
 }
 
-type backfillDataBundle struct {
-	Conv     *types.Conversation
-	Messages []*types.Message
-	Inbox    *response.TwitterInboxData
+// xchatItemToConversation converts an XChatInboxItem to a types.Conversation.
+func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) *types.Conversation {
+	detail := item.ConversationDetail
+
+	conv := &types.Conversation{
+		ConversationID: detail.ConversationID,
+		Trusted:        true, // XChat conversations are always trusted
+		Muted:          detail.IsMuted,
+	}
+
+	// Determine conversation type based on participants
+	if len(detail.ParticipantsResults) == 2 {
+		conv.Type = "ONE_TO_ONE"
+	} else if len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil {
+		conv.Type = "GROUP_DM"
+	} else {
+		conv.Type = "ONE_TO_ONE"
+	}
+
+	// Build participants list
+	for _, p := range detail.ParticipantsResults {
+		conv.Participants = append(conv.Participants, types.Participant{
+			UserID: p.RestID,
+		})
+	}
+
+	// Set sort timestamp from group metadata if available
+	if detail.GroupMetadata != nil && detail.GroupMetadata.UpdatedAtMsec != "" {
+		conv.SortTimestamp = detail.GroupMetadata.UpdatedAtMsec
+		conv.AvatarImageHttps = detail.GroupMetadata.GroupAvatarURL
+		if name := tc.decryptGroupName(ctx, detail.ConversationID, detail.GroupMetadata.GroupName); name != "" {
+			conv.Name = name
+		}
+	}
+
+	return conv
+}
+
+// xchatItemToChatInfo converts an XChatInboxItem to bridgev2 chat info.
+func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User, conv *types.Conversation) *bridgev2.ChatInfo {
+	detail := item.ConversationDetail
+
+	isGroup := len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil
+
+	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(detail.ParticipantsResults))
+	for _, p := range detail.ParticipantsResults {
+		var userInfo *bridgev2.UserInfo
+		// First try inline Result from participants_results, then fall back to users map
+		if p.Result != nil {
+			user := twittermeow.ConvertXChatUserToUser(p.Result)
+			userInfo = tc.connector.wrapUserInfo(tc.client, user)
+		} else if user, ok := users[p.RestID]; ok {
+			userInfo = tc.connector.wrapUserInfo(tc.client, user)
+		}
+		memberMap[MakeUserID(p.RestID)] = bridgev2.ChatMember{
+			EventSender: tc.MakeEventSender(p.RestID),
+			UserInfo:    userInfo,
+		}
+	}
+
+	info := &bridgev2.ChatInfo{
+		Members: &bridgev2.ChatMemberList{
+			IsFull:           true,
+			TotalMemberCount: len(detail.ParticipantsResults),
+			MemberMap:        memberMap,
+		},
+	}
+
+	if isGroup {
+		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
+		if conv != nil && conv.AvatarImageHttps != "" {
+			info.Avatar = makeAvatar(tc.client, conv.AvatarImageHttps)
+		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
+			info.Avatar = makeAvatar(tc.client, detail.GroupMetadata.GroupAvatarURL)
+		}
+		if conv != nil && conv.Name != "" {
+			info.Name = &conv.Name
+		} else if detail.GroupMetadata != nil {
+			if name := tc.decryptGroupName(ctx, detail.ConversationID, detail.GroupMetadata.GroupName); name != "" {
+				info.Name = &name
+			}
+		}
+	} else {
+		info.Type = ptr.Ptr(database.RoomTypeDM)
+	}
+
+	return info
+}
+
+func (tc *TwitterClient) decryptGroupName(ctx context.Context, conversationID, encName string) string {
+	if encName == "" {
+		return ""
+	}
+	km := tc.client.GetKeyManager()
+	convKey, err := km.GetLatestConversationKey(ctx, conversationID)
+	if err != nil || convKey == nil || len(convKey.Key) == 0 {
+		zerolog.Ctx(ctx).Debug().
+			Str("conversation_id", conversationID).
+			Msg("No conversation key available to decrypt group name")
+		return ""
+	}
+
+	var ciphertext []byte
+	if dec, err := base64.StdEncoding.DecodeString(encName); err == nil {
+		ciphertext = dec
+	} else if dec, err := base64.RawStdEncoding.DecodeString(encName); err == nil {
+		ciphertext = dec
+	} else {
+		zerolog.Ctx(ctx).Warn().
+			Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to base64 decode encrypted group name")
+		return ""
+	}
+
+	plaintext, err := crypto.SecretboxDecrypt(ciphertext, convKey.Key)
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().
+			Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to decrypt group name with conversation key")
+		return ""
+	}
+	return string(plaintext)
 }

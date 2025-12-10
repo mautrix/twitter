@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-
-	"github.com/google/uuid"
 )
 
 func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
@@ -428,4 +429,185 @@ func (c *Client) AddParticipants(ctx context.Context, variables *payload.AddPart
 
 	data := response.AddParticipantsResponse{}
 	return &data, json.Unmarshal(respBody, &data)
+}
+
+// SendRawEncryptedMessage sends an already-encoded encrypted message payload.
+// This is primarily for testing/debugging purposes.
+func (c *Client) SendRawEncryptedMessage(ctx context.Context, conversationID, messageID, conversationToken, encodedMCE, encodedSig string) (*response.SendMessageMutationResponse, error) {
+	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
+		ConversationID:               conversationID,
+		MessageID:                    messageID,
+		ConversationToken:            conversationToken,
+		EncodedMessageCreateEvent:    encodedMCE,
+		EncodedMessageEventSignature: encodedSig,
+	},
+	)
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().RawJSON("payload", jsonBody).Msg("Sending raw encrypted message")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().RawJSON("response", respBody).Msg("Got response for encrypted message")
+
+	var resp response.SendMessageMutationResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+// SendEncryptedMessageOpts contains options for sending an encrypted message.
+type SendEncryptedMessageOpts struct {
+	ConversationID string
+	MessageID      string // optional, generates UUID if empty
+	Text           string
+	Attachments    []*payload.MessageAttachment
+	ReplyTo        *payload.ReplyingToPreview
+	Entities       []*payload.RichTextEntity
+}
+
+// SendEncryptedMessage sends an encrypted message via the XChat protocol.
+func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMessageOpts) (*response.SendMessageMutationResponse, error) {
+	// Get the server-provided conversation token for this conversation
+	token, err := c.keyManager.GetConversationToken(ctx, opts.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation token: %w", err)
+	}
+
+	messageID := opts.MessageID
+	if messageID == "" {
+		messageID = uuid.NewString()
+	}
+
+	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
+		SetMessageID(messageID).
+		SetConversationID(opts.ConversationID).
+		SetText(opts.Text)
+
+	for _, att := range opts.Attachments {
+		builder.AddAttachment(att)
+	}
+	if opts.ReplyTo != nil {
+		builder.SetReplyTo(opts.ReplyTo)
+	}
+	if len(opts.Entities) > 0 {
+		builder.SetEntities(opts.Entities)
+	}
+
+	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build message: %w", err)
+	}
+
+	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
+		ConversationID:               opts.ConversationID,
+		MessageID:                    messageID,
+		ConversationToken:            token,
+		EncodedMessageCreateEvent:    encodedMCE,
+		EncodedMessageEventSignature: encodedSig,
+	})
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, err
+	}
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp response.SendMessageMutationResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
+	formBody, err := variables.Encode()
+
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("form_body", string(formBody)).
+		Str("url", endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL).
+		Msg("GetInitialXChatPage request payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
+	})
+
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg("GetInitialXChatPage request failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg("GetInitialXChatPage response")
+
+	var resp response.GetInitialXChatPageQueryResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+
+}
+
+func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
+	queryString, err := variables.EncodeJSONQuery()
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("url", endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL).
+		Str("query", queryString).
+		Msg("GetInboxPageRequest payload")
+
+	url := endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL + "?" + queryString
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodGet,
+		WithClientUUID: true,
+	})
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg("GetInboxPageRequest failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg("GetInboxPageRequest response")
+
+	var resp response.GetInboxPageRequestQueryResponse
+	return &resp, json.Unmarshal(respBody, &resp)
 }

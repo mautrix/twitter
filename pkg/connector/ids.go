@@ -41,19 +41,13 @@ func (tc *TwitterClient) makePortalKeyFromInbox(conversationID string, inbox *re
 }
 
 func (tc *TwitterClient) MakePortalKey(conv *types.Conversation) networkid.PortalKey {
-	var receiver networkid.UserLoginID
-	if conv.Type == types.ConversationTypeOneToOne || tc.connector.br.Config.SplitPortals {
-		receiver = tc.userLogin.ID
-	}
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(conv.ConversationID),
-		Receiver: receiver,
-	}
+	return tc.MakePortalKeyFromID(conv.ConversationID)
 }
 
 func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.PortalKey {
 	var receiver networkid.UserLoginID
-	if strings.Contains(conversationID, "-") || tc.connector.br.Config.SplitPortals {
+	// 1:1 DM conversation IDs use `:` as delimiter between user IDs
+	if strings.Contains(conversationID, ":") || strings.HasPrefix(conversationID, "g") || tc.connector.br.Config.SplitPortals {
 		receiver = tc.userLogin.ID
 	}
 	return networkid.PortalKey{

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -132,4 +134,41 @@ func (c *Client) SetPushNotificationConfig(ctx context.Context, action PushNotif
 	}
 	_, _, err = c.makeAPIRequest(ctx, apiRequestOpts)
 	return err
+}
+
+func (c *Client) GenerateXChatToken(ctx context.Context) (*response.XChatGetAuthTokenResponse, error) {
+	payload := (&payload.GenerateXChatTokenMutationPayload{}).Default()
+
+	// derive the sha256 hash from the endpoint path segment
+	u, err := url.Parse(endpoints.GENERATE_XCHAT_TOKEN_MUTATION_URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse xchat token endpoint: %w", err)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("unexpected xchat token endpoint path: %s", u.Path)
+	}
+	payload.Extensions.PersistedQuery.Sha256Hash = parts[len(parts)-2]
+
+	encodedBody, err := json.Marshal(payload)
+
+	if err != nil {
+		return nil, err
+	}
+
+	apiRequestOpts := apiRequestOpts{
+		URL:            endpoints.GENERATE_XCHAT_TOKEN_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           encodedBody,
+	}
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	var out response.XChatGetAuthTokenResponse
+	return &out, json.Unmarshal(respBody, &out)
 }

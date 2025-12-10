@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"maps"
 
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -29,28 +28,14 @@ import (
 	bridgeEvt "maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
-	conversationID := string(portal.PortalKey.ID)
-	queryConversationPayload := payload.DMRequestQuery{}.Default()
-	queryConversationPayload.IncludeConversationInfo = true
-	conversationData, err := tc.client.FetchConversationContext(ctx, conversationID, &queryConversationPayload, payload.CONTEXT_FETCH_DM_CONVERSATION)
-	if err != nil {
-		return nil, err
-	}
-
-	conversation := conversationData.ConversationTimeline.GetConversationByID(conversationID)
-	if conversation == nil {
-		return nil, fmt.Errorf("failed to find conversation by id %s", conversationID)
-	}
-	tc.userCacheLock.Lock()
-	maps.Copy(tc.userCache, conversationData.ConversationTimeline.Users)
-	tc.userCacheLock.Unlock()
-	return tc.conversationToChatInfo(conversation, conversationData.ConversationTimeline), nil
+func (tc *TwitterClient) GetChatInfo(_ context.Context, _ *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+	// Chat info is populated during initial sync via GetInitialXChatPage.
+	// We don't support on-demand fetching via REST API as it doesn't work with XChat/group chats.
+	return nil, nil
 }
 
 func (tc *TwitterClient) GetUserInfo(_ context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
@@ -72,9 +57,13 @@ func (tc *TwitterClient) getCachedUserInfo(userID string) *bridgev2.UserInfo {
 }
 
 func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.User) *bridgev2.UserInfo {
+	avatarURL := user.ProfileImageURL
+	if avatarURL == "" {
+		avatarURL = user.ProfileImageURLHTTPS
+	}
 	return &bridgev2.UserInfo{
 		Name:        ptr.Ptr(tc.Config.FormatDisplayname(user.ScreenName, user.Name)),
-		Avatar:      makeAvatar(cli, user.ProfileImageURL),
+		Avatar:      makeAvatar(cli, avatarURL),
 		Identifiers: []string{fmt.Sprintf("twitter:%s", user.ScreenName)},
 	}
 }

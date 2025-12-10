@@ -21,15 +21,44 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	body := strings.Builder{}
 	bodyHTML := strings.Builder{}
 	charArr := []rune(msg.Text)
+	charArrLen := len(charArr)
 	cursor := 0
 	sortedEntites := sortEntities(msg.Entities)
 	var mentions event.Mentions
+
+	clamp := func(idx int) (int, bool) {
+		switch {
+		case idx < 0:
+			return 0, true
+		case idx > charArrLen:
+			return charArrLen, true
+		default:
+			return idx, false
+		}
+	}
 
 	for _, union := range sortedEntites {
 		switch entity := union.(type) {
 		case types.URLs:
 			url := entity
 			start, end := url.Indices[0], url.Indices[1]
+			start, startClamped := clamp(start)
+			end, endClamped := clamp(end)
+			if end < start {
+				end = start
+			}
+			if startClamped || endClamped {
+				zerolog.Ctx(ctx).Debug().
+					Int("start_raw", url.Indices[0]).
+					Int("end_raw", url.Indices[1]).
+					Int("start", start).
+					Int("end", end).
+					Int("text_len", charArrLen).
+					Msg("Clamped URL entity indices to text length")
+			}
+			if cursor > charArrLen {
+				cursor = charArrLen
+			}
 			if cursor < start {
 				body.WriteString(string(charArr[cursor:start]))
 				bodyHTML.WriteString(string(charArr[cursor:start]))
@@ -44,7 +73,26 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 		case types.UserMention:
 			mention := entity
 			start, end := mention.Indices[0], mention.Indices[1]
-			body.WriteString(string(charArr[cursor:end]))
+			start, startClamped := clamp(start)
+			end, endClamped := clamp(end)
+			if end < start {
+				end = start
+			}
+			if startClamped || endClamped {
+				zerolog.Ctx(ctx).Debug().
+					Int("start_raw", mention.Indices[0]).
+					Int("end_raw", mention.Indices[1]).
+					Int("start", start).
+					Int("end", end).
+					Int("text_len", charArrLen).
+					Msg("Clamped mention entity indices to text length")
+			}
+			if cursor > charArrLen {
+				cursor = charArrLen
+			}
+			if cursor < end {
+				body.WriteString(string(charArr[cursor:end]))
+			}
 			if cursor < start {
 				bodyHTML.WriteString(string(charArr[cursor:start]))
 			}

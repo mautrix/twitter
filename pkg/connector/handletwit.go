@@ -32,6 +32,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
@@ -118,14 +119,35 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			ConvertEditFunc: tc.convertEditToMatrix,
 		}).Success
 	case *types.ConversationRead:
+		lastTarget := networkid.MessageID(evt.LastReadEventID)
+		readUpTo := methods.ParseSnowflake(evt.LastReadEventID)
+		if readUpTo.IsZero() {
+			readUpTo = methods.ParseSnowflake(evt.ID)
+		}
+		readUpToStreamOrder := methods.ParseSnowflakeInt(evt.LastReadEventID)
+		if readUpToStreamOrder == 0 {
+			readUpToStreamOrder = methods.ParseSnowflakeInt(evt.ID)
+		}
+		var targets []networkid.MessageID
+		if lastTarget != "" {
+			targets = []networkid.MessageID{lastTarget}
+		}
 		return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				Sender:    bridgev2.EventSender{IsFromMe: true},
+				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
 				Timestamp: methods.ParseSnowflake(evt.ID),
+				PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
+					if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
+						_ = intent.EnsureJoined(ctx, portal.MXID)
+					}
+				},
 			},
-			LastTarget: networkid.MessageID(evt.LastReadEventID),
+			LastTarget:          lastTarget,
+			Targets:             targets,
+			ReadUpTo:            readUpTo,
+			ReadUpToStreamOrder: readUpToStreamOrder,
 		}).Success
 	case *types.MessageReactionCreate:
 		portalKey := tc.makePortalKeyFromInbox(evt.ConversationID, inbox)
@@ -367,6 +389,9 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 			if participant.UserID == ParseUserLoginID(tc.userLogin.ID) {
 				continue
 			}
+			if participant.LastReadEventID == "" {
+				continue
+			}
 			var cachedParticipant *types.Participant
 			for _, p := range cache {
 				if p.UserID == participant.UserID {
@@ -375,14 +400,29 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 				}
 			}
 			if cachedParticipant == nil || cachedParticipant.LastReadEventID < participant.LastReadEventID {
+				lastTarget := networkid.MessageID(participant.LastReadEventID)
+				readUpTo := methods.ParseSnowflake(participant.LastReadEventID)
+				readUpToStreamOrder := methods.ParseSnowflakeInt(participant.LastReadEventID)
+				var targets []networkid.MessageID
+				if lastTarget != "" {
+					targets = []networkid.MessageID{lastTarget}
+				}
 				tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
 					EventMeta: simplevent.EventMeta{
 						Type:      bridgev2.RemoteEventReadReceipt,
 						PortalKey: tc.makePortalKeyFromInbox(conversationID, inbox),
 						Sender:    tc.MakeEventSender(participant.UserID),
 						Timestamp: methods.ParseSnowflake(participant.LastReadEventID),
+						PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
+							if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
+								_ = intent.EnsureJoined(ctx, portal.MXID)
+							}
+						},
 					},
-					LastTarget: networkid.MessageID(participant.LastReadEventID),
+					LastTarget:          lastTarget,
+					Targets:             targets,
+					ReadUpTo:            readUpTo,
+					ReadUpToStreamOrder: readUpToStreamOrder,
 				})
 			}
 		}
@@ -424,3 +464,256 @@ func (tc *TwitterClient) HandleStreamEvent(evt response.StreamEvent) {
 		})
 	}
 }
+
+// HandleXChatEvent handles events from the XChat websocket processor.
+func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.TwitterEvent) bool {
+	if rawEvt == nil {
+		return true
+	}
+
+	log := tc.userLogin.Log.With().
+		Str("handler", "xchat").
+		Type("event_type", rawEvt).
+		Logger()
+
+	switch evt := rawEvt.(type) {
+	case *types.Message:
+		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+
+		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventMessage,
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.
+						Str("message_id", evt.ID).
+						Str("sender", evt.MessageData.SenderID).
+						Bool("is_from_me", isFromMe)
+				},
+				PortalKey:    portalKey,
+				CreatePortal: false, // Portal should already exist from initial sync
+				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
+				StreamOrder:  methods.ParseInt64(evt.ID),
+				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+			},
+			ID:            networkid.MessageID(evt.ID),
+			TransactionID: networkid.TransactionID(evt.RequestID),
+			TargetMessage: networkid.MessageID(evt.ID),
+			Data:          &evt.MessageData,
+			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
+				return tc.convertToMatrix(ctx, portal, intent, data), nil
+			},
+			ConvertEditFunc: tc.convertEditToMatrix,
+		}).Success
+
+	case *types.MessageReactionCreate:
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReaction)
+		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
+
+	case *types.MessageReactionDelete:
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReactionRemove)
+		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
+
+	case *types.ConversationRead:
+		lastTarget := networkid.MessageID(evt.LastReadEventID)
+		readUpTo := methods.ParseMsecTimestamp(evt.Time)
+		readUpToStreamOrder := methods.ParseInt64(evt.LastReadEventID)
+		if readUpToStreamOrder == 0 {
+			readUpToStreamOrder = methods.ParseInt64(evt.ID)
+		}
+		var targets []networkid.MessageID
+		if lastTarget != "" {
+			targets = []networkid.MessageID{lastTarget}
+		}
+		return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventReadReceipt,
+				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
+				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
+				Timestamp: readUpTo,
+				PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
+					if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
+						_ = intent.EnsureJoined(ctx, portal.MXID)
+					}
+				},
+			},
+			LastTarget:          lastTarget,
+			Targets:             targets,
+			ReadUpTo:            readUpTo,
+			ReadUpToStreamOrder: readUpToStreamOrder,
+		}).Success
+
+	case *types.MessageDelete:
+		allSuccess := true
+		for _, deletedMsg := range evt.Messages {
+			messageDeleteRemoteEvent := &simplevent.MessageRemove{
+				EventMeta: simplevent.EventMeta{
+					Type:      bridgev2.RemoteEventMessageRemove,
+					PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
+					LogContext: func(c zerolog.Context) zerolog.Context {
+						return c.
+							Str("message_id", deletedMsg.MessageID).
+							Str("message_create_event_id", deletedMsg.MessageCreateEventID)
+					},
+					Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+					StreamOrder: methods.ParseInt64(evt.ID),
+				},
+				TargetMessage: networkid.MessageID(deletedMsg.MessageID),
+			}
+			allSuccess = tc.userLogin.QueueRemoteEvent(messageDeleteRemoteEvent).Success && allSuccess
+		}
+		return allSuccess
+
+	case *types.ConversationDelete:
+		portalDeleteRemoteEvent := &simplevent.ChatDelete{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventChatDelete,
+				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.Str("conversation_id", evt.ConversationID)
+				},
+				StreamOrder: methods.ParseInt64(evt.ID),
+				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+			},
+			OnlyForMe: true,
+		}
+		log.Info().Any("data", evt).Msg("Deleted conversation")
+		return tc.userLogin.QueueRemoteEvent(portalDeleteRemoteEvent).Success
+
+	case *types.ConversationNameUpdate:
+		portalUpdateRemoteEvent := &simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:   bridgev2.RemoteEventChatInfoChange,
+				Sender: tc.MakeEventSender(evt.ByUserID),
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.
+						Str("conversation_id", evt.ConversationID).
+						Str("new_name", evt.ConversationName).
+						Str("changed_by_user_id", evt.ByUserID)
+				},
+				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
+				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+				StreamOrder: methods.ParseInt64(evt.ID),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: &bridgev2.ChatInfo{
+					Name: &evt.ConversationName,
+				},
+			},
+		}
+		return tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent).Success
+
+	case *types.ConversationAvatarUpdate:
+		chatInfo := &bridgev2.ChatInfo{
+			Avatar: makeAvatar(tc.client, evt.ConversationAvatarImageHttps),
+		}
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventChatInfoChange,
+				Sender:      tc.MakeEventSender(evt.ByUserID),
+				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
+				StreamOrder: methods.ParseInt64(evt.ID),
+				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: chatInfo,
+			},
+		}).Success
+
+	case *types.ParticipantsJoin:
+		memberChanges := &bridgev2.ChatMemberList{
+			IsFull:    false,
+			MemberMap: make(map[networkid.UserID]bridgev2.ChatMember),
+		}
+		for _, p := range evt.Participants {
+			memberChanges.MemberMap[MakeUserID(p.UserID)] = bridgev2.ChatMember{
+				EventSender: tc.MakeEventSender(p.UserID),
+				Membership:  event.MembershipJoin,
+			}
+		}
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventChatInfoChange,
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.
+						Str("conversation_id", evt.ConversationID).
+						Int("total_new_members", len(evt.Participants))
+				},
+				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
+				CreatePortal: false, // Portal should already exist from initial sync
+				StreamOrder:  methods.ParseInt64(evt.ID),
+				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				MemberChanges: memberChanges,
+			},
+		}).Success
+
+	case *types.ParticipantsLeave:
+		memberChanges := &bridgev2.ChatMemberList{
+			IsFull:    false,
+			MemberMap: make(map[networkid.UserID]bridgev2.ChatMember),
+		}
+		for _, p := range evt.Participants {
+			memberChanges.MemberMap[MakeUserID(p.UserID)] = bridgev2.ChatMember{
+				EventSender: tc.MakeEventSender(p.UserID),
+				Membership:  event.MembershipLeave,
+			}
+		}
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventChatInfoChange,
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.
+						Str("conversation_id", evt.ConversationID).
+						Int("total_left_members", len(evt.Participants))
+				},
+				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
+				CreatePortal: false,
+				StreamOrder:  methods.ParseInt64(evt.ID),
+				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				MemberChanges: memberChanges,
+			},
+		}).Success
+
+	case *types.XChatTyping:
+		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventTyping,
+				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
+				Sender:    tc.MakeEventSender(evt.SenderID),
+			},
+			Timeout: 3 * time.Second,
+		})
+		return true
+
+	case *types.XChatKeyChange:
+		log.Info().
+			Str("conversation_id", evt.ConversationID).
+			Str("new_key_version", evt.NewKeyVersion).
+			Msg("Conversation key changed")
+		return true
+
+	case *types.XChatMessageFailure:
+		log.Warn().
+			Str("conversation_id", evt.ConversationID).
+			Str("message_id", evt.MessageID).
+			Int32("failure_type", int32(evt.FailureType)).
+			Msg("Message failure event received")
+		return true
+
+	default:
+		log.Debug().
+			Type("event_data_type", rawEvt).
+			Any("event_data", rawEvt).
+			Msg("Received unhandled XChat event")
+		return true
+	}
+}
+
+// ignorePayloadImport is used to prevent the import from being removed
+var _ = payload.FailureType(0)

@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -32,6 +34,7 @@ import (
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
@@ -112,6 +115,108 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 		if content.Info.MimeType == "image/gif" || content.Info.MauGIF {
 			uploadMediaParams.MediaCategory = "dm_gif"
+		}
+
+		// Attempt encrypted path first if we have a conversation key/token.
+		km := tc.client.GetKeyManager()
+		convKey, keyErr := km.GetLatestConversationKey(ctx, conversationID)
+		useEncrypted := keyErr == nil && convKey != nil && len(convKey.Key) > 0
+
+		if useEncrypted {
+			messageID := string(msg.InputTransactionID)
+			if messageID == "" {
+				messageID = uuid.NewString()
+			}
+			msg.AddPendingToIgnore(networkid.TransactionID(messageID))
+
+			opts := twittermeow.SendEncryptedMessageOpts{
+				ConversationID: conversationID,
+				MessageID:      messageID,
+				Text:           sendDMPayload.Text,
+			}
+
+			// Build attachments (media) if present.
+			if content.MsgType == event.MsgVideo || content.MsgType == event.MsgImage || content.MsgType == event.MsgAudio {
+				data, dlErr := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
+				if dlErr != nil {
+					return nil, dlErr
+				}
+				uploadMediaParams := &payload.UploadMediaQuery{
+					MediaCategory: mediaCategoryMap[content.MsgType],
+					MediaType:     content.Info.MimeType,
+				}
+				if content.Info.MimeType == "image/gif" || content.Info.MauGIF {
+					uploadMediaParams.MediaCategory = "dm_gif"
+				}
+				if content.MsgType == event.MsgAudio {
+					uploadMediaParams.MediaCategory = "dm_video"
+					if content.Info.MimeType != "video/mp4" {
+						converted, convErr := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+						if convErr != nil {
+							return nil, convErr
+						}
+						data = converted
+					}
+				}
+				uploadedMediaResponse, upErr := tc.client.UploadMedia(ctx, uploadMediaParams, data)
+				if upErr != nil {
+					return nil, upErr
+				}
+
+				attType := payload.MediaTypeImage
+				switch content.MsgType {
+				case event.MsgVideo:
+					attType = payload.MediaTypeVideo
+				case event.MsgAudio:
+					attType = payload.MediaTypeAudio
+				}
+				width := int64(content.Info.Width)
+				height := int64(content.Info.Height)
+				size := int64(uploadedMediaResponse.Size)
+				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
+					Media: &payload.MediaAttachment{
+						MediaHashKey: &uploadedMediaResponse.MediaKey,
+						Type:         ptr.Ptr(int32(attType)),
+						Dimensions: &payload.MediaDimensions{
+							Width:  &width,
+							Height: &height,
+						},
+						FilesizeBytes: &size,
+						Filename:      ptr.Ptr(content.FileName),
+						AttachmentId:  ptr.Ptr(uploadedMediaResponse.MediaIDString),
+					},
+				})
+				// In encrypted flow, clear text if it's just filename.
+				if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
+					opts.Text = ""
+				}
+			}
+
+			// Replies: best-effort include target ID.
+			if msg.ReplyTo != nil {
+				replyID := string(msg.ReplyTo.ID)
+				opts.ReplyTo = &payload.ReplyingToPreview{
+					ReplyingToMessageId: &replyID,
+				}
+			}
+
+			if _, sendErr := tc.client.SendEncryptedMessage(ctx, opts); sendErr == nil {
+				// We don't get full message data back; store a placeholder DB entry.
+				return &bridgev2.MatrixMessageResponse{
+					DB: &database.Message{
+						ID:        networkid.MessageID(messageID),
+						MXID:      msg.Event.ID,
+						Room:      msg.Portal.PortalKey,
+						SenderID:  UserLoginIDToUserID(tc.userLogin.ID),
+						Timestamp: time.Now(),
+						Metadata:  &MessageMetadata{},
+					},
+					RemovePending: networkid.TransactionID(messageID),
+				}, nil
+			}
+
+			// Fall through to plaintext path on error, reuse the same message ID to match pending ignores.
+			sendDMPayload.RequestID = messageID
 		}
 
 		if content.MsgType == event.MsgAudio {

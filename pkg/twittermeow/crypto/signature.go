@@ -1,0 +1,173 @@
+package crypto
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"math/big"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+)
+
+const (
+	// SignatureVersion3 is the current signature version for MessageCreateEvent.
+	SignatureVersion3 = "3"
+
+	// SignatureSize is the size of a raw ECDSA P-256 signature (r || s).
+	SignatureSize = 64
+)
+
+// SignaturePreimage builds the preimage for signature version 3.
+// Format: "MessageCreateEvent,{message_id},{sender_id},{conversation_id},{key_version},{base64_nopad(contents)}"
+func SignaturePreimage(messageID, senderID, conversationID, keyVersion string, contents []byte) []byte {
+	// Use standard base64 without padding (matches Twitter's format)
+	contentsB64 := base64.RawStdEncoding.EncodeToString(contents)
+	preimage := fmt.Sprintf("MessageCreateEvent,%s,%s,%s,%s,%s",
+		messageID, senderID, conversationID, keyVersion, contentsB64)
+	return []byte(preimage)
+}
+
+// Sign creates an ECDSA P-256 signature over the given preimage.
+// Returns the raw 64-byte signature (r || s), base64-encoded.
+func Sign(privateKey *ecdsa.PrivateKey, preimage []byte) (string, error) {
+	if privateKey == nil {
+		return "", errors.New("private key is nil")
+	}
+
+	hash := sha256.Sum256(preimage)
+	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
+	if err != nil {
+		return "", fmt.Errorf("ecdsa sign: %w", err)
+	}
+
+	// Encode as raw 64 bytes: r (32) || s (32), both padded to 32 bytes
+	sig := make([]byte, SignatureSize)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(rBytes):32], rBytes)
+	copy(sig[64-len(sBytes):64], sBytes)
+
+	// Use StdEncoding (with padding) to match Twitter's format
+	return base64.StdEncoding.EncodeToString(sig), nil
+}
+
+// SignMessage creates a signature for a MessageCreateEvent.
+// contents should be the raw ciphertext bytes (not hex-encoded).
+func SignMessage(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, keyVersion string, contents []byte) (string, error) {
+	preimage := SignaturePreimage(messageID, senderID, conversationID, keyVersion, contents)
+	return Sign(privateKey, preimage)
+}
+
+// Verify verifies an ECDSA P-256 signature.
+// signatureB64 is the raw 64-byte signature, base64-encoded.
+func Verify(publicKey *ecdsa.PublicKey, preimage []byte, signatureB64 string) error {
+	if publicKey == nil {
+		return errors.New("public key is nil")
+	}
+
+	sigBytes, err := decodeBase64Flexible(signatureB64)
+	if err != nil {
+		return fmt.Errorf("decode signature: %w", err)
+	}
+
+	if len(sigBytes) != SignatureSize {
+		return fmt.Errorf("signature must be %d bytes, got %d", SignatureSize, len(sigBytes))
+	}
+
+	r := new(big.Int).SetBytes(sigBytes[:32])
+	s := new(big.Int).SetBytes(sigBytes[32:])
+
+	hash := sha256.Sum256(preimage)
+
+	if !ecdsa.Verify(publicKey, hash[:], r, s) {
+		return ErrSignatureInvalid
+	}
+
+	return nil
+}
+
+// VerifyMessage verifies a signature for a MessageCreateEvent.
+// contents should be the raw ciphertext bytes (not hex-encoded).
+func VerifyMessage(publicKey *ecdsa.PublicKey, messageID, senderID, conversationID, keyVersion string, contents []byte, signatureB64 string) error {
+	preimage := SignaturePreimage(messageID, senderID, conversationID, keyVersion, contents)
+	return Verify(publicKey, preimage, signatureB64)
+}
+
+// VerifyMessageEvent verifies the signature on a MessageEvent.
+// If km is provided, it will be used to look up/cache the public key.
+// Returns nil if verification succeeds.
+func VerifyMessageEvent(ctx context.Context, km *KeyManager, event *payload.MessageEvent) error {
+	if event == nil {
+		return errors.New("event is nil")
+	}
+	if event.MessageEventSignature == nil {
+		return errors.New("no signature present")
+	}
+
+	sig := event.MessageEventSignature
+	if sig.SignatureVersion == nil || *sig.SignatureVersion != SignatureVersion3 {
+		return fmt.Errorf("unsupported signature version: %v", sig.SignatureVersion)
+	}
+
+	if sig.Signature == nil {
+		return errors.New("signature is nil")
+	}
+
+	if event.Detail == nil || event.Detail.MessageCreateEvent == nil {
+		return errors.New("not a message create event")
+	}
+
+	mce := event.Detail.MessageCreateEvent
+	if len(mce.Contents) == 0 || mce.ConversationKeyVersion == nil {
+		return errors.New("missing contents or key version")
+	}
+
+	// Contents is already raw bytes
+	contents := mce.Contents
+
+	// Get required fields
+	messageID := ""
+	if event.MessageId != nil {
+		messageID = *event.MessageId
+	}
+
+	senderID := ""
+	if event.SenderId != nil {
+		senderID = *event.SenderId
+	}
+
+	conversationID := ""
+	if event.ConversationId != nil {
+		conversationID = *event.ConversationId
+	}
+
+	keyVersion := ""
+	if sig.PublicKeyVersion != nil {
+		keyVersion = *sig.PublicKeyVersion
+	}
+
+	spki := ""
+	if sig.SigningPublicKey != nil {
+		spki = *sig.SigningPublicKey
+	}
+
+	// Get the public key
+	var pubKey *ecdsa.PublicKey
+	var err error
+	if km != nil {
+		pubKey, err = km.GetPublicKeyForVerification(ctx, senderID, keyVersion, spki)
+	} else if spki != "" {
+		pubKey, err = ParsePublicKeySPKI(spki)
+	} else {
+		return errors.New("no public key available for verification")
+	}
+	if err != nil {
+		return fmt.Errorf("get public key: %w", err)
+	}
+
+	return VerifyMessage(pubKey, messageID, senderID, conversationID, *mce.ConversationKeyVersion, contents, *sig.Signature)
+}

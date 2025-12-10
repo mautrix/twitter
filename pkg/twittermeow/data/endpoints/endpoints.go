@@ -38,6 +38,12 @@ const (
 	ADD_REACTION_URL                  = BASE_URL + "/i/api/graphql/VyDyV9pC2oZEj6g52hgnhA/useDMReactionMutationAddMutation"
 	REMOVE_REACTION_URL               = BASE_URL + "/i/api/graphql/bV_Nim3RYHsaJwMkTXJ6ew/useDMReactionMutationRemoveMutation"
 	SEND_TYPING_NOTIFICATION          = BASE_URL + "/i/api/graphql/HL96-xZ3Y81IEzAdczDokg/useTypingNotifierMutation"
+	GENERATE_XCHAT_TOKEN_MUTATION_URL = API_BASE_URL + "/graphql/Qh3fZRjPPtPoHYR_2sCZsA/GenerateXChatTokenMutation"
+	SEND_MESSAGE_MUTATION_URL         = API_BASE_URL + "/graphql/LkAIEchf8AGj-WgeLoTVcw/SendMessageMutation"
+	GET_INITIAL_XCHAT_PAGE_QUERY_URL  = API_BASE_URL + "/graphql/6gAgW7rM7oOZMq_um-zGyg/GetInitialXChatPageQuery"
+	GET_INBOX_PAGE_REQUEST_QUERY_URL  = API_BASE_URL + "/graphql/wmieJEOHm6twV06EXwRdiA/GetInboxPageRequestQuery"
+
+	XCHAT_WEBSOCKET_URL = "wss://chat-ws.x.com/ws"
 
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"

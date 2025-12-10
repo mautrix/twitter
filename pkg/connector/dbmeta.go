@@ -19,6 +19,7 @@ package connector
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"time"
 
 	"go.mau.fi/util/exerrors"
 	"go.mau.fi/util/random"
@@ -42,10 +43,28 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 }
 
 type UserLoginMetadata struct {
-	Cookies  string    `json:"cookies"`
-	PushKeys *PushKeys `json:"push_keys,omitempty"`
+	Cookies           string    `json:"cookies"`
+	SecretKey         string    `json:"secret_key,omitempty"`
+	SigningKey        string    `json:"signing_key,omitempty"`
+	SigningKeyVersion string    `json:"signing_key_version,omitempty"`
+	PushKeys          *PushKeys `json:"push_keys,omitempty"`
 
-	Session *twittermeow.CachedSession `json:"session,omitempty"`
+	Session            *twittermeow.CachedSession      `json:"session,omitempty"`
+	ConversationKeys   map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
+	ConversationTokens map[string]string               `json:"conversation_tokens,omitempty"`  // conversationID -> server-provided token
+	MaxUserSequenceID  string                          `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
+	// Deprecated: kept for backward compatibility with older saves; prefer MaxUserSequenceID.
+	MaxSequenceID      string `json:"max_sequence_id,omitempty"`
+	MessagePullVersion *int   `json:"message_pull_version,omitempty"`
+}
+
+// ConversationKeyData stores a conversation encryption key.
+// The map key in UserLoginMetadata.ConversationKeys is "conversationID:keyVersion".
+type ConversationKeyData struct {
+	KeyVersion string     `json:"key_version"`
+	Key        []byte     `json:"key"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
 type MessageMetadata struct {

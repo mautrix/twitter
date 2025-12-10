@@ -1,25 +1,27 @@
 {
-  "name": "reverse-xchat",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
-  },
-  "devDependencies": {
-    "@types/libsodium-wrappers": "^0.7.14",
-    "typescript": "~5.9.3",
-    "vite": "^7.2.4",
-    "vite-plugin-top-level-await": "^1.6.0",
-    "vite-plugin-wasm": "^3.5.0"
-  },
-  "dependencies": {
-    "@tailwindcss/vite": "^4.1.17",
-    "highlight.js": "^11.11.1",
-    "juicebox-sdk": "^0.3.4",
-    "libsodium-wrappers": "^0.7.15",
-    "tailwindcss": "^4.1.17"
-  }
+	"name": "reverse-xchat",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "tsc && vite build",
+		"preview": "vite preview",
+		"format": "prettier --write ."
+	},
+	"devDependencies": {
+		"@types/libsodium-wrappers": "^0.7.14",
+		"prettier": "^3.7.4",
+		"typescript": "~5.9.3",
+		"vite": "^7.2.4",
+		"vite-plugin-top-level-await": "^1.6.0",
+		"vite-plugin-wasm": "^3.5.0"
+	},
+	"dependencies": {
+		"@tailwindcss/vite": "^4.1.17",
+		"highlight.js": "^11.11.1",
+		"juicebox-sdk": "^0.3.4",
+		"libsodium-wrappers": "^0.7.15",
+		"tailwindcss": "^4.1.17"
+	}
 }

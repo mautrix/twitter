@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -26,21 +27,29 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
 
 type TwitterLogin struct {
-	User    *bridgev2.User
-	Cookies string
-	tc      *TwitterConnector
+	User       *bridgev2.User
+	Cookies    string
+	SecretKey  string
+	SigningKey string
+	tc         *TwitterConnector
+
+	client   *twittermeow.Client
+	settings *response.AccountSettingsResponse
 }
 
 var (
 	LoginStepIDCookies  = "fi.mau.twitter.login.enter_cookies"
+	LoginStepSecretKey  = "fi.mau.twitter.login.secret_key"
 	LoginStepIDComplete = "fi.mau.twitter.login.complete"
 )
 
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
+var _ bridgev2.LoginProcessUserInput = (*TwitterLogin)(nil)
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
@@ -60,6 +69,7 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 }
 
 func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
+
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
 		StepID:       LoginStepIDCookies,
@@ -91,23 +101,105 @@ func (t *TwitterLogin) Cancel() {}
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
 	cookieStruct := twitCookies.NewCookies(cookies)
-	meta := &UserLoginMetadata{
-		Cookies: cookieStruct.String(),
-	}
+	t.Cookies = cookieStruct.String()
 
 	client := twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
-	inboxState, settings, err := client.LoadMessagesPage(ctx)
+	settings, err := client.LoadMessagesPage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
 	}
-	remoteProfile := t.tc.makeRemoteProfile(ctx, client, client.GetCurrentUserID(), inboxState.InboxInitialState)
-	if remoteProfile == nil {
-		remoteProfile = &status.RemoteProfile{
-			Username: settings.ScreenName,
+	t.client = client
+	t.settings = settings
+
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeUserInput,
+		StepID:       LoginStepSecretKey,
+		Instructions: "Enter the secret key (for decrypting conversation keys) and signing key (for signing messages).",
+		UserInputParams: &bridgev2.LoginUserInputParams{
+			Fields: []bridgev2.LoginInputDataField{
+				{
+					Type:        bridgev2.LoginInputFieldTypePassword,
+					ID:          "secret_key",
+					Name:        "Secret key",
+					Description: "The secret key for decrypting conversation keys (base64 32-byte scalar).",
+					Validate: func(input string) (string, error) {
+						input = strings.TrimSpace(input)
+						if input == "" {
+							return "", fmt.Errorf("secret key cannot be empty")
+						}
+						if _, err := crypto.ParsePrivateKeyScalar(input); err != nil {
+							return "", fmt.Errorf("invalid secret key: %w", err)
+						}
+						return input, nil
+					},
+				},
+				{
+					Type:        bridgev2.LoginInputFieldTypePassword,
+					ID:          "signing_key",
+					Name:        "Signing key",
+					Description: "The signing key for signing messages (base64 32-byte scalar).",
+					Validate: func(input string) (string, error) {
+						input = strings.TrimSpace(input)
+						if input == "" {
+							return "", nil
+						}
+						if _, err := crypto.ParsePrivateKeyScalar(input); err != nil {
+							return "", fmt.Errorf("invalid signing key: %w", err)
+						}
+						return input, nil
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	secretKey, ok := input["secret_key"]
+	if !ok {
+		return nil, fmt.Errorf("secret_key input is required")
+	}
+	secretKey = strings.TrimSpace(secretKey)
+	if secretKey == "" {
+		return nil, fmt.Errorf("secret key cannot be empty")
+	}
+	if _, err := crypto.ParsePrivateKeyScalar(secretKey); err != nil {
+		return nil, fmt.Errorf("invalid secret key: %w", err)
+	}
+	t.SecretKey = secretKey
+
+	signingKey := strings.TrimSpace(input["signing_key"])
+	if signingKey != "" {
+		if _, err := crypto.ParsePrivateKeyScalar(signingKey); err != nil {
+			return nil, fmt.Errorf("invalid signing key: %w", err)
 		}
 	}
-	id := MakeUserLoginID(client.GetCurrentUserID())
+	t.SigningKey = signingKey
+
+	if t.client == nil {
+		if t.Cookies == "" {
+			return nil, fmt.Errorf("cookies must be submitted before secret key")
+		}
+		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
+		t.client = twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+		settings, err := t.client.LoadMessagesPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load messages page after submitting secret key: %w", err)
+		}
+		t.settings = settings
+	}
+
+	meta := &UserLoginMetadata{
+		Cookies:    t.Cookies,
+		SecretKey:  t.SecretKey,
+		SigningKey: t.SigningKey,
+	}
+
+	remoteProfile := &status.RemoteProfile{
+		Username: t.settings.ScreenName,
+	}
+	id := MakeUserLoginID(t.client.GetCurrentUserID())
 	ul, err := t.User.NewLogin(
 		ctx,
 		&database.UserLogin{
@@ -120,8 +212,12 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 			DeleteOnConflict:  true,
 			DontReuseExisting: false,
 			LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
-				client.Logger = login.Log.With().Str("component", "twitter_client").Logger()
-				login.Client = NewTwitterClient(login, t.tc, client)
+				ensureUserLoginMetadata(login)
+				if t.client != nil {
+					t.client.SetKeyStore(newUserLoginKeyStore(login))
+				}
+				t.client.Logger = login.Log.With().Str("component", "twitter_client").Logger()
+				login.Client = NewTwitterClient(login, t.tc, t.client)
 				return nil
 			},
 		},
@@ -131,9 +227,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 	ul.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 
-	go func(ctx context.Context, client *TwitterClient, inboxState *response.InboxInitialStateResponse) {
-		client.DoConnect(ctx, inboxState)
-	}(context.WithoutCancel(ctx), ul.Client.(*TwitterClient), inboxState)
+	go func(ctx context.Context, client *TwitterClient) {
+		client.DoConnect(ctx)
+	}(context.WithoutCancel(ctx), ul.Client.(*TwitterClient))
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeComplete,

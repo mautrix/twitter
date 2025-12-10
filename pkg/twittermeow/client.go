@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -16,7 +17,6 @@ import (
 	"github.com/imroc/req/v3"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exslices"
-	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -30,6 +30,14 @@ import (
 type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool
 type StreamEventHandler func(evt response.StreamEvent)
 
+// XChatTokenTTL is how long an XChat token is considered valid.
+const XChatTokenTTL = 5 * time.Minute
+
+type cachedXChatToken struct {
+	Token     string
+	FetchedAt time.Time
+}
+
 type Client struct {
 	Logger  zerolog.Logger
 	cookies *cookies.Cookies
@@ -38,11 +46,18 @@ type Client struct {
 
 	eventHandler       EventHandler
 	streamEventHandler StreamEventHandler
+	xchatEventHandler  XChatEventHandler
 	onCursorChanged    func(ctx context.Context)
 
-	jot     *JotClient
-	polling *PollingClient
-	stream  *StreamClient
+	jot            *JotClient
+	polling        *PollingClient
+	stream         *StreamClient
+	xchat          *xchatWebsocketClient
+	xchatProcessor *XChatEventProcessor
+	keyManager     *crypto.KeyManager
+
+	xchatToken   *cachedXChatToken
+	xchatTokenMu sync.Mutex
 }
 
 func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
@@ -56,11 +71,14 @@ func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
 
 	cli.polling = cli.newPollingClient()
 	cli.stream = cli.newStreamClient()
+	cli.xchat = cli.newXChatWebsocketClient()
 	cli.jot = cli.newJotClient()
 	cli.cookies = cookies
 	cli.session = &CachedSession{
 		ClientUUID: uuid.NewString(),
 	}
+	cli.keyManager = crypto.NewKeyManager(nil, crypto.DefaultKeyManagerConfig())
+	cli.xchatProcessor = newXChatEventProcessor(&cli)
 
 	return &cli
 }
@@ -77,12 +95,51 @@ func (c *Client) GetSession() *CachedSession {
 	return c.session
 }
 
+// GetKeyManager returns the key manager for cryptographic operations.
+func (c *Client) GetKeyManager() *crypto.KeyManager {
+	return c.keyManager
+}
+
+// GetXChatProcessor returns the XChat event processor.
+func (c *Client) GetXChatProcessor() *XChatEventProcessor {
+	return c.xchatProcessor
+}
+
+// SetKeyStore sets a custom KeyStore for persistent key storage.
+// This replaces the current KeyManager with a new one using the provided store.
+func (c *Client) SetKeyStore(store crypto.KeyStore) {
+	c.keyManager = crypto.NewKeyManager(store, crypto.DefaultKeyManagerConfig())
+}
+
+// GetXChatToken returns a valid XChat token, refreshing if expired.
+func (c *Client) GetXChatToken(ctx context.Context) (string, error) {
+	c.xchatTokenMu.Lock()
+	defer c.xchatTokenMu.Unlock()
+
+	if c.xchatToken != nil && time.Since(c.xchatToken.FetchedAt) < XChatTokenTTL {
+		return c.xchatToken.Token, nil
+	}
+
+	resp, err := c.GenerateXChatToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	c.xchatToken = &cachedXChatToken{
+		Token:     resp.Data.UserGetXChatAuthToken.Token,
+		FetchedAt: time.Now(),
+	}
+	return c.xchatToken.Token, nil
+}
+
 func (c *Client) Connect(ctx context.Context, cached bool) {
 	if c.eventHandler == nil {
 		panic(ErrConnectSetEventHandler)
 	}
 
 	c.polling.startPolling(c.Logger.WithContext(ctx))
+	c.StartXChatWebsocket(ctx)
+
 	if cached {
 		c.polling.doShortCircuit()
 	}
@@ -91,6 +148,7 @@ func (c *Client) Connect(ctx context.Context, cached bool) {
 func (c *Client) Disconnect() {
 	c.polling.stopPolling()
 	c.stream.stopStream()
+	c.stopXChatWebsocket()
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -112,10 +170,10 @@ func (c *Client) Logout(ctx context.Context) error {
 	return c.loadPage(ctx, endpoints.BASE_LOGOUT_URL)
 }
 
-func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialStateResponse, *response.AccountSettingsResponse, error) {
+func (c *Client) LoadMessagesPage(ctx context.Context) (*response.AccountSettingsResponse, error) {
 	err := c.loadPage(ctx, endpoints.BASE_MESSAGES_URL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load messages page: %w", err)
+		return nil, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
 	data, err := c.GetAccountSettings(ctx, payload.AccountSettingsQuery{
@@ -131,27 +189,20 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.InboxInitialSt
 	})
 	if err != nil {
 		if IsAuthError(err) {
-			return nil, nil, err
+			return nil, err
 		}
 		c.Logger.Warn().Err(err).Msg("Failed to get account settings")
 		data = &response.AccountSettingsResponse{}
 	}
 
-	initialInboxState, err := c.GetInitialInboxState(ctx, ptr.Ptr(payload.DMRequestQuery{}.Default()))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get initial inbox state: %w", err)
-	}
-
-	c.session.PollingCursor = initialInboxState.InboxInitialState.Cursor
 	c.session.InitializedAt = time.Now()
 	c.session.CacheVersion = CurrentCacheVersion
 
 	c.Logger.Info().
 		Str("screen_name", data.ScreenName).
-		Str("initial_inbox_cursor", initialInboxState.InboxInitialState.Cursor).
 		Msg("Successfully loaded and authenticated as user")
 
-	return initialInboxState, data, nil
+	return data, nil
 }
 
 func (c *Client) GetCurrentUserID() string {
@@ -167,6 +218,12 @@ func (c *Client) SetEventHandler(handler EventHandler, streamHandler StreamEvent
 	c.eventHandler = handler
 	c.streamEventHandler = streamHandler
 	c.onCursorChanged = onCursorChanged
+}
+
+// SetXChatEventHandler sets the handler for processed XChat websocket events.
+func (c *Client) SetXChatEventHandler(handler XChatEventHandler) {
+	c.xchatEventHandler = handler
+	c.xchatProcessor.SetEventHandler(handler)
 }
 
 func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
@@ -391,3 +448,4 @@ func (c *Client) SetActiveConversation(conversationID string) {
 func (c *Client) PollConversation(conversationID string) {
 	c.polling.pollConversation(conversationID)
 }
+
