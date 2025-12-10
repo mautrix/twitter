@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/rs/zerolog"
@@ -180,7 +181,19 @@ func ParseMessageEntryContentsBytes(data []byte) (*payload.MessageEntryContents,
 	return decodeMessageEntryHolder(data, nil)
 }
 
-func decodeMessageEntryHolder(data []byte, log *zerolog.Logger) (*payload.MessageEntryContents, error) {
+func decodeMessageEntryHolder(data []byte, log *zerolog.Logger) (_ *payload.MessageEntryContents, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if log != nil {
+				log.Warn().
+					Interface("panic", r).
+					Str("plaintext_full_hex", hex.EncodeToString(data)).
+					Msg("Thrift decode panic in MessageEntryHolder")
+			}
+			err = fmt.Errorf("thrift decode panic: %v", r)
+		}
+	}()
+
 	var holder payload.MessageEntryHolder
 	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
 	if err := decoder.Decode(&holder); err != nil {
@@ -390,6 +403,7 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	// Get conversation key
 	var convKey []byte
 	var keyVersion string
+	unencrypted := false
 
 	if b.conversationKey != nil {
 		convKey = b.conversationKey
@@ -397,12 +411,20 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	} else if b.km != nil {
 		key, err := b.km.GetLatestConversationKey(ctx, b.conversationID)
 		if err != nil {
-			return nil, fmt.Errorf("get conversation key: %w", err)
+			if errors.Is(err, ErrKeyNotFound) {
+				unencrypted = true
+			} else {
+				return nil, fmt.Errorf("get conversation key: %w", err)
+			}
+		} else if key == nil || len(key.Key) == 0 {
+			unencrypted = true
+		} else {
+			convKey = key.Key
+			keyVersion = key.KeyVersion
 		}
-		convKey = key.Key
-		keyVersion = key.KeyVersion
 	} else {
-		return nil, fmt.Errorf("no conversation key provided")
+		// No key manager means we can't fetch a key; fall back to plaintext.
+		unencrypted = true
 	}
 
 	// Build MessageContents
@@ -413,10 +435,19 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 		ReplyingToPreview: b.replyTo,
 	}
 
-	// Encrypt - get raw ciphertext bytes (not hex)
-	contentsBytes, err := EncryptMessageContentsRaw(contents, convKey)
-	if err != nil {
-		return nil, fmt.Errorf("encrypt contents: %w", err)
+	// Encrypt if we have a key, otherwise send plaintext contents.
+	var contentsBytes []byte
+	var err error
+	if !unencrypted && len(convKey) > 0 {
+		contentsBytes, err = EncryptMessageContentsRaw(contents, convKey)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt contents: %w", err)
+		}
+	} else {
+		contentsBytes, err = EncodeMessageContents(contents)
+		if err != nil {
+			return nil, fmt.Errorf("encode contents: %w", err)
+		}
 	}
 
 	// Build MessageCreateEvent
@@ -424,11 +455,13 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	isPendingPublicKey := false
 	priority := int32(1)
 	mce := &payload.MessageCreateEvent{
-		Contents:               contentsBytes,
-		ConversationKeyVersion: &keyVersion,
-		ShouldNotify:           &shouldNotify,
-		IsPendingPublicKey:     &isPendingPublicKey,
-		Priority:               &priority,
+		Contents:           contentsBytes,
+		ShouldNotify:       &shouldNotify,
+		IsPendingPublicKey: &isPendingPublicKey,
+		Priority:           &priority,
+	}
+	if !unencrypted && keyVersion != "" {
+		mce.ConversationKeyVersion = &keyVersion
 	}
 
 	// Get signing key
@@ -457,8 +490,8 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 		},
 	}
 
-	// Sign if we have a signing key
-	if signingKey != nil {
+	// Sign when we have a valid signing key+version. For plaintext (no conv key) the signature is still required.
+	if signingKey != nil && sigKeyVersion != "" {
 		signature, err := SignMessage(signingKey, b.messageID, b.ownUserID, b.conversationID, keyVersion, contentsBytes)
 		if err != nil {
 			return nil, fmt.Errorf("sign message: %w", err)

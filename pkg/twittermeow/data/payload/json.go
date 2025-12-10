@@ -113,11 +113,11 @@ type PushConfigPayloadWrapper struct {
 }
 
 type SendMessageMutationVariables struct {
-	ConversationID               string `json:"conversation_id"`
-	MessageID                    string `json:"message_id"`
-	ConversationToken            string `json:"conversation_token"`
-	EncodedMessageCreateEvent    string `json:"encoded_message_create_event"`
-	EncodedMessageEventSignature string `json:"encoded_message_event_signature"`
+	ConversationID               string  `json:"conversation_id"`
+	MessageID                    string  `json:"message_id"`
+	ConversationToken            string  `json:"conversation_token"`
+	EncodedMessageCreateEvent    string  `json:"encoded_message_create_event"`
+	EncodedMessageEventSignature *string `json:"encoded_message_event_signature,omitempty"`
 }
 
 type SendMessageMutationPayload struct {

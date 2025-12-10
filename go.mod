@@ -37,10 +37,14 @@ require (
 	github.com/refraction-networking/utls v1.8.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
+	github.com/thrift-iterator/go v0.0.0-20190402154806-9b5a67519118 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/v2pro/plz v0.0.0-20221028024117-e5f9aec5b631 // indirect
+	github.com/v2pro/quokka v0.0.0-20171201153428-382cb39c6ee6 // indirect
+	github.com/v2pro/wombat v0.0.0-20180402055224-a56dbdcddef2 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/crypto v0.44.0 // indirect

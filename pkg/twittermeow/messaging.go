@@ -434,14 +434,18 @@ func (c *Client) AddParticipants(ctx context.Context, variables *payload.AddPart
 // SendRawEncryptedMessage sends an already-encoded encrypted message payload.
 // This is primarily for testing/debugging purposes.
 func (c *Client) SendRawEncryptedMessage(ctx context.Context, conversationID, messageID, conversationToken, encodedMCE, encodedSig string) (*response.SendMessageMutationResponse, error) {
+	var sigPtr *string
+	if encodedSig != "" {
+		sigPtr = &encodedSig
+	}
+
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               conversationID,
 		MessageID:                    messageID,
 		ConversationToken:            conversationToken,
 		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: encodedSig,
-	},
-	)
+		EncodedMessageEventSignature: sigPtr,
+	})
 
 	jsonBody, err := json.Marshal(pl)
 	if err != nil {
@@ -511,18 +515,27 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 		return nil, fmt.Errorf("build message: %w", err)
 	}
 
+	var sigPtr *string
+	if encodedSig != "" {
+		sigPtr = &encodedSig
+	}
+
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               opts.ConversationID,
 		MessageID:                    messageID,
 		ConversationToken:            token,
 		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: encodedSig,
+		EncodedMessageEventSignature: sigPtr,
 	})
 
 	jsonBody, err := json.Marshal(pl)
 	if err != nil {
 		return nil, err
 	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("SendMessageMutation payload")
 
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,

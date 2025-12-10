@@ -36,8 +36,6 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 var mediaCategoryMap = map[event.MessageType]payload.MediaCategory{
@@ -72,36 +70,38 @@ func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.Ro
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
 	conversationID := string(msg.Portal.ID)
-	sendDMPayload := &payload.SendDirectMessagePayload{
-		ConversationID:    conversationID,
-		IncludeCards:      1,
-		IncludeQuoteCount: true,
-		RecipientIDs:      false,
-		DMUsers:           false,
-		CardsPlatform:     "Web-12",
-		RequestID:         string(msg.InputTransactionID),
-	}
-	if sendDMPayload.RequestID == "" {
-		sendDMPayload.RequestID = uuid.NewString()
-	}
-
-	if msg.ReplyTo != nil {
-		sendDMPayload.ReplyToDMID = string(msg.ReplyTo.ID)
-	}
-
 	content := msg.Content
+
+	text := content.Body
 	if content.Format == event.FormatHTML {
-		sendDMPayload.Text = tc.matrixParser.Parse(content.FormattedBody, format.NewContext(ctx))
-	} else {
-		sendDMPayload.Text = content.Body
+		text = tc.matrixParser.Parse(content.FormattedBody, format.NewContext(ctx))
+	}
+
+	messageID := string(msg.InputTransactionID)
+	if messageID == "" {
+		messageID = uuid.NewString()
+	}
+
+	opts := twittermeow.SendEncryptedMessageOpts{
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		Text:           text,
+	}
+
+	// Replies: best-effort include target ID.
+	if msg.ReplyTo != nil {
+		replyID := string(msg.ReplyTo.ID)
+		opts.ReplyTo = &payload.ReplyingToPreview{
+			ReplyingToMessageId: &replyID,
+		}
 	}
 
 	switch content.MsgType {
 	case event.MsgText:
-		break
+		// nothing extra
 	case event.MsgVideo, event.MsgImage, event.MsgAudio:
-		if content.FileName == "" || content.Body == content.FileName {
-			sendDMPayload.Text = ""
+		if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
+			opts.Text = ""
 		}
 
 		data, err := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
@@ -116,158 +116,67 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		if content.Info.MimeType == "image/gif" || content.Info.MauGIF {
 			uploadMediaParams.MediaCategory = "dm_gif"
 		}
-
-		// Attempt encrypted path first if we have a conversation key/token.
-		km := tc.client.GetKeyManager()
-		convKey, keyErr := km.GetLatestConversationKey(ctx, conversationID)
-		useEncrypted := keyErr == nil && convKey != nil && len(convKey.Key) > 0
-
-		if useEncrypted {
-			messageID := string(msg.InputTransactionID)
-			if messageID == "" {
-				messageID = uuid.NewString()
-			}
-			msg.AddPendingToIgnore(networkid.TransactionID(messageID))
-
-			opts := twittermeow.SendEncryptedMessageOpts{
-				ConversationID: conversationID,
-				MessageID:      messageID,
-				Text:           sendDMPayload.Text,
-			}
-
-			// Build attachments (media) if present.
-			if content.MsgType == event.MsgVideo || content.MsgType == event.MsgImage || content.MsgType == event.MsgAudio {
-				data, dlErr := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
-				if dlErr != nil {
-					return nil, dlErr
-				}
-				uploadMediaParams := &payload.UploadMediaQuery{
-					MediaCategory: mediaCategoryMap[content.MsgType],
-					MediaType:     content.Info.MimeType,
-				}
-				if content.Info.MimeType == "image/gif" || content.Info.MauGIF {
-					uploadMediaParams.MediaCategory = "dm_gif"
-				}
-				if content.MsgType == event.MsgAudio {
-					uploadMediaParams.MediaCategory = "dm_video"
-					if content.Info.MimeType != "video/mp4" {
-						converted, convErr := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
-						if convErr != nil {
-							return nil, convErr
-						}
-						data = converted
-					}
-				}
-				uploadedMediaResponse, upErr := tc.client.UploadMedia(ctx, uploadMediaParams, data)
-				if upErr != nil {
-					return nil, upErr
-				}
-
-				attType := payload.MediaTypeImage
-				switch content.MsgType {
-				case event.MsgVideo:
-					attType = payload.MediaTypeVideo
-				case event.MsgAudio:
-					attType = payload.MediaTypeAudio
-				}
-				width := int64(content.Info.Width)
-				height := int64(content.Info.Height)
-				size := int64(uploadedMediaResponse.Size)
-				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
-					Media: &payload.MediaAttachment{
-						MediaHashKey: &uploadedMediaResponse.MediaKey,
-						Type:         ptr.Ptr(int32(attType)),
-						Dimensions: &payload.MediaDimensions{
-							Width:  &width,
-							Height: &height,
-						},
-						FilesizeBytes: &size,
-						Filename:      ptr.Ptr(content.FileName),
-						AttachmentId:  ptr.Ptr(uploadedMediaResponse.MediaIDString),
-					},
-				})
-				// In encrypted flow, clear text if it's just filename.
-				if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
-					opts.Text = ""
-				}
-			}
-
-			// Replies: best-effort include target ID.
-			if msg.ReplyTo != nil {
-				replyID := string(msg.ReplyTo.ID)
-				opts.ReplyTo = &payload.ReplyingToPreview{
-					ReplyingToMessageId: &replyID,
-				}
-			}
-
-			if _, sendErr := tc.client.SendEncryptedMessage(ctx, opts); sendErr == nil {
-				// We don't get full message data back; store a placeholder DB entry.
-				return &bridgev2.MatrixMessageResponse{
-					DB: &database.Message{
-						ID:        networkid.MessageID(messageID),
-						MXID:      msg.Event.ID,
-						Room:      msg.Portal.PortalKey,
-						SenderID:  UserLoginIDToUserID(tc.userLogin.ID),
-						Timestamp: time.Now(),
-						Metadata:  &MessageMetadata{},
-					},
-					RemovePending: networkid.TransactionID(messageID),
-				}, nil
-			}
-
-			// Fall through to plaintext path on error, reuse the same message ID to match pending ignores.
-			sendDMPayload.RequestID = messageID
-		}
-
 		if content.MsgType == event.MsgAudio {
-			sendDMPayload.AudioOnlyMediaAttachment = true
 			uploadMediaParams.MediaCategory = "dm_video"
 			if content.Info.MimeType != "video/mp4" {
 				converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
 				if err != nil {
 					return nil, err
-				} else {
-					data = converted
 				}
+				data = converted
 			}
 		}
+
 		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
 		if err != nil {
 			return nil, err
 		}
 
 		zerolog.Ctx(ctx).Debug().Any("media_info", uploadedMediaResponse).Msg("Successfully uploaded media to twitter's servers")
-		sendDMPayload.MediaID = uploadedMediaResponse.MediaIDString
+
+		attType := payload.MediaTypeImage
+		switch content.MsgType {
+		case event.MsgVideo:
+			attType = payload.MediaTypeVideo
+		case event.MsgAudio:
+			attType = payload.MediaTypeAudio
+		}
+		width := int64(content.Info.Width)
+		height := int64(content.Info.Height)
+		size := int64(uploadedMediaResponse.Size)
+		opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
+			Media: &payload.MediaAttachment{
+				MediaHashKey: &uploadedMediaResponse.MediaKey,
+				Type:         ptr.Ptr(int32(attType)),
+				Dimensions: &payload.MediaDimensions{
+					Width:  &width,
+					Height: &height,
+				},
+				FilesizeBytes: &size,
+				Filename:      ptr.Ptr(content.FileName),
+				AttachmentId:  ptr.Ptr(uploadedMediaResponse.MediaIDString),
+			},
+		})
 	default:
 		return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
 	}
 
-	txnID := networkid.TransactionID(sendDMPayload.RequestID)
+	txnID := networkid.TransactionID(messageID)
 	msg.AddPendingToIgnore(txnID)
-	resp, err := tc.client.SendDirectMessage(ctx, sendDMPayload)
-	if err != nil {
+
+	if _, err := tc.client.SendEncryptedMessage(ctx, opts); err != nil {
 		return nil, err
-	} else if len(resp.Entries) == 0 {
-		return nil, fmt.Errorf("no entries in send response")
-	} else if len(resp.Entries) > 1 {
-		zerolog.Ctx(ctx).Warn().
-			Int("entry_count", len(resp.Entries)).
-			Msg("Unexpected number of entries in send response")
 	}
-	entry, ok := resp.Entries[0].ParseWithErrorLog(zerolog.Ctx(ctx)).(*types.Message)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response data: not a message")
-	}
+
 	return &bridgev2.MatrixMessageResponse{
 		DB: &database.Message{
-			ID:        networkid.MessageID(entry.MessageData.ID),
+			ID:        networkid.MessageID(messageID),
 			MXID:      msg.Event.ID,
 			Room:      msg.Portal.PortalKey,
 			SenderID:  UserLoginIDToUserID(tc.userLogin.ID),
-			Timestamp: methods.ParseSnowflake(entry.MessageData.ID),
+			Timestamp: time.Now(),
 			Metadata:  &MessageMetadata{},
 		},
-		StreamOrder:   methods.ParseSnowflakeInt(entry.MessageData.ID),
 		RemovePending: txnID,
 	}, nil
 }

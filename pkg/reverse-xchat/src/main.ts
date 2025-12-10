@@ -648,6 +648,17 @@ const extractJuiceboxBundle = (root: any) => {
 
 	return { configObj, tokenMap };
 };
+const extractPublicKeyVersion = (root: any) => {
+	const meta = root?.public_keys_with_token_map?.[0];
+	const version = meta?.public_key_with_metadata?.version;
+	console.log(root);
+	if (typeof version === "string") {
+		const trimmed = version.trim();
+		return trimmed || null;
+	}
+	if (typeof version === "number" && Number.isFinite(version)) return version;
+	return null;
+};
 // ---- Rendering helpers ----
 const highlightJson = (target: HTMLPreElement, text: string) => {
 	target.classList.add("hljs");
@@ -760,11 +771,11 @@ const setDecoded = (source: DecodeSource, parsed: any | null, bytes?: Uint8Array
 	const assign =
 		source === "manual"
 			? (payload: DecodedPayload | null) => {
-					state.lastManualDecoded = payload;
-				}
+				state.lastManualDecoded = payload;
+			}
 			: (payload: DecodedPayload | null) => {
-					state.lastGenericDecoded = payload;
-				};
+				state.lastGenericDecoded = payload;
+			};
 	const button = source === "manual" ? manualVerifyBtn : genericVerifyBtn;
 	const render =
 		source === "manual" ? renderManualVerifyPayload : renderGenericVerifyPayload;
@@ -1025,6 +1036,8 @@ const handleJuiceboxSubmit = async (event: Event) => {
 		return;
 	}
 
+	const publicKeyVersion = extractPublicKeyVersion(parsed);
+
 	let bundle: { configObj: any; tokenMap: Record<string, string> };
 	try {
 		bundle = extractJuiceboxBundle(parsed);
@@ -1077,6 +1090,7 @@ const handleJuiceboxSubmit = async (event: Event) => {
 		renderJuiceboxPayload(
 			JSON.stringify(
 				{
+					publicKeyVersion: publicKeyVersion ?? "(not found)",
 					savedPrivKeyB64: privKeyB64,
 					savedPubKeyB64: pubKeyB64,
 					config: bundle.configObj,
@@ -1156,8 +1170,7 @@ const handleVerifyClick = async (source: DecodeSource) => {
 		signatureBytes = base64ToUint8Array(signatureB64);
 	} catch (err) {
 		render(
-			`Signature is not valid base64 (keyBundle.sodiumKeyBlobB64): ${
-				err instanceof Error ? err.message : String(err)
+			`Signature is not valid base64 (keyBundle.sodiumKeyBlobB64): ${err instanceof Error ? err.message : String(err)
 			}`,
 		);
 		return;
@@ -1834,31 +1847,31 @@ const stop = () => Uint8Array.of(T.STOP);
 
 const defaultEncode =
 	(t: TCode) =>
-	(v: any): Uint8Array => {
-		switch (t) {
-			case T.STRING:
-			case T.UTF8:
-			case T.UTF16:
-				return enc.str(String(v));
-			case T.BOOL:
-				return enc.bool(!!v);
-			case T.BYTE: {
-				const n = Number(v);
-				const b = (n | 0) & 0xff;
-				return Uint8Array.of(b);
+		(v: any): Uint8Array => {
+			switch (t) {
+				case T.STRING:
+				case T.UTF8:
+				case T.UTF16:
+					return enc.str(String(v));
+				case T.BOOL:
+					return enc.bool(!!v);
+				case T.BYTE: {
+					const n = Number(v);
+					const b = (n | 0) & 0xff;
+					return Uint8Array.of(b);
+				}
+				case T.I16:
+					return enc.i16(Number(v));
+				case T.I32:
+					return enc.i32(Number(v));
+				case T.I64:
+					return enc.i64(v);
+				case T.DOUBLE:
+					return enc.dbl(Number(v));
+				default:
+					throw new Error(`Provide encoder for complex type ${t}`);
 			}
-			case T.I16:
-				return enc.i16(Number(v));
-			case T.I32:
-				return enc.i32(Number(v));
-			case T.I64:
-				return enc.i64(v);
-			case T.DOUBLE:
-				return enc.dbl(Number(v));
-			default:
-				throw new Error(`Provide encoder for complex type ${t}`);
-		}
-	};
+		};
 
 // Encode JS object to Thrift struct (binary protocol, no message envelope)
 export function encodeStruct(obj: any, schema: FieldSchema[]): Uint8Array {
@@ -2209,74 +2222,74 @@ export class Decoder {
 
 // Thrift types generated from twittermeow/data/payload/thrift.go (dmv2.thriftjava)
 export enum AdditionalAction {
-  AdditionalActionFetchConvIfMissingCkey = 0,
+	AdditionalActionFetchConvIfMissingCkey = 0,
 }
 
 export type AdditionalActionCode = AdditionalAction;
 
 export enum DeleteMessageAction {
-  DeleteMessageActionDeleteForSelf = 1,
-  DeleteMessageActionDeleteForAll = 2,
+	DeleteMessageActionDeleteForSelf = 1,
+	DeleteMessageActionDeleteForAll = 2,
 }
 
 export type DeleteMessageActionCode = DeleteMessageAction;
 
 export enum FailureType {
-  FailureTypeEmptyDetail = 1,
-  FailureTypeInternalError = 2,
-  FailureTypeContentsTooLarge = 3,
-  FailureTypeTooManyMessages = 4,
-  FailureTypeInvalidSenderSignature = 5,
-  FailureTypeNonLatestCkeyVersion = 6,
-  FailureTypeRecipientHasNotTrustedConversation = 7,
-  FailureTypeRecipientKeyHasChanged = 8,
+	FailureTypeEmptyDetail = 1,
+	FailureTypeInternalError = 2,
+	FailureTypeContentsTooLarge = 3,
+	FailureTypeTooManyMessages = 4,
+	FailureTypeInvalidSenderSignature = 5,
+	FailureTypeNonLatestCkeyVersion = 6,
+	FailureTypeRecipientHasNotTrustedConversation = 7,
+	FailureTypeRecipientKeyHasChanged = 8,
 }
 
 export type FailureTypeCode = FailureType;
 
 export enum MediaType {
-  MediaTypeImage = 1,
-  MediaTypeGif = 2,
-  MediaTypeVideo = 3,
-  MediaTypeAudio = 4,
-  MediaTypeFile = 5,
-  MediaTypeSvg = 6,
+	MediaTypeImage = 1,
+	MediaTypeGif = 2,
+	MediaTypeVideo = 3,
+	MediaTypeAudio = 4,
+	MediaTypeFile = 5,
+	MediaTypeSvg = 6,
 }
 
 export type MediaTypeCode = MediaType;
 
 export enum ScreenCaptureType {
-  ScreenCaptureTypeScreenshot = 1,
-  ScreenCaptureTypeRecording = 2,
+	ScreenCaptureTypeScreenshot = 1,
+	ScreenCaptureTypeRecording = 2,
 }
 
 export type ScreenCaptureTypeCode = ScreenCaptureType;
 
 export enum SentFromSurface {
-  SentFromSurfaceConversationScreenComposer = 1,
-  SentFromSurfaceNotificationReply = 2,
-  SentFromSurfaceShareSheet = 3,
-  SentFromSurfacePaymentsSupportComposer = 4,
-  SentFromSurfaceMessageForwardSheet = 5,
+	SentFromSurfaceConversationScreenComposer = 1,
+	SentFromSurfaceNotificationReply = 2,
+	SentFromSurfaceShareSheet = 3,
+	SentFromSurfacePaymentsSupportComposer = 4,
+	SentFromSurfaceMessageForwardSheet = 5,
 }
 
 export type SentFromSurfaceCode = SentFromSurface;
 
 export type AVCallEnded = {
-  sent_at_millis?: bigint;
-  duration_seconds?: bigint;
-  is_audio_only?: boolean;
-  broadcast_id?: string;
+	sent_at_millis?: bigint;
+	duration_seconds?: bigint;
+	is_audio_only?: boolean;
+	broadcast_id?: string;
 };
 
 export type AVCallMissed = {
-  sent_at_millis?: bigint;
-  is_audio_only?: boolean;
+	sent_at_millis?: bigint;
+	is_audio_only?: boolean;
 };
 
 export type AVCallStarted = {
-  is_audio_only?: boolean;
-  broadcast_id?: string;
+	is_audio_only?: boolean;
+	broadcast_id?: string;
 };
 
 export type AcceptMessageRequest = {
@@ -2286,168 +2299,168 @@ export type AddressRichTextContent = {
 };
 
 export type BatchedMessageEvents = {
-  message_events?: MessageEvent[];
+	message_events?: MessageEvent[];
 };
 
 export type CallToAction = {
-  label?: string;
-  url?: string;
+	label?: string;
+	url?: string;
 };
 
 export type CashtagRichTextContent = {
 };
 
 export type ConversationDeleteEvent = {
-  conversation_id?: string;
+	conversation_id?: string;
 };
 
 export type ConversationKeyChangeEvent = {
-  conversation_key_version?: string;
-  conversation_participant_keys?: ConversationParticipantKey[];
-  ratchet_tree?: KeyRotation;
+	conversation_key_version?: string;
+	conversation_participant_keys?: ConversationParticipantKey[];
+	ratchet_tree?: KeyRotation;
 };
 
 export type ConversationMetadataChange = {
-  message_duration_change?: MessageDurationChange;
-  message_duration_remove?: MessageDurationRemove;
-  mute_conversation?: MuteConversation;
-  unmute_conversation?: UnmuteConversation;
-  enable_screen_capture_detection?: EnableScreenCaptureDetection;
-  disable_screen_capture_detection?: DisableScreenCaptureDetection;
-  enable_screen_capture_blocking?: EnableScreenCaptureBlocking;
-  disable_screen_capture_blocking?: DisableScreenCaptureBlocking;
+	message_duration_change?: MessageDurationChange;
+	message_duration_remove?: MessageDurationRemove;
+	mute_conversation?: MuteConversation;
+	unmute_conversation?: UnmuteConversation;
+	enable_screen_capture_detection?: EnableScreenCaptureDetection;
+	disable_screen_capture_detection?: DisableScreenCaptureDetection;
+	enable_screen_capture_blocking?: EnableScreenCaptureBlocking;
+	disable_screen_capture_blocking?: DisableScreenCaptureBlocking;
 };
 
 export type ConversationMetadataChangeEvent = {
-  conversation_metadata_change?: ConversationMetadataChange;
+	conversation_metadata_change?: ConversationMetadataChange;
 };
 
 export type ConversationParticipantKey = {
-  user_id?: string;
-  encrypted_conversation_key?: string;
-  public_key_version?: string;
+	user_id?: string;
+	encrypted_conversation_key?: string;
+	public_key_version?: string;
 };
 
 export type DisableScreenCaptureBlocking = {
-  placeholder?: string;
+	placeholder?: string;
 };
 
 export type DisableScreenCaptureDetection = {
-  placeholder?: string;
+	placeholder?: string;
 };
 
 export type DisplayTemporaryPasscodeInstruction = {
-  token?: string;
-  latest_public_key_version?: string;
+	token?: string;
+	latest_public_key_version?: string;
 };
 
 export type DraftMessage = {
-  conversation_id?: string;
-  draft_text?: string;
+	conversation_id?: string;
+	draft_text?: string;
 };
 
 export type EmailRichTextContent = {
 };
 
 export type EmptyNode = {
-  description?: string;
+	description?: string;
 };
 
 export type EnableScreenCaptureBlocking = {
-  placeholder?: string;
+	placeholder?: string;
 };
 
 export type EnableScreenCaptureDetection = {
-  placeholder?: string;
+	placeholder?: string;
 };
 
 export type EventQueuePriority = {
 };
 
 export type ForwardedMessage = {
-  message_text?: string;
-  entities?: RichTextEntity[];
+	message_text?: string;
+	entities?: RichTextEntity[];
 };
 
 export type GrokSearchResponseEvent = {
-  search_response_id?: string;
+	search_response_id?: string;
 };
 
 export type GroupAdminAddChange = {
-  admin_ids?: string[];
+	admin_ids?: string[];
 };
 
 export type GroupAdminRemoveChange = {
-  admin_ids?: string[];
+	admin_ids?: string[];
 };
 
 export type GroupAvatarUrlChange = {
-  custom_avatar_url?: string;
-  conversation_key_version?: string;
+	custom_avatar_url?: string;
+	conversation_key_version?: string;
 };
 
 export type GroupChange = {
-  group_create?: GroupCreate;
-  group_title_change?: GroupTitleChange;
-  group_avatar_change?: GroupAvatarUrlChange;
-  group_admin_add?: GroupAdminAddChange;
-  group_member_add?: GroupMemberAddChange;
-  group_admin_remove?: GroupAdminRemoveChange;
-  group_member_remove?: GroupMemberRemoveChange;
-  group_invite_enable?: GroupInviteEnable;
-  group_invite_disable?: GroupInviteDisable;
-  group_join_request?: GroupJoinRequest;
-  group_join_reject?: GroupJoinReject;
+	group_create?: GroupCreate;
+	group_title_change?: GroupTitleChange;
+	group_avatar_change?: GroupAvatarUrlChange;
+	group_admin_add?: GroupAdminAddChange;
+	group_member_add?: GroupMemberAddChange;
+	group_admin_remove?: GroupAdminRemoveChange;
+	group_member_remove?: GroupMemberRemoveChange;
+	group_invite_enable?: GroupInviteEnable;
+	group_invite_disable?: GroupInviteDisable;
+	group_join_request?: GroupJoinRequest;
+	group_join_reject?: GroupJoinReject;
 };
 
 export type GroupChangeEvent = {
-  group_change?: GroupChange;
+	group_change?: GroupChange;
 };
 
 export type GroupCreate = {
-  member_ids?: string[];
-  admin_ids?: string[];
-  title?: string;
-  avatar_url?: string;
-  conversation_key_version?: string;
+	member_ids?: string[];
+	admin_ids?: string[];
+	title?: string;
+	avatar_url?: string;
+	conversation_key_version?: string;
 };
 
 export type GroupInviteDisable = {
-  disabled_by_member_id?: string;
+	disabled_by_member_id?: string;
 };
 
 export type GroupInviteEnable = {
-  expires_at_msec?: bigint;
-  invite_url?: string;
-  affiliate_id?: string;
+	expires_at_msec?: bigint;
+	invite_url?: string;
+	affiliate_id?: string;
 };
 
 export type GroupJoinReject = {
-  rejected_user_ids?: string[];
+	rejected_user_ids?: string[];
 };
 
 export type GroupJoinRequest = {
-  requesting_user_id?: string;
+	requesting_user_id?: string;
 };
 
 export type GroupMemberAddChange = {
-  member_ids?: string[];
-  current_member_ids?: string[];
-  current_admin_ids?: string[];
-  current_title?: string;
-  current_avatar_url?: string;
-  conversation_key_version?: string;
-  current_ttl_msec?: bigint;
-  current_pending_member_ids?: string[];
+	member_ids?: string[];
+	current_member_ids?: string[];
+	current_admin_ids?: string[];
+	current_title?: string;
+	current_avatar_url?: string;
+	conversation_key_version?: string;
+	current_ttl_msec?: bigint;
+	current_pending_member_ids?: string[];
 };
 
 export type GroupMemberRemoveChange = {
-  member_ids?: string[];
+	member_ids?: string[];
 };
 
 export type GroupTitleChange = {
-  custom_title?: string;
-  conversation_key_version?: string;
+	custom_title?: string;
+	conversation_key_version?: string;
 };
 
 export type HashtagRichTextContent = {
@@ -2457,397 +2470,397 @@ export type KeepAliveInstruction = {
 };
 
 export type KeyRotation = {
-  previous_version?: string;
-  ratchet_tree?: RatchetTree;
-  nodes?: UpdatePathNode[];
-  encrypted_private_key?: string;
+	previous_version?: string;
+	ratchet_tree?: RatchetTree;
+	nodes?: UpdatePathNode[];
+	encrypted_private_key?: string;
 };
 
 export type LeafNode = {
-  subtree_encryption_public_key?: string;
-  signature_public_key?: string;
-  keypair_id?: string;
-  max_supported_protocol_version?: number;
-  parent_hash?: string;
-  signature?: string;
+	subtree_encryption_public_key?: string;
+	signature_public_key?: string;
+	keypair_id?: string;
+	max_supported_protocol_version?: number;
+	parent_hash?: string;
+	signature?: string;
 };
 
 export type MarkConversationRead = {
-  seen_until_sequence_id?: string;
-  seen_at_millis?: bigint;
+	seen_until_sequence_id?: string;
+	seen_at_millis?: bigint;
 };
 
 export type MarkConversationReadEvent = {
-  seen_until_sequence_id?: string;
-  seen_at_millis?: bigint;
+	seen_until_sequence_id?: string;
+	seen_at_millis?: bigint;
 };
 
 export type MarkConversationUnread = {
-  seen_until_sequence_id?: string;
+	seen_until_sequence_id?: string;
 };
 
 export type MarkConversationUnreadEvent = {
-  seen_until_sequence_id?: string;
+	seen_until_sequence_id?: string;
 };
 
 export type MaybeKeypair = {
-  empty?: string;
-  keypair?: StoredKeypair;
+	empty?: string;
+	keypair?: StoredKeypair;
 };
 
 export type MediaAttachment = {
-  media_hash_key?: string;
-  dimensions?: MediaDimensions;
-  type?: number;
-  duration_millis?: bigint;
-  filesize_bytes?: bigint;
-  filename?: string;
-  attachment_id?: string;
-  legacy_media_url_https?: string;
-  legacy_media_preview_url?: string;
+	media_hash_key?: string;
+	dimensions?: MediaDimensions;
+	type?: number;
+	duration_millis?: bigint;
+	filesize_bytes?: bigint;
+	filename?: string;
+	attachment_id?: string;
+	legacy_media_url_https?: string;
+	legacy_media_preview_url?: string;
 };
 
 export type MediaDimensions = {
-  width?: bigint;
-  height?: bigint;
+	width?: bigint;
+	height?: bigint;
 };
 
 export type MemberAccountDeleteEvent = {
-  member_id?: string;
+	member_id?: string;
 };
 
 export type MentionRichTextContent = {
 };
 
 export type Message = {
-  messageEvent?: MessageEvent;
-  messageInstruction?: MessageInstruction;
-  batchedMessageEvents?: BatchedMessageEvents;
+	messageEvent?: MessageEvent;
+	messageInstruction?: MessageInstruction;
+	batchedMessageEvents?: BatchedMessageEvents;
 };
 
 export type MessageAttachment = {
-  media?: MediaAttachment;
-  post?: PostAttachment;
-  url?: UrlAttachment;
-  unified_card?: UnifiedCardAttachment;
-  money?: MoneyAttachment;
+	media?: MediaAttachment;
+	post?: PostAttachment;
+	url?: UrlAttachment;
+	unified_card?: UnifiedCardAttachment;
+	money?: MoneyAttachment;
 };
 
 export type MessageContents = {
-  message_text?: string;
-  entities?: RichTextEntity[];
-  attachments?: MessageAttachment[];
-  replying_to_preview?: ReplyingToPreview;
-  forwarded_message?: ForwardedMessage;
-  sent_from?: number;
-  quick_reply?: QuickReply;
-  ctas?: CallToAction[];
+	message_text?: string;
+	entities?: RichTextEntity[];
+	attachments?: MessageAttachment[];
+	replying_to_preview?: ReplyingToPreview;
+	forwarded_message?: ForwardedMessage;
+	sent_from?: number;
+	quick_reply?: QuickReply;
+	ctas?: CallToAction[];
 };
 
 export type MessageCreateEvent = {
-  contents?: string;
-  conversation_key_version?: string;
-  should_notify?: boolean;
-  ttl_msec?: bigint;
-  delivered_at_msec?: bigint;
-  is_pending_public_key?: boolean;
-  priority?: number;
-  additional_action_list?: number[];
+	contents?: string;
+	conversation_key_version?: string;
+	should_notify?: boolean;
+	ttl_msec?: bigint;
+	delivered_at_msec?: bigint;
+	is_pending_public_key?: boolean;
+	priority?: number;
+	additional_action_list?: number[];
 };
 
 export type MessageDeleteEvent = {
-  sequence_ids?: string[];
-  delete_message_action?: number;
+	sequence_ids?: string[];
+	delete_message_action?: number;
 };
 
 export type MessageDurationChange = {
-  ttl_msec?: bigint;
+	ttl_msec?: bigint;
 };
 
 export type MessageDurationRemove = {
-  current_ttl_msec?: bigint;
+	current_ttl_msec?: bigint;
 };
 
 export type MessageEdit = {
-  message_sequence_id?: string;
-  updated_text?: string;
-  entities?: RichTextEntity[];
+	message_sequence_id?: string;
+	updated_text?: string;
+	entities?: RichTextEntity[];
 };
 
 export type MessageEntryContents = {
-  reaction_add?: MessageReactionAdd;
-  reaction_remove?: MessageReactionRemove;
-  message_edit?: MessageEdit;
-  mark_conversation_read?: MarkConversationRead;
-  mark_conversation_unread?: MarkConversationUnread;
-  pin_conversation?: PinConversation;
-  unpin_conversation?: UnpinConversation;
-  screen_capture_detected?: ScreenCaptureDetected;
-  av_call_ended?: AVCallEnded;
-  av_call_missed?: AVCallMissed;
-  draft_message?: DraftMessage;
-  accept_message_request?: AcceptMessageRequest;
-  nickname_message?: NicknameMessage;
-  set_verified_status?: SetVerifiedStatus;
-  av_call_started?: AVCallStarted;
+	reaction_add?: MessageReactionAdd;
+	reaction_remove?: MessageReactionRemove;
+	message_edit?: MessageEdit;
+	mark_conversation_read?: MarkConversationRead;
+	mark_conversation_unread?: MarkConversationUnread;
+	pin_conversation?: PinConversation;
+	unpin_conversation?: UnpinConversation;
+	screen_capture_detected?: ScreenCaptureDetected;
+	av_call_ended?: AVCallEnded;
+	av_call_missed?: AVCallMissed;
+	draft_message?: DraftMessage;
+	accept_message_request?: AcceptMessageRequest;
+	nickname_message?: NicknameMessage;
+	set_verified_status?: SetVerifiedStatus;
+	av_call_started?: AVCallStarted;
 };
 
 export type MessageEntryHolder = {
-  contents?: MessageEntryContents;
+	contents?: MessageEntryContents;
 };
 
 export type MessageEvent = {
-  sequence_id?: string;
-  message_id?: string;
-  sender_id?: string;
-  conversation_id?: string;
-  conversation_token?: string;
-  created_at_msec?: string;
-  detail?: MessageEventDetail;
-  relay_source?: number;
-  message_event_signature?: MessageEventSignature;
-  previous_sequence_id?: string;
-  is_trusted?: boolean;
+	sequence_id?: string;
+	message_id?: string;
+	sender_id?: string;
+	conversation_id?: string;
+	conversation_token?: string;
+	created_at_msec?: string;
+	detail?: MessageEventDetail;
+	relay_source?: number;
+	message_event_signature?: MessageEventSignature;
+	previous_sequence_id?: string;
+	is_trusted?: boolean;
 };
 
 export type MessageEventDetail = {
-  messageCreateEvent?: MessageCreateEvent;
-  conversationKeyChangeEvent?: ConversationKeyChangeEvent;
-  groupChangeEvent?: GroupChangeEvent;
-  messageFailureEvent?: MessageFailureEvent;
-  messageTypingEvent?: MessageTypingEvent;
-  messageDeleteEvent?: MessageDeleteEvent;
-  conversationDeleteEvent?: ConversationDeleteEvent;
-  conversationMetadataChangeEvent?: ConversationMetadataChangeEvent;
-  grokSearchResponseEvent?: GrokSearchResponseEvent;
-  requestForEncryptedResendEvent?: RequestForEncryptedResendEvent;
-  markConversationReadEvent?: MarkConversationReadEvent;
-  markConversationUnreadEvent?: MarkConversationUnreadEvent;
-  memberAccountDeleteEvent?: MemberAccountDeleteEvent;
+	messageCreateEvent?: MessageCreateEvent;
+	conversationKeyChangeEvent?: ConversationKeyChangeEvent;
+	groupChangeEvent?: GroupChangeEvent;
+	messageFailureEvent?: MessageFailureEvent;
+	messageTypingEvent?: MessageTypingEvent;
+	messageDeleteEvent?: MessageDeleteEvent;
+	conversationDeleteEvent?: ConversationDeleteEvent;
+	conversationMetadataChangeEvent?: ConversationMetadataChangeEvent;
+	grokSearchResponseEvent?: GrokSearchResponseEvent;
+	requestForEncryptedResendEvent?: RequestForEncryptedResendEvent;
+	markConversationReadEvent?: MarkConversationReadEvent;
+	markConversationUnreadEvent?: MarkConversationUnreadEvent;
+	memberAccountDeleteEvent?: MemberAccountDeleteEvent;
 };
 
 export type MessageEventRelaySource = {
 };
 
 export type MessageEventSignature = {
-  signature?: string;
-  public_key_version?: string;
-  signature_version?: string;
-  signing_public_key?: string;
+	signature?: string;
+	public_key_version?: string;
+	signature_version?: string;
+	signing_public_key?: string;
 };
 
 export type MessageFailureEvent = {
-  failure_type?: number;
+	failure_type?: number;
 };
 
 export type MessageInstruction = {
-  pullMessagesInstruction?: PullMessagesInstruction;
-  keepAliveInstruction?: KeepAliveInstruction;
-  pullMessagesFinishedInstruction?: PullMessagesFinishedInstruction;
-  pinReminderInstruction?: PinReminderInstruction;
-  switchToHybridPullInstruction?: SwitchToHybridPullInstruction;
-  displayTemporaryPasscodeInstruction?: DisplayTemporaryPasscodeInstruction;
+	pullMessagesInstruction?: PullMessagesInstruction;
+	keepAliveInstruction?: KeepAliveInstruction;
+	pullMessagesFinishedInstruction?: PullMessagesFinishedInstruction;
+	pinReminderInstruction?: PinReminderInstruction;
+	switchToHybridPullInstruction?: SwitchToHybridPullInstruction;
+	displayTemporaryPasscodeInstruction?: DisplayTemporaryPasscodeInstruction;
 };
 
 export type MessageReactionAdd = {
-  message_sequence_id?: string;
-  emoji?: string;
+	message_sequence_id?: string;
+	emoji?: string;
 };
 
 export type MessageReactionRemove = {
-  message_sequence_id?: string;
-  emoji?: string;
+	message_sequence_id?: string;
+	emoji?: string;
 };
 
 export type MessageTypingEvent = {
-  conversation_id?: string;
+	conversation_id?: string;
 };
 
 export type MoneyAttachment = {
-  fallbackText?: string;
-  payload?: string;
+	fallbackText?: string;
+	payload?: string;
 };
 
 export type MuteConversation = {
-  muted_conversation_ids?: string[];
+	muted_conversation_ids?: string[];
 };
 
 export type NicknameMessage = {
-  user_id?: bigint;
-  nickname_text?: string;
+	user_id?: bigint;
+	nickname_text?: string;
 };
 
 export type ParentNode = {
-  subtree_encryption_public_key?: string;
-  parent_hash?: string;
+	subtree_encryption_public_key?: string;
+	parent_hash?: string;
 };
 
 export type PhoneNumberRichTextContent = {
 };
 
 export type PinConversation = {
-  conversation_id?: string;
+	conversation_id?: string;
 };
 
 export type PinReminderInstruction = {
-  should_register?: boolean;
-  should_generate?: boolean;
+	should_register?: boolean;
+	should_generate?: boolean;
 };
 
 export type PostAttachment = {
-  rest_id?: string;
-  post_url?: string;
-  attachment_id?: string;
+	rest_id?: string;
+	post_url?: string;
+	attachment_id?: string;
 };
 
 export type PullMessagePageDetails = {
-  min_sequence_id?: string;
-  max_sequence_id?: string;
-  is_batched_pull?: boolean;
+	min_sequence_id?: string;
+	max_sequence_id?: string;
+	is_batched_pull?: boolean;
 };
 
 export type PullMessagesFinishedInstruction = {
-  finished_pull?: boolean;
-  sequence_continue?: string;
-  pull_message_page_details?: PullMessagePageDetails;
+	finished_pull?: boolean;
+	sequence_continue?: string;
+	pull_message_page_details?: PullMessagePageDetails;
 };
 
 export type PullMessagesInstruction = {
-  sequence_start?: string;
-  sender_id?: string;
-  is_batched_pull?: boolean;
+	sequence_start?: string;
+	sender_id?: string;
+	is_batched_pull?: boolean;
 };
 
 export type QuickReply = {
-  request?: QuickReplyRequest;
-  response?: QuickReplyResponse;
+	request?: QuickReplyRequest;
+	response?: QuickReplyResponse;
 };
 
 export type QuickReplyOption = {
-  id?: string;
-  label?: string;
-  metadata?: string;
-  description?: string;
+	id?: string;
+	label?: string;
+	metadata?: string;
+	description?: string;
 };
 
 export type QuickReplyOptionsRequest = {
-  id?: string;
-  options?: QuickReplyOption[];
+	id?: string;
+	options?: QuickReplyOption[];
 };
 
 export type QuickReplyOptionsResponse = {
-  request_id?: string;
-  metadata?: string;
-  selected_option_id?: string;
+	request_id?: string;
+	metadata?: string;
+	selected_option_id?: string;
 };
 
 export type QuickReplyRequest = {
-  options?: QuickReplyOptionsRequest;
+	options?: QuickReplyOptionsRequest;
 };
 
 export type QuickReplyResponse = {
-  options?: QuickReplyOptionsResponse;
+	options?: QuickReplyOptionsResponse;
 };
 
 export type RatchetTree = {
-  leaves?: RatchetTreeLeaf[];
-  parents?: RatchetTreeParent[];
+	leaves?: RatchetTreeLeaf[];
+	parents?: RatchetTreeParent[];
 };
 
 export type RatchetTreeLeaf = {
-  empty?: EmptyNode;
-  leaf?: LeafNode;
+	empty?: EmptyNode;
+	leaf?: LeafNode;
 };
 
 export type RatchetTreeParent = {
-  empty?: EmptyNode;
-  parent?: ParentNode;
+	empty?: EmptyNode;
+	parent?: ParentNode;
 };
 
 export type ReplyingToPreview = {
-  sender_id?: bigint;
-  message_text?: string;
-  entities?: RichTextEntity[];
-  attachments?: MessageAttachment[];
-  sender_display_name?: string;
-  replying_to_message_sequence_id?: string;
-  replying_to_message_id?: string;
+	sender_id?: bigint;
+	message_text?: string;
+	entities?: RichTextEntity[];
+	attachments?: MessageAttachment[];
+	sender_display_name?: string;
+	replying_to_message_sequence_id?: string;
+	replying_to_message_id?: string;
 };
 
 export type RequestForEncryptedResendEvent = {
-  min_sequence_id?: string;
-  max_sequence_id?: string;
+	min_sequence_id?: string;
+	max_sequence_id?: string;
 };
 
 export type RichTextContent = {
-  hashtag?: HashtagRichTextContent;
-  cashtag?: CashtagRichTextContent;
-  mention?: MentionRichTextContent;
-  url?: UrlRichTextContent;
-  email?: EmailRichTextContent;
-  phoneNumber?: PhoneNumberRichTextContent;
+	hashtag?: HashtagRichTextContent;
+	cashtag?: CashtagRichTextContent;
+	mention?: MentionRichTextContent;
+	url?: UrlRichTextContent;
+	email?: EmailRichTextContent;
+	phoneNumber?: PhoneNumberRichTextContent;
 };
 
 export type RichTextEntity = {
-  start_index?: number;
-  end_index?: number;
-  content?: RichTextContent;
+	start_index?: number;
+	end_index?: number;
+	content?: RichTextContent;
 };
 
 export type ScreenCaptureDetected = {
-  type?: number;
+	type?: number;
 };
 
 export type SetVerifiedStatus = {
-  user_id?: bigint;
-  verified_status?: boolean;
+	user_id?: bigint;
+	verified_status?: boolean;
 };
 
 export type StoredGroupState = {
-  keypairs?: MaybeKeypair[];
-  ratchet_tree?: RatchetTree;
+	keypairs?: MaybeKeypair[];
+	ratchet_tree?: RatchetTree;
 };
 
 export type StoredKeypair = {
-  public_key?: string;
-  private_key?: string;
+	public_key?: string;
+	private_key?: string;
 };
 
 export type SwitchToHybridPullInstruction = {
-  requesting_user_agent?: string;
+	requesting_user_agent?: string;
 };
 
 export type UnifiedCardAttachment = {
-  url?: string;
-  attachment_id?: string;
+	url?: string;
+	attachment_id?: string;
 };
 
 export type UnmuteConversation = {
-  unmuted_conversation_ids?: string[];
+	unmuted_conversation_ids?: string[];
 };
 
 export type UnpinConversation = {
-  conversation_id?: string;
+	conversation_id?: string;
 };
 
 export type UpdatePathNode = {
-  encrypted_secrets?: string[];
-  encrypted_private_key?: string;
+	encrypted_secrets?: string[];
+	encrypted_private_key?: string;
 };
 
 export type UrlAttachment = {
-  url?: string;
-  banner_image_media_hash_key?: UrlAttachmentImage;
-  favicon_image_media_hash_key?: UrlAttachmentImage;
-  display_title?: string;
-  attachment_id?: string;
+	url?: string;
+	banner_image_media_hash_key?: UrlAttachmentImage;
+	favicon_image_media_hash_key?: UrlAttachmentImage;
+	display_title?: string;
+	attachment_id?: string;
 };
 
 export type UrlAttachmentImage = {
-  media_hash_key?: string;
-  filesize_bytes?: bigint;
-  filename?: string;
-  dimensions?: MediaDimensions;
+	media_hash_key?: string;
+	filesize_bytes?: bigint;
+	filename?: string;
+	dimensions?: MediaDimensions;
 };
 
 export type UrlRichTextContent = {
@@ -2960,20 +2973,20 @@ export const urlAttachmentImageSchema: FieldSchema[] = [];
 export const urlRichTextContentSchema: FieldSchema[] = [];
 
 aVCallEndedSchema.push(
-  { id: 1, key: "sent_at_millis", type: T.I64 },
-  { id: 2, key: "duration_seconds", type: T.I64 },
-  { id: 3, key: "is_audio_only", type: T.BOOL },
-  { id: 5, key: "broadcast_id", type: T.STRING },
+	{ id: 1, key: "sent_at_millis", type: T.I64 },
+	{ id: 2, key: "duration_seconds", type: T.I64 },
+	{ id: 3, key: "is_audio_only", type: T.BOOL },
+	{ id: 5, key: "broadcast_id", type: T.STRING },
 );
 
 aVCallMissedSchema.push(
-  { id: 1, key: "sent_at_millis", type: T.I64 },
-  { id: 2, key: "is_audio_only", type: T.BOOL },
+	{ id: 1, key: "sent_at_millis", type: T.I64 },
+	{ id: 2, key: "is_audio_only", type: T.BOOL },
 );
 
 aVCallStartedSchema.push(
-  { id: 1, key: "is_audio_only", type: T.BOOL },
-  { id: 3, key: "broadcast_id", type: T.STRING },
+	{ id: 1, key: "is_audio_only", type: T.BOOL },
+	{ id: 3, key: "broadcast_id", type: T.STRING },
 );
 
 acceptMessageRequestSchema.push(
@@ -2983,168 +2996,168 @@ addressRichTextContentSchema.push(
 );
 
 batchedMessageEventsSchema.push(
-  { id: 1, key: "message_events", type: T.LIST, elemType: T.STRUCT, elemSchema: messageEventSchema },
+	{ id: 1, key: "message_events", type: T.LIST, elemType: T.STRUCT, elemSchema: messageEventSchema },
 );
 
 callToActionSchema.push(
-  { id: 1, key: "label", type: T.STRING },
-  { id: 2, key: "url", type: T.STRING },
+	{ id: 1, key: "label", type: T.STRING },
+	{ id: 2, key: "url", type: T.STRING },
 );
 
 cashtagRichTextContentSchema.push(
 );
 
 conversationDeleteEventSchema.push(
-  { id: 1, key: "conversation_id", type: T.STRING },
+	{ id: 1, key: "conversation_id", type: T.STRING },
 );
 
 conversationKeyChangeEventSchema.push(
-  { id: 1, key: "conversation_key_version", type: T.STRING },
-  { id: 2, key: "conversation_participant_keys", type: T.LIST, elemType: T.STRUCT, elemSchema: conversationParticipantKeySchema },
-  { id: 3, key: "ratchet_tree", type: T.STRUCT, schema: keyRotationSchema },
+	{ id: 1, key: "conversation_key_version", type: T.STRING },
+	{ id: 2, key: "conversation_participant_keys", type: T.LIST, elemType: T.STRUCT, elemSchema: conversationParticipantKeySchema },
+	{ id: 3, key: "ratchet_tree", type: T.STRUCT, schema: keyRotationSchema },
 );
 
 conversationMetadataChangeSchema.push(
-  { id: 1, key: "message_duration_change", type: T.STRUCT, schema: messageDurationChangeSchema },
-  { id: 2, key: "message_duration_remove", type: T.STRUCT, schema: messageDurationRemoveSchema },
-  { id: 3, key: "mute_conversation", type: T.STRUCT, schema: muteConversationSchema },
-  { id: 4, key: "unmute_conversation", type: T.STRUCT, schema: unmuteConversationSchema },
-  { id: 5, key: "enable_screen_capture_detection", type: T.STRUCT, schema: enableScreenCaptureDetectionSchema },
-  { id: 6, key: "disable_screen_capture_detection", type: T.STRUCT, schema: disableScreenCaptureDetectionSchema },
-  { id: 7, key: "enable_screen_capture_blocking", type: T.STRUCT, schema: enableScreenCaptureBlockingSchema },
-  { id: 8, key: "disable_screen_capture_blocking", type: T.STRUCT, schema: disableScreenCaptureBlockingSchema },
+	{ id: 1, key: "message_duration_change", type: T.STRUCT, schema: messageDurationChangeSchema },
+	{ id: 2, key: "message_duration_remove", type: T.STRUCT, schema: messageDurationRemoveSchema },
+	{ id: 3, key: "mute_conversation", type: T.STRUCT, schema: muteConversationSchema },
+	{ id: 4, key: "unmute_conversation", type: T.STRUCT, schema: unmuteConversationSchema },
+	{ id: 5, key: "enable_screen_capture_detection", type: T.STRUCT, schema: enableScreenCaptureDetectionSchema },
+	{ id: 6, key: "disable_screen_capture_detection", type: T.STRUCT, schema: disableScreenCaptureDetectionSchema },
+	{ id: 7, key: "enable_screen_capture_blocking", type: T.STRUCT, schema: enableScreenCaptureBlockingSchema },
+	{ id: 8, key: "disable_screen_capture_blocking", type: T.STRUCT, schema: disableScreenCaptureBlockingSchema },
 );
 
 conversationMetadataChangeEventSchema.push(
-  { id: 1, key: "conversation_metadata_change", type: T.STRUCT, schema: conversationMetadataChangeSchema },
+	{ id: 1, key: "conversation_metadata_change", type: T.STRUCT, schema: conversationMetadataChangeSchema },
 );
 
 conversationParticipantKeySchema.push(
-  { id: 1, key: "user_id", type: T.STRING },
-  { id: 2, key: "encrypted_conversation_key", type: T.STRING },
-  { id: 3, key: "public_key_version", type: T.STRING },
+	{ id: 1, key: "user_id", type: T.STRING },
+	{ id: 2, key: "encrypted_conversation_key", type: T.STRING },
+	{ id: 3, key: "public_key_version", type: T.STRING },
 );
 
 disableScreenCaptureBlockingSchema.push(
-  { id: 1, key: "placeholder", type: T.STRING },
+	{ id: 1, key: "placeholder", type: T.STRING },
 );
 
 disableScreenCaptureDetectionSchema.push(
-  { id: 1, key: "placeholder", type: T.STRING },
+	{ id: 1, key: "placeholder", type: T.STRING },
 );
 
 displayTemporaryPasscodeInstructionSchema.push(
-  { id: 1, key: "token", type: T.STRING },
-  { id: 2, key: "latest_public_key_version", type: T.STRING },
+	{ id: 1, key: "token", type: T.STRING },
+	{ id: 2, key: "latest_public_key_version", type: T.STRING },
 );
 
 draftMessageSchema.push(
-  { id: 1, key: "conversation_id", type: T.STRING },
-  { id: 2, key: "draft_text", type: T.STRING },
+	{ id: 1, key: "conversation_id", type: T.STRING },
+	{ id: 2, key: "draft_text", type: T.STRING },
 );
 
 emailRichTextContentSchema.push(
 );
 
 emptyNodeSchema.push(
-  { id: 1, key: "description", type: T.STRING },
+	{ id: 1, key: "description", type: T.STRING },
 );
 
 enableScreenCaptureBlockingSchema.push(
-  { id: 1, key: "placeholder", type: T.STRING },
+	{ id: 1, key: "placeholder", type: T.STRING },
 );
 
 enableScreenCaptureDetectionSchema.push(
-  { id: 1, key: "placeholder", type: T.STRING },
+	{ id: 1, key: "placeholder", type: T.STRING },
 );
 
 eventQueuePrioritySchema.push(
 );
 
 forwardedMessageSchema.push(
-  { id: 1, key: "message_text", type: T.STRING },
-  { id: 2, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
+	{ id: 1, key: "message_text", type: T.STRING },
+	{ id: 2, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
 );
 
 grokSearchResponseEventSchema.push(
-  { id: 1, key: "search_response_id", type: T.STRING },
+	{ id: 1, key: "search_response_id", type: T.STRING },
 );
 
 groupAdminAddChangeSchema.push(
-  { id: 1, key: "admin_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "admin_ids", type: T.LIST, elemType: T.STRING },
 );
 
 groupAdminRemoveChangeSchema.push(
-  { id: 1, key: "admin_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "admin_ids", type: T.LIST, elemType: T.STRING },
 );
 
 groupAvatarUrlChangeSchema.push(
-  { id: 1, key: "custom_avatar_url", type: T.STRING },
-  { id: 2, key: "conversation_key_version", type: T.STRING },
+	{ id: 1, key: "custom_avatar_url", type: T.STRING },
+	{ id: 2, key: "conversation_key_version", type: T.STRING },
 );
 
 groupChangeSchema.push(
-  { id: 1, key: "group_create", type: T.STRUCT, schema: groupCreateSchema },
-  { id: 2, key: "group_title_change", type: T.STRUCT, schema: groupTitleChangeSchema },
-  { id: 3, key: "group_avatar_change", type: T.STRUCT, schema: groupAvatarUrlChangeSchema },
-  { id: 4, key: "group_admin_add", type: T.STRUCT, schema: groupAdminAddChangeSchema },
-  { id: 5, key: "group_member_add", type: T.STRUCT, schema: groupMemberAddChangeSchema },
-  { id: 6, key: "group_admin_remove", type: T.STRUCT, schema: groupAdminRemoveChangeSchema },
-  { id: 7, key: "group_member_remove", type: T.STRUCT, schema: groupMemberRemoveChangeSchema },
-  { id: 8, key: "group_invite_enable", type: T.STRUCT, schema: groupInviteEnableSchema },
-  { id: 9, key: "group_invite_disable", type: T.STRUCT, schema: groupInviteDisableSchema },
-  { id: 10, key: "group_join_request", type: T.STRUCT, schema: groupJoinRequestSchema },
-  { id: 11, key: "group_join_reject", type: T.STRUCT, schema: groupJoinRejectSchema },
+	{ id: 1, key: "group_create", type: T.STRUCT, schema: groupCreateSchema },
+	{ id: 2, key: "group_title_change", type: T.STRUCT, schema: groupTitleChangeSchema },
+	{ id: 3, key: "group_avatar_change", type: T.STRUCT, schema: groupAvatarUrlChangeSchema },
+	{ id: 4, key: "group_admin_add", type: T.STRUCT, schema: groupAdminAddChangeSchema },
+	{ id: 5, key: "group_member_add", type: T.STRUCT, schema: groupMemberAddChangeSchema },
+	{ id: 6, key: "group_admin_remove", type: T.STRUCT, schema: groupAdminRemoveChangeSchema },
+	{ id: 7, key: "group_member_remove", type: T.STRUCT, schema: groupMemberRemoveChangeSchema },
+	{ id: 8, key: "group_invite_enable", type: T.STRUCT, schema: groupInviteEnableSchema },
+	{ id: 9, key: "group_invite_disable", type: T.STRUCT, schema: groupInviteDisableSchema },
+	{ id: 10, key: "group_join_request", type: T.STRUCT, schema: groupJoinRequestSchema },
+	{ id: 11, key: "group_join_reject", type: T.STRUCT, schema: groupJoinRejectSchema },
 );
 
 groupChangeEventSchema.push(
-  { id: 1, key: "group_change", type: T.STRUCT, schema: groupChangeSchema },
+	{ id: 1, key: "group_change", type: T.STRUCT, schema: groupChangeSchema },
 );
 
 groupCreateSchema.push(
-  { id: 1, key: "member_ids", type: T.LIST, elemType: T.STRING },
-  { id: 2, key: "admin_ids", type: T.LIST, elemType: T.STRING },
-  { id: 3, key: "title", type: T.STRING },
-  { id: 4, key: "avatar_url", type: T.STRING },
-  { id: 5, key: "conversation_key_version", type: T.STRING },
+	{ id: 1, key: "member_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 2, key: "admin_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 3, key: "title", type: T.STRING },
+	{ id: 4, key: "avatar_url", type: T.STRING },
+	{ id: 5, key: "conversation_key_version", type: T.STRING },
 );
 
 groupInviteDisableSchema.push(
-  { id: 1, key: "disabled_by_member_id", type: T.STRING },
+	{ id: 1, key: "disabled_by_member_id", type: T.STRING },
 );
 
 groupInviteEnableSchema.push(
-  { id: 1, key: "expires_at_msec", type: T.I64 },
-  { id: 2, key: "invite_url", type: T.STRING },
-  { id: 3, key: "affiliate_id", type: T.STRING },
+	{ id: 1, key: "expires_at_msec", type: T.I64 },
+	{ id: 2, key: "invite_url", type: T.STRING },
+	{ id: 3, key: "affiliate_id", type: T.STRING },
 );
 
 groupJoinRejectSchema.push(
-  { id: 1, key: "rejected_user_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "rejected_user_ids", type: T.LIST, elemType: T.STRING },
 );
 
 groupJoinRequestSchema.push(
-  { id: 1, key: "requesting_user_id", type: T.STRING },
+	{ id: 1, key: "requesting_user_id", type: T.STRING },
 );
 
 groupMemberAddChangeSchema.push(
-  { id: 1, key: "member_ids", type: T.LIST, elemType: T.STRING },
-  { id: 2, key: "current_member_ids", type: T.LIST, elemType: T.STRING },
-  { id: 3, key: "current_admin_ids", type: T.LIST, elemType: T.STRING },
-  { id: 4, key: "current_title", type: T.STRING },
-  { id: 5, key: "current_avatar_url", type: T.STRING },
-  { id: 6, key: "conversation_key_version", type: T.STRING },
-  { id: 7, key: "current_ttl_msec", type: T.I64 },
-  { id: 8, key: "current_pending_member_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "member_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 2, key: "current_member_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 3, key: "current_admin_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 4, key: "current_title", type: T.STRING },
+	{ id: 5, key: "current_avatar_url", type: T.STRING },
+	{ id: 6, key: "conversation_key_version", type: T.STRING },
+	{ id: 7, key: "current_ttl_msec", type: T.I64 },
+	{ id: 8, key: "current_pending_member_ids", type: T.LIST, elemType: T.STRING },
 );
 
 groupMemberRemoveChangeSchema.push(
-  { id: 1, key: "member_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "member_ids", type: T.LIST, elemType: T.STRING },
 );
 
 groupTitleChangeSchema.push(
-  { id: 1, key: "custom_title", type: T.STRING },
-  { id: 2, key: "conversation_key_version", type: T.STRING },
+	{ id: 1, key: "custom_title", type: T.STRING },
+	{ id: 2, key: "conversation_key_version", type: T.STRING },
 );
 
 hashtagRichTextContentSchema.push(
@@ -3154,397 +3167,397 @@ keepAliveInstructionSchema.push(
 );
 
 keyRotationSchema.push(
-  { id: 1, key: "previous_version", type: T.STRING },
-  { id: 2, key: "ratchet_tree", type: T.STRUCT, schema: ratchetTreeSchema },
-  { id: 3, key: "nodes", type: T.LIST, elemType: T.STRUCT, elemSchema: updatePathNodeSchema },
-  { id: 4, key: "encrypted_private_key", type: T.STRING },
+	{ id: 1, key: "previous_version", type: T.STRING },
+	{ id: 2, key: "ratchet_tree", type: T.STRUCT, schema: ratchetTreeSchema },
+	{ id: 3, key: "nodes", type: T.LIST, elemType: T.STRUCT, elemSchema: updatePathNodeSchema },
+	{ id: 4, key: "encrypted_private_key", type: T.STRING },
 );
 
 leafNodeSchema.push(
-  { id: 1, key: "subtree_encryption_public_key", type: T.STRING },
-  { id: 2, key: "signature_public_key", type: T.STRING },
-  { id: 3, key: "keypair_id", type: T.STRING },
-  { id: 4, key: "max_supported_protocol_version", type: T.I32 },
-  { id: 5, key: "parent_hash", type: T.STRING },
-  { id: 6, key: "signature", type: T.STRING },
+	{ id: 1, key: "subtree_encryption_public_key", type: T.STRING },
+	{ id: 2, key: "signature_public_key", type: T.STRING },
+	{ id: 3, key: "keypair_id", type: T.STRING },
+	{ id: 4, key: "max_supported_protocol_version", type: T.I32 },
+	{ id: 5, key: "parent_hash", type: T.STRING },
+	{ id: 6, key: "signature", type: T.STRING },
 );
 
 markConversationReadSchema.push(
-  { id: 1, key: "seen_until_sequence_id", type: T.STRING },
-  { id: 2, key: "seen_at_millis", type: T.I64 },
+	{ id: 1, key: "seen_until_sequence_id", type: T.STRING },
+	{ id: 2, key: "seen_at_millis", type: T.I64 },
 );
 
 markConversationReadEventSchema.push(
-  { id: 1, key: "seen_until_sequence_id", type: T.STRING },
-  { id: 2, key: "seen_at_millis", type: T.I64 },
+	{ id: 1, key: "seen_until_sequence_id", type: T.STRING },
+	{ id: 2, key: "seen_at_millis", type: T.I64 },
 );
 
 markConversationUnreadSchema.push(
-  { id: 1, key: "seen_until_sequence_id", type: T.STRING },
+	{ id: 1, key: "seen_until_sequence_id", type: T.STRING },
 );
 
 markConversationUnreadEventSchema.push(
-  { id: 1, key: "seen_until_sequence_id", type: T.STRING },
+	{ id: 1, key: "seen_until_sequence_id", type: T.STRING },
 );
 
 maybeKeypairSchema.push(
-  { id: 1, key: "empty", type: T.STRING },
-  { id: 2, key: "keypair", type: T.STRUCT, schema: storedKeypairSchema },
+	{ id: 1, key: "empty", type: T.STRING },
+	{ id: 2, key: "keypair", type: T.STRUCT, schema: storedKeypairSchema },
 );
 
 mediaAttachmentSchema.push(
-  { id: 1, key: "media_hash_key", type: T.STRING },
-  { id: 2, key: "dimensions", type: T.STRUCT, schema: mediaDimensionsSchema },
-  { id: 3, key: "type", type: T.I32 },
-  { id: 4, key: "duration_millis", type: T.I64 },
-  { id: 5, key: "filesize_bytes", type: T.I64 },
-  { id: 6, key: "filename", type: T.STRING },
-  { id: 7, key: "attachment_id", type: T.STRING },
-  { id: 8, key: "legacy_media_url_https", type: T.STRING },
-  { id: 9, key: "legacy_media_preview_url", type: T.STRING },
+	{ id: 1, key: "media_hash_key", type: T.STRING },
+	{ id: 2, key: "dimensions", type: T.STRUCT, schema: mediaDimensionsSchema },
+	{ id: 3, key: "type", type: T.I32 },
+	{ id: 4, key: "duration_millis", type: T.I64 },
+	{ id: 5, key: "filesize_bytes", type: T.I64 },
+	{ id: 6, key: "filename", type: T.STRING },
+	{ id: 7, key: "attachment_id", type: T.STRING },
+	{ id: 8, key: "legacy_media_url_https", type: T.STRING },
+	{ id: 9, key: "legacy_media_preview_url", type: T.STRING },
 );
 
 mediaDimensionsSchema.push(
-  { id: 1, key: "width", type: T.I64 },
-  { id: 2, key: "height", type: T.I64 },
+	{ id: 1, key: "width", type: T.I64 },
+	{ id: 2, key: "height", type: T.I64 },
 );
 
 memberAccountDeleteEventSchema.push(
-  { id: 1, key: "member_id", type: T.STRING },
+	{ id: 1, key: "member_id", type: T.STRING },
 );
 
 mentionRichTextContentSchema.push(
 );
 
 messageSchema.push(
-  { id: 1, key: "messageEvent", type: T.STRUCT, schema: messageEventSchema },
-  { id: 2, key: "messageInstruction", type: T.STRUCT, schema: messageInstructionSchema },
-  { id: 3, key: "batchedMessageEvents", type: T.STRUCT, schema: batchedMessageEventsSchema },
+	{ id: 1, key: "messageEvent", type: T.STRUCT, schema: messageEventSchema },
+	{ id: 2, key: "messageInstruction", type: T.STRUCT, schema: messageInstructionSchema },
+	{ id: 3, key: "batchedMessageEvents", type: T.STRUCT, schema: batchedMessageEventsSchema },
 );
 
 messageAttachmentSchema.push(
-  { id: 1, key: "media", type: T.STRUCT, schema: mediaAttachmentSchema },
-  { id: 2, key: "post", type: T.STRUCT, schema: postAttachmentSchema },
-  { id: 3, key: "url", type: T.STRUCT, schema: urlAttachmentSchema },
-  { id: 4, key: "unified_card", type: T.STRUCT, schema: unifiedCardAttachmentSchema },
-  { id: 5, key: "money", type: T.STRUCT, schema: moneyAttachmentSchema },
+	{ id: 1, key: "media", type: T.STRUCT, schema: mediaAttachmentSchema },
+	{ id: 2, key: "post", type: T.STRUCT, schema: postAttachmentSchema },
+	{ id: 3, key: "url", type: T.STRUCT, schema: urlAttachmentSchema },
+	{ id: 4, key: "unified_card", type: T.STRUCT, schema: unifiedCardAttachmentSchema },
+	{ id: 5, key: "money", type: T.STRUCT, schema: moneyAttachmentSchema },
 );
 
 messageContentsSchema.push(
-  { id: 1, key: "message_text", type: T.STRING },
-  { id: 2, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
-  { id: 3, key: "attachments", type: T.LIST, elemType: T.STRUCT, elemSchema: messageAttachmentSchema },
-  { id: 4, key: "replying_to_preview", type: T.STRUCT, schema: replyingToPreviewSchema },
-  { id: 6, key: "forwarded_message", type: T.STRUCT, schema: forwardedMessageSchema },
-  { id: 7, key: "sent_from", type: T.I32 },
-  { id: 8, key: "quick_reply", type: T.STRUCT, schema: quickReplySchema },
-  { id: 9, key: "ctas", type: T.LIST, elemType: T.STRUCT, elemSchema: callToActionSchema },
+	{ id: 1, key: "message_text", type: T.STRING },
+	{ id: 2, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
+	{ id: 3, key: "attachments", type: T.LIST, elemType: T.STRUCT, elemSchema: messageAttachmentSchema },
+	{ id: 4, key: "replying_to_preview", type: T.STRUCT, schema: replyingToPreviewSchema },
+	{ id: 6, key: "forwarded_message", type: T.STRUCT, schema: forwardedMessageSchema },
+	{ id: 7, key: "sent_from", type: T.I32 },
+	{ id: 8, key: "quick_reply", type: T.STRUCT, schema: quickReplySchema },
+	{ id: 9, key: "ctas", type: T.LIST, elemType: T.STRUCT, elemSchema: callToActionSchema },
 );
 
 messageCreateEventSchema.push(
-  { id: 100, key: "contents", type: T.STRING },
-  { id: 101, key: "conversation_key_version", type: T.STRING },
-  { id: 102, key: "should_notify", type: T.BOOL },
-  { id: 103, key: "ttl_msec", type: T.I64 },
-  { id: 104, key: "delivered_at_msec", type: T.I64 },
-  { id: 105, key: "is_pending_public_key", type: T.BOOL },
-  { id: 106, key: "priority", type: T.I32 },
-  { id: 107, key: "additional_action_list", type: T.LIST, elemType: T.I32 },
+	{ id: 100, key: "contents", type: T.STRING },
+	{ id: 101, key: "conversation_key_version", type: T.STRING },
+	{ id: 102, key: "should_notify", type: T.BOOL },
+	{ id: 103, key: "ttl_msec", type: T.I64 },
+	{ id: 104, key: "delivered_at_msec", type: T.I64 },
+	{ id: 105, key: "is_pending_public_key", type: T.BOOL },
+	{ id: 106, key: "priority", type: T.I32 },
+	{ id: 107, key: "additional_action_list", type: T.LIST, elemType: T.I32 },
 );
 
 messageDeleteEventSchema.push(
-  { id: 1, key: "sequence_ids", type: T.LIST, elemType: T.STRING },
-  { id: 2, key: "delete_message_action", type: T.I32 },
+	{ id: 1, key: "sequence_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 2, key: "delete_message_action", type: T.I32 },
 );
 
 messageDurationChangeSchema.push(
-  { id: 1, key: "ttl_msec", type: T.I64 },
+	{ id: 1, key: "ttl_msec", type: T.I64 },
 );
 
 messageDurationRemoveSchema.push(
-  { id: 1, key: "current_ttl_msec", type: T.I64 },
+	{ id: 1, key: "current_ttl_msec", type: T.I64 },
 );
 
 messageEditSchema.push(
-  { id: 1, key: "message_sequence_id", type: T.STRING },
-  { id: 2, key: "updated_text", type: T.STRING },
-  { id: 3, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
+	{ id: 1, key: "message_sequence_id", type: T.STRING },
+	{ id: 2, key: "updated_text", type: T.STRING },
+	{ id: 3, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
 );
 
 messageEntryContentsSchema.push(
-  { id: 2, key: "reaction_add", type: T.STRUCT, schema: messageReactionAddSchema },
-  { id: 3, key: "reaction_remove", type: T.STRUCT, schema: messageReactionRemoveSchema },
-  { id: 4, key: "message_edit", type: T.STRUCT, schema: messageEditSchema },
-  { id: 5, key: "mark_conversation_read", type: T.STRUCT, schema: markConversationReadSchema },
-  { id: 6, key: "mark_conversation_unread", type: T.STRUCT, schema: markConversationUnreadSchema },
-  { id: 7, key: "pin_conversation", type: T.STRUCT, schema: pinConversationSchema },
-  { id: 8, key: "unpin_conversation", type: T.STRUCT, schema: unpinConversationSchema },
-  { id: 9, key: "screen_capture_detected", type: T.STRUCT, schema: screenCaptureDetectedSchema },
-  { id: 10, key: "av_call_ended", type: T.STRUCT, schema: aVCallEndedSchema },
-  { id: 11, key: "av_call_missed", type: T.STRUCT, schema: aVCallMissedSchema },
-  { id: 12, key: "draft_message", type: T.STRUCT, schema: draftMessageSchema },
-  { id: 13, key: "accept_message_request", type: T.STRUCT, schema: acceptMessageRequestSchema },
-  { id: 14, key: "nickname_message", type: T.STRUCT, schema: nicknameMessageSchema },
-  { id: 15, key: "set_verified_status", type: T.STRUCT, schema: setVerifiedStatusSchema },
-  { id: 16, key: "av_call_started", type: T.STRUCT, schema: aVCallStartedSchema },
+	{ id: 2, key: "reaction_add", type: T.STRUCT, schema: messageReactionAddSchema },
+	{ id: 3, key: "reaction_remove", type: T.STRUCT, schema: messageReactionRemoveSchema },
+	{ id: 4, key: "message_edit", type: T.STRUCT, schema: messageEditSchema },
+	{ id: 5, key: "mark_conversation_read", type: T.STRUCT, schema: markConversationReadSchema },
+	{ id: 6, key: "mark_conversation_unread", type: T.STRUCT, schema: markConversationUnreadSchema },
+	{ id: 7, key: "pin_conversation", type: T.STRUCT, schema: pinConversationSchema },
+	{ id: 8, key: "unpin_conversation", type: T.STRUCT, schema: unpinConversationSchema },
+	{ id: 9, key: "screen_capture_detected", type: T.STRUCT, schema: screenCaptureDetectedSchema },
+	{ id: 10, key: "av_call_ended", type: T.STRUCT, schema: aVCallEndedSchema },
+	{ id: 11, key: "av_call_missed", type: T.STRUCT, schema: aVCallMissedSchema },
+	{ id: 12, key: "draft_message", type: T.STRUCT, schema: draftMessageSchema },
+	{ id: 13, key: "accept_message_request", type: T.STRUCT, schema: acceptMessageRequestSchema },
+	{ id: 14, key: "nickname_message", type: T.STRUCT, schema: nicknameMessageSchema },
+	{ id: 15, key: "set_verified_status", type: T.STRUCT, schema: setVerifiedStatusSchema },
+	{ id: 16, key: "av_call_started", type: T.STRUCT, schema: aVCallStartedSchema },
 );
 
 messageEntryHolderSchema.push(
-  { id: 1, key: "contents", type: T.STRUCT, schema: messageEntryContentsSchema },
+	{ id: 1, key: "contents", type: T.STRUCT, schema: messageEntryContentsSchema },
 );
 
 messageEventSchema.push(
-  { id: 1, key: "sequence_id", type: T.STRING },
-  { id: 2, key: "message_id", type: T.STRING },
-  { id: 3, key: "sender_id", type: T.STRING },
-  { id: 4, key: "conversation_id", type: T.STRING },
-  { id: 5, key: "conversation_token", type: T.STRING },
-  { id: 6, key: "created_at_msec", type: T.STRING },
-  { id: 7, key: "detail", type: T.STRUCT, schema: messageEventDetailSchema },
-  { id: 8, key: "relay_source", type: T.I32 },
-  { id: 9, key: "message_event_signature", type: T.STRUCT, schema: messageEventSignatureSchema },
-  { id: 10, key: "previous_sequence_id", type: T.STRING },
-  { id: 11, key: "is_trusted", type: T.BOOL },
+	{ id: 1, key: "sequence_id", type: T.STRING },
+	{ id: 2, key: "message_id", type: T.STRING },
+	{ id: 3, key: "sender_id", type: T.STRING },
+	{ id: 4, key: "conversation_id", type: T.STRING },
+	{ id: 5, key: "conversation_token", type: T.STRING },
+	{ id: 6, key: "created_at_msec", type: T.STRING },
+	{ id: 7, key: "detail", type: T.STRUCT, schema: messageEventDetailSchema },
+	{ id: 8, key: "relay_source", type: T.I32 },
+	{ id: 9, key: "message_event_signature", type: T.STRUCT, schema: messageEventSignatureSchema },
+	{ id: 10, key: "previous_sequence_id", type: T.STRING },
+	{ id: 11, key: "is_trusted", type: T.BOOL },
 );
 
 messageEventDetailSchema.push(
-  { id: 1, key: "messageCreateEvent", type: T.STRUCT, schema: messageCreateEventSchema },
-  { id: 3, key: "conversationKeyChangeEvent", type: T.STRUCT, schema: conversationKeyChangeEventSchema },
-  { id: 4, key: "groupChangeEvent", type: T.STRUCT, schema: groupChangeEventSchema },
-  { id: 5, key: "messageFailureEvent", type: T.STRUCT, schema: messageFailureEventSchema },
-  { id: 6, key: "messageTypingEvent", type: T.STRUCT, schema: messageTypingEventSchema },
-  { id: 7, key: "messageDeleteEvent", type: T.STRUCT, schema: messageDeleteEventSchema },
-  { id: 8, key: "conversationDeleteEvent", type: T.STRUCT, schema: conversationDeleteEventSchema },
-  { id: 9, key: "conversationMetadataChangeEvent", type: T.STRUCT, schema: conversationMetadataChangeEventSchema },
-  { id: 10, key: "grokSearchResponseEvent", type: T.STRUCT, schema: grokSearchResponseEventSchema },
-  { id: 11, key: "requestForEncryptedResendEvent", type: T.STRUCT, schema: requestForEncryptedResendEventSchema },
-  { id: 12, key: "markConversationReadEvent", type: T.STRUCT, schema: markConversationReadEventSchema },
-  { id: 13, key: "markConversationUnreadEvent", type: T.STRUCT, schema: markConversationUnreadEventSchema },
-  { id: 14, key: "memberAccountDeleteEvent", type: T.STRUCT, schema: memberAccountDeleteEventSchema },
+	{ id: 1, key: "messageCreateEvent", type: T.STRUCT, schema: messageCreateEventSchema },
+	{ id: 3, key: "conversationKeyChangeEvent", type: T.STRUCT, schema: conversationKeyChangeEventSchema },
+	{ id: 4, key: "groupChangeEvent", type: T.STRUCT, schema: groupChangeEventSchema },
+	{ id: 5, key: "messageFailureEvent", type: T.STRUCT, schema: messageFailureEventSchema },
+	{ id: 6, key: "messageTypingEvent", type: T.STRUCT, schema: messageTypingEventSchema },
+	{ id: 7, key: "messageDeleteEvent", type: T.STRUCT, schema: messageDeleteEventSchema },
+	{ id: 8, key: "conversationDeleteEvent", type: T.STRUCT, schema: conversationDeleteEventSchema },
+	{ id: 9, key: "conversationMetadataChangeEvent", type: T.STRUCT, schema: conversationMetadataChangeEventSchema },
+	{ id: 10, key: "grokSearchResponseEvent", type: T.STRUCT, schema: grokSearchResponseEventSchema },
+	{ id: 11, key: "requestForEncryptedResendEvent", type: T.STRUCT, schema: requestForEncryptedResendEventSchema },
+	{ id: 12, key: "markConversationReadEvent", type: T.STRUCT, schema: markConversationReadEventSchema },
+	{ id: 13, key: "markConversationUnreadEvent", type: T.STRUCT, schema: markConversationUnreadEventSchema },
+	{ id: 14, key: "memberAccountDeleteEvent", type: T.STRUCT, schema: memberAccountDeleteEventSchema },
 );
 
 messageEventRelaySourceSchema.push(
 );
 
 messageEventSignatureSchema.push(
-  { id: 1, key: "signature", type: T.STRING },
-  { id: 2, key: "public_key_version", type: T.STRING },
-  { id: 3, key: "signature_version", type: T.STRING },
-  { id: 4, key: "signing_public_key", type: T.STRING },
+	{ id: 1, key: "signature", type: T.STRING },
+	{ id: 2, key: "public_key_version", type: T.STRING },
+	{ id: 3, key: "signature_version", type: T.STRING },
+	{ id: 4, key: "signing_public_key", type: T.STRING },
 );
 
 messageFailureEventSchema.push(
-  { id: 1, key: "failure_type", type: T.I32 },
+	{ id: 1, key: "failure_type", type: T.I32 },
 );
 
 messageInstructionSchema.push(
-  { id: 1, key: "pullMessagesInstruction", type: T.STRUCT, schema: pullMessagesInstructionSchema },
-  { id: 2, key: "keepAliveInstruction", type: T.STRUCT, schema: keepAliveInstructionSchema },
-  { id: 3, key: "pullMessagesFinishedInstruction", type: T.STRUCT, schema: pullMessagesFinishedInstructionSchema },
-  { id: 4, key: "pinReminderInstruction", type: T.STRUCT, schema: pinReminderInstructionSchema },
-  { id: 5, key: "switchToHybridPullInstruction", type: T.STRUCT, schema: switchToHybridPullInstructionSchema },
-  { id: 6, key: "displayTemporaryPasscodeInstruction", type: T.STRUCT, schema: displayTemporaryPasscodeInstructionSchema },
+	{ id: 1, key: "pullMessagesInstruction", type: T.STRUCT, schema: pullMessagesInstructionSchema },
+	{ id: 2, key: "keepAliveInstruction", type: T.STRUCT, schema: keepAliveInstructionSchema },
+	{ id: 3, key: "pullMessagesFinishedInstruction", type: T.STRUCT, schema: pullMessagesFinishedInstructionSchema },
+	{ id: 4, key: "pinReminderInstruction", type: T.STRUCT, schema: pinReminderInstructionSchema },
+	{ id: 5, key: "switchToHybridPullInstruction", type: T.STRUCT, schema: switchToHybridPullInstructionSchema },
+	{ id: 6, key: "displayTemporaryPasscodeInstruction", type: T.STRUCT, schema: displayTemporaryPasscodeInstructionSchema },
 );
 
 messageReactionAddSchema.push(
-  { id: 1, key: "message_sequence_id", type: T.STRING },
-  { id: 2, key: "emoji", type: T.STRING },
+	{ id: 1, key: "message_sequence_id", type: T.STRING },
+	{ id: 2, key: "emoji", type: T.STRING },
 );
 
 messageReactionRemoveSchema.push(
-  { id: 1, key: "message_sequence_id", type: T.STRING },
-  { id: 2, key: "emoji", type: T.STRING },
+	{ id: 1, key: "message_sequence_id", type: T.STRING },
+	{ id: 2, key: "emoji", type: T.STRING },
 );
 
 messageTypingEventSchema.push(
-  { id: 1, key: "conversation_id", type: T.STRING },
+	{ id: 1, key: "conversation_id", type: T.STRING },
 );
 
 moneyAttachmentSchema.push(
-  { id: 1, key: "fallbackText", type: T.STRING },
-  { id: 2, key: "payload", type: T.STRING },
+	{ id: 1, key: "fallbackText", type: T.STRING },
+	{ id: 2, key: "payload", type: T.STRING },
 );
 
 muteConversationSchema.push(
-  { id: 1, key: "muted_conversation_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "muted_conversation_ids", type: T.LIST, elemType: T.STRING },
 );
 
 nicknameMessageSchema.push(
-  { id: 1, key: "user_id", type: T.I64 },
-  { id: 2, key: "nickname_text", type: T.STRING },
+	{ id: 1, key: "user_id", type: T.I64 },
+	{ id: 2, key: "nickname_text", type: T.STRING },
 );
 
 parentNodeSchema.push(
-  { id: 1, key: "subtree_encryption_public_key", type: T.STRING },
-  { id: 2, key: "parent_hash", type: T.STRING },
+	{ id: 1, key: "subtree_encryption_public_key", type: T.STRING },
+	{ id: 2, key: "parent_hash", type: T.STRING },
 );
 
 phoneNumberRichTextContentSchema.push(
 );
 
 pinConversationSchema.push(
-  { id: 1, key: "conversation_id", type: T.STRING },
+	{ id: 1, key: "conversation_id", type: T.STRING },
 );
 
 pinReminderInstructionSchema.push(
-  { id: 1, key: "should_register", type: T.BOOL },
-  { id: 2, key: "should_generate", type: T.BOOL },
+	{ id: 1, key: "should_register", type: T.BOOL },
+	{ id: 2, key: "should_generate", type: T.BOOL },
 );
 
 postAttachmentSchema.push(
-  { id: 1, key: "rest_id", type: T.STRING },
-  { id: 2, key: "post_url", type: T.STRING },
-  { id: 3, key: "attachment_id", type: T.STRING },
+	{ id: 1, key: "rest_id", type: T.STRING },
+	{ id: 2, key: "post_url", type: T.STRING },
+	{ id: 3, key: "attachment_id", type: T.STRING },
 );
 
 pullMessagePageDetailsSchema.push(
-  { id: 3, key: "min_sequence_id", type: T.STRING },
-  { id: 4, key: "max_sequence_id", type: T.STRING },
-  { id: 7, key: "is_batched_pull", type: T.BOOL },
+	{ id: 3, key: "min_sequence_id", type: T.STRING },
+	{ id: 4, key: "max_sequence_id", type: T.STRING },
+	{ id: 7, key: "is_batched_pull", type: T.BOOL },
 );
 
 pullMessagesFinishedInstructionSchema.push(
-  { id: 1, key: "finished_pull", type: T.BOOL },
-  { id: 2, key: "sequence_continue", type: T.STRING },
-  { id: 3, key: "pull_message_page_details", type: T.STRUCT, schema: pullMessagePageDetailsSchema },
+	{ id: 1, key: "finished_pull", type: T.BOOL },
+	{ id: 2, key: "sequence_continue", type: T.STRING },
+	{ id: 3, key: "pull_message_page_details", type: T.STRUCT, schema: pullMessagePageDetailsSchema },
 );
 
 pullMessagesInstructionSchema.push(
-  { id: 1, key: "sequence_start", type: T.STRING },
-  { id: 2, key: "sender_id", type: T.STRING },
-  { id: 6, key: "is_batched_pull", type: T.BOOL },
+	{ id: 1, key: "sequence_start", type: T.STRING },
+	{ id: 2, key: "sender_id", type: T.STRING },
+	{ id: 6, key: "is_batched_pull", type: T.BOOL },
 );
 
 quickReplySchema.push(
-  { id: 1, key: "request", type: T.STRUCT, schema: quickReplyRequestSchema },
-  { id: 2, key: "response", type: T.STRUCT, schema: quickReplyResponseSchema },
+	{ id: 1, key: "request", type: T.STRUCT, schema: quickReplyRequestSchema },
+	{ id: 2, key: "response", type: T.STRUCT, schema: quickReplyResponseSchema },
 );
 
 quickReplyOptionSchema.push(
-  { id: 1, key: "id", type: T.STRING },
-  { id: 2, key: "label", type: T.STRING },
-  { id: 3, key: "metadata", type: T.STRING },
-  { id: 4, key: "description", type: T.STRING },
+	{ id: 1, key: "id", type: T.STRING },
+	{ id: 2, key: "label", type: T.STRING },
+	{ id: 3, key: "metadata", type: T.STRING },
+	{ id: 4, key: "description", type: T.STRING },
 );
 
 quickReplyOptionsRequestSchema.push(
-  { id: 1, key: "id", type: T.STRING },
-  { id: 2, key: "options", type: T.LIST, elemType: T.STRUCT, elemSchema: quickReplyOptionSchema },
+	{ id: 1, key: "id", type: T.STRING },
+	{ id: 2, key: "options", type: T.LIST, elemType: T.STRUCT, elemSchema: quickReplyOptionSchema },
 );
 
 quickReplyOptionsResponseSchema.push(
-  { id: 1, key: "request_id", type: T.STRING },
-  { id: 2, key: "metadata", type: T.STRING },
-  { id: 3, key: "selected_option_id", type: T.STRING },
+	{ id: 1, key: "request_id", type: T.STRING },
+	{ id: 2, key: "metadata", type: T.STRING },
+	{ id: 3, key: "selected_option_id", type: T.STRING },
 );
 
 quickReplyRequestSchema.push(
-  { id: 1, key: "options", type: T.STRUCT, schema: quickReplyOptionsRequestSchema },
+	{ id: 1, key: "options", type: T.STRUCT, schema: quickReplyOptionsRequestSchema },
 );
 
 quickReplyResponseSchema.push(
-  { id: 1, key: "options", type: T.STRUCT, schema: quickReplyOptionsResponseSchema },
+	{ id: 1, key: "options", type: T.STRUCT, schema: quickReplyOptionsResponseSchema },
 );
 
 ratchetTreeSchema.push(
-  { id: 1, key: "leaves", type: T.LIST, elemType: T.STRUCT, elemSchema: ratchetTreeLeafSchema },
-  { id: 2, key: "parents", type: T.LIST, elemType: T.STRUCT, elemSchema: ratchetTreeParentSchema },
+	{ id: 1, key: "leaves", type: T.LIST, elemType: T.STRUCT, elemSchema: ratchetTreeLeafSchema },
+	{ id: 2, key: "parents", type: T.LIST, elemType: T.STRUCT, elemSchema: ratchetTreeParentSchema },
 );
 
 ratchetTreeLeafSchema.push(
-  { id: 1, key: "empty", type: T.STRUCT, schema: emptyNodeSchema },
-  { id: 2, key: "leaf", type: T.STRUCT, schema: leafNodeSchema },
+	{ id: 1, key: "empty", type: T.STRUCT, schema: emptyNodeSchema },
+	{ id: 2, key: "leaf", type: T.STRUCT, schema: leafNodeSchema },
 );
 
 ratchetTreeParentSchema.push(
-  { id: 1, key: "empty", type: T.STRUCT, schema: emptyNodeSchema },
-  { id: 2, key: "parent", type: T.STRUCT, schema: parentNodeSchema },
+	{ id: 1, key: "empty", type: T.STRUCT, schema: emptyNodeSchema },
+	{ id: 2, key: "parent", type: T.STRUCT, schema: parentNodeSchema },
 );
 
 replyingToPreviewSchema.push(
-  { id: 1, key: "sender_id", type: T.I64 },
-  { id: 2, key: "message_text", type: T.STRING },
-  { id: 3, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
-  { id: 4, key: "attachments", type: T.LIST, elemType: T.STRUCT, elemSchema: messageAttachmentSchema },
-  { id: 5, key: "sender_display_name", type: T.STRING },
-  { id: 6, key: "replying_to_message_sequence_id", type: T.STRING },
-  { id: 7, key: "replying_to_message_id", type: T.STRING },
+	{ id: 1, key: "sender_id", type: T.I64 },
+	{ id: 2, key: "message_text", type: T.STRING },
+	{ id: 3, key: "entities", type: T.LIST, elemType: T.STRUCT, elemSchema: richTextEntitySchema },
+	{ id: 4, key: "attachments", type: T.LIST, elemType: T.STRUCT, elemSchema: messageAttachmentSchema },
+	{ id: 5, key: "sender_display_name", type: T.STRING },
+	{ id: 6, key: "replying_to_message_sequence_id", type: T.STRING },
+	{ id: 7, key: "replying_to_message_id", type: T.STRING },
 );
 
 requestForEncryptedResendEventSchema.push(
-  { id: 1, key: "min_sequence_id", type: T.STRING },
-  { id: 2, key: "max_sequence_id", type: T.STRING },
+	{ id: 1, key: "min_sequence_id", type: T.STRING },
+	{ id: 2, key: "max_sequence_id", type: T.STRING },
 );
 
 richTextContentSchema.push(
-  { id: 1, key: "hashtag", type: T.STRUCT, schema: hashtagRichTextContentSchema },
-  { id: 2, key: "cashtag", type: T.STRUCT, schema: cashtagRichTextContentSchema },
-  { id: 3, key: "mention", type: T.STRUCT, schema: mentionRichTextContentSchema },
-  { id: 4, key: "url", type: T.STRUCT, schema: urlRichTextContentSchema },
-  { id: 5, key: "email", type: T.STRUCT, schema: emailRichTextContentSchema },
-  { id: 7, key: "phoneNumber", type: T.STRUCT, schema: phoneNumberRichTextContentSchema },
+	{ id: 1, key: "hashtag", type: T.STRUCT, schema: hashtagRichTextContentSchema },
+	{ id: 2, key: "cashtag", type: T.STRUCT, schema: cashtagRichTextContentSchema },
+	{ id: 3, key: "mention", type: T.STRUCT, schema: mentionRichTextContentSchema },
+	{ id: 4, key: "url", type: T.STRUCT, schema: urlRichTextContentSchema },
+	{ id: 5, key: "email", type: T.STRUCT, schema: emailRichTextContentSchema },
+	{ id: 7, key: "phoneNumber", type: T.STRUCT, schema: phoneNumberRichTextContentSchema },
 );
 
 richTextEntitySchema.push(
-  { id: 1, key: "start_index", type: T.I32 },
-  { id: 2, key: "end_index", type: T.I32 },
-  { id: 3, key: "content", type: T.STRUCT, schema: richTextContentSchema },
+	{ id: 1, key: "start_index", type: T.I32 },
+	{ id: 2, key: "end_index", type: T.I32 },
+	{ id: 3, key: "content", type: T.STRUCT, schema: richTextContentSchema },
 );
 
 screenCaptureDetectedSchema.push(
-  { id: 1, key: "type", type: T.I32 },
+	{ id: 1, key: "type", type: T.I32 },
 );
 
 setVerifiedStatusSchema.push(
-  { id: 1, key: "user_id", type: T.I64 },
-  { id: 2, key: "verified_status", type: T.BOOL },
+	{ id: 1, key: "user_id", type: T.I64 },
+	{ id: 2, key: "verified_status", type: T.BOOL },
 );
 
 storedGroupStateSchema.push(
-  { id: 1, key: "keypairs", type: T.LIST, elemType: T.STRUCT, elemSchema: maybeKeypairSchema },
-  { id: 2, key: "ratchet_tree", type: T.STRUCT, schema: ratchetTreeSchema },
+	{ id: 1, key: "keypairs", type: T.LIST, elemType: T.STRUCT, elemSchema: maybeKeypairSchema },
+	{ id: 2, key: "ratchet_tree", type: T.STRUCT, schema: ratchetTreeSchema },
 );
 
 storedKeypairSchema.push(
-  { id: 1, key: "public_key", type: T.STRING },
-  { id: 2, key: "private_key", type: T.STRING },
+	{ id: 1, key: "public_key", type: T.STRING },
+	{ id: 2, key: "private_key", type: T.STRING },
 );
 
 switchToHybridPullInstructionSchema.push(
-  { id: 1, key: "requesting_user_agent", type: T.STRING },
+	{ id: 1, key: "requesting_user_agent", type: T.STRING },
 );
 
 unifiedCardAttachmentSchema.push(
-  { id: 1, key: "url", type: T.STRING },
-  { id: 2, key: "attachment_id", type: T.STRING },
+	{ id: 1, key: "url", type: T.STRING },
+	{ id: 2, key: "attachment_id", type: T.STRING },
 );
 
 unmuteConversationSchema.push(
-  { id: 1, key: "unmuted_conversation_ids", type: T.LIST, elemType: T.STRING },
+	{ id: 1, key: "unmuted_conversation_ids", type: T.LIST, elemType: T.STRING },
 );
 
 unpinConversationSchema.push(
-  { id: 1, key: "conversation_id", type: T.STRING },
+	{ id: 1, key: "conversation_id", type: T.STRING },
 );
 
 updatePathNodeSchema.push(
-  { id: 1, key: "encrypted_secrets", type: T.LIST, elemType: T.STRING },
-  { id: 2, key: "encrypted_private_key", type: T.STRING },
+	{ id: 1, key: "encrypted_secrets", type: T.LIST, elemType: T.STRING },
+	{ id: 2, key: "encrypted_private_key", type: T.STRING },
 );
 
 urlAttachmentSchema.push(
-  { id: 1, key: "url", type: T.STRING },
-  { id: 2, key: "banner_image_media_hash_key", type: T.STRUCT, schema: urlAttachmentImageSchema },
-  { id: 3, key: "favicon_image_media_hash_key", type: T.STRUCT, schema: urlAttachmentImageSchema },
-  { id: 4, key: "display_title", type: T.STRING },
-  { id: 5, key: "attachment_id", type: T.STRING },
+	{ id: 1, key: "url", type: T.STRING },
+	{ id: 2, key: "banner_image_media_hash_key", type: T.STRUCT, schema: urlAttachmentImageSchema },
+	{ id: 3, key: "favicon_image_media_hash_key", type: T.STRUCT, schema: urlAttachmentImageSchema },
+	{ id: 4, key: "display_title", type: T.STRING },
+	{ id: 5, key: "attachment_id", type: T.STRING },
 );
 
 urlAttachmentImageSchema.push(
-  { id: 1, key: "media_hash_key", type: T.STRING },
-  { id: 2, key: "filesize_bytes", type: T.I64 },
-  { id: 3, key: "filename", type: T.STRING },
-  { id: 4, key: "dimensions", type: T.STRUCT, schema: mediaDimensionsSchema },
+	{ id: 1, key: "media_hash_key", type: T.STRING },
+	{ id: 2, key: "filesize_bytes", type: T.I64 },
+	{ id: 3, key: "filename", type: T.STRING },
+	{ id: 4, key: "dimensions", type: T.STRUCT, schema: mediaDimensionsSchema },
 );
 
 urlRichTextContentSchema.push(

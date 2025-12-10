@@ -32,11 +32,12 @@ import (
 )
 
 type TwitterLogin struct {
-	User       *bridgev2.User
-	Cookies    string
-	SecretKey  string
-	SigningKey string
-	tc         *TwitterConnector
+	User              *bridgev2.User
+	Cookies           string
+	SecretKey         string
+	SigningKey        string
+	SigningKeyVersion string
+	tc                *TwitterConnector
 
 	client   *twittermeow.Client
 	settings *response.AccountSettingsResponse
@@ -115,7 +116,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
 		StepID:       LoginStepSecretKey,
-		Instructions: "Enter the secret key (for decrypting conversation keys) and signing key (for signing messages).",
+		Instructions: "Enter the secret key (for decrypting conversation keys), signing key (for signing messages), and the signing key version string.",
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
@@ -150,6 +151,12 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 						return input, nil
 					},
 				},
+				{
+					Type:        bridgev2.LoginInputFieldTypeToken,
+					ID:          "signing_key_version",
+					Name:        "Signing key version",
+					Description: "The signing key version identifier (string).",
+				},
 			},
 		},
 	}, nil
@@ -177,6 +184,12 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	}
 	t.SigningKey = signingKey
 
+	signingKeyVersion, ok := input["signing_key_version"]
+	if ok {
+		signingKeyVersion = strings.TrimSpace(signingKeyVersion)
+	}
+	t.SigningKeyVersion = signingKeyVersion
+
 	if t.client == nil {
 		if t.Cookies == "" {
 			return nil, fmt.Errorf("cookies must be submitted before secret key")
@@ -191,9 +204,10 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	}
 
 	meta := &UserLoginMetadata{
-		Cookies:    t.Cookies,
-		SecretKey:  t.SecretKey,
-		SigningKey: t.SigningKey,
+		Cookies:           t.Cookies,
+		SecretKey:         t.SecretKey,
+		SigningKey:        t.SigningKey,
+		SigningKeyVersion: t.SigningKeyVersion,
 	}
 
 	remoteProfile := &status.RemoteProfile{
