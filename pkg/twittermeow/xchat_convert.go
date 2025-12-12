@@ -5,16 +5,19 @@ import (
 	"strconv"
 
 	"go.mau.fi/util/ptr"
+	"go.mau.fi/util/variationselector"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-// convertXChatMessageToTwitterMessage converts an XChat MessageEvent with decrypted contents to a types.Message
-func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *payload.MessageContents) *types.Message {
+// convertXChatMessageToTwitterMessage converts an XChat MessageEvent with decrypted contents to a types.Message.
+// keyVersion is the conversation key version attached to the message, if any.
+func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *payload.MessageContents, keyVersion string) *types.Message {
+	seqID := ptr.Val(evt.SequenceId)
 	msgData := types.MessageData{
-		ID:       ptr.Val(evt.MessageId),
+		ID:       seqID,
 		Time:     ptr.Val(evt.CreatedAtMsec),
 		SenderID: ptr.Val(evt.SenderId),
 		Text:     ptr.Val(contents.MessageText),
@@ -36,12 +39,20 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	}
 
 	return &types.Message{
-		ID:             ptr.Val(evt.SequenceId),
-		Time:           ptr.Val(evt.CreatedAtMsec),
-		RequestID:      ptr.Val(evt.MessageId),
-		ConversationID: ptr.Val(evt.ConversationId),
-		MessageData:    msgData,
+		ID:                     seqID,
+		Time:                   ptr.Val(evt.CreatedAtMsec),
+		SequenceID:             seqID,
+		RequestID:              ptr.Val(evt.MessageId),
+		ConversationID:         ptr.Val(evt.ConversationId),
+		ConversationKeyVersion: keyVersion,
+		MessageData:            msgData,
 	}
+}
+
+// ConvertXChatMessageContentsToMessage converts an XChat MessageEvent with decrypted contents to a types.Message.
+// keyVersion is the conversation key version attached to the message, if any.
+func ConvertXChatMessageContentsToMessage(evt *payload.MessageEvent, contents *payload.MessageContents, keyVersion string) *types.Message {
+	return convertXChatMessageToTwitterMessage(evt, contents, keyVersion)
 }
 
 // convertXChatEntities converts XChat RichTextEntity to types.Entities
@@ -182,26 +193,42 @@ func convertXChatReplyPreview(preview *payload.ReplyingToPreview) types.ReplyDat
 
 // convertXChatReactionAdd converts XChat MessageReactionAdd to types.MessageReactionCreate
 func convertXChatReactionAdd(evt *payload.MessageEvent, reaction *payload.MessageReactionAdd) *types.MessageReactionCreate {
+	emoji := variationselector.FullyQualify(ptr.Val(reaction.Emoji))
+	targetMsgID := ptr.Val(reaction.MessageSequenceId)
+	if targetMsgID == "" {
+		targetMsgID = ptr.Val(evt.MessageId)
+	}
+	if targetMsgID == "" {
+		targetMsgID = ptr.Val(evt.SequenceId)
+	}
 	return (*types.MessageReactionCreate)(&types.MessageReaction{
 		ID:             ptr.Val(evt.SequenceId),
 		Time:           ptr.Val(evt.CreatedAtMsec),
 		ConversationID: ptr.Val(evt.ConversationId),
-		MessageID:      ptr.Val(reaction.MessageSequenceId),
-		EmojiReaction:  ptr.Val(reaction.Emoji),
-		ReactionKey:    ptr.Val(reaction.Emoji),
+		MessageID:      targetMsgID,
+		EmojiReaction:  emoji,
+		ReactionKey:    emoji,
 		SenderID:       ptr.Val(evt.SenderId),
 	})
 }
 
 // convertXChatReactionRemove converts XChat MessageReactionRemove to types.MessageReactionDelete
 func convertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.MessageReactionRemove) *types.MessageReactionDelete {
+	emoji := variationselector.FullyQualify(ptr.Val(reaction.Emoji))
+	targetMsgID := ptr.Val(reaction.MessageSequenceId)
+	if targetMsgID == "" {
+		targetMsgID = ptr.Val(evt.MessageId)
+	}
+	if targetMsgID == "" {
+		targetMsgID = ptr.Val(evt.SequenceId)
+	}
 	return (*types.MessageReactionDelete)(&types.MessageReaction{
 		ID:             ptr.Val(evt.SequenceId),
 		Time:           ptr.Val(evt.CreatedAtMsec),
 		ConversationID: ptr.Val(evt.ConversationId),
-		MessageID:      ptr.Val(reaction.MessageSequenceId),
-		EmojiReaction:  ptr.Val(reaction.Emoji),
-		ReactionKey:    ptr.Val(reaction.Emoji),
+		MessageID:      targetMsgID,
+		EmojiReaction:  emoji,
+		ReactionKey:    emoji,
 		SenderID:       ptr.Val(evt.SenderId),
 	})
 }
@@ -306,6 +333,7 @@ func convertXChatGroupAvatarChange(evt *payload.MessageEvent, avatar *payload.Gr
 		Time:                         ptr.Val(evt.CreatedAtMsec),
 		ConversationID:               ptr.Val(evt.ConversationId),
 		ConversationAvatarImageHttps: ptr.Val(avatar.CustomAvatarUrl),
+		ConversationKeyVersion:       ptr.Val(avatar.ConversationKeyVersion),
 		ByUserID:                     ptr.Val(evt.SenderId),
 	}
 }

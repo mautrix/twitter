@@ -49,6 +49,7 @@ type Client struct {
 	xchatEventHandler  XChatEventHandler
 	onCursorChanged    func(ctx context.Context)
 
+	currentUserID  string
 	jot            *JotClient
 	polling        *PollingClient
 	stream         *StreamClient
@@ -206,8 +207,16 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.AccountSetting
 }
 
 func (c *Client) GetCurrentUserID() string {
+	if c.currentUserID != "" {
+		return c.currentUserID
+	}
 	twid := c.cookies.Get(cookies.XTwid)
 	return strings.Replace(strings.Replace(twid, "u%3D", "", -1), "u=", "", -1)
+}
+
+// SetCurrentUserID explicitly sets the user ID, bypassing cookie lookup.
+func (c *Client) SetCurrentUserID(userID string) {
+	c.currentUserID = strings.TrimSpace(userID)
 }
 
 func (c *Client) IsLoggedIn() bool {
@@ -447,4 +456,19 @@ func (c *Client) SetActiveConversation(conversationID string) {
 
 func (c *Client) PollConversation(conversationID string) {
 	c.polling.pollConversation(conversationID)
+}
+
+// FetchRaw performs an authenticated request to the given URL and returns the response and body.
+// Useful for downloading blobs that still require the standard auth headers (cookies, bearer, etc).
+func (c *Client) FetchRaw(ctx context.Context, url string) (*http.Response, []byte, error) {
+	return c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodGet,
+		Origin:         endpoints.BASE_URL,
+		WithClientUUID: false,
+		Headers: map[string]string{
+			"accept": "*/*",
+		},
+		ContentType: types.ContentTypeNone,
+	})
 }

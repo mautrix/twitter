@@ -60,6 +60,8 @@ type TwitterClient struct {
 	matrixParser *format.HTMLParser
 
 	reconnectAttempted atomic.Bool
+
+	ensurePortalLocks sync.Map
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -72,8 +74,14 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		userCache:        make(map[string]*types.User),
 		participantCache: make(map[string][]types.Participant),
 	}
-	client.SetEventHandler(tc.HandleTwitterEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
+	// Ensure current user ID is available even if cookies omit twid
+	meta := ensureUserLoginMetadata(login)
+	if meta.UserID != "" {
+		client.SetCurrentUserID(meta.UserID)
+	} else {
+		client.SetCurrentUserID(string(login.ID))
+	}
 	tc.matrixParser = &format.HTMLParser{
 		TabsToSpaces:   4,
 		Newline:        "\n",
@@ -99,6 +107,11 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 	c := cookies.NewCookiesFromString(meta.Cookies)
 	log := login.Log.With().Str("component", "twitter_client").Logger()
 	client := twittermeow.NewClient(c, log)
+	if meta.UserID != "" {
+		client.SetCurrentUserID(meta.UserID)
+	} else {
+		client.SetCurrentUserID(string(login.ID))
+	}
 	client.SetKeyStore(newUserLoginKeyStore(login))
 	login.Client = NewTwitterClient(login, tc, client)
 	return nil
@@ -284,24 +297,46 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	}
 
 	// Collect users from all pages
+	var missingUserIDs []string
 	for _, pg := range pages {
 		for _, item := range pg.Items {
 			for _, p := range item.ConversationDetail.ParticipantsResults {
 				if p.Result != nil {
 					users[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+				} else if p.RestID != "" {
+					missingUserIDs = append(missingUserIDs, p.RestID)
 				}
 			}
 			for _, p := range item.ConversationDetail.GroupMembersResults {
 				if p.Result != nil {
 					users[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+				} else if p.RestID != "" {
+					missingUserIDs = append(missingUserIDs, p.RestID)
 				}
 			}
 			for _, p := range item.ConversationDetail.GroupAdminsResults {
 				if p.Result != nil {
 					users[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+				} else if p.RestID != "" {
+					missingUserIDs = append(missingUserIDs, p.RestID)
 				}
 			}
 		}
+	}
+
+	if err := tc.ensureUsersInCacheByID(ctx, missingUserIDs); err != nil {
+		log.Err(err).Msg("Failed to fetch missing XChat users")
+	} else {
+		tc.userCacheLock.RLock()
+		for _, id := range missingUserIDs {
+			if users[id] != nil {
+				continue
+			}
+			if u := tc.userCache[id]; u != nil {
+				users[id] = u
+			}
+		}
+		tc.userCacheLock.RUnlock()
 	}
 
 	tc.userCacheLock.Lock()

@@ -482,6 +482,69 @@ type SendEncryptedMessageOpts struct {
 	Entities       []*payload.RichTextEntity
 }
 
+// SendEncryptedReaction sends a reaction add/remove via the XChat protocol.
+// targetMessageSequenceID must be the XChat message sequence ID of the message being reacted to.
+func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove bool) (*response.SendMessageMutationResponse, error) {
+	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation token: %w", err)
+	}
+
+	messageID := uuid.NewString()
+
+	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
+		SetMessageID(messageID).
+		SetConversationID(conversationID)
+
+	if remove {
+		builder.SetReactionRemove(targetMessageSequenceID, emoji)
+	} else {
+		builder.SetReactionAdd(targetMessageSequenceID, emoji)
+	}
+
+	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build reaction: %w", err)
+	}
+
+	var sigPtr *string
+	if encodedSig != "" {
+		sigPtr = &encodedSig
+	}
+
+	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
+		ConversationID:               conversationID,
+		MessageID:                    messageID,
+		ConversationToken:            token,
+		EncodedMessageCreateEvent:    encodedMCE,
+		EncodedMessageEventSignature: sigPtr,
+	})
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("SendMessageMutation reaction payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp response.SendMessageMutationResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
 // SendEncryptedMessage sends an encrypted message via the XChat protocol.
 func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMessageOpts) (*response.SendMessageMutationResponse, error) {
 	// Get the server-provided conversation token for this conversation
@@ -592,28 +655,29 @@ func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.Get
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
-	queryString, err := variables.EncodeJSONQuery()
+	formBody, err := variables.Encode()
 	if err != nil {
 		return nil, err
 	}
 
 	c.Logger.Debug().
+		Str("form_body", string(formBody)).
 		Str("url", endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL).
-		Str("query", queryString).
 		Msg("GetInboxPageRequest payload")
 
-	url := endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL + "?" + queryString
-
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodGet,
+		URL:            endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL,
+		Method:         http.MethodPost,
 		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
 	})
 	if err != nil {
 		c.Logger.Debug().
 			Str("response_body", string(respBody)).
 			Err(err).
-			Msg("GetInboxPageRequest failed")
+			Msg("GetInboxPageRequest request failed")
 		return nil, err
 	}
 
@@ -622,5 +686,110 @@ func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.Get
 		Msg("GetInboxPageRequest response")
 
 	var resp response.GetInboxPageRequestQueryResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+func (c *Client) GetConversationData(ctx context.Context, variables *payload.GetInboxPageConversationDataQueryVariables) (*response.GetInboxPageConversationDataResponse, error) {
+	formBody, err := variables.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("url", endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL).
+		Str("form_body", string(formBody)).
+		Msg("GetInboxPageConversationData payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
+	})
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg("GetInboxPageConversationData failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg("GetInboxPageConversationData response")
+
+	var resp response.GetInboxPageConversationDataResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+func (c *Client) GetUsersByIdsForXChat(ctx context.Context, variables *payload.GetUsersByIdsForXChatVariables) (*response.GetUsersByIdsForXChatResponse, error) {
+	formBody, err := variables.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("url", endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL).
+		Str("form_body", string(formBody)).
+		Msg("GetUsersByIdsForXChat payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
+	})
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg("GetUsersByIdsForXChat failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg("GetUsersByIdsForXChat response")
+
+	var resp response.GetUsersByIdsForXChatResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+func (c *Client) GetConversationPage(ctx context.Context, variables *payload.GetConversationPageQueryVariables) (*response.GetConversationPageQueryResponse, error) {
+	formBody, err := variables.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("url", endpoints.GET_CONVERSATION_PAGE_QUERY_URL).
+		Str("form_body", string(formBody)).
+		Msg("GetConversationPageQuery payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.GET_CONVERSATION_PAGE_QUERY_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
+	})
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg("GetConversationPageQuery failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg("GetConversationPageQuery response")
+
+	var resp response.GetConversationPageQueryResponse
 	return &resp, json.Unmarshal(respBody, &resp)
 }

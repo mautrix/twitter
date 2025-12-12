@@ -26,6 +26,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -212,7 +213,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		return tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent).Success
 	case *types.ConversationAvatarUpdate:
 		chatInfo := &bridgev2.ChatInfo{
-			Avatar: makeAvatar(tc.client, evt.ConversationAvatarImageHttps),
+			Avatar: tc.makeGroupAvatar(evt.ConversationID, evt.ConversationAvatarImageHttps, evt.ConversationKeyVersion),
 		}
 		success := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
@@ -368,6 +369,18 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 }
 
 func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey networkid.PortalKey, evtType bridgev2.RemoteEventType) *simplevent.Reaction {
+	senderID := data.SenderID
+	if senderID == "" {
+		senderID = tc.client.GetCurrentUserID()
+	}
+	reactionKey := data.ReactionKey
+	if reactionKey == "" {
+		reactionKey = data.EmojiReaction
+	}
+	emojiID := networkid.EmojiID(reactionKey)
+	if emojiID == "" {
+		emojiID = networkid.EmojiID(data.EmojiReaction)
+	}
 	return &simplevent.Reaction{
 		EventMeta: simplevent.EventMeta{
 			Type: evtType,
@@ -379,11 +392,11 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 					Str("emoji_reaction", data.EmojiReaction)
 			},
 			PortalKey:   portalKey,
-			Sender:      tc.MakeEventSender(data.SenderID),
+			Sender:      tc.MakeEventSender(senderID),
 			Timestamp:   methods.ParseSnowflake(data.ID),
 			StreamOrder: methods.ParseSnowflakeInt(data.ID),
 		},
-		EmojiID:       "",
+		EmojiID:       emojiID,
 		Emoji:         data.EmojiReaction,
 		TargetMessage: networkid.MessageID(data.MessageID),
 	}
@@ -487,30 +500,102 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 	case *types.Message:
 		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		requiredKeyVersion := evt.ConversationKeyVersion
+		msgID := evt.SequenceID
+		if msgID == "" {
+			msgID = evt.ID
+		}
+		streamOrder := methods.ParseInt64(msgID)
+		if streamOrder == 0 {
+			streamOrder = methods.ParseInt64(evt.Time)
+		}
+
+		if ctx == nil || ctx.Value(ensurePortalContextKey{}) == nil {
+			if _, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, requiredKeyVersion); err != nil {
+				log.Warn().
+					Err(err).
+					Str("conversation_id", evt.ConversationID).
+					Str("required_key_version", requiredKeyVersion).
+					Msg("Failed to ensure portal and key exist before handling XChat message")
+				return false
+			}
+		}
+
+		txnID := evt.RequestID
+		if txnID == "" {
+			txnID = msgID
+		}
+		clientMsgID := evt.RequestID
 
 		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventMessage,
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.
-						Str("message_id", evt.ID).
+						Str("message_id", msgID).
 						Str("sender", evt.MessageData.SenderID).
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    portalKey,
 				CreatePortal: false, // Portal should already exist from initial sync
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
-				StreamOrder:  methods.ParseInt64(evt.ID),
+				StreamOrder:  streamOrder,
 				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
 			},
-			ID:            networkid.MessageID(evt.ID),
-			TransactionID: networkid.TransactionID(evt.RequestID),
-			TargetMessage: networkid.MessageID(evt.ID),
+			ID:            networkid.MessageID(msgID),
+			TransactionID: networkid.TransactionID(txnID),
+			TargetMessage: networkid.MessageID(msgID),
 			Data:          &evt.MessageData,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
-				return tc.convertToMatrix(ctx, portal, intent, data), nil
+				converted := tc.convertToMatrix(ctx, portal, intent, data)
+				if converted == nil {
+					return nil, nil
+				}
+				for _, part := range converted.Parts {
+					if part == nil {
+						continue
+					}
+					meta, ok := part.DBMetadata.(*MessageMetadata)
+					if !ok || meta == nil {
+						meta = &MessageMetadata{}
+						part.DBMetadata = meta
+					}
+					if meta.XChatSequenceID == "" {
+						meta.XChatSequenceID = msgID
+					}
+					if meta.XChatCreatedAtMS == "" {
+						meta.XChatCreatedAtMS = evt.Time
+					}
+					if clientMsgID != "" && meta.XChatClientMsgID == "" {
+						meta.XChatClientMsgID = clientMsgID
+					}
+				}
+				return converted, nil
 			},
 			ConvertEditFunc: tc.convertEditToMatrix,
+			HandleExistingFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (bridgev2.UpsertResult, error) {
+				for _, part := range existing {
+					meta, ok := part.Metadata.(*MessageMetadata)
+					if !ok || meta == nil {
+						meta = &MessageMetadata{}
+						part.Metadata = meta
+					}
+					if meta.XChatSequenceID == "" {
+						meta.XChatSequenceID = msgID
+					}
+					if meta.XChatCreatedAtMS == "" {
+						meta.XChatCreatedAtMS = evt.Time
+					}
+					if clientMsgID != "" && meta.XChatClientMsgID == "" {
+						meta.XChatClientMsgID = clientMsgID
+					}
+					if data != nil && data.EditCount > meta.EditCount {
+						meta.EditCount = data.EditCount
+					}
+				}
+				// This is typically the remote echo for a pending outgoing message; don't bridge again.
+				return bridgev2.UpsertResult{SaveParts: true, ContinueMessageHandling: false}, nil
+			},
 		}).Success
 
 	case *types.MessageReactionCreate:
@@ -614,7 +699,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 
 	case *types.ConversationAvatarUpdate:
 		chatInfo := &bridgev2.ChatInfo{
-			Avatar: makeAvatar(tc.client, evt.ConversationAvatarImageHttps),
+			Avatar: tc.makeGroupAvatar(evt.ConversationID, evt.ConversationAvatarImageHttps, evt.ConversationKeyVersion),
 		}
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{

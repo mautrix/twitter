@@ -148,6 +148,42 @@ func (p *GenerateXChatTokenMutationPayload) Default() *GenerateXChatTokenMutatio
 	return p
 }
 
+type GetConversationPageQuerySettings struct {
+	InboxConversationEventLimit int `json:"inbox_conversation_event_limit"`
+	InboxConversationLimit      int `json:"inbox_conversation_limit"`
+	ConversationEventLimit      int `json:"conversation_event_limit"`
+	UserEventLimit              int `json:"user_event_limit"`
+}
+
+func DefaultGetConversationPageQuerySettings() *GetConversationPageQuerySettings {
+	return &GetConversationPageQuerySettings{
+		InboxConversationEventLimit: 5,
+		InboxConversationLimit:      20,
+		ConversationEventLimit:      200,
+		UserEventLimit:              500,
+	}
+}
+
+// GetConversationPageQueryVariables is the JSON body for the GetConversationPageQuery endpoint.
+type GetConversationPageQueryVariables struct {
+	ConversationID            string                            `json:"conversation_id"`
+	MinLocalSequenceID        string                            `json:"min_local_sequence_id,omitempty"`
+	MinConversationKeyVersion string                            `json:"min_conversation_key_version,omitempty"`
+	QuerySettings             *GetConversationPageQuerySettings `json:"query_settings,omitempty"`
+}
+
+func NewGetConversationPageQueryVariables(conversationID, minLocalSequenceID, minConversationKeyVersion string, settings *GetConversationPageQuerySettings) *GetConversationPageQueryVariables {
+	if settings == nil {
+		settings = DefaultGetConversationPageQuerySettings()
+	}
+	return &GetConversationPageQueryVariables{
+		ConversationID:            conversationID,
+		MinLocalSequenceID:        minLocalSequenceID,
+		MinConversationKeyVersion: minConversationKeyVersion,
+		QuerySettings:             settings,
+	}
+}
+
 // EncodeJSONQuery serializes the inbox page request variables to JSON and wraps
 // them in a query string suitable for ?variables=... on GraphQL GET requests.
 func (p *GetInboxPageRequestQueryVariables) EncodeJSONQuery() (string, error) {

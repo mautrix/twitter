@@ -47,6 +47,7 @@ type UserLoginMetadata struct {
 	SecretKey         string    `json:"secret_key,omitempty"`
 	SigningKey        string    `json:"signing_key,omitempty"`
 	SigningKeyVersion string    `json:"signing_key_version,omitempty"`
+	UserID            string    `json:"user_id,omitempty"`
 	PushKeys          *PushKeys `json:"push_keys,omitempty"`
 
 	Session            *twittermeow.CachedSession      `json:"session,omitempty"`
@@ -69,6 +70,29 @@ type ConversationKeyData struct {
 
 type MessageMetadata struct {
 	EditCount int `json:"edit_count,omitempty"`
+
+	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages
+	XChatSequenceID  string `json:"xchat_sequence_id,omitempty"`   // numeric sequence id from XChat events
+	XChatCreatedAtMS string `json:"xchat_created_at_ms,omitempty"` // message created_at_msec from XChat event
+}
+
+func (m *MessageMetadata) CopyFrom(other any) {
+	o, ok := other.(*MessageMetadata)
+	if !ok || o == nil || m == nil {
+		return
+	}
+	if o.EditCount > m.EditCount {
+		m.EditCount = o.EditCount
+	}
+	if m.XChatClientMsgID == "" {
+		m.XChatClientMsgID = o.XChatClientMsgID
+	}
+	if m.XChatSequenceID == "" {
+		m.XChatSequenceID = o.XChatSequenceID
+	}
+	if m.XChatCreatedAtMS == "" {
+		m.XChatCreatedAtMS = o.XChatCreatedAtMS
+	}
 }
 
 type PushKeys struct {

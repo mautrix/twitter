@@ -162,56 +162,92 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	txnID := networkid.TransactionID(messageID)
-	msg.AddPendingToIgnore(txnID)
+	dbMsg := &database.Message{
+		ID:        networkid.MessageID(messageID),
+		MXID:      msg.Event.ID,
+		Room:      msg.Portal.PortalKey,
+		SenderID:  UserLoginIDToUserID(tc.userLogin.ID),
+		Timestamp: time.Now(),
+		Metadata:  &MessageMetadata{XChatClientMsgID: messageID},
+	}
+	msg.AddPendingToSave(dbMsg, txnID, func(remote bridgev2.RemoteMessage, db *database.Message) (bool, error) {
+		// Store the real (numeric) XChat message ID when the remote echo arrives.
+		if remote != nil {
+			db.ID = remote.GetID()
+			if meta, ok := db.Metadata.(*MessageMetadata); ok && meta != nil {
+				meta.XChatSequenceID = string(remote.GetID())
+			}
+		}
+		return true, nil
+	})
 
 	if _, err := tc.client.SendEncryptedMessage(ctx, opts); err != nil {
 		return nil, err
 	}
 
 	return &bridgev2.MatrixMessageResponse{
-		DB: &database.Message{
-			ID:        networkid.MessageID(messageID),
-			MXID:      msg.Event.ID,
-			Room:      msg.Portal.PortalKey,
-			SenderID:  UserLoginIDToUserID(tc.userLogin.ID),
-			Timestamp: time.Now(),
-			Metadata:  &MessageMetadata{},
-		},
-		RemovePending: txnID,
+		DB:      dbMsg,
+		Pending: true,
 	}, nil
 }
 
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
+	var senderID string
+	if msg.TargetReaction != nil {
+		senderID = string(msg.TargetReaction.SenderID)
+	}
+	zerolog.Ctx(ctx).Info().
+		Str("conversation_id", string(msg.Portal.ID)).
+		Str("target_message_id", string(msg.TargetReaction.MessageID)).
+		Str("emoji", msg.TargetReaction.Emoji).
+		Str("sender_id", senderID).
+		Str("sender_mxid", msg.Event.Sender.String()).
+		Msg("Handling Matrix reaction removal")
 	return tc.doHandleMatrixReaction(ctx, true, string(msg.Portal.ID), string(msg.TargetReaction.MessageID), msg.TargetReaction.Emoji)
 }
 
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
+	emoji := variationselector.FullyQualify(msg.Content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
 		SenderID:     UserLoginIDToUserID(tc.userLogin.ID),
-		Emoji:        variationselector.FullyQualify(msg.Content.RelatesTo.Key),
+		EmojiID:      networkid.EmojiID(emoji),
+		Emoji:        emoji,
 		MaxReactions: 1,
 	}, nil
 }
 
 func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
-	return nil, tc.doHandleMatrixReaction(ctx, false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji)
+	zerolog.Ctx(ctx).Info().
+		Str("conversation_id", string(msg.Portal.ID)).
+		Str("target_message_id", string(msg.TargetMessage.ID)).
+		Str("emoji", msg.PreHandleResp.Emoji).
+		Str("sender_id", string(msg.PreHandleResp.SenderID)).
+		Str("sender_mxid", msg.Event.Sender.String()).
+		Msg("Handling Matrix reaction")
+	if err := tc.doHandleMatrixReaction(ctx, false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji); err != nil {
+		return nil, err
+	}
+
+	return &database.Reaction{
+		Room:          msg.Portal.PortalKey,
+		MessageID:     msg.TargetMessage.ID,
+		MessagePartID: msg.TargetMessage.PartID,
+		SenderID:      msg.PreHandleResp.SenderID,
+		SenderMXID:    msg.Event.Sender,
+		EmojiID:       msg.PreHandleResp.EmojiID,
+		MXID:          msg.Event.ID,
+		Timestamp:     time.Now(),
+		Emoji:         msg.PreHandleResp.Emoji,
+	}, nil
 }
 
 func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, conversationID, messageID, emoji string) error {
-	reactionPayload := &payload.ReactionActionPayload{
-		ConversationID: conversationID,
-		MessageID:      messageID,
-		ReactionTypes:  []string{"Emoji"},
-		EmojiReactions: []string{emoji},
-	}
-	reactionResponse, err := tc.client.React(ctx, reactionPayload, remove)
+	// XChat reactions are sent as encrypted MessageCreateEvents (reaction_add/reaction_remove).
+	resp, err := tc.client.SendEncryptedReaction(ctx, conversationID, messageID, emoji, remove)
 	if err != nil {
 		return err
 	}
-	tc.client.Logger.Debug().Any("reactionResponse", reactionResponse).Any("payload", reactionPayload).Msg("Reaction response")
-	if reactionResponse.Data.CreateDmReaction.Typename == "CreateDMReactionFailure" {
-		return fmt.Errorf("server rejected reaction")
-	}
+	tc.client.Logger.Debug().Any("reactionResponse", resp).Msg("Reaction response")
 	return nil
 }
 

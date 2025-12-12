@@ -10,6 +10,42 @@ type XChatGetAuthTokenResponse struct {
 	} `json:"data"`
 }
 
+// GetUsersByIdsForXChatResponse models the GraphQL response for fetching XChat member/user data.
+type GetUsersByIdsForXChatResponse struct {
+	Data struct {
+		GetMemberResults struct {
+			Results []XChatMemberResult `json:"results,omitempty"`
+		} `json:"get_member_results"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message,omitempty"`
+	} `json:"errors,omitempty"`
+}
+
+type XChatMemberResult struct {
+	Typename      string           `json:"__typename,omitempty"`
+	ID            string           `json:"id,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	MemberResults *XChatUserResult `json:"member_results,omitempty"`
+}
+
+// GetConversationPageQueryResponse models the GraphQL response for fetching message history in a conversation.
+type GetConversationPageQueryResponse struct {
+	Data struct {
+		GetConversationPage XChatConversationPage `json:"get_conversation_page"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message,omitempty"`
+	} `json:"errors,omitempty"`
+}
+
+type XChatConversationPage struct {
+	Typename                           string   `json:"__typename,omitempty"`
+	EncodedMessageEvents               []string `json:"encoded_message_events,omitempty"`
+	MissingConversationKeyChangeEvents []string `json:"missing_conversation_key_change_events,omitempty"`
+	HasMore                            bool     `json:"has_more,omitempty"`
+}
+
 // GetInitialXChatPageQueryResponse models the GraphQL response for fetching the
 // initial XChat inbox page.
 type GetInitialXChatPageQueryResponse struct {
@@ -25,10 +61,20 @@ type GetInboxPageRequestQueryResponse struct {
 	} `json:"data"`
 }
 
+// GetInboxPageConversationDataResponse models fetching a single conversation's data by ID.
+type GetInboxPageConversationDataResponse struct {
+	Data struct {
+		GetInboxPageConversationData struct {
+			Typename string         `json:"__typename,omitempty"`
+			Data     XChatInboxItem `json:"data"`
+		} `json:"get_inbox_page_conversation_data"`
+	} `json:"data"`
+}
+
 type XChatInboxPage struct {
 	Typename           string           `json:"__typename,omitempty"`
 	InboxCursor        XChatInboxCursor `json:"inboxCursor"`
-	Items              []XChatInboxItem `json:"items"`
+	Items              []XChatInboxItem `json:"items,omitempty"`
 	HasMessageRequests bool             `json:"has_message_requests,omitempty"`
 	MaxUserSequenceID  *string          `json:"max_user_sequence_id,omitempty"`
 	MessagePullVersion *int             `json:"message_pull_version,omitempty"`
@@ -46,6 +92,7 @@ type XChatInboxCursor struct {
 type XChatInboxItem struct {
 	Typename                           string                      `json:"__typename,omitempty"`
 	LatestMessageEvents                []string                    `json:"latest_message_events,omitempty"`
+	EncodedMessageEvents               []string                    `json:"encoded_message_events,omitempty"`
 	ConversationDetail                 XChatConversationDetail     `json:"conversation_detail"`
 	LatestConversationKeyChangeEvents  []string                    `json:"latest_conversation_key_change_events,omitempty"`
 	LatestNotifiableMessageCreateEvent string                      `json:"latest_notifiable_message_create_event,omitempty"`

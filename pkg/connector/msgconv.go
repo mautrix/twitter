@@ -149,9 +149,13 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		}
 		attachmentURL = highestBitRateVariant.URL
 	} else if attachment.Card != nil {
+		var urls []types.URLs
+		if msg.Entities != nil {
+			urls = msg.Entities.URLs
+		}
 		content := event.MessageEventContent{
 			MsgType:            event.MsgText,
-			BeeperLinkPreviews: []*event.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, attachment.Card, msg.Entities.URLs)},
+			BeeperLinkPreviews: []*event.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, attachment.Card, urls)},
 		}
 		return &bridgev2.ConvertedMessagePart{
 			ID:      networkid.PartID(""),

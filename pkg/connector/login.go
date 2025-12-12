@@ -112,6 +112,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	}
 	t.client = client
 	t.settings = settings
+	// Refresh cookies with any values set during LoadMessagesPage (e.g., twid)
+	t.Cookies = t.client.GetCookieString()
+	t.client.SetCurrentUserID(t.client.GetCurrentUserID())
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -202,12 +205,16 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		}
 		t.settings = settings
 	}
+	// Persist any cookies set by LoadMessagesPage so subsequent sessions include them.
+	t.Cookies = t.client.GetCookieString()
+	t.client.SetCurrentUserID(t.client.GetCurrentUserID())
 
 	meta := &UserLoginMetadata{
 		Cookies:           t.Cookies,
 		SecretKey:         t.SecretKey,
 		SigningKey:        t.SigningKey,
 		SigningKeyVersion: t.SigningKeyVersion,
+		UserID:            t.client.GetCurrentUserID(),
 	}
 
 	remoteProfile := &status.RemoteProfile{

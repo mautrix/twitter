@@ -52,7 +52,8 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 				Msg("Request successful")
 			return resp, respDat, nil
 		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			log.Err(err).
+			log.Error().
+				Err(err).
 				Dur("duration", dur).
 				Str("response_body", string(respDat)).
 				Msg("Request failed")

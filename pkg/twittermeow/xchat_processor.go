@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -195,6 +196,7 @@ func (p *XChatEventProcessor) processMessageEvent(ctx context.Context, evt *payl
 func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt *payload.MessageEvent, mce *payload.MessageCreateEvent) error {
 	conversationID := ptr.Val(evt.ConversationId)
 	contentsBytes := mce.Contents
+	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 
 	if len(contentsBytes) == 0 {
 		p.log.Warn().
@@ -210,7 +212,6 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	// Check if message has a signature - if so, it's encrypted
 	if evt.MessageEventSignature != nil && evt.MessageEventSignature.Signature != nil {
 		// Encrypted message - decrypt using conversation key
-		keyVersion := ptr.Val(mce.ConversationKeyVersion)
 		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
 		if err != nil {
 			p.log.Warn().
@@ -257,7 +258,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
 	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
-		msg := convertXChatMessageToTwitterMessage(evt, contents.Message)
+		msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
 		return p.emitEvent(ctx, msg)
 	}
 
@@ -354,7 +355,6 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 		Int("participant_keys", len(ckce.ConversationParticipantKeys)).
 		Msg("Processing ConversationKeyChangeEvent")
 
-	// Get our own signing key to unwrap the conversation key
 	signingKey, err := p.client.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
 		p.log.Err(err).
@@ -363,13 +363,20 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 		return err
 	}
 
-	// Find our encrypted key in the participant keys
 	ownUserID := p.client.GetCurrentUserID()
+	if ownUserID == "" {
+		p.log.Warn().
+			Str("conversation_id", conversationID).
+			Msg("Current user ID is empty while handling key change; cannot unwrap key")
+		return nil
+	}
+
 	var ourEncryptedKey string
 
 	for _, pk := range ckce.ConversationParticipantKeys {
 		if ptr.Val(pk.UserId) == ownUserID {
 			ourEncryptedKey = ptr.Val(pk.EncryptedConversationKey)
+			p.log.Info().Msgf("Our Encrypted Key Is Found")
 			break
 		}
 	}
@@ -382,7 +389,6 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 		return nil
 	}
 
-	// Unwrap the conversation key using the decryption key
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 	if err != nil {
 		p.log.Err(err).
@@ -550,25 +556,87 @@ func DecodeMessageEvent(encoded string) (*payload.MessageEvent, error) {
 	return &evt, nil
 }
 
-// ProcessKeyChangeEvents processes key change events from an XChatInboxItem.
-// This should be called BEFORE syncing the channel, as keys are needed for decryption.
-func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *response.XChatInboxItem) error {
-	conversationID := item.ConversationDetail.ConversationID
+type decodedInboxMessageEvent struct {
+	seq int64
+	evt *payload.MessageEvent
+}
 
-	for _, encodedEvt := range item.LatestConversationKeyChangeEvents {
+func (p *XChatEventProcessor) decodeAndSortInboxEvents(conversationID string, encodedEvents []string) []decodedInboxMessageEvent {
+	if len(encodedEvents) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(encodedEvents))
+	out := make([]decodedInboxMessageEvent, 0, len(encodedEvents))
+
+	for _, encodedEvt := range encodedEvents {
+		if encodedEvt == "" {
+			continue
+		}
+
 		evt, err := DecodeMessageEvent(encodedEvt)
 		if err != nil {
 			p.log.Warn().
 				Err(err).
 				Str("conversation_id", conversationID).
-				Msg("Failed to decode key change event from initial inbox")
+				Msg("Failed to decode inbox message event")
 			continue
 		}
-		if err := p.processMessageEvent(ctx, evt); err != nil {
+
+		seqID := ptr.Val(evt.SequenceId)
+		seenKey := seqID
+		if seenKey == "" {
+			seenKey = encodedEvt
+		}
+		if _, ok := seen[seenKey]; ok {
+			continue
+		}
+		seen[seenKey] = struct{}{}
+
+		var seq int64
+		if seqID != "" {
+			seq, _ = strconv.ParseInt(seqID, 10, 64)
+		}
+		out = append(out, decodedInboxMessageEvent{seq: seq, evt: evt})
+	}
+
+	slices.SortStableFunc(out, func(a, b decodedInboxMessageEvent) int {
+		switch {
+		case a.seq == 0 && b.seq != 0:
+			return 1
+		case a.seq != 0 && b.seq == 0:
+			return -1
+		case a.seq < b.seq:
+			return -1
+		case a.seq > b.seq:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	return out
+}
+
+// ProcessKeyChangeEvents processes key change events from an XChatInboxItem.
+// This should be called BEFORE syncing the channel, as keys are needed for decryption.
+func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *response.XChatInboxItem) error {
+	conversationID := item.ConversationDetail.ConversationID
+
+	encodedEvents := make([]string, 0, len(item.LatestConversationKeyChangeEvents)+len(item.EncodedMessageEvents))
+	encodedEvents = append(encodedEvents, item.LatestConversationKeyChangeEvents...)
+	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
+
+	for _, decoded := range p.decodeAndSortInboxEvents(conversationID, encodedEvents) {
+		detail := decoded.evt.Detail
+		if detail == nil || detail.ConversationKeyChangeEvent == nil {
+			continue
+		}
+		if err := p.processMessageEvent(ctx, decoded.evt); err != nil {
 			p.log.Warn().
 				Err(err).
 				Str("conversation_id", conversationID).
-				Msg("Failed to process key change event from initial inbox")
+				Msg("Failed to process key change event from inbox")
 		}
 	}
 
@@ -580,25 +648,31 @@ func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *
 func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, item *response.XChatInboxItem) error {
 	conversationID := item.ConversationDetail.ConversationID
 
-	// Process message events in chronological order (oldest first).
-	// The LatestMessageEvents array is in reverse chronological order (newest first).
-	messageEvents := item.LatestMessageEvents
-	slices.Reverse(messageEvents)
+	processedSeqIDs := make(map[string]struct{})
 
-	for _, encodedEvt := range messageEvents {
-		evt, err := DecodeMessageEvent(encodedEvt)
-		if err != nil {
-			p.log.Warn().
-				Err(err).
-				Str("conversation_id", conversationID).
-				Msg("Failed to decode message event from initial inbox")
+	encodedEvents := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents))
+	encodedEvents = append(encodedEvents, item.LatestMessageEvents...)
+	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
+
+	for _, decoded := range p.decodeAndSortInboxEvents(conversationID, encodedEvents) {
+		seqID := ptr.Val(decoded.evt.SequenceId)
+		if seqID != "" {
+			if _, ok := processedSeqIDs[seqID]; ok {
+				continue
+			}
+			processedSeqIDs[seqID] = struct{}{}
+		}
+
+		detail := decoded.evt.Detail
+		if detail != nil && detail.ConversationKeyChangeEvent != nil {
 			continue
 		}
-		if err := p.processMessageEvent(ctx, evt); err != nil {
+
+		if err := p.processMessageEvent(ctx, decoded.evt); err != nil {
 			p.log.Warn().
 				Err(err).
 				Str("conversation_id", conversationID).
-				Msg("Failed to process message event from initial inbox")
+				Msg("Failed to process message event from inbox")
 		}
 	}
 
@@ -615,6 +689,12 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 				Str("participant_id", readEvt.ParticipantID.RestID).
 				Msg("Failed to decode read event from initial inbox")
 			continue
+		}
+		if seqID := ptr.Val(evt.SequenceId); seqID != "" {
+			if _, ok := processedSeqIDs[seqID]; ok {
+				continue
+			}
+			processedSeqIDs[seqID] = struct{}{}
 		}
 		if err := p.processMessageEvent(ctx, evt); err != nil {
 			p.log.Warn().

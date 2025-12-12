@@ -260,12 +260,17 @@ func EncodeMessageContents(contents *payload.MessageContents) ([]byte, error) {
 		contents.SentFrom = &sentFrom
 	}
 
-	// Wrap in MessageEntryHolder -> MessageEntryContents -> Message
-	holder := &payload.MessageEntryHolder{
-		Contents: &payload.MessageEntryContents{
-			Message: contents,
-		},
+	return EncodeMessageEntryContents(&payload.MessageEntryContents{Message: contents})
+}
+
+// EncodeMessageEntryContents encodes MessageEntryContents to Thrift binary.
+// The wire format is: MessageEntryHolder { MessageEntryContents }
+func EncodeMessageEntryContents(contents *payload.MessageEntryContents) ([]byte, error) {
+	if contents == nil {
+		return nil, fmt.Errorf("message entry contents is nil")
 	}
+
+	holder := &payload.MessageEntryHolder{Contents: contents}
 
 	var buf bytes.Buffer
 	encoder := thrifter.NewEncoder(&buf)
@@ -273,6 +278,21 @@ func EncodeMessageContents(contents *payload.MessageContents) ([]byte, error) {
 		return nil, fmt.Errorf("thrift encode: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// EncryptMessageEntryContentsRaw encrypts MessageEntryContents to raw ciphertext bytes.
+func EncryptMessageEntryContentsRaw(contents *payload.MessageEntryContents, conversationKey []byte) ([]byte, error) {
+	entryBytes, err := EncodeMessageEntryContents(contents)
+	if err != nil {
+		return nil, err
+	}
+
+	ciphertext, err := SecretboxEncrypt(entryBytes, conversationKey)
+	if err != nil {
+		return nil, fmt.Errorf("secretbox encrypt: %w", err)
+	}
+
+	return ciphertext, nil
 }
 
 // DecryptMessageEvent decrypts a MessageEvent's contents using the KeyManager.
@@ -324,6 +344,8 @@ type MessageBuilder struct {
 	attachments    []*payload.MessageAttachment
 	replyTo        *payload.ReplyingToPreview
 	entities       []*payload.RichTextEntity
+	reactionAdd    *payload.MessageReactionAdd
+	reactionRemove *payload.MessageReactionRemove
 
 	// Crypto fields (per-call overrides)
 	conversationKey     []byte
@@ -356,6 +378,24 @@ func (b *MessageBuilder) SetConversationID(id string) *MessageBuilder {
 // SetText sets the message text.
 func (b *MessageBuilder) SetText(text string) *MessageBuilder {
 	b.text = text
+	return b
+}
+
+func (b *MessageBuilder) SetReactionAdd(targetMessageSequenceID, emoji string) *MessageBuilder {
+	b.reactionAdd = &payload.MessageReactionAdd{
+		MessageSequenceId: &targetMessageSequenceID,
+		Emoji:             &emoji,
+	}
+	b.reactionRemove = nil
+	return b
+}
+
+func (b *MessageBuilder) SetReactionRemove(targetMessageSequenceID, emoji string) *MessageBuilder {
+	b.reactionRemove = &payload.MessageReactionRemove{
+		MessageSequenceId: &targetMessageSequenceID,
+		Emoji:             &emoji,
+	}
+	b.reactionAdd = nil
 	return b
 }
 
@@ -427,24 +467,39 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 		unencrypted = true
 	}
 
-	// Build MessageContents
-	contents := &payload.MessageContents{
-		MessageText:       &b.text,
-		Attachments:       b.attachments,
-		Entities:          b.entities,
-		ReplyingToPreview: b.replyTo,
+	// Build MessageEntryContents (message or reaction).
+	entryContents := &payload.MessageEntryContents{}
+	if b.reactionAdd != nil {
+		entryContents.ReactionAdd = b.reactionAdd
+	} else if b.reactionRemove != nil {
+		entryContents.ReactionRemove = b.reactionRemove
+	} else {
+		contents := &payload.MessageContents{
+			MessageText:       &b.text,
+			Attachments:       b.attachments,
+			Entities:          b.entities,
+			ReplyingToPreview: b.replyTo,
+		}
+
+		// Ensure SentFrom is set (default to 1)
+		if contents.SentFrom == nil {
+			sentFrom := int32(1)
+			contents.SentFrom = &sentFrom
+		}
+
+		entryContents.Message = contents
 	}
 
 	// Encrypt if we have a key, otherwise send plaintext contents.
 	var contentsBytes []byte
 	var err error
 	if !unencrypted && len(convKey) > 0 {
-		contentsBytes, err = EncryptMessageContentsRaw(contents, convKey)
+		contentsBytes, err = EncryptMessageEntryContentsRaw(entryContents, convKey)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt contents: %w", err)
 		}
 	} else {
-		contentsBytes, err = EncodeMessageContents(contents)
+		contentsBytes, err = EncodeMessageEntryContents(entryContents)
 		if err != nil {
 			return nil, fmt.Errorf("encode contents: %w", err)
 		}

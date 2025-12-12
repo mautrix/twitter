@@ -39,11 +39,15 @@ func ensureUserLoginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 			meta.MaxUserSequenceID = meta.MaxSequenceID
 			meta.MaxSequenceID = ""
 		}
+		if meta.UserID == "" {
+			meta.UserID = string(login.ID)
+		}
 		return meta
 	}
 	meta := &UserLoginMetadata{
 		ConversationKeys:   make(map[string]*ConversationKeyData),
 		ConversationTokens: make(map[string]string),
+		UserID:             string(login.ID),
 	}
 	login.Metadata = meta
 	return meta

@@ -1,6 +1,11 @@
 package payload
 
-import "github.com/google/go-querystring/query"
+import (
+	"encoding/json"
+	"net/url"
+
+	"github.com/google/go-querystring/query"
+)
 
 type MigrationRequestPayload struct {
 	Tok  string `url:"tok"`
@@ -343,15 +348,6 @@ func NewInitialXChatPageQueryVariables(
 	}
 }
 
-func NewInitialXChatPageQueryVariablesWithCursor(
-	cursor *XChatCursor,
-) *GetInitialXChatPageQueryVariables {
-	return &GetInitialXChatPageQueryVariables{
-		ContinueCursor: cursor,
-		QuerySettings:  DefaultQuerySettings(),
-	}
-}
-
 func (p *GetInitialXChatPageQueryVariables) Encode() ([]byte, error) {
 	values, err := query.Values(p)
 	if err != nil {
@@ -372,4 +368,69 @@ func NewInboxPageRequestQueryVariables(
 		ContinueCursor: cursor,
 		QuerySettings:  DefaultQuerySettings(),
 	}
+}
+
+func (p *GetInboxPageRequestQueryVariables) Encode() ([]byte, error) {
+	encodedQuery, err := p.EncodeJSONQuery()
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(encodedQuery), nil
+}
+
+type GetInboxPageConversationDataQueryVariables struct {
+	ConversationID        string `json:"conversation_id"`
+	IncludeUserPublicKeys bool   `json:"include_user_public_keys"`
+}
+
+func NewInboxPageConversationDataQueryVariables(conversationID string, includeKeys bool) *GetInboxPageConversationDataQueryVariables {
+	return &GetInboxPageConversationDataQueryVariables{
+		ConversationID:        conversationID,
+		IncludeUserPublicKeys: includeKeys,
+	}
+}
+
+// Encode encodes the variables into a form body with a single "variables" JSON field,
+// matching how other XChat GraphQL endpoints are called.
+func (p *GetInboxPageConversationDataQueryVariables) Encode() ([]byte, error) {
+	jsonVars, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("variables", string(jsonVars))
+	return []byte(values.Encode()), nil
+}
+
+type GetUsersByIdsForXChatVariables struct {
+	IDs []string `json:"ids"`
+}
+
+func NewGetUsersByIdsForXChatVariables(ids []string) *GetUsersByIdsForXChatVariables {
+	return &GetUsersByIdsForXChatVariables{
+		IDs: ids,
+	}
+}
+
+func (p *GetUsersByIdsForXChatVariables) Encode() ([]byte, error) {
+	jsonVars, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("variables", string(jsonVars))
+	return []byte(values.Encode()), nil
+}
+
+// Encode encodes the variables into a form body with a single "variables" JSON field,
+// matching how other XChat GraphQL endpoints are called.
+func (p *GetConversationPageQueryVariables) Encode() ([]byte, error) {
+	jsonVars, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("variables", string(jsonVars))
+	return []byte(values.Encode()), nil
 }

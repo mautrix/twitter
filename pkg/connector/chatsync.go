@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -53,6 +54,21 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			Str("conversation_id", conv.ConversationID).
 			Msg("Failed to get/create portal")
 		return
+	}
+
+	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
+	// Beeper scrollback relies on the backfill task existing for the portal.
+	if portal.MXID != "" {
+		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
+		if chatInfo.CanBackfill {
+			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
+				log.Warn().Err(err).
+					Str("conversation_id", conv.ConversationID).
+					Msg("Failed to ensure backfill task exists")
+			} else {
+				tc.connector.br.WakeupBackfillQueue()
+			}
+		}
 	}
 
 	// Create Matrix room if it doesn't exist
@@ -153,14 +169,15 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 			TotalMemberCount: len(detail.ParticipantsResults),
 			MemberMap:        memberMap,
 		},
+		CanBackfill: true,
 	}
 
 	if isGroup {
 		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
 		if conv != nil && conv.AvatarImageHttps != "" {
-			info.Avatar = makeAvatar(tc.client, conv.AvatarImageHttps)
+			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, conv.AvatarImageHttps, "")
 		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
-			info.Avatar = makeAvatar(tc.client, detail.GroupMetadata.GroupAvatarURL)
+			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, detail.GroupMetadata.GroupAvatarURL, "")
 		}
 		if conv != nil && conv.Name != "" {
 			info.Name = &conv.Name
@@ -180,13 +197,45 @@ func (tc *TwitterClient) decryptGroupName(ctx context.Context, conversationID, e
 	if encName == "" {
 		return ""
 	}
+
+	keyVersion := ""
+	if parts := strings.SplitN(encName, ":", 2); len(parts) == 2 && parts[0] != "" {
+		keyVersion = parts[0]
+		encName = parts[1]
+	}
+
 	km := tc.client.GetKeyManager()
-	convKey, err := km.GetLatestConversationKey(ctx, conversationID)
-	if err != nil || convKey == nil || len(convKey.Key) == 0 {
-		zerolog.Ctx(ctx).Debug().
-			Str("conversation_id", conversationID).
-			Msg("No conversation key available to decrypt group name")
-		return ""
+	var convKey *crypto.ConversationKey
+	var err error
+
+	if keyVersion != "" {
+		convKey, err = km.GetConversationKey(ctx, conversationID, keyVersion)
+		if err != nil {
+			zerolog.Ctx(ctx).Warn().
+				Err(err).
+				Str("conversation_id", conversationID).
+				Str("key_version", keyVersion).
+				Msg("Failed to get conversation key for group name by version")
+			return ""
+		}
+	}
+
+	if convKey == nil || len(convKey.Key) == 0 {
+		if keyVersion != "" {
+			zerolog.Ctx(ctx).Debug().
+				Str("conversation_id", conversationID).
+				Str("key_version", keyVersion).
+				Msg("Conversation key with required version missing; cannot decrypt group name")
+			return ""
+		}
+		convKey, err = km.GetLatestConversationKey(ctx, conversationID)
+		if err != nil || convKey == nil || len(convKey.Key) == 0 {
+			zerolog.Ctx(ctx).Debug().
+				Str("conversation_id", conversationID).
+				Str("key_version", keyVersion).
+				Msg("No conversation key available to decrypt group name")
+			return ""
+		}
 	}
 
 	var ciphertext []byte

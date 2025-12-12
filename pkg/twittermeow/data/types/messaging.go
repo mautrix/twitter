@@ -13,13 +13,15 @@ type MessageData struct {
 }
 
 type Message struct {
-	ID               string            `json:"id,omitempty"`
-	Time             string            `json:"time,omitempty"`
-	AffectsSort      bool              `json:"affects_sort,omitempty"`
-	RequestID        string            `json:"request_id,omitempty"`
-	ConversationID   string            `json:"conversation_id,omitempty"`
-	MessageData      MessageData       `json:"message_data,omitempty"`
-	MessageReactions []MessageReaction `json:"message_reactions,omitempty"`
+	ID                     string            `json:"id,omitempty"`
+	Time                   string            `json:"time,omitempty"`
+	AffectsSort            bool              `json:"affects_sort,omitempty"`
+	SequenceID             string            `json:"sequence_id,omitempty"`
+	RequestID              string            `json:"request_id,omitempty"`
+	ConversationID         string            `json:"conversation_id,omitempty"`
+	ConversationKeyVersion string            `json:"conversation_key_version,omitempty"`
+	MessageData            MessageData       `json:"message_data,omitempty"`
+	MessageReactions       []MessageReaction `json:"message_reactions,omitempty"`
 }
 
 type MessageEdit Message
@@ -60,6 +62,7 @@ type ConversationAvatarUpdate struct {
 	AffectsSort                  bool   `json:"affects_sort,omitempty"`
 	ConversationID               string `json:"conversation_id,omitempty"`
 	ConversationAvatarImageHttps string `json:"conversation_avatar_image_https,omitempty"`
+	ConversationKeyVersion       string `json:"conversation_key_version,omitempty"`
 	Avatar                       Avatar `json:"avatar,omitempty"`
 	ByUserID                     string `json:"by_user_id,omitempty"`
 }
