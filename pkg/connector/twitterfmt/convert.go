@@ -99,7 +99,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 
 			uid := mention.IDStr
 			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid)) // TODO use MakeUserID
-			if err != nil {
+			if err != nil || ghost == nil {
 				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost")
 				bodyHTML.WriteString(string(charArr[start:end]))
 				continue

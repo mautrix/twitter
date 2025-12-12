@@ -1,3 +1,5 @@
+// Deprecated: This file contains legacy Twitter DM polling.
+// Use XChat WebSocket (websocket.go) for real-time messaging.
 package twittermeow
 
 import (

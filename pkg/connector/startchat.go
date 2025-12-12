@@ -30,7 +30,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 			resolvedUser = user
 		}
 	}
-	ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(resolvedUser.IDStr))
+	ghost, err := tc.connector.br.GetGhostByID(ctx, networkid.UserID(resolvedUser.IDStr))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ghost from Twitter User ID: %w", err)
 	}
@@ -51,13 +51,13 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 			return nil, fmt.Errorf("not allowed to DM this Twitter user: %v", resolvedUser.IDStr)
 		}
 
-		conversationID := methods.CreateConversationID([]string{resolvedUser.IDStr, ParseUserLoginID(tc.userLogin.ID)})
+		conversationID := methods.CreateConversationID([]string{resolvedUser.IDStr, string(tc.userLogin.ID)})
 		portalKey = tc.MakePortalKeyFromID(conversationID)
 	}
 
 	return &bridgev2.ResolveIdentifierResponse{
 		Ghost:  ghost,
-		UserID: MakeUserID(resolvedUser.IDStr),
+		UserID: networkid.UserID(resolvedUser.IDStr),
 		Chat:   &bridgev2.CreateChatResponse{PortalKey: portalKey},
 	}, nil
 }

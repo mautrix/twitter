@@ -35,6 +35,12 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
+// Conversation type constants for Twitter DM conversations.
+const (
+	ConversationTypeOneToOne = "ONE_TO_ONE"
+	ConversationTypeGroupDM  = "GROUP_DM"
+)
+
 // syncXChatChannel syncs a single conversation from XChat inbox data.
 // Creates the portal synchronously if it doesn't exist.
 func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) {
@@ -114,12 +120,10 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 	}
 
 	// Determine conversation type based on participants
-	if len(detail.ParticipantsResults) == 2 {
-		conv.Type = "ONE_TO_ONE"
-	} else if len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil {
-		conv.Type = "GROUP_DM"
+	if len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil {
+		conv.Type = ConversationTypeGroupDM
 	} else {
-		conv.Type = "ONE_TO_ONE"
+		conv.Type = ConversationTypeOneToOne
 	}
 
 	// Build participants list
@@ -157,7 +161,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		} else if user, ok := users[p.RestID]; ok {
 			userInfo = tc.connector.wrapUserInfo(tc.client, user)
 		}
-		memberMap[MakeUserID(p.RestID)] = bridgev2.ChatMember{
+		memberMap[networkid.UserID(p.RestID)] = bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
 			UserInfo:    userInfo,
 		}

@@ -49,20 +49,15 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	}
 
 	conversationID := string(fetchParams.Portal.PortalKey.ID)
+	minSeqID := string(fetchParams.AnchorMessage.ID)
+
 	zerolog.Ctx(ctx).Info().
 		Str("conversation_id", conversationID).
 		Bool("forward", fetchParams.Forward).
-		Str("cursor", string(fetchParams.AnchorMessage.ID)).
+		Str("cursor", minSeqID).
 		Int("count", fetchParams.Count).
 		Msg("XChat backfill requested")
 
-	minSeqID := string(fetchParams.AnchorMessage.ID)
-	if minSeqID == "" {
-		if fetchParams.AnchorMessage == nil {
-			return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
-		}
-		minSeqID = string(fetchParams.AnchorMessage.ID)
-	}
 	if minSeqID == "" {
 		return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
 	}

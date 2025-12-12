@@ -17,21 +17,14 @@
 package connector
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	thrifter "github.com/thrift-iterator/go"
-	thriftergeneral "github.com/thrift-iterator/go/general"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -40,7 +33,6 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -392,7 +384,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 	// Update remote profile from cached user data
 	currentUserID := tc.client.GetCurrentUserID()
-	if MakeUserLoginID(currentUserID) != tc.userLogin.ID {
+	if networkid.UserLoginID(currentUserID) != tc.userLogin.ID {
 		log.Warn().
 			Str("user_login_id", string(tc.userLogin.ID)).
 			Str("current_user_id", currentUserID).
@@ -433,7 +425,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 // makeXChatRemoteProfile creates a RemoteProfile from XChat user data.
 func (tc *TwitterClient) makeXChatRemoteProfile(user *types.User) *status.RemoteProfile {
 	var avatarMXC id.ContentURIString
-	ownGhost, err := tc.connector.br.GetGhostByID(context.Background(), MakeUserID(user.IDStr))
+	ownGhost, err := tc.connector.br.GetGhostByID(context.Background(), networkid.UserID(user.IDStr))
 	if err == nil && ownGhost != nil {
 		avatarMXC = ownGhost.AvatarMXC
 	}
@@ -492,231 +484,11 @@ func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
 }
 
 func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) bool {
-	return UserLoginIDToUserID(tc.userLogin.ID) == userID
+	return networkid.UserID(tc.userLogin.ID) == userID
 }
 
 func (tc *TwitterClient) FullReconnect() {
 	tc.Disconnect()
 	tc.userLogin.Metadata.(*UserLoginMetadata).Session = nil
 	tc.Connect(tc.userLogin.Log.WithContext(tc.connector.br.BackgroundCtx))
-}
-
-// TEMP TEST FUNCTION - DELETE AFTER TESTING
-func (tc *TwitterClient) tempTestSendEncrypted(ctx context.Context) {
-	// Wait 5 seconds before sending
-	time.Sleep(5 * time.Second)
-
-	log := zerolog.Ctx(ctx)
-
-	// First, test signature with exact Python test data
-	testSignature(log)
-
-	// Test data with correct timestamp-based key versions
-	conversationID := "1374864718591098886:1374864718591098886"
-	convKeyB64 := "ST4hdGP1V3A5az3dM4GgjvoPRiaBl9TZUwGkfPy9/0E="
-	privKeyB64 := "rdGJfa2OxTXLoUKp5D2O3fyjjiEFHrpCtLHO2TP4dbE="
-	keyVersion := "1763143771470"    // Conversation key timestamp
-	sigKeyVersion := "1749110687780" // Signing key timestamp
-
-	// Decode conversation key
-	convKey, err := base64.StdEncoding.DecodeString(convKeyB64)
-	if err != nil {
-		log.Error().Err(err).Msg("TEMP TEST: Failed to decode conversation key")
-		return
-	}
-
-	// Parse signing key
-	signingKey, err := crypto.ParsePrivateKeyScalar(privKeyB64)
-	if err != nil {
-		log.Error().Err(err).Msg("TEMP TEST: Failed to parse signing key")
-		return
-	}
-
-	// Generate message ID
-	messageID := uuid.NewString()
-
-	// Build message using MessageBuilder with the provided key and signing key
-	ownUserID := string(tc.userLogin.ID)
-	builder := crypto.NewMessageBuilder(nil, ownUserID).
-		SetMessageID(messageID).
-		SetConversationID(conversationID).
-		SetText("Hello from forged encrypted message!").
-		WithConversationKey(convKey, keyVersion).
-		WithSigningKey(signingKey, sigKeyVersion)
-
-	// Build the message event
-	event, err := builder.Build(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("TEMP TEST: Failed to build message")
-		return
-	}
-
-	// Encode MessageCreateEvent to base64 Thrift
-	encodedMCE, err := crypto.EncodeMessageCreateEvent(event.Detail.MessageCreateEvent)
-	if err != nil {
-		log.Error().Err(err).Msg("TEMP TEST: Failed to encode MCE")
-		return
-	}
-
-	// Debug: decode and print raw bytes
-	rawMCE, _ := base64.StdEncoding.DecodeString(encodedMCE)
-	log.Info().
-		Str("hex", fmt.Sprintf("%x", rawMCE)).
-		Int("len", len(rawMCE)).
-		Msg("TEMP TEST: Encoded MCE bytes")
-
-	// Encode signature
-	encodedSig := ""
-	if event.MessageEventSignature != nil {
-		encodedSig, err = crypto.EncodeMessageEventSignature(event.MessageEventSignature)
-		if err != nil {
-			log.Error().Err(err).Msg("TEMP TEST: Failed to encode signature")
-			return
-		}
-	}
-
-	// Generate conversation token (HS256 JWT)
-	currentUserID := string(tc.userLogin.ID)
-	recipient := crypto.GetRecipientFromConversationID(conversationID, currentUserID)
-	validSinceMSec := int64(1745884800000)
-	token := crypto.GenerateConversationToken(currentUserID, recipient, validSinceMSec, convKey)
-
-	log.Info().
-		Str("message_id", messageID).
-		Str("conversation_id", conversationID).
-		Str("encoded_mce", encodedMCE).
-		Str("encoded_sig", encodedSig).
-		Str("token", token).
-		Msg("TEMP TEST: Sending forged encrypted message")
-
-	// Send the message
-	resp, err := tc.client.SendRawEncryptedMessage(ctx, conversationID, messageID, token, encodedMCE, encodedSig)
-	if err != nil {
-		log.Error().Err(err).Msg("TEMP TEST: Failed to send encrypted message")
-		return
-	}
-
-	log.Info().Any("response", resp).Msg("TEMP TEST: Successfully sent encrypted message")
-}
-
-// testSignature tests our signature implementation against the Python test data
-func testSignature(log *zerolog.Logger) {
-	log.Info().Msg("=== SIGNATURE TEST ===")
-
-	// New valid payload data
-	messageID := "cb88a1ac-606d-4c58-ad66-8b865c2650b4"
-	senderID := "1374864718591098886"
-	conversationID := "1374864718591098886:1374864718591098886"
-	convKeyVersion := "1763143771470"
-	contentsHex := "3a84581ad14fd439151e9b7bd011a8f55260e4b4c26135dc1fd90acebc2ca8aec2e1fcb3d063422cdb924f1427c6b64e09b2a01e82d5b4627ebaddde64d482f4aa5b2b8645a10120244998fc5c471877ded191"
-	expectedSig := "U7ZhqITL83z1/cME18jSJLEnrM1s3+n8Cd6FzKUpQx2oAI2NVVIO9bjid4DNc/tnbtq67pWNNOePTX/IL9O7oQ"
-	pubKeyB64 := "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAER7OEz60En69/Dr1z3vodgWk2UHn3Kxxs/qoSyaii/i5njCDyOMW6G95O7+Hcbv4iFGz33IWIqmXwBBnz3OBwcw=="
-	privKeyB64 := "rdGJfa2OxTXLoUKp5D2O3fyjjiEFHrpCtLHO2TP4dbE="
-	convKeyB64 := "ST4hdGP1V3A5az3dM4GgjvoPRiaBl9TZUwGkfPy9/0E="
-
-	// Decode contents from hex
-	contentsBytes, err := hex.DecodeString(contentsHex)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to decode contents hex")
-		return
-	}
-
-	// Decrypt the test ciphertext to see what valid MessageContents looks like
-	convKey, _ := base64.StdEncoding.DecodeString(convKeyB64)
-	decrypted, err := crypto.SecretboxDecrypt(contentsBytes, convKey)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to decrypt test ciphertext")
-	} else {
-		log.Info().
-			Str("decrypted_hex", fmt.Sprintf("%x", decrypted)).
-			Int("len", len(decrypted)).
-			Msg("Decrypted valid MessageContents (raw Thrift binary)")
-
-		// Decode Thrift bytes generically to see the structure
-		decoder := thrifter.NewDecoder(bytes.NewReader(decrypted), nil)
-		var decoded thriftergeneral.Struct
-		if err := decoder.Decode(&decoded); err != nil {
-			log.Error().Err(err).Msg("Failed to decode MessageContents thrift")
-		} else {
-			log.Info().Interface("decoded", decoded).Msg("Decoded MessageContents structure")
-		}
-	}
-
-	// Use "test" as that's what the valid payload contains
-	text := "test"
-	log.Info().Str("encoding_text", text).Msg("Encoding MessageContents with same text")
-
-	ourContents, err := crypto.EncodeMessageContents(&payload.MessageContents{
-		MessageText: &text,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to encode our MessageContents")
-	} else {
-		log.Info().
-			Str("our_hex", fmt.Sprintf("%x", ourContents)).
-			Int("len", len(ourContents)).
-			Msg("Our encoded MessageContents")
-
-		// Compare with decrypted valid payload
-		if decrypted != nil {
-			log.Info().
-				Str("valid_hex", fmt.Sprintf("%x", decrypted)).
-				Str("our_hex", fmt.Sprintf("%x", ourContents)).
-				Bool("match", fmt.Sprintf("%x", decrypted) == fmt.Sprintf("%x", ourContents)).
-				Msg("Comparison: valid vs our encoding")
-		}
-	}
-
-	// Build preimage (same as Python)
-	contentsB64 := base64.RawStdEncoding.EncodeToString(contentsBytes)
-	preimage := fmt.Sprintf("MessageCreateEvent,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, convKeyVersion, contentsB64)
-
-	log.Info().
-		Str("preimage", preimage).
-		Int("preimage_len", len(preimage)).
-		Msg("Built preimage")
-
-	// Parse keys
-	privKey, err := crypto.ParsePrivateKeyScalar(privKeyB64)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to parse private key")
-		return
-	}
-
-	pubKey, err := crypto.ParsePublicKeySPKI(pubKeyB64)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to parse public key")
-		return
-	}
-
-	// Sign
-	ourSig, err := crypto.SignMessage(privKey, messageID, senderID, conversationID, convKeyVersion, contentsBytes)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to sign")
-		return
-	}
-
-	log.Info().
-		Str("our_sig", ourSig).
-		Str("expected_sig", expectedSig).
-		Msg("Generated signature")
-
-	// Verify our signature
-	err = crypto.VerifyMessage(pubKey, messageID, senderID, conversationID, convKeyVersion, contentsBytes, ourSig)
-	if err != nil {
-		log.Error().Err(err).Msg("Our signature INVALID")
-	} else {
-		log.Info().Msg("Our signature VALID")
-	}
-
-	// Verify expected signature
-	err = crypto.VerifyMessage(pubKey, messageID, senderID, conversationID, convKeyVersion, contentsBytes, expectedSig)
-	if err != nil {
-		log.Error().Err(err).Msg("Expected signature INVALID")
-	} else {
-		log.Info().Msg("Expected signature VALID")
-	}
-
-	log.Info().Msg("=== END SIGNATURE TEST ===")
 }

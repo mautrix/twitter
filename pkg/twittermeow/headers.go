@@ -9,17 +9,11 @@ import (
 
 const BrowserName = "Chrome"
 const ChromeVersion = "141"
-const ChromeVersionFull = ChromeVersion + ".0.7390.65"
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + ChromeVersion + ".0.0.0 Safari/537.36"
 const SecCHUserAgent = `"Chromium";v="` + ChromeVersion + `", "Google Chrome";v="` + ChromeVersion + `", "Not-A.Brand";v="99"`
-const SecCHFullVersionList = `"Chromium";v="` + ChromeVersionFull + `", "Google Chrome";v="` + ChromeVersionFull + `", "Not-A.Brand";v="99.0.0.0"`
 const OSName = "Linux"
-const OSVersion = "6.8.0"
 const SecCHPlatform = `"` + OSName + `"`
-const SecCHPlatformVersion = `"` + OSVersion + `"`
 const SecCHMobile = "?0"
-const SecCHModel = ""
-const SecCHPrefersColorScheme = "light"
 
 const UDID = OSName + "/" + BrowserName
 
@@ -32,10 +26,6 @@ var BaseHeaders = http.Header{
 	"Sec-Ch-Ua-Mobile":   []string{SecCHMobile},
 	"Referer":            []string{endpoints.BASE_URL + "/"},
 	"Origin":             []string{endpoints.BASE_URL},
-	//"Sec-Ch-Prefers-Color-Scheme": []string{SecCHPrefersColorScheme},
-	//"Sec-Ch-Ua-Full-Version-List": []string{SecCHFullVersionList},
-	//"Sec-Ch-Ua-Model":             []string{SecCHModel},
-	//"Sec-Ch-Ua-Platform-Version":  []string{SecCHPlatformVersion},
 }
 
 type HeaderOpts struct {

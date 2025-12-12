@@ -15,6 +15,8 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
+// Deprecated: GetInitialInboxState uses the legacy Twitter DM API.
+// Use GetInitialXChatPage for the new XChat API.
 func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
@@ -35,6 +37,8 @@ func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMReq
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+// Deprecated: GetDMUserUpdates uses the legacy Twitter DM polling API.
+// Use XChat WebSocket for real-time updates.
 func (c *Client) GetDMUserUpdates(ctx context.Context, params *payload.DMRequestQuery) (*response.GetDMUserUpdatesResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
@@ -76,6 +80,8 @@ func (c *Client) MarkConversationRead(ctx context.Context, params *payload.MarkC
 	return nil
 }
 
+// Deprecated: FetchConversationContext uses the legacy Twitter DM API.
+// Use GetConversationData for the new XChat API.
 func (c *Client) FetchConversationContext(ctx context.Context, conversationID string, params *payload.DMRequestQuery, context payload.ContextInfo) (*response.ConversationDMResponse, error) {
 	params.Context = context
 	encodedQuery, err := params.Encode()
@@ -97,6 +103,8 @@ func (c *Client) FetchConversationContext(ctx context.Context, conversationID st
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+// Deprecated: FetchTrustedThreads uses the legacy Twitter DM API.
+// Use XChat inbox API instead.
 func (c *Client) FetchTrustedThreads(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxTimelineResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
@@ -116,6 +124,8 @@ func (c *Client) FetchTrustedThreads(ctx context.Context, params *payload.DMRequ
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+// Deprecated: SendDirectMessage uses the legacy Twitter DM API.
+// Use SendXChatMessage for the new XChat API.
 func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMessagePayload) (*response.TwitterInboxData, error) {
 	if pl.RequestID == "" {
 		pl.RequestID = uuid.NewString()
@@ -144,6 +154,8 @@ func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMe
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+// Deprecated: EditDirectMessage uses the legacy Twitter DM API.
+// Use XChat edit API instead.
 func (c *Client) EditDirectMessage(ctx context.Context, payload *payload.EditDirectMessagePayload) (*types.Message, error) {
 	if payload.RequestID == "" {
 		payload.RequestID = uuid.NewString()

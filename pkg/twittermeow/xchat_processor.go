@@ -520,25 +520,12 @@ func (p *XChatEventProcessor) emitEvent(ctx context.Context, evt types.TwitterEv
 	return nil
 }
 
-// truncateHex returns the first n characters of a hex string for logging.
-func truncateHex(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 // truncateBytes returns a hex representation of the first n bytes for logging.
 func truncateBytes(b []byte, n int) string {
 	if len(b) <= n {
 		return hex.EncodeToString(b)
 	}
 	return hex.EncodeToString(b[:n]) + "..."
-}
-
-// hexDecode is a helper to decode hex strings.
-func hexDecode(s string) ([]byte, error) {
-	return hex.DecodeString(s)
 }
 
 // DecodeMessageEvent decodes a base64-encoded thrift MessageEvent string.

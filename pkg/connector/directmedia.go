@@ -27,7 +27,7 @@ func (tc *TwitterConnector) Download(ctx context.Context, mediaID networkid.Medi
 		return nil, fmt.Errorf("no logged in user found")
 	}
 	client := ul.Client.(*TwitterClient)
-	resp, err := client.downloadFile(ctx, mediaInfo.URL)
+	resp, err := downloadFile(ctx, client.client, mediaInfo.URL)
 	if err != nil {
 		return nil, err
 	}

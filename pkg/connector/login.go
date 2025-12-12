@@ -23,6 +23,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -220,7 +221,7 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	remoteProfile := &status.RemoteProfile{
 		Username: t.settings.ScreenName,
 	}
-	id := MakeUserLoginID(t.client.GetCurrentUserID())
+	id := networkid.UserLoginID(t.client.GetCurrentUserID())
 	ul, err := t.User.NewLogin(
 		ctx,
 		&database.UserLogin{

@@ -39,6 +39,8 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
+// Deprecated: HandleTwitterEvent handles legacy Twitter DM API events.
+// Use HandleXChatEvent for new XChat WebSocket events.
 func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
 	if rawEvt == nil && inbox != nil {
 		prevState := tc.userLogin.BridgeState.GetPrevUnsent().StateEvent
@@ -144,7 +146,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
+				Sender:    tc.MakeEventSender(string(tc.userLogin.ID)),
 				Timestamp: methods.ParseSnowflake(evt.ID),
 				PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
 					if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
@@ -273,7 +275,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 		conversation := inbox.GetConversationByID(evt.ConversationID)
 		if conversation != nil {
 			conversation.Participants = slices.DeleteFunc(conversation.Participants, func(pcp types.Participant) bool {
-				_, remove := memberChanges.MemberMap[MakeUserID(pcp.UserID)]
+				_, remove := memberChanges.MemberMap[networkid.UserID(pcp.UserID)]
 				return remove
 			})
 			memberChanges.TotalMemberCount = len(conversation.Participants)
@@ -406,7 +408,7 @@ func (tc *TwitterClient) updateTwitterReadReceipt(inbox *response.TwitterInboxDa
 	for conversationID, conversation := range inbox.Conversations {
 		cache := tc.participantCache[conversationID]
 		for _, participant := range conversation.Participants {
-			if participant.UserID == ParseUserLoginID(tc.userLogin.ID) {
+			if participant.UserID == string(tc.userLogin.ID) {
 				continue
 			}
 			if participant.LastReadEventID == "" {
@@ -455,7 +457,7 @@ func (tc *TwitterClient) updateTwitterUserInfo(inbox *response.TwitterInboxData)
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
 		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
-			ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
+			ghost, err := tc.connector.br.GetGhostByID(ctx, networkid.UserID(userID))
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost by ID")
 			} else {
@@ -482,6 +484,41 @@ func (tc *TwitterClient) HandleStreamEvent(evt response.StreamEvent) {
 			},
 			Timeout: 3 * time.Second,
 		})
+	}
+}
+
+// buildMemberChangeEvent creates a ChatInfoChange event for participant joins/leaves.
+func (tc *TwitterClient) buildMemberChangeEvent(
+	conversationID, eventID, eventTime string,
+	participants []types.Participant,
+	membership event.Membership,
+) *simplevent.ChatInfoChange {
+	memberChanges := &bridgev2.ChatMemberList{
+		IsFull:    false,
+		MemberMap: make(map[networkid.UserID]bridgev2.ChatMember, len(participants)),
+	}
+	for _, p := range participants {
+		memberChanges.MemberMap[networkid.UserID(p.UserID)] = bridgev2.ChatMember{
+			EventSender: tc.MakeEventSender(p.UserID),
+			Membership:  membership,
+		}
+	}
+	return &simplevent.ChatInfoChange{
+		EventMeta: simplevent.EventMeta{
+			Type: bridgev2.RemoteEventChatInfoChange,
+			LogContext: func(c zerolog.Context) zerolog.Context {
+				return c.
+					Str("conversation_id", conversationID).
+					Int("member_count", len(participants))
+			},
+			PortalKey:    tc.MakePortalKeyFromID(conversationID),
+			CreatePortal: false,
+			StreamOrder:  methods.ParseInt64(eventID),
+			Timestamp:    methods.ParseMsecTimestamp(eventTime),
+		},
+		ChatInfoChange: &bridgev2.ChatInfoChange{
+			MemberChanges: memberChanges,
+		},
 	}
 }
 
@@ -623,7 +660,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
-				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
+				Sender:    tc.MakeEventSender(string(tc.userLogin.ID)),
 				Timestamp: readUpTo,
 				PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
 					if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
@@ -715,62 +752,12 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}).Success
 
 	case *types.ParticipantsJoin:
-		memberChanges := &bridgev2.ChatMemberList{
-			IsFull:    false,
-			MemberMap: make(map[networkid.UserID]bridgev2.ChatMember),
-		}
-		for _, p := range evt.Participants {
-			memberChanges.MemberMap[MakeUserID(p.UserID)] = bridgev2.ChatMember{
-				EventSender: tc.MakeEventSender(p.UserID),
-				Membership:  event.MembershipJoin,
-			}
-		}
-		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventChatInfoChange,
-				LogContext: func(c zerolog.Context) zerolog.Context {
-					return c.
-						Str("conversation_id", evt.ConversationID).
-						Int("total_new_members", len(evt.Participants))
-				},
-				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
-				CreatePortal: false, // Portal should already exist from initial sync
-				StreamOrder:  methods.ParseInt64(evt.ID),
-				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				MemberChanges: memberChanges,
-			},
-		}).Success
+		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipJoin)
+		return tc.userLogin.QueueRemoteEvent(changeEvt).Success
 
 	case *types.ParticipantsLeave:
-		memberChanges := &bridgev2.ChatMemberList{
-			IsFull:    false,
-			MemberMap: make(map[networkid.UserID]bridgev2.ChatMember),
-		}
-		for _, p := range evt.Participants {
-			memberChanges.MemberMap[MakeUserID(p.UserID)] = bridgev2.ChatMember{
-				EventSender: tc.MakeEventSender(p.UserID),
-				Membership:  event.MembershipLeave,
-			}
-		}
-		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventChatInfoChange,
-				LogContext: func(c zerolog.Context) zerolog.Context {
-					return c.
-						Str("conversation_id", evt.ConversationID).
-						Int("total_left_members", len(evt.Participants))
-				},
-				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
-				CreatePortal: false,
-				StreamOrder:  methods.ParseInt64(evt.ID),
-				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				MemberChanges: memberChanges,
-			},
-		}).Success
+		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipLeave)
+		return tc.userLogin.QueueRemoteEvent(changeEvt).Success
 
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{

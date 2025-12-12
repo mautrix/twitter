@@ -19,6 +19,11 @@ type userLoginKeyStore struct {
 	meta  *UserLoginMetadata
 }
 
+// conversationCacheKey builds a cache key for conversation key storage.
+func conversationCacheKey(conversationID, keyVersion string) string {
+	return conversationID + ":" + keyVersion
+}
+
 func newUserLoginKeyStore(login *bridgev2.UserLogin) *userLoginKeyStore {
 	return &userLoginKeyStore{
 		login: login,
@@ -55,7 +60,7 @@ func ensureUserLoginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 
 func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
-	cacheKey := conversationID + ":" + keyVersion
+	cacheKey := conversationCacheKey(conversationID, keyVersion)
 	data, ok := ks.meta.ConversationKeys[cacheKey]
 	if !ok {
 		log.Info().
@@ -88,7 +93,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	if key == nil {
 		return fmt.Errorf("conversation key cannot be nil")
 	}
-	cacheKey := key.ConversationID + ":" + key.KeyVersion
+	cacheKey := conversationCacheKey(key.ConversationID, key.KeyVersion)
 	log.Info().
 		Str("conversation_id", key.ConversationID).
 		Str("key_version", key.KeyVersion).
@@ -120,7 +125,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 }
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
-	cacheKey := conversationID + ":" + keyVersion
+	cacheKey := conversationCacheKey(conversationID, keyVersion)
 	delete(ks.meta.ConversationKeys, cacheKey)
 	return ks.login.Save(ctx)
 }

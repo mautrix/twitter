@@ -2,14 +2,8 @@ package twittermeow
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 type JotClient struct {
@@ -22,57 +16,7 @@ func (c *Client) newJotClient() *JotClient {
 	}
 }
 
+// sendClientLoggingEvent is disabled - JOT logging not currently used.
 func (jc *JotClient) sendClientLoggingEvent(ctx context.Context, category payload.JotLoggingCategory, debug bool, body []interface{}) error {
-	if true {
-		return nil
-	}
-	logPayloadBytes, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-
-	clientLogPayload := &payload.JotClientEventPayload{
-		Category: category,
-		Debug:    debug,
-		Log:      string(logPayloadBytes),
-	}
-
-	clientLogPayloadBytes, err := clientLogPayload.Encode()
-	if err != nil {
-		return err
-	}
-
-	clientTransactionID, err := crypto.SignTransaction(jc.client.session.AnimationToken, jc.client.session.VerificationToken, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost)
-	if err != nil {
-		return err
-	}
-
-	extraHeaders := map[string]string{
-		"accept":                  "*/*",
-		"sec-fetch-site":          "same-site",
-		"sec-fetch-mode":          "cors",
-		"sec-fetch-dest":          "empty",
-		"x-client-transaction-id": clientTransactionID,
-	}
-
-	headerOpts := HeaderOpts{
-		WithAuthBearer:      true,
-		WithCookies:         true,
-		WithXGuestToken:     true,
-		WithXTwitterHeaders: true,
-		Origin:              endpoints.BASE_URL,
-		Referer:             endpoints.BASE_URL + "/",
-		Extra:               extraHeaders,
-	}
-
-	clientLogResponse, _, err := jc.client.MakeRequest(ctx, endpoints.JOT_CLIENT_EVENT_URL, http.MethodPost, jc.client.buildHeaders(headerOpts), clientLogPayloadBytes, types.ContentTypeForm)
-	if err != nil {
-		return err
-	}
-
-	if clientLogResponse.StatusCode > 204 {
-		return fmt.Errorf("failed to send jot client event, status code: %d", clientLogResponse.StatusCode)
-	}
-
 	return nil
 }

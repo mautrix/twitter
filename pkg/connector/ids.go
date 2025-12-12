@@ -56,35 +56,11 @@ func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.Po
 	}
 }
 
-func MakeUserID(userID string) networkid.UserID {
-	return networkid.UserID(userID)
-}
-
-func ParseUserID(userID networkid.UserID) string {
-	return string(userID)
-}
-
-func UserIDToUserLoginID(userID networkid.UserID) networkid.UserLoginID {
-	return networkid.UserLoginID(userID)
-}
-
-func UserLoginIDToUserID(userID networkid.UserLoginID) networkid.UserID {
-	return networkid.UserID(userID)
-}
-
-func MakeUserLoginID(userID string) networkid.UserLoginID {
-	return networkid.UserLoginID(userID)
-}
-
-func ParseUserLoginID(userID networkid.UserLoginID) string {
-	return string(userID)
-}
-
 func (tc *TwitterClient) MakeEventSender(userID string) bridgev2.EventSender {
 	return bridgev2.EventSender{
 		IsFromMe:    userID == string(tc.userLogin.ID),
-		SenderLogin: MakeUserLoginID(userID),
-		Sender:      MakeUserID(userID),
+		SenderLogin: networkid.UserLoginID(userID),
+		Sender:      networkid.UserID(userID),
 	}
 }
 
@@ -95,7 +71,7 @@ type MediaInfo struct {
 
 func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
 	mediaID := []byte{1}
-	uID, err := strconv.ParseUint(ParseUserLoginID(userID), 10, 64)
+	uID, err := strconv.ParseUint(string(userID), 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -127,7 +103,7 @@ func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	mediaInfo.UserID = MakeUserLoginID(strconv.FormatUint(uID, 10))
+	mediaInfo.UserID = networkid.UserLoginID(strconv.FormatUint(uID, 10))
 
 	size, err := binary.ReadUvarint(buf)
 	if err != nil {

@@ -166,7 +166,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		ID:        networkid.MessageID(messageID),
 		MXID:      msg.Event.ID,
 		Room:      msg.Portal.PortalKey,
-		SenderID:  UserLoginIDToUserID(tc.userLogin.ID),
+		SenderID:  networkid.UserID(tc.userLogin.ID),
 		Timestamp: time.Now(),
 		Metadata:  &MessageMetadata{XChatClientMsgID: messageID},
 	}
@@ -209,7 +209,7 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	emoji := variationselector.FullyQualify(msg.Content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
-		SenderID:     UserLoginIDToUserID(tc.userLogin.ID),
+		SenderID:     networkid.UserID(tc.userLogin.ID),
 		EmojiID:      networkid.EmojiID(emoji),
 		Emoji:        emoji,
 		MaxReactions: 1,

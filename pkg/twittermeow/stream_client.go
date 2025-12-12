@@ -114,6 +114,9 @@ func (sc *StreamClient) start(ctx context.Context) {
 			continue
 		}
 		index := strings.Index(line, ":")
+		if index < 0 {
+			continue // Skip malformed lines without ':'
+		}
 		field := line[:index]
 		value := line[index+1:]
 		if field != "data" {

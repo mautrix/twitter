@@ -176,7 +176,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		return nil, nil, fmt.Errorf("unsupported attachment type")
 	}
 
-	fileResp, err := tc.downloadFile(ctx, attachmentURL)
+	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -267,9 +267,6 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	return getResp, nil
 }
 
-func (tc *TwitterClient) downloadFile(ctx context.Context, url string) (*http.Response, error) {
-	return downloadFile(ctx, tc.client, url)
-}
 
 func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *event.BeeperLinkPreview {
 	canonicalURL := card.BindingValues.CardURL.StringValue
@@ -299,7 +296,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	if len(medias) > 0 {
 		media := medias[0]
 		if media.Type == "photo" {
-			resp, err := tc.downloadFile(ctx, media.MediaURLHTTPS)
+			resp, err := downloadFile(ctx, tc.client, media.MediaURLHTTPS)
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {

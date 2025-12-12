@@ -37,6 +37,50 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
+// previewString returns a truncated string preview for logging.
+func previewString(b []byte, max int) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if len(b) > max {
+		b = b[:max]
+	}
+	return string(b)
+}
+
+// previewBase64 returns a truncated base64 preview for logging.
+func previewBase64(b []byte, maxChars int) string {
+	if len(b) == 0 {
+		return ""
+	}
+	enc := base64.StdEncoding.EncodeToString(b)
+	if len(enc) > maxChars {
+		return enc[:maxChars]
+	}
+	return enc
+}
+
+// previewHex returns a truncated hex preview for logging.
+func previewHex(b []byte, maxBytes int) string {
+	if len(b) > maxBytes {
+		b = b[:maxBytes]
+	}
+	return hex.EncodeToString(b)
+}
+
+// getLatestConversationKey retrieves the latest conversation key for a conversation.
+func (tc *TwitterClient) getLatestConversationKey(ctx context.Context, conversationID string) *crypto.ConversationKey {
+	km := tc.client.GetKeyManager()
+	if km == nil {
+		return nil
+	}
+	key, err := km.GetLatestConversationKey(ctx, conversationID)
+	if err != nil || key == nil {
+		return nil
+	}
+	return key
+}
+
 func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 	if portal == nil {
 		return nil, fmt.Errorf("portal is nil")
@@ -189,7 +233,7 @@ func (tc *TwitterClient) conversationTypeToRoomType(convType types.ConversationT
 func (tc *TwitterClient) participantsToMemberList(participants []types.Participant, inbox *response.TwitterInboxData) *bridgev2.ChatMemberList {
 	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(participants))
 	for _, participant := range participants {
-		memberMap[MakeUserID(participant.UserID)] = tc.participantToChatMember(participant, inbox)
+		memberMap[networkid.UserID(participant.UserID)] = tc.participantToChatMember(participant, inbox)
 	}
 	return &bridgev2.ChatMemberList{
 		IsFull:           true,
@@ -245,32 +289,6 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 				return nil, err
 			}
 
-			previewString := func(b []byte, max int) string {
-				if len(b) == 0 {
-					return ""
-				}
-				if len(b) > max {
-					b = b[:max]
-				}
-				return string(b)
-			}
-			previewBase64 := func(b []byte, maxChars int) string {
-				if len(b) == 0 {
-					return ""
-				}
-				enc := base64.StdEncoding.EncodeToString(b)
-				if len(enc) > maxChars {
-					return enc[:maxChars]
-				}
-				return enc
-			}
-			previewHex := func(b []byte, maxBytes int) string {
-				if len(b) > maxBytes {
-					b = b[:maxBytes]
-				}
-				return hex.EncodeToString(b)
-			}
-
 			if resp != nil {
 				logger.Info().
 					Int("status_code", resp.StatusCode).
@@ -285,21 +303,9 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 				return body, nil
 			}
 
-			getConversationKey := func() *crypto.ConversationKey {
-				km := tc.client.GetKeyManager()
-				if km == nil {
-					return nil
-				}
-				if key, err := km.GetLatestConversationKey(ctx, conversationID); err == nil && key != nil {
-					return key
-				}
-				return nil
-			}
-
-			convKey := getConversationKey()
+			convKey := tc.getLatestConversationKey(ctx, conversationID)
 			if convKey == nil || len(convKey.Key) == 0 {
-				logger.Warn().
-					Msg("No conversation key available for group avatar; returning raw bytes")
+				logger.Warn().Msg("No conversation key available for group avatar; returning raw bytes")
 				return body, nil
 			}
 
