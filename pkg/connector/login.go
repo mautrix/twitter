@@ -212,7 +212,8 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 
 	t.SecretKey = keys.SecretKey
 	t.SigningKey = keys.SigningKey
-	t.SigningKeyVersion = keys.SigningKeyVersion
+	// SigningKeyVersion comes from the API response, not Juicebox (binary data doesn't include it)
+	t.SigningKeyVersion = keyData.PublicKeyWithMetadata.Version
 
 	// Validate recovered keys
 	if t.SecretKey != "" {
