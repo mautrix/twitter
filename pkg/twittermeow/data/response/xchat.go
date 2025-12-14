@@ -216,3 +216,67 @@ type XChatUserVerification struct {
 	IsVerifiedOrganizationAffiliate bool   `json:"is_verified_organization_affiliate,omitempty"`
 	Verified                        bool   `json:"verified,omitempty"`
 }
+
+// GetPublicKeysResponse models the GraphQL response for fetching public keys and Juicebox tokens.
+type GetPublicKeysResponse struct {
+	Data struct {
+		UserResultsByRestIDs []UserResultsWithPublicKeys `json:"user_results_by_rest_ids"`
+	} `json:"data"`
+}
+
+type UserResultsWithPublicKeys struct {
+	Typename string `json:"__typename,omitempty"`
+	RestID   string `json:"rest_id,omitempty"`
+	Result   struct {
+		Typename      string              `json:"__typename,omitempty"`
+		GetPublicKeys GetPublicKeysResult `json:"get_public_keys"`
+	} `json:"result,omitempty"`
+}
+
+type GetPublicKeysResult struct {
+	Typename               string                  `json:"__typename,omitempty"`
+	PublicKeysWithTokenMap []PublicKeyWithTokenMap `json:"public_keys_with_token_map,omitempty"`
+	IsManagedPinUser       bool                    `json:"is_managed_pin_user,omitempty"`
+}
+
+type PublicKeyWithTokenMap struct {
+	Typename              string                   `json:"__typename,omitempty"`
+	PublicKeyWithMetadata XChatPublicKeyWithMeta   `json:"public_key_with_metadata"`
+	TokenMap              KeyStoreTokenMap         `json:"token_map"`
+}
+
+type XChatPublicKeyWithMeta struct {
+	Typename  string         `json:"__typename,omitempty"`
+	PublicKey XChatPublicKey `json:"public_key"`
+	Version   string         `json:"version,omitempty"` // This is the signing_key_version
+}
+
+type XChatPublicKey struct {
+	Typename                   string `json:"__typename,omitempty"`
+	PublicKey                  string `json:"public_key,omitempty"`
+	SigningPublicKey           string `json:"signing_public_key,omitempty"`
+	IdentityPublicKeySignature string `json:"identity_public_key_signature,omitempty"`
+}
+
+type KeyStoreTokenMap struct {
+	Typename             string               `json:"__typename,omitempty"`
+	RealmState           string               `json:"realm_state,omitempty"`
+	MaxGuessCount        int                  `json:"max_guess_count,omitempty"`
+	RecoverThreshold     int                  `json:"recover_threshold,omitempty"`
+	RegisterThreshold    int                  `json:"register_threshold,omitempty"`
+	TokenMap             []KeyStoreTokenEntry `json:"token_map,omitempty"`
+	KeyStoreTokenMapJSON string               `json:"key_store_token_map_json,omitempty"` // Ready-to-use Juicebox config JSON
+}
+
+type KeyStoreTokenEntry struct {
+	Typename string        `json:"__typename,omitempty"`
+	Key      string        `json:"key,omitempty"`   // Realm ID (hex)
+	Value    KeyStoreToken `json:"value,omitempty"`
+}
+
+type KeyStoreToken struct {
+	Typename  string `json:"__typename,omitempty"`
+	Token     string `json:"token,omitempty"`      // Auth token for this realm
+	Address   string `json:"address,omitempty"`    // Realm URL
+	PublicKey string `json:"public_key,omitempty"` // Optional realm public key
+}

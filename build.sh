@@ -1,4 +1,12 @@
 #!/bin/sh
-MAUTRIX_VERSION=$(cat go.mod | grep 'maunium.net/go/mautrix ' | awk '{ print $2 }' | head -n1)
-GO_LDFLAGS="-s -w -X main.Tag=$(git describe --exact-match --tags 2>/dev/null) -X main.Commit=$(git rev-parse HEAD) -X 'main.BuildTime=`date -Iseconds`' -X 'maunium.net/go/mautrix.GoModVersion=$MAUTRIX_VERSION'"
-go build -ldflags="$GO_LDFLAGS" "$@" ./cmd/mautrix-twitter
+set -e
+
+# Build Juicebox FFI library
+./build-rust.sh
+
+# Copy FFI artifacts to project root and pkg/juicebox
+cp -f pkg/juicebox/juicebox-sdk/target/release/libjuicebox_sdk_ffi.a .
+cp -f pkg/juicebox/juicebox-sdk/swift/Sources/JuiceboxSdkFfi/juicebox-sdk-ffi.h pkg/juicebox/
+
+# Build Go with LIBRARY_PATH set
+LIBRARY_PATH=.:$LIBRARY_PATH ./build-go.sh "$@"

@@ -45,9 +45,10 @@ type TwitterLogin struct {
 }
 
 var (
-	LoginStepIDCookies  = "fi.mau.twitter.login.enter_cookies"
-	LoginStepSecretKey  = "fi.mau.twitter.login.secret_key"
-	LoginStepIDComplete = "fi.mau.twitter.login.complete"
+	LoginStepIDCookies   = "fi.mau.twitter.login.enter_cookies"
+	LoginStepSecretKey   = "fi.mau.twitter.login.secret_key"
+	LoginStepJuiceboxPIN = "fi.mau.twitter.login.juicebox_pin"
+	LoginStepIDComplete  = "fi.mau.twitter.login.complete"
 )
 
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
@@ -119,47 +120,15 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
-		StepID:       LoginStepSecretKey,
-		Instructions: "Enter the secret key (for decrypting conversation keys), signing key (for signing messages), and the signing key version string.",
+		StepID:       LoginStepJuiceboxPIN,
+		Instructions: "Enter your 4-digit PIN to recover your encryption keys from Juicebox.",
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
 					Type:        bridgev2.LoginInputFieldTypePassword,
-					ID:          "secret_key",
-					Name:        "Secret key",
-					Description: "The secret key for decrypting conversation keys (base64 32-byte scalar).",
-					Validate: func(input string) (string, error) {
-						input = strings.TrimSpace(input)
-						if input == "" {
-							return "", fmt.Errorf("secret key cannot be empty")
-						}
-						if _, err := crypto.ParsePrivateKeyScalar(input); err != nil {
-							return "", fmt.Errorf("invalid secret key: %w", err)
-						}
-						return input, nil
-					},
-				},
-				{
-					Type:        bridgev2.LoginInputFieldTypePassword,
-					ID:          "signing_key",
-					Name:        "Signing key",
-					Description: "The signing key for signing messages (base64 32-byte scalar).",
-					Validate: func(input string) (string, error) {
-						input = strings.TrimSpace(input)
-						if input == "" {
-							return "", nil
-						}
-						if _, err := crypto.ParsePrivateKeyScalar(input); err != nil {
-							return "", fmt.Errorf("invalid signing key: %w", err)
-						}
-						return input, nil
-					},
-				},
-				{
-					Type:        bridgev2.LoginInputFieldTypeToken,
-					ID:          "signing_key_version",
-					Name:        "Signing key version",
-					Description: "The signing key version identifier (string).",
+					ID:          "pin",
+					Name:        "PIN",
+					Description: "4-digit PIN for key recovery",
 				},
 			},
 		},
@@ -167,48 +136,95 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 }
 
 func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
-	secretKey, ok := input["secret_key"]
+	pin, ok := input["pin"]
 	if !ok {
-		return nil, fmt.Errorf("secret_key input is required")
+		return nil, fmt.Errorf("pin input is required")
 	}
-	secretKey = strings.TrimSpace(secretKey)
-	if secretKey == "" {
-		return nil, fmt.Errorf("secret key cannot be empty")
+	pin = strings.TrimSpace(pin)
+	if pin == "" {
+		return nil, fmt.Errorf("PIN cannot be empty")
 	}
-	if _, err := crypto.ParsePrivateKeyScalar(secretKey); err != nil {
-		return nil, fmt.Errorf("invalid secret key: %w", err)
-	}
-	t.SecretKey = secretKey
-
-	signingKey := strings.TrimSpace(input["signing_key"])
-	if signingKey != "" {
-		if _, err := crypto.ParsePrivateKeyScalar(signingKey); err != nil {
-			return nil, fmt.Errorf("invalid signing key: %w", err)
-		}
-	}
-	t.SigningKey = signingKey
-
-	signingKeyVersion, ok := input["signing_key_version"]
-	if ok {
-		signingKeyVersion = strings.TrimSpace(signingKeyVersion)
-	}
-	t.SigningKeyVersion = signingKeyVersion
 
 	if t.client == nil {
 		if t.Cookies == "" {
-			return nil, fmt.Errorf("cookies must be submitted before secret key")
+			return nil, fmt.Errorf("cookies must be submitted before PIN")
 		}
 		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 		t.client = twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 		settings, err := t.client.LoadMessagesPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load messages page after submitting secret key: %w", err)
+			return nil, fmt.Errorf("failed to load messages page: %w", err)
 		}
 		t.settings = settings
 	}
+
 	// Persist any cookies set by LoadMessagesPage so subsequent sessions include them.
 	t.Cookies = t.client.GetCookieString()
 	t.client.SetCurrentUserID(t.client.GetCurrentUserID())
+
+	// Get Juicebox config from X/Twitter API
+	publicKeysResp, err := t.client.GetPublicKeys(ctx, []string{t.client.GetCurrentUserID()})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public keys: %w", err)
+	}
+
+	if len(publicKeysResp.Data.UserResultsByRestIDs) == 0 {
+		return nil, fmt.Errorf("no public keys found for user")
+	}
+
+	userResult := publicKeysResp.Data.UserResultsByRestIDs[0]
+	if len(userResult.Result.GetPublicKeys.PublicKeysWithTokenMap) == 0 {
+		return nil, fmt.Errorf("no juicebox token map found for user")
+	}
+
+	keyData := userResult.Result.GetPublicKeys.PublicKeysWithTokenMap[0]
+	juiceboxConfigJSON := keyData.TokenMap.KeyStoreTokenMapJSON
+
+	// Validate config JSON is not empty
+	if juiceboxConfigJSON == "" {
+		return nil, fmt.Errorf("juicebox config JSON is empty - KeyStoreTokenMapJSON not returned by API")
+	}
+
+	// Build auth tokens map from token_map entries
+	// Maps realm ID (hex string, lowercase) to pre-fetched JWT auth token
+	authTokens := make(map[string]string)
+	for _, entry := range keyData.TokenMap.TokenMap {
+		authTokens[strings.ToLower(entry.Key)] = entry.Value.Token
+	}
+
+	if len(authTokens) == 0 {
+		return nil, fmt.Errorf("no auth tokens found in token_map")
+	}
+
+	juiceboxLogger := t.User.Log.With().Str("component", "juicebox").Logger()
+	juiceboxLogger.Debug().
+		Str("juicebox_config", juiceboxConfigJSON).
+		Int("juicebox_config_len", len(juiceboxConfigJSON)).
+		Any("auth_tokens", authTokens).
+		Int("auth_tokens_count", len(authTokens)).
+		Msg("Juicebox recovery parameters")
+
+	// Recover keys from Juicebox (user info must be empty)
+	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", juiceboxLogger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to recover keys from Juicebox: %w", err)
+	}
+
+	t.SecretKey = keys.SecretKey
+	t.SigningKey = keys.SigningKey
+	t.SigningKeyVersion = keys.SigningKeyVersion
+
+	// Validate recovered keys
+	if t.SecretKey != "" {
+		if _, err := crypto.ParsePrivateKeyScalar(t.SecretKey); err != nil {
+			return nil, fmt.Errorf("recovered invalid secret key: %w", err)
+		}
+	}
+	if t.SigningKey != "" {
+		if _, err := crypto.ParsePrivateKeyScalar(t.SigningKey); err != nil {
+			return nil, fmt.Errorf("recovered invalid signing key: %w", err)
+		}
+	}
 
 	meta := &UserLoginMetadata{
 		Cookies:           t.Cookies,

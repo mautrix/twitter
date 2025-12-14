@@ -805,3 +805,40 @@ func (c *Client) GetConversationPage(ctx context.Context, variables *payload.Get
 	var resp response.GetConversationPageQueryResponse
 	return &resp, json.Unmarshal(respBody, &resp)
 }
+
+func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {
+	variables := payload.NewGetPublicKeysQueryVariables(userIDs)
+
+	formBody, err := variables.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("url", endpoints.GET_PUBLIC_KEYS_QUERY_URL).
+		Str("form_body", string(formBody)).
+		Msg("GetPublicKeys payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.GET_PUBLIC_KEYS_QUERY_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
+	})
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg("GetPublicKeys failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg("GetPublicKeys response")
+
+	var resp response.GetPublicKeysResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}

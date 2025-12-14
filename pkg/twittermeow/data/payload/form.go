@@ -434,3 +434,25 @@ func (p *GetConversationPageQueryVariables) Encode() ([]byte, error) {
 	values.Set("variables", string(jsonVars))
 	return []byte(values.Encode()), nil
 }
+
+type GetPublicKeysQueryVariables struct {
+	IDs                   []string `json:"ids"`
+	IncludeJuiceboxTokens bool     `json:"include_juicebox_tokens"`
+}
+
+func NewGetPublicKeysQueryVariables(ids []string) *GetPublicKeysQueryVariables {
+	return &GetPublicKeysQueryVariables{
+		IDs:                   ids,
+		IncludeJuiceboxTokens: true,
+	}
+}
+
+func (p *GetPublicKeysQueryVariables) Encode() ([]byte, error) {
+	jsonVars, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("variables", string(jsonVars))
+	return []byte(values.Encode()), nil
+}
