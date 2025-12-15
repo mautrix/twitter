@@ -91,8 +91,18 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	if len(textPart.Content.Body) > 0 {
 		parts = append(parts, textPart)
 	}
+	displayName := tc.getDisplayNameForUser(ctx, msg.SenderID)
+	if displayName == "" {
+		displayName = msg.SenderID
+	}
+
 	for _, part := range parts {
-		part.DBMetadata = &MessageMetadata{EditCount: msg.EditCount}
+		part.DBMetadata = &MessageMetadata{
+			EditCount:         msg.EditCount,
+			MessageText:       msg.Text,
+			SenderID:          msg.SenderID,
+			SenderDisplayName: displayName,
+		}
 	}
 
 	cm := &bridgev2.ConvertedMessage{
@@ -115,6 +125,37 @@ func removeEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []
 	}
 
 	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
+}
+
+func (tc *TwitterClient) getDisplayNameForUser(ctx context.Context, userID string) string {
+	if userID == "" {
+		return ""
+	}
+
+	tc.userCacheLock.RLock()
+	user := tc.userCache[userID]
+	tc.userCacheLock.RUnlock()
+
+	if user == nil {
+		if err := tc.ensureUsersInCacheByID(ctx, []string{userID}); err != nil {
+			zerolog.Ctx(ctx).Debug().
+				Err(err).
+				Str("user_id", userID).
+				Msg("Failed to fetch user while resolving display name")
+			return ""
+		}
+		tc.userCacheLock.RLock()
+		user = tc.userCache[userID]
+		tc.userCacheLock.RUnlock()
+	}
+
+	if user == nil {
+		return ""
+	}
+	if user.Name != "" {
+		return user.Name
+	}
+	return user.ScreenName
 }
 
 func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
@@ -266,7 +307,6 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	}
 	return getResp, nil
 }
-
 
 func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *event.BeeperLinkPreview {
 	canonicalURL := card.BindingValues.CardURL.StringValue

@@ -78,6 +78,19 @@ func DecryptMessageEntryContentsBytesDebug(ciphertext []byte, conversationKey []
 	if entry == nil {
 		return nil, fmt.Errorf("no message entry contents in holder")
 	}
+	if log != nil && entry.Message != nil {
+		if msgJSON, err := json.Marshal(entry.Message); err == nil {
+			evt := log.Info().
+				Int("decrypted_json_len", len(msgJSON)).
+				Int("plaintext_len", len(plaintext))
+			if len(msgJSON) <= 4000 {
+				evt = evt.RawJSON("decrypted_message", msgJSON)
+			} else {
+				evt = evt.Str("decrypted_message_prefix", string(msgJSON[:4000]))
+			}
+			evt.Msg("Decrypted XChat message contents")
+		}
+	}
 	return entry, nil
 }
 

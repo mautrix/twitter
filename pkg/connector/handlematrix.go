@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,11 +89,60 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		Text:           text,
 	}
 
-	// Replies: best-effort include target ID.
 	if msg.ReplyTo != nil {
-		replyID := string(msg.ReplyTo.ID)
+		replySeqID := string(msg.ReplyTo.ID)
+		replyMsgID := replySeqID
+		var replyText string
+		var replyDisplayName string
+		var senderIDStr string
+
+		var metaCopy MessageMetadata
+		if meta, ok := msg.ReplyTo.Metadata.(*MessageMetadata); ok && meta != nil {
+			metaCopy = *meta
+		}
+		if extra := tc.lookupReplyMetadata(ctx, msg.Portal.PortalKey, msg.ReplyTo.ID); extra != nil {
+			metaCopy.CopyFrom(extra)
+		}
+
+		if metaCopy.XChatSequenceID != "" {
+			replySeqID = metaCopy.XChatSequenceID
+		}
+		if metaCopy.XChatClientMsgID != "" {
+			replyMsgID = metaCopy.XChatClientMsgID
+		}
+		replyText = metaCopy.MessageText
+		replyDisplayName = metaCopy.SenderDisplayName
+		senderIDStr = metaCopy.SenderID
+
+		if senderIDStr == "" && msg.ReplyTo.SenderID != "" {
+			senderIDStr = string(msg.ReplyTo.SenderID)
+		}
+		if replyDisplayName == "" && senderIDStr != "" {
+			replyDisplayName = tc.getDisplayNameForUser(ctx, senderIDStr)
+			if replyDisplayName == "" {
+				replyDisplayName = senderIDStr
+			}
+		}
+		var senderIDPtr *int64
+		if senderIDStr != "" {
+			if parsed, err := strconv.ParseInt(senderIDStr, 10, 64); err == nil {
+				senderIDPtr = &parsed
+			} else {
+				zerolog.Ctx(ctx).Debug().
+					Str("raw_sender_id", senderIDStr).
+					Err(err).
+					Msg("Failed to parse sender_id for reply preview")
+			}
+		}
+		if replyMsgID == "" {
+			replyMsgID = replySeqID
+		}
 		opts.ReplyTo = &payload.ReplyingToPreview{
-			ReplyingToMessageId: &replyID,
+			ReplyingToMessageId:         &replyMsgID,
+			ReplyingToMessageSequenceId: &replySeqID,
+			MessageText:                 &replyText,
+			SenderDisplayName:           ptr.Ptr(replyDisplayName),
+			SenderId:                    senderIDPtr,
 		}
 	}
 
@@ -168,7 +218,12 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		Room:      msg.Portal.PortalKey,
 		SenderID:  networkid.UserID(tc.userLogin.ID),
 		Timestamp: time.Now(),
-		Metadata:  &MessageMetadata{XChatClientMsgID: messageID},
+		Metadata: &MessageMetadata{
+			XChatClientMsgID:  messageID,
+			MessageText:       text,
+			SenderID:          string(tc.userLogin.ID),
+			SenderDisplayName: tc.getDisplayNameForUser(ctx, string(tc.userLogin.ID)),
+		},
 	}
 	msg.AddPendingToSave(dbMsg, txnID, func(remote bridgev2.RemoteMessage, db *database.Message) (bool, error) {
 		// Store the real (numeric) XChat message ID when the remote echo arrives.
@@ -189,6 +244,26 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		DB:      dbMsg,
 		Pending: true,
 	}, nil
+}
+
+// lookupReplyMetadata fetches message metadata for a given message ID across all parts and merges them.
+func (tc *TwitterClient) lookupReplyMetadata(ctx context.Context, portalKey networkid.PortalKey, msgID networkid.MessageID) *MessageMetadata {
+	msgs, err := tc.connector.br.DB.Message.GetAllPartsByID(ctx, portalKey.Receiver, msgID)
+	if err != nil {
+		zerolog.Ctx(ctx).Debug().
+			Err(err).
+			Str("conversation_id", string(portalKey.ID)).
+			Str("reply_to_id", string(msgID)).
+			Msg("Failed to load reply target metadata from DB")
+		return nil
+	}
+	var merged MessageMetadata
+	for _, m := range msgs {
+		if meta, ok := m.Metadata.(*MessageMetadata); ok && meta != nil {
+			merged.CopyFrom(meta)
+		}
+	}
+	return &merged
 }
 
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {

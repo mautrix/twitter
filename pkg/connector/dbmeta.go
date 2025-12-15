@@ -74,6 +74,10 @@ type MessageMetadata struct {
 	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages
 	XChatSequenceID  string `json:"xchat_sequence_id,omitempty"`   // numeric sequence id from XChat events
 	XChatCreatedAtMS string `json:"xchat_created_at_ms,omitempty"` // message created_at_msec from XChat event
+
+	MessageText       string `json:"message_text,omitempty"`
+	SenderDisplayName string `json:"sender_display_name,omitempty"`
+	SenderID          string `json:"sender_id,omitempty"`
 }
 
 func (m *MessageMetadata) CopyFrom(other any) {
@@ -92,6 +96,15 @@ func (m *MessageMetadata) CopyFrom(other any) {
 	}
 	if m.XChatCreatedAtMS == "" {
 		m.XChatCreatedAtMS = o.XChatCreatedAtMS
+	}
+	if m.MessageText == "" {
+		m.MessageText = o.MessageText
+	}
+	if m.SenderDisplayName == "" {
+		m.SenderDisplayName = o.SenderDisplayName
+	}
+	if m.SenderID == "" {
+		m.SenderID = o.SenderID
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -240,26 +241,28 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Msg("Failed to decrypt message contents, skipping")
 			return nil
 		}
-	} else {
-		// No signature - parse as plaintext thrift
-		contents, err = crypto.ParseMessageEntryContentsBytes(contentsBytes)
-		if err != nil {
-			p.log.Warn().
+		} else {
+			// No signature - parse as plaintext thrift
+			contents, err = crypto.ParseMessageEntryContentsBytes(contentsBytes)
+			if err != nil {
+				p.log.Warn().
 				Err(err).
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
 				Str("contents_hex_prefix", truncateBytes(contentsBytes, 32)).
-				Msg("Failed to parse message contents, skipping")
-			return nil
+					Msg("Failed to parse message contents, skipping")
+				return nil
+			}
 		}
-	}
 
-	// MessageContents directly contains message data (MessageText, Attachments, etc.)
-	// Check if it has actual message content
-	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
-		msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
-		return p.emitEvent(ctx, msg)
+		p.logDecodedMessageContents(evt, conversationID, contents)
+
+		// MessageContents directly contains message data (MessageText, Attachments, etc.)
+		// Check if it has actual message content
+		if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
+			msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
+			return p.emitEvent(ctx, msg)
 	}
 
 	if contents.ReactionAdd != nil {
@@ -526,6 +529,33 @@ func truncateBytes(b []byte, n int) string {
 		return hex.EncodeToString(b)
 	}
 	return hex.EncodeToString(b[:n]) + "..."
+}
+
+func (p *XChatEventProcessor) logDecodedMessageContents(evt *payload.MessageEvent, conversationID string, contents *payload.MessageEntryContents) {
+	if contents == nil {
+		return
+	}
+	seqID := ptr.Val(evt.SequenceId)
+	raw, err := json.Marshal(contents)
+	if err != nil {
+		p.log.Warn().
+			Err(err).
+			Str("sequence_id", seqID).
+			Str("conversation_id", conversationID).
+			Msg("Failed to marshal decrypted message contents")
+		return
+	}
+
+	logEvt := p.log.Info().
+		Str("sequence_id", seqID).
+		Str("conversation_id", conversationID).
+		Int("decoded_json_len", len(raw))
+	if len(raw) <= 4000 {
+		logEvt = logEvt.RawJSON("decrypted_contents", raw)
+	} else {
+		logEvt = logEvt.Str("decrypted_contents_prefix", string(raw[:4000]))
+	}
+	logEvt.Msg("Decrypted MessageCreateEvent contents")
 }
 
 // DecodeMessageEvent decodes a base64-encoded thrift MessageEvent string.

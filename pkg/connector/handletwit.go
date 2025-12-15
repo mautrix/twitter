@@ -626,6 +626,20 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 					if clientMsgID != "" && meta.XChatClientMsgID == "" {
 						meta.XChatClientMsgID = clientMsgID
 					}
+					if data != nil {
+						if meta.MessageText == "" {
+							meta.MessageText = data.Text
+						}
+						if meta.SenderID == "" {
+							meta.SenderID = data.SenderID
+						}
+						if meta.SenderDisplayName == "" {
+							meta.SenderDisplayName = tc.getDisplayNameForUser(ctx, data.SenderID)
+							if meta.SenderDisplayName == "" {
+								meta.SenderDisplayName = data.SenderID
+							}
+						}
+					}
 					if data != nil && data.EditCount > meta.EditCount {
 						meta.EditCount = data.EditCount
 					}

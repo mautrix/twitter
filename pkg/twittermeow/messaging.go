@@ -579,6 +579,20 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 		builder.AddAttachment(att)
 	}
 	if opts.ReplyTo != nil {
+		if replyJSON, err := json.Marshal(opts.ReplyTo); err != nil {
+			c.Logger.Warn().
+				Err(err).
+				Interface("reply_preview", opts.ReplyTo).
+				Str("conversation_id", opts.ConversationID).
+				Str("message_id", messageID).
+				Msg("Failed to marshal ReplyingToPreview for logging")
+		} else {
+			c.Logger.Debug().
+				Str("conversation_id", opts.ConversationID).
+				Str("message_id", messageID).
+				RawJSON("reply_preview", replyJSON).
+				Msg("Sending reply with ReplyingToPreview")
+		}
 		builder.SetReplyTo(opts.ReplyTo)
 	}
 	if len(opts.Entities) > 0 {
