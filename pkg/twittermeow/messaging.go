@@ -429,3 +429,23 @@ func (c *Client) AddParticipants(ctx context.Context, variables *payload.AddPart
 	data := response.AddParticipantsResponse{}
 	return &data, json.Unmarshal(respBody, &data)
 }
+
+func (c *Client) AcceptConversation(ctx context.Context, conversationID string) error {
+	resp, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            fmt.Sprintf(endpoints.ACCEPT_CONVERSATION_URL, conversationID),
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Referer:        endpoints.BASE_MESSAGES_URL,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode > 204 {
+		return fmt.Errorf("failed to accept conversation id=%s (status_code=%d, response_body=%s)", conversationID, resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}

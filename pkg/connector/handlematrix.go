@@ -43,15 +43,16 @@ var mediaCategoryMap = map[event.MessageType]payload.MediaCategory{
 }
 
 var (
-	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
-	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
-	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
-	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
-	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
-	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
-	_ bridgev2.MembershipHandlingNetworkAPI  = (*TwitterClient)(nil)
-	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
-	_ bridgev2.RoomNameHandlingNetworkAPI    = (*TwitterClient)(nil)
+	_ bridgev2.ReactionHandlingNetworkAPI        = (*TwitterClient)(nil)
+	_ bridgev2.ReadReceiptHandlingNetworkAPI     = (*TwitterClient)(nil)
+	_ bridgev2.EditHandlingNetworkAPI            = (*TwitterClient)(nil)
+	_ bridgev2.TypingHandlingNetworkAPI          = (*TwitterClient)(nil)
+	_ bridgev2.ChatViewingNetworkAPI             = (*TwitterClient)(nil)
+	_ bridgev2.DeleteChatHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.MembershipHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.MessageRequestAcceptingNetworkAPI = (*TwitterClient)(nil)
+	_ bridgev2.RoomAvatarHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.RoomNameHandlingNetworkAPI        = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -331,4 +332,8 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 		return nil, err
 	}
 	return nil, nil
+}
+
+func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
+	return tc.client.AcceptConversation(ctx, string(msg.Portal.ID))
 }
