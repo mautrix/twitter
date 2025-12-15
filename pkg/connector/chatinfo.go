@@ -87,11 +87,13 @@ func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox 
 	} else {
 		userLocal.MutedUntil = ptr.Ptr(bridgev2.Unmuted)
 	}
+	messageRequest := !conv.Trusted || conv.LowQuality
 	chatInfo := &bridgev2.ChatInfo{
-		Members:     memberList,
-		Type:        tc.conversationTypeToRoomType(conv.Type),
-		UserLocal:   &userLocal,
-		CanBackfill: true,
+		Members:        memberList,
+		Type:           tc.conversationTypeToRoomType(conv.Type),
+		UserLocal:      &userLocal,
+		MessageRequest: &messageRequest,
+		CanBackfill:    true,
 	}
 
 	if *chatInfo.Type != database.RoomTypeDM {
