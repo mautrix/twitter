@@ -103,7 +103,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    tc.makePortalKeyFromInbox(evt.ConversationID, inbox),
-				CreatePortal: true,
+				CreatePortal: isFromMe || (conversation != nil && !conversation.LowQuality),
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
 				StreamOrder:  methods.ParseSnowflakeInt(evt.MessageData.ID),
 				Timestamp:    methods.ParseSnowflake(evt.MessageData.ID),
