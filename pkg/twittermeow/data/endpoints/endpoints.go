@@ -28,6 +28,7 @@ const (
 	GRAPHQL_MESSAGE_DELETION_MUTATION = BASE_URL + "/i/api/graphql/BJ6DtxA2llfjnRoRjaiIiw/DMMessageDeleteMutation"
 	SEARCH_TYPEAHEAD_URL              = BASE_URL + "/i/api/1.1/search/typeahead.json"
 	DM_PERMISSIONS_URL                = BASE_URL + "/i/api/1.1/dm/permissions.json"
+	ACCEPT_CONVERSATION_URL           = BASE_URL + "/i/api/1.1/dm/conversation/%s/accept.json"
 	DELETE_CONVERSATION_URL           = BASE_URL + "/i/api/1.1/dm/conversation/%s/delete.json"
 	UPDATE_CONVERSATION_AVATAR_URL    = BASE_URL + "/i/api/1.1/dm/conversation/%s/update_avatar.json"
 	UPDATE_CONVERSATION_NAME_URL      = BASE_URL + "/i/api/1.1/dm/conversation/%s/update_name.json"

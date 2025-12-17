@@ -288,7 +288,7 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			EventMeta: simplevent.EventMeta{
 				Type:         bridgev2.RemoteEventChatResync,
 				PortalKey:    tc.MakePortalKey(conversation),
-				CreatePortal: conversation != nil && conversation.Trusted,
+				CreatePortal: true,
 			},
 			ChatInfo: tc.conversationToChatInfo(conversation, inbox),
 		}).Success
