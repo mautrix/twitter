@@ -309,7 +309,7 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 				return body, nil
 			}
 
-			pt, err := crypto.SecretboxDecrypt(body, convKey.Key)
+			pt, err := crypto.SecretstreamDecrypt(body, convKey.Key)
 			if err != nil {
 				logger.Warn().
 					Err(err).
