@@ -39,11 +39,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
-var mediaCategoryMap = map[event.MessageType]payload.MediaCategory{
-	event.MsgVideo: payload.MEDIA_CATEGORY_DM_VIDEO,
-	event.MsgImage: payload.MEDIA_CATEGORY_DM_IMAGE,
-}
-
 var (
 	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
@@ -159,30 +154,24 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			return nil, err
 		}
 
-		uploadMediaParams := &payload.UploadMediaQuery{
-			MediaCategory: mediaCategoryMap[content.MsgType],
-			MediaType:     content.Info.MimeType,
-		}
-		if content.Info.MimeType == "image/gif" || content.Info.MauGIF {
-			uploadMediaParams.MediaCategory = "dm_gif"
-		}
-		if content.MsgType == event.MsgAudio {
-			uploadMediaParams.MediaCategory = "dm_video"
-			if content.Info.MimeType != "video/mp4" {
-				converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
-				if err != nil {
-					return nil, err
-				}
-				data = converted
+		// Convert audio to mp4 if needed
+		if content.MsgType == event.MsgAudio && content.Info.MimeType != "video/mp4" {
+			converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+			if err != nil {
+				return nil, err
 			}
+			data = converted
 		}
 
-		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
+		// Upload media using encrypted XChat flow
+		uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
 		if err != nil {
 			return nil, err
 		}
 
-		zerolog.Ctx(ctx).Debug().Any("media_info", uploadedMediaResponse).Msg("Successfully uploaded media to twitter's servers")
+		zerolog.Ctx(ctx).Debug().
+			Str("media_hash_key", uploadResult.MediaHashKey).
+			Msg("Successfully uploaded encrypted media to XChat")
 
 		attType := payload.MediaTypeImage
 		switch content.MsgType {
@@ -193,10 +182,10 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 		width := int64(content.Info.Width)
 		height := int64(content.Info.Height)
-		size := int64(uploadedMediaResponse.Size)
+		size := int64(len(data))
 		opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
 			Media: &payload.MediaAttachment{
-				MediaHashKey: &uploadedMediaResponse.MediaKey,
+				MediaHashKey: &uploadResult.MediaHashKey,
 				Type:         ptr.Ptr(int32(attType)),
 				Dimensions: &payload.MediaDimensions{
 					Width:  &width,
@@ -204,7 +193,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 				},
 				FilesizeBytes: &size,
 				Filename:      ptr.Ptr(content.FileName),
-				AttachmentId:  ptr.Ptr(uploadedMediaResponse.MediaIDString),
 			},
 		})
 	default:

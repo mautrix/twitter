@@ -17,10 +17,11 @@ import (
 func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *payload.MessageContents, keyVersion string) *types.Message {
 	seqID := ptr.Val(evt.SequenceId)
 	msgData := types.MessageData{
-		ID:       seqID,
-		Time:     ptr.Val(evt.CreatedAtMsec),
-		SenderID: ptr.Val(evt.SenderId),
-		Text:     ptr.Val(contents.MessageText),
+		ID:                     seqID,
+		Time:                   ptr.Val(evt.CreatedAtMsec),
+		SenderID:               ptr.Val(evt.SenderId),
+		Text:                   ptr.Val(contents.MessageText),
+		ConversationKeyVersion: keyVersion,
 	}
 
 	// Convert entities
@@ -119,6 +120,7 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 			info := types.AttachmentInfo{
 				IDStr:         ptr.Val(media.AttachmentId),
 				MediaURLHTTPS: ptr.Val(media.LegacyMediaUrlHttps),
+				MediaHashKey:  ptr.Val(media.MediaHashKey),
 			}
 
 			if media.Dimensions != nil {

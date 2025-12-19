@@ -17,6 +17,7 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -184,11 +185,14 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		mimeType = "video/mp4"
 		msgType = event.MsgVideo
 
-		highestBitRateVariant, err := attachmentInfo.VideoInfo.GetHighestBitrateVariant()
-		if err != nil {
-			return nil, nil, err
+		// For XChat encrypted media, skip variant lookup - we'll use MediaHashKey
+		if attachmentInfo.MediaHashKey == "" {
+			highestBitRateVariant, err := attachmentInfo.VideoInfo.GetHighestBitrateVariant()
+			if err != nil {
+				return nil, nil, err
+			}
+			attachmentURL = highestBitRateVariant.URL
 		}
-		attachmentURL = highestBitRateVariant.URL
 	} else if attachment.Card != nil {
 		var urls []types.URLs
 		if msg.Entities != nil {
@@ -217,10 +221,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		return nil, nil, fmt.Errorf("unsupported attachment type")
 	}
 
-	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
-	if err != nil {
-		return nil, nil, err
-	}
 	content := event.MessageEventContent{
 		Info: &event.FileInfo{
 			MimeType: mimeType,
@@ -236,11 +236,19 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
-	if tc.connector.directMedia {
-		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(portal.Receiver, attachmentURL))
-	} else {
-		content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-			n, err := io.Copy(file, fileResp.Body)
+
+	var err error
+	// Check if this is XChat encrypted media
+	if attachmentInfo.MediaHashKey != "" {
+		// Download and decrypt XChat media
+		conversationID := string(portal.ID)
+		decryptedData, downloadErr := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
+		if downloadErr != nil {
+			return nil, nil, fmt.Errorf("failed to download XChat media: %w", downloadErr)
+		}
+		content.Info.Size = len(decryptedData)
+		content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, int64(len(decryptedData)), audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+			n, err := io.Copy(file, bytes.NewReader(decryptedData))
 			if err != nil {
 				return nil, err
 			}
@@ -273,6 +281,50 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				FileName: content.Body,
 			}, nil
 		})
+	} else {
+		// Legacy media download
+		fileResp, downloadErr := downloadFile(ctx, tc.client, attachmentURL)
+		if downloadErr != nil {
+			return nil, nil, downloadErr
+		}
+		if tc.connector.directMedia {
+			content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(portal.Receiver, attachmentURL))
+		} else {
+			content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+				n, err := io.Copy(file, fileResp.Body)
+				if err != nil {
+					return nil, err
+				}
+				if audioOnly && ffmpeg.Supported() {
+					outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
+					if err == nil {
+						mimeType = "audio/ogg"
+						content.Info.MimeType = mimeType
+						content.Info.Width = 0
+						content.Info.Height = 0
+						content.MsgType = event.MsgAudio
+						content.Body += ".ogg"
+						return &bridgev2.FileStreamResult{
+							ReplacementFile: outFile,
+							MimeType:        mimeType,
+							FileName:        content.Body,
+						}, nil
+					} else {
+						zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
+					}
+				} else {
+					content.Info.Size = int(n)
+				}
+				ext := exmime.ExtensionFromMimetype(mimeType)
+				if !strings.HasSuffix(content.Body, ext) {
+					content.Body += ext
+				}
+				return &bridgev2.FileStreamResult{
+					MimeType: content.Info.MimeType,
+					FileName: content.Body,
+				}, nil
+			})
+		}
 	}
 	if err != nil {
 		return nil, nil, err

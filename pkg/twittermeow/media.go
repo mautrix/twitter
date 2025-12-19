@@ -11,12 +11,16 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/random"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
@@ -200,4 +204,261 @@ func (c *Client) ConvertAudioPayload(ctx context.Context, mediaBytes []byte, mim
 
 	// A video part is required to send voice message.
 	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".mp4", []string{"-f", "lavfi", "-i", "color=black:s=854x480:r=30"}, []string{"-c:v", "h264", "-c:a", "aac", "-tune", "stillimage", "-shortest"}, mimeType)
+}
+
+// XChatMediaUploadResult contains the result of an XChat media upload.
+type XChatMediaUploadResult struct {
+	MediaHashKey string
+	KeyVersion   string
+}
+
+// UploadXChatMedia uploads media for XChat messages.
+// Media is encrypted using secretstream (XChaCha20-Poly1305) with the conversation key.
+func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID string, mediaBytes []byte) (*XChatMediaUploadResult, error) {
+	// Get the conversation key for encryption
+	convKey, err := c.keyManager.GetLatestConversationKey(ctx, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation key: %w", err)
+	}
+
+	// Encrypt media using secretstream (XChaCha20-Poly1305)
+	encryptedBytes, err := crypto.SecretstreamEncrypt(mediaBytes, convKey.Key)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt media: %w", err)
+	}
+
+	c.Logger.Debug().
+		Int("plaintext_size", len(mediaBytes)).
+		Int("encrypted_size", len(encryptedBytes)).
+		Str("key_version", convKey.KeyVersion).
+		Msg("Encrypted media for XChat upload")
+
+	// Initialize upload with encrypted size
+	initResp, err := c.initializeXChatMediaUpload(ctx, conversationID, messageID, len(encryptedBytes))
+	if err != nil {
+		return nil, fmt.Errorf("initialize upload: %w", err)
+	}
+
+	// Upload encrypted bytes in chunks
+	numParts, err := c.uploadMediaBytes(ctx, initResp.Data.XChatInitializeMediaUpload.ResumeUploadURL, encryptedBytes)
+	if err != nil {
+		return nil, fmt.Errorf("upload bytes: %w", err)
+	}
+
+	// Finalize upload with the actual number of parts
+	_, err = c.finalizeXChatMediaUpload(
+		ctx,
+		conversationID,
+		messageID,
+		initResp.Data.XChatInitializeMediaUpload.MediaHashKey,
+		initResp.Data.XChatInitializeMediaUpload.ResumeID,
+		numParts,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("finalize upload: %w", err)
+	}
+
+	return &XChatMediaUploadResult{
+		MediaHashKey: initResp.Data.XChatInitializeMediaUpload.MediaHashKey,
+		KeyVersion:   convKey.KeyVersion,
+	}, nil
+}
+
+// initializeXChatMediaUpload initializes an XChat media upload.
+func (c *Client) initializeXChatMediaUpload(ctx context.Context, conversationID, messageID string, totalBytes int) (*response.InitializeXChatMediaUploadResponse, error) {
+	pl := (&payload.InitializeXChatMediaUploadPayload{}).Default()
+	pl.Variables = payload.InitializeXChatMediaUploadVariables{
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		TotalBytes:     strconv.Itoa(totalBytes),
+	}
+
+	// Extract sha256 hash from endpoint URL path
+	u, err := url.Parse(endpoints.INITIALIZE_XCHAT_MEDIA_UPLOAD_URL)
+	if err != nil {
+		return nil, fmt.Errorf("parse endpoint URL: %w", err)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("unexpected endpoint path: %s", u.Path)
+	}
+	pl.Extensions.PersistedQuery.Sha256Hash = parts[len(parts)-2]
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("InitializeXChatMediaUpload request")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.INITIALIZE_XCHAT_MEDIA_UPLOAD_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		RawJSON("response", respBody).
+		Msg("InitializeXChatMediaUpload response")
+
+	var resp response.InitializeXChatMediaUploadResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+// uploadMediaBytes uploads media bytes to ton.x.com in 512KB chunks.
+// Returns the number of parts uploaded.
+func (c *Client) uploadMediaBytes(ctx context.Context, resumeUploadURL string, mediaBytes []byte) (int, error) {
+	const chunkSize = 512 * 1024 // 512 KB chunks
+
+	headerOpts := HeaderOpts{
+		WithNonAuthBearer: true,
+		WithXCsrfToken:    true,
+		WithCookies:       true,
+		Origin:            endpoints.BASE_URL,
+		Referer:           endpoints.BASE_URL + "/",
+		Extra: map[string]string{
+			"accept": "*/*",
+		},
+	}
+	headers := c.buildHeaders(headerOpts)
+	headers.Set("Content-Type", "application/octet-stream")
+
+	partNumber := 0
+	for chunk := range slices.Chunk(mediaBytes, chunkSize) {
+		uploadURL := endpoints.TON_UPLOAD_BASE_URL + "/i/ton/data" + resumeUploadURL + "&partNumber=" + strconv.Itoa(partNumber)
+
+		resp, respBody, err := c.MakeRequest(ctx, uploadURL, http.MethodPost, headers, chunk, types.ContentTypeNone)
+		if err != nil {
+			return 0, fmt.Errorf("upload part %d: %w", partNumber, err)
+		}
+
+		if resp.StatusCode > 204 {
+			return 0, fmt.Errorf("upload part %d failed (status_code=%d, response_body=%s)", partNumber, resp.StatusCode, string(respBody))
+		}
+
+		c.Logger.Debug().
+			Int("part_number", partNumber).
+			Int("chunk_size", len(chunk)).
+			Msg("Uploaded media chunk")
+
+		partNumber++
+	}
+
+	return partNumber, nil
+}
+
+// finalizeXChatMediaUpload finalizes an XChat media upload.
+func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, messageID, mediaHashKey, resumeID string, numParts int) (*response.FinalizeXChatMediaUploadResponse, error) {
+	pl := (&payload.FinalizeXChatMediaUploadPayload{}).Default()
+	pl.Variables = payload.FinalizeXChatMediaUploadVariables{
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		MediaHashKey:   mediaHashKey,
+		ResumeID:       resumeID,
+		NumParts:       strconv.Itoa(numParts),
+		TTLMsec:        nil,
+	}
+
+	// Extract sha256 hash from endpoint URL path
+	u, err := url.Parse(endpoints.FINALIZE_XCHAT_MEDIA_UPLOAD_URL)
+	if err != nil {
+		return nil, fmt.Errorf("parse endpoint URL: %w", err)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("unexpected endpoint path: %s", u.Path)
+	}
+	pl.Extensions.PersistedQuery.Sha256Hash = parts[len(parts)-2]
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("FinalizeXChatMediaUpload request")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.FINALIZE_XCHAT_MEDIA_UPLOAD_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		RawJSON("response", respBody).
+		Msg("FinalizeXChatMediaUpload response")
+
+	var resp response.FinalizeXChatMediaUploadResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+// DownloadXChatMedia downloads and decrypts encrypted media from XChat.
+// The media is fetched from ton.x.com and decrypted using secretstream with the conversation key.
+// If keyVersion is empty, the latest conversation key will be used.
+func (c *Client) DownloadXChatMedia(ctx context.Context, conversationID, mediaHashKey, keyVersion string) ([]byte, error) {
+	// Get the conversation key for decryption
+	var convKey *crypto.ConversationKey
+	var err error
+	if keyVersion != "" {
+		convKey, err = c.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+	} else {
+		convKey, err = c.keyManager.GetLatestConversationKey(ctx, conversationID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get conversation key: %w", err)
+	}
+
+	// Construct download URL
+	downloadURL := endpoints.TON_UPLOAD_BASE_URL + "/i/ton/data/xchat_media/" + conversationID + "/" + mediaHashKey
+
+	c.Logger.Info().
+		Str("download_url", downloadURL).
+		Str("conversation_id", conversationID).
+		Str("media_hash_key", mediaHashKey).
+		Str("key_version", convKey.KeyVersion).
+		Msg("Downloading XChat encrypted media")
+
+	headerOpts := HeaderOpts{
+		WithNonAuthBearer: true,
+		WithXCsrfToken:    true,
+		WithCookies:       true,
+		Origin:            endpoints.BASE_URL,
+		Referer:           endpoints.BASE_URL + "/",
+		Extra: map[string]string{
+			"accept": "*/*",
+		},
+	}
+	headers := c.buildHeaders(headerOpts)
+
+	resp, respBody, err := c.MakeRequest(ctx, downloadURL, http.MethodGet, headers, nil, types.ContentTypeNone)
+	if err != nil {
+		return nil, fmt.Errorf("download request: %w", err)
+	}
+
+	if resp.StatusCode > 204 {
+		return nil, fmt.Errorf("download failed (status_code=%d, response_body=%s)", resp.StatusCode, string(respBody))
+	}
+
+	// Decrypt using secretstream (XChaCha20-Poly1305)
+	plaintext, err := crypto.SecretstreamDecrypt(respBody, convKey.Key)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt media: %w", err)
+	}
+
+	return plaintext, nil
 }

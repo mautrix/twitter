@@ -41,3 +41,22 @@ type ProcessingInfo struct {
 	CheckAfterSecs  int             `json:"check_after_secs,omitempty"`
 	ProgressPercent int             `json:"progress_percent,omitempty"`
 }
+
+type InitializeXChatMediaUploadResponse struct {
+	Data struct {
+		XChatInitializeMediaUpload struct {
+			TypeName        string `json:"__typename"`
+			ResumeUploadURL string `json:"resume_upload_url"`
+			MediaHashKey    string `json:"media_hash_key"`
+			ResumeID        string `json:"resume_id"`
+		} `json:"xchat_initialize_media_upload"`
+	} `json:"data"`
+}
+
+type FinalizeXChatMediaUploadResponse struct {
+	Data struct {
+		XChatFinalizeMediaUpload struct {
+			TypeName string `json:"__typename"`
+		} `json:"xchat_finalize_media_upload"`
+	} `json:"data"`
+}

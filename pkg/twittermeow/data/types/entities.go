@@ -150,6 +150,7 @@ type AttachmentInfo struct {
 	ExtAltText    string        `json:"ext_alt_text,omitempty"`
 	Ext           Ext           `json:"ext,omitempty"`
 	AudioOnly     bool          `json:"audio_only,omitempty"`
+	MediaHashKey  string        `json:"media_hash_key,omitempty"`
 }
 
 type AttachmentCard struct {

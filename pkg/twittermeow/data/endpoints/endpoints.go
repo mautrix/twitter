@@ -49,6 +49,10 @@ const (
 
 	XCHAT_WEBSOCKET_URL = "wss://chat-ws.x.com/ws"
 
+	INITIALIZE_XCHAT_MEDIA_UPLOAD_URL = API_BASE_URL + "/graphql/g2n9PB_uaRYv_SFvQokEFw/InitializeXChatMediaUpload"
+	FINALIZE_XCHAT_MEDIA_UPLOAD_URL   = API_BASE_URL + "/graphql/UK24H5vBa5MJspBmjZyFVQ/FinalizeXChatMediaUpload"
+	TON_UPLOAD_BASE_URL               = "https://ton.x.com"
+
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"
 

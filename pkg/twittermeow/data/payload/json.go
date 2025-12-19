@@ -148,6 +148,73 @@ func (p *GenerateXChatTokenMutationPayload) Default() *GenerateXChatTokenMutatio
 	return p
 }
 
+// ApolloExtensions - reusable struct for Apollo-style GraphQL persisted queries
+type ApolloExtensions struct {
+	PersistedQuery struct {
+		Version    int    `json:"version"`
+		Sha256Hash string `json:"sha256Hash"`
+	} `json:"persistedQuery"`
+	ClientLibrary struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"clientLibrary"`
+}
+
+// DefaultApolloExtensions returns ApolloExtensions with default values
+func DefaultApolloExtensions() ApolloExtensions {
+	return ApolloExtensions{
+		PersistedQuery: struct {
+			Version    int    `json:"version"`
+			Sha256Hash string `json:"sha256Hash"`
+		}{Version: 1},
+		ClientLibrary: struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		}{Name: "apollo-kotlin", Version: "4.3.3"},
+	}
+}
+
+// InitializeXChatMediaUploadPayload for the InitializeXChatMediaUpload GraphQL request
+type InitializeXChatMediaUploadPayload struct {
+	OperationName string                              `json:"operationName"`
+	Variables     InitializeXChatMediaUploadVariables `json:"variables"`
+	Extensions    ApolloExtensions                    `json:"extensions"`
+}
+
+type InitializeXChatMediaUploadVariables struct {
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id"`
+	TotalBytes     string `json:"total_bytes"`
+}
+
+func (p *InitializeXChatMediaUploadPayload) Default() *InitializeXChatMediaUploadPayload {
+	p.OperationName = "InitializeXChatMediaUpload"
+	p.Extensions = DefaultApolloExtensions()
+	return p
+}
+
+// FinalizeXChatMediaUploadPayload for the FinalizeXChatMediaUpload GraphQL request
+type FinalizeXChatMediaUploadPayload struct {
+	OperationName string                            `json:"operationName"`
+	Variables     FinalizeXChatMediaUploadVariables `json:"variables"`
+	Extensions    ApolloExtensions                  `json:"extensions"`
+}
+
+type FinalizeXChatMediaUploadVariables struct {
+	ConversationID string  `json:"conversation_id"`
+	MessageID      string  `json:"message_id"`
+	MediaHashKey   string  `json:"media_hash_key"`
+	ResumeID       string  `json:"resume_id"`
+	NumParts       string  `json:"num_parts"`
+	TTLMsec        *string `json:"ttl_msec"`
+}
+
+func (p *FinalizeXChatMediaUploadPayload) Default() *FinalizeXChatMediaUploadPayload {
+	p.OperationName = "FinalizeXChatMediaUpload"
+	p.Extensions = DefaultApolloExtensions()
+	return p
+}
+
 type GetConversationPageQuerySettings struct {
 	InboxConversationEventLimit int `json:"inbox_conversation_event_limit"`
 	InboxConversationLimit      int `json:"inbox_conversation_limit"`

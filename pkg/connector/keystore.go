@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -14,9 +15,11 @@ import (
 
 // userLoginKeyStore stores cryptographic keys in the user login metadata.
 // Signing keys and conversation keys are persisted; public keys are not.
+// All methods are thread-safe.
 type userLoginKeyStore struct {
 	login *bridgev2.UserLogin
 	meta  *UserLoginMetadata
+	mu    sync.RWMutex
 }
 
 // conversationCacheKey builds a cache key for conversation key storage.
@@ -61,13 +64,18 @@ func ensureUserLoginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
 	cacheKey := conversationCacheKey(conversationID, keyVersion)
+
+	ks.mu.RLock()
 	data, ok := ks.meta.ConversationKeys[cacheKey]
+	totalKeys := len(ks.meta.ConversationKeys)
+	ks.mu.RUnlock()
+
 	if !ok {
 		log.Info().
 			Str("conversation_id", conversationID).
 			Str("key_version", keyVersion).
 			Str("cache_key", cacheKey).
-			Int("total_stored_keys", len(ks.meta.ConversationKeys)).
+			Int("total_stored_keys", totalKeys).
 			Msg("Conversation key not found in keystore")
 		return nil, crypto.ErrKeyNotFound
 	}
@@ -94,6 +102,10 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 		return fmt.Errorf("conversation key cannot be nil")
 	}
 	cacheKey := conversationCacheKey(key.ConversationID, key.KeyVersion)
+
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
 	log.Info().
 		Str("conversation_id", key.ConversationID).
 		Str("key_version", key.KeyVersion).
@@ -108,6 +120,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 		CreatedAt:  key.CreatedAt,
 		ExpiresAt:  key.ExpiresAt,
 	}
+
 	err := ks.login.Save(ctx)
 	if err != nil {
 		log.Err(err).
@@ -126,6 +139,10 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
 	cacheKey := conversationCacheKey(conversationID, keyVersion)
+
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
 	delete(ks.meta.ConversationKeys, cacheKey)
 	return ks.login.Save(ctx)
 }
@@ -136,6 +153,7 @@ func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conve
 	var latestVersion string
 	prefix := conversationID + ":"
 
+	ks.mu.RLock()
 	var matchingKeys []string
 	for cacheKey, data := range ks.meta.ConversationKeys {
 		if !strings.HasPrefix(cacheKey, prefix) {
@@ -147,11 +165,13 @@ func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conve
 			latestVersion = data.KeyVersion
 		}
 	}
+	totalKeys := len(ks.meta.ConversationKeys)
+	ks.mu.RUnlock()
 
 	if latest == nil {
 		log.Info().
 			Str("conversation_id", conversationID).
-			Int("total_stored_keys", len(ks.meta.ConversationKeys)).
+			Int("total_stored_keys", totalKeys).
 			Msg("No conversation keys found for conversation")
 		return nil, crypto.ErrKeyNotFound
 	}
@@ -176,18 +196,26 @@ func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conve
 
 func (ks *userLoginKeyStore) GetOwnSigningKey(ctx context.Context) (*crypto.SigningKeyPair, error) {
 	log := zerolog.Ctx(ctx)
+
+	ks.mu.RLock()
+	secretKey := ks.meta.SecretKey
+	signingKey := ks.meta.SigningKey
+	signingKeyVersion := ks.meta.SigningKeyVersion
+	loginID := string(ks.login.ID)
+	ks.mu.RUnlock()
+
 	log.Info().
-		Bool("has_secret_key", ks.meta.SecretKey != "").
-		Bool("has_signing_key", ks.meta.SigningKey != "").
-		Str("signing_key_version", ks.meta.SigningKeyVersion).
-		Str("login_id", string(ks.login.ID)).
+		Bool("has_secret_key", secretKey != "").
+		Bool("has_signing_key", signingKey != "").
+		Str("signing_key_version", signingKeyVersion).
+		Str("login_id", loginID).
 		Msg("GetOwnSigningKey called")
 
-	if ks.meta.SecretKey == "" && ks.meta.SigningKey == "" {
+	if secretKey == "" && signingKey == "" {
 		log.Warn().Msg("No signing keys found in metadata")
 		return nil, crypto.ErrKeyNotFound
 	}
-	key, err := crypto.LoadSigningKeyPair(string(ks.login.ID), ks.meta.SigningKeyVersion, ks.meta.SigningKey, ks.meta.SecretKey)
+	key, err := crypto.LoadSigningKeyPair(loginID, signingKeyVersion, signingKey, secretKey)
 	if err != nil {
 		log.Err(err).Msg("Failed to load signing key pair")
 		return nil, err
@@ -204,10 +232,12 @@ func (ks *userLoginKeyStore) PutOwnSigningKey(ctx context.Context, key *crypto.S
 		return fmt.Errorf("signing key cannot be nil")
 	}
 
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
 	ks.meta.SecretKey = key.DecryptKeyB64
 	ks.meta.SigningKey = key.SigningKeyB64
 	ks.meta.SigningKeyVersion = key.KeyVersion
-
 	return ks.login.Save(ctx)
 }
 
@@ -220,7 +250,10 @@ func (ks *userLoginKeyStore) PutPublicKey(_ context.Context, _ *crypto.PublicKey
 }
 
 func (ks *userLoginKeyStore) GetConversationToken(_ context.Context, conversationID string) (string, error) {
+	ks.mu.RLock()
 	token, ok := ks.meta.ConversationTokens[conversationID]
+	ks.mu.RUnlock()
+
 	if !ok {
 		return "", crypto.ErrKeyNotFound
 	}
@@ -228,6 +261,9 @@ func (ks *userLoginKeyStore) GetConversationToken(_ context.Context, conversatio
 }
 
 func (ks *userLoginKeyStore) PutConversationToken(ctx context.Context, conversationID, token string) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
 	ks.meta.ConversationTokens[conversationID] = token
 	return ks.login.Save(ctx)
 }

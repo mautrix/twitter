@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"golang.org/x/sync/errgroup"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -337,43 +338,55 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	}
 	tc.userCacheLock.Unlock()
 
-	// First, process all conversation key events (needed for decryption)
+	// Flatten all items for parallel processing
+	var allItems []*response.XChatInboxItem
 	for pIdx := range pages {
 		for i := range pages[pIdx].Items {
-			item := &pages[pIdx].Items[i]
-			conversationID := item.ConversationDetail.ConversationID
-
-			if err := processor.ProcessKeyChangeEvents(ctx, item); err != nil {
-				log.Warn().
-					Err(err).
-					Str("conversation_id", conversationID).
-					Msg("Failed to process key change events")
-			}
+			allItems = append(allItems, &pages[pIdx].Items[i])
 		}
 	}
+	totalItems = len(allItems)
+
+	// Process key change events in parallel (bounded concurrency)
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
+
+	for _, item := range allItems {
+		g.Go(func() error {
+			if err := processor.ProcessKeyChangeEvents(gCtx, item); err != nil {
+				log.Warn().
+					Err(err).
+					Str("conversation_id", item.ConversationDetail.ConversationID).
+					Msg("Failed to process key change events")
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
 
 	// Start XChat websocket for real-time events after keys are in place
 	if err := tc.client.StartXChatWebsocket(ctx); err != nil {
 		log.Err(err).Msg("Failed to start XChat websocket")
 	}
 
-	// Then process message/read events and sync channels
-	for pIdx := range pages {
-		for i := range pages[pIdx].Items {
-			item := &pages[pIdx].Items[i]
+	// Process message/read events and sync channels in parallel
+	g2, gCtx2 := errgroup.WithContext(ctx)
+	g2.SetLimit(10)
 
-			tc.syncXChatChannel(ctx, item, users)
+	for _, item := range allItems {
+		g2.Go(func() error {
+			tc.syncXChatChannel(gCtx2, item, users)
 
-			if err := processor.ProcessMessageAndReadEvents(ctx, item); err != nil {
+			if err := processor.ProcessMessageAndReadEvents(gCtx2, item); err != nil {
 				log.Warn().
 					Err(err).
 					Str("conversation_id", item.ConversationDetail.ConversationID).
 					Msg("Failed to process message/read events")
 			}
-		}
-
-		totalItems += len(pages[pIdx].Items)
+			return nil
+		})
 	}
+	_ = g2.Wait()
 
 	log.Info().
 		Int("conversations", totalItems).

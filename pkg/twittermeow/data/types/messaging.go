@@ -1,15 +1,16 @@
 package types
 
 type MessageData struct {
-	ID          string      `json:"id,omitempty"`
-	Time        string      `json:"time,omitempty"`
-	RecipientID string      `json:"recipient_id,omitempty"`
-	SenderID    string      `json:"sender_id,omitempty"`
-	Text        string      `json:"text,omitempty"`
-	Entities    *Entities   `json:"entities,omitempty"`
-	Attachment  *Attachment `json:"attachment,omitempty"`
-	ReplyData   ReplyData   `json:"reply_data,omitempty"`
-	EditCount   int         `json:"edit_count,omitempty"`
+	ID                     string      `json:"id,omitempty"`
+	Time                   string      `json:"time,omitempty"`
+	RecipientID            string      `json:"recipient_id,omitempty"`
+	SenderID               string      `json:"sender_id,omitempty"`
+	Text                   string      `json:"text,omitempty"`
+	Entities               *Entities   `json:"entities,omitempty"`
+	Attachment             *Attachment `json:"attachment,omitempty"`
+	ReplyData              ReplyData   `json:"reply_data,omitempty"`
+	EditCount              int         `json:"edit_count,omitempty"`
+	ConversationKeyVersion string      `json:"conversation_key_version,omitempty"`
 }
 
 type Message struct {
