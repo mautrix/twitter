@@ -184,9 +184,43 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	}
 	msgPullVersion := meta.MessagePullVersion
 
-	users := make(map[string]*types.User)
-	totalItems := 0
-	var pages []response.XChatInboxPage
+	// Errgroup for processing pages in parallel as they're fetched
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
+
+	var totalItems atomic.Int32
+
+	// processPage spawns goroutines to process each item in a page immediately
+	processPage := func(page response.XChatInboxPage) {
+		for i := range page.Items {
+			item := &page.Items[i]
+			totalItems.Add(1)
+
+			g.Go(func() error {
+				// Collect users from item and cache them
+				tc.cacheUsersFromItem(item)
+
+				// Process key changes first (needed for decryption)
+				if err := processor.ProcessKeyChangeEvents(gCtx, item); err != nil {
+					log.Warn().
+						Err(err).
+						Str("conversation_id", item.ConversationDetail.ConversationID).
+						Msg("Failed to process key change events")
+				}
+
+				// Sync channel and process messages
+				tc.syncXChatChannel(gCtx, item, nil)
+
+				if err := processor.ProcessMessageAndReadEvents(gCtx, item); err != nil {
+					log.Warn().
+						Err(err).
+						Str("conversation_id", item.ConversationDetail.ConversationID).
+						Msg("Failed to process message/read events")
+				}
+				return nil
+			})
+		}
+	}
 
 	// Initial page fetch
 	vars := payload.NewInitialXChatPageQueryVariables(seqID)
@@ -216,6 +250,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		Str("response_cursor_id", page.InboxCursor.CursorID).
 		Str("response_graph_snapshot_id", page.InboxCursor.GraphSnapshotID).
 		Bool("pull_finished", page.InboxCursor.PullFinished).
+		Int("items", len(page.Items)).
 		Msg("Received XChat inbox page")
 
 	if page.MaxUserSequenceID != nil && parseSequenceID(*page.MaxUserSequenceID) > parseSequenceID(maxSeqID) {
@@ -225,7 +260,8 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		msgPullVersion = page.MessagePullVersion
 	}
 
-	pages = append(pages, page)
+	// Process initial page immediately
+	processPage(page)
 
 	var cursor *payload.XChatCursor
 	if !page.InboxCursor.PullFinished && page.InboxCursor.CursorID != "" && page.InboxCursor.GraphSnapshotID != "" {
@@ -235,7 +271,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		}
 	}
 
-	// Subsequent pages via GetInboxPageRequest
+	// Subsequent pages via GetInboxPageRequest - process each page as it's fetched
 	for cursor != nil {
 		fetchLog.Info().
 			Str("cursor_id", cursor.CursorId).
@@ -252,7 +288,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 				Error:      "twitter-xchat-fetch-error",
 				Message:    err.Error(),
 			})
-			return
+			break
 		}
 
 		page := resp.Data.GetInboxPage
@@ -260,6 +296,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			Str("response_cursor_id", page.InboxCursor.CursorID).
 			Str("response_graph_snapshot_id", page.InboxCursor.GraphSnapshotID).
 			Bool("pull_finished", page.InboxCursor.PullFinished).
+			Int("items", len(page.Items)).
 			Msg("Received XChat inbox page")
 
 		if page.MaxUserSequenceID != nil && parseSequenceID(*page.MaxUserSequenceID) > parseSequenceID(maxSeqID) {
@@ -269,7 +306,8 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			msgPullVersion = page.MessagePullVersion
 		}
 
-		pages = append(pages, page)
+		// Process this page immediately while fetching continues
+		processPage(page)
 
 		if page.InboxCursor.PullFinished || page.InboxCursor.CursorID == "" || page.InboxCursor.GraphSnapshotID == "" {
 			cursor = nil
@@ -289,108 +327,16 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		}
 	}
 
-	// Collect users from all pages
-	var missingUserIDs []string
-	for _, pg := range pages {
-		for _, item := range pg.Items {
-			for _, p := range item.ConversationDetail.ParticipantsResults {
-				if p.Result != nil {
-					users[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
-				} else if p.RestID != "" {
-					missingUserIDs = append(missingUserIDs, p.RestID)
-				}
-			}
-			for _, p := range item.ConversationDetail.GroupMembersResults {
-				if p.Result != nil {
-					users[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
-				} else if p.RestID != "" {
-					missingUserIDs = append(missingUserIDs, p.RestID)
-				}
-			}
-			for _, p := range item.ConversationDetail.GroupAdminsResults {
-				if p.Result != nil {
-					users[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
-				} else if p.RestID != "" {
-					missingUserIDs = append(missingUserIDs, p.RestID)
-				}
-			}
-		}
-	}
-
-	if err := tc.ensureUsersInCacheByID(ctx, missingUserIDs); err != nil {
-		log.Err(err).Msg("Failed to fetch missing XChat users")
-	} else {
-		tc.userCacheLock.RLock()
-		for _, id := range missingUserIDs {
-			if users[id] != nil {
-				continue
-			}
-			if u := tc.userCache[id]; u != nil {
-				users[id] = u
-			}
-		}
-		tc.userCacheLock.RUnlock()
-	}
-
-	tc.userCacheLock.Lock()
-	for userID, user := range users {
-		tc.userCache[userID] = user
-	}
-	tc.userCacheLock.Unlock()
-
-	// Flatten all items for parallel processing
-	var allItems []*response.XChatInboxItem
-	for pIdx := range pages {
-		for i := range pages[pIdx].Items {
-			allItems = append(allItems, &pages[pIdx].Items[i])
-		}
-	}
-	totalItems = len(allItems)
-
-	// Process key change events in parallel (bounded concurrency)
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(10)
-
-	for _, item := range allItems {
-		g.Go(func() error {
-			if err := processor.ProcessKeyChangeEvents(gCtx, item); err != nil {
-				log.Warn().
-					Err(err).
-					Str("conversation_id", item.ConversationDetail.ConversationID).
-					Msg("Failed to process key change events")
-			}
-			return nil
-		})
-	}
+	// Wait for all page processing to complete
 	_ = g.Wait()
 
-	// Start XChat websocket for real-time events after keys are in place
+	// Start XChat websocket for real-time events after initial sync
 	if err := tc.client.StartXChatWebsocket(ctx); err != nil {
 		log.Err(err).Msg("Failed to start XChat websocket")
 	}
 
-	// Process message/read events and sync channels in parallel
-	g2, gCtx2 := errgroup.WithContext(ctx)
-	g2.SetLimit(10)
-
-	for _, item := range allItems {
-		g2.Go(func() error {
-			tc.syncXChatChannel(gCtx2, item, users)
-
-			if err := processor.ProcessMessageAndReadEvents(gCtx2, item); err != nil {
-				log.Warn().
-					Err(err).
-					Str("conversation_id", item.ConversationDetail.ConversationID).
-					Msg("Failed to process message/read events")
-			}
-			return nil
-		})
-	}
-	_ = g2.Wait()
-
 	log.Info().
-		Int("conversations", totalItems).
-		Int("users", len(users)).
+		Int("conversations", int(totalItems.Load())).
 		Msg("Finished fetching XChat inbox")
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
@@ -404,7 +350,10 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			Msg("User login ID mismatch")
 	}
 
-	if selfUser, ok := users[currentUserID]; ok && selfUser != nil {
+	tc.userCacheLock.RLock()
+	selfUser := tc.userCache[currentUserID]
+	tc.userCacheLock.RUnlock()
+	if selfUser != nil {
 		remoteProfile := tc.makeXChatRemoteProfile(selfUser)
 		if tc.userLogin.RemoteName != remoteProfile.Username ||
 			tc.userLogin.RemoteProfile != *remoteProfile {
@@ -504,4 +453,26 @@ func (tc *TwitterClient) FullReconnect() {
 	tc.Disconnect()
 	tc.userLogin.Metadata.(*UserLoginMetadata).Session = nil
 	tc.Connect(tc.userLogin.Log.WithContext(tc.connector.br.BackgroundCtx))
+}
+
+// cacheUsersFromItem extracts user info from an XChatInboxItem and caches them.
+func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) {
+	tc.userCacheLock.Lock()
+	defer tc.userCacheLock.Unlock()
+
+	for _, p := range item.ConversationDetail.ParticipantsResults {
+		if p.Result != nil {
+			tc.userCache[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+		}
+	}
+	for _, p := range item.ConversationDetail.GroupMembersResults {
+		if p.Result != nil {
+			tc.userCache[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+		}
+	}
+	for _, p := range item.ConversationDetail.GroupAdminsResults {
+		if p.Result != nil {
+			tc.userCache[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+		}
+	}
 }

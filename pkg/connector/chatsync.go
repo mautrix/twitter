@@ -154,12 +154,21 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(detail.ParticipantsResults))
 	for _, p := range detail.ParticipantsResults {
 		var userInfo *bridgev2.UserInfo
-		// First try inline Result from participants_results, then fall back to users map
+		// First try inline Result from participants_results, then fall back to users map or cache
 		if p.Result != nil {
 			user := twittermeow.ConvertXChatUserToUser(p.Result)
 			userInfo = tc.connector.wrapUserInfo(tc.client, user)
-		} else if user, ok := users[p.RestID]; ok {
-			userInfo = tc.connector.wrapUserInfo(tc.client, user)
+		} else if users != nil {
+			if user, ok := users[p.RestID]; ok {
+				userInfo = tc.connector.wrapUserInfo(tc.client, user)
+			}
+		} else {
+			// Fall back to user cache when users map is nil
+			tc.userCacheLock.RLock()
+			if user, ok := tc.userCache[p.RestID]; ok {
+				userInfo = tc.connector.wrapUserInfo(tc.client, user)
+			}
+			tc.userCacheLock.RUnlock()
 		}
 		memberMap[networkid.UserID(p.RestID)] = bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
