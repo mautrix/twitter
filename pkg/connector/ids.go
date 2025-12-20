@@ -58,7 +58,7 @@ func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.Po
 
 func (tc *TwitterClient) MakeEventSender(userID string) bridgev2.EventSender {
 	return bridgev2.EventSender{
-		IsFromMe:    userID == string(tc.userLogin.ID),
+		IsFromMe:    userID == tc.client.GetCurrentUserID(),
 		SenderLogin: networkid.UserLoginID(userID),
 		Sender:      networkid.UserID(userID),
 	}

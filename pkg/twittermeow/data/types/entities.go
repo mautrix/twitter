@@ -8,6 +8,9 @@ type Attachment struct {
 	Photo       *AttachmentInfo  `json:"photo,omitempty"`
 	Card        *AttachmentCard  `json:"card,omitempty"`
 	Tweet       *AttachmentTweet `json:"tweet,omitempty"`
+
+	// XChat-specific fields for URL attachment images
+	URLBannerMediaHashKey string `json:"url_banner_media_hash_key,omitempty"`
 }
 type URLs struct {
 	URL         string `json:"url,omitempty"`

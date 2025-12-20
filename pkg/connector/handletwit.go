@@ -160,12 +160,14 @@ func (tc *TwitterClient) HandleTwitterEvent(rawEvt types.TwitterEvent, inbox *re
 			ReadUpToStreamOrder: readUpToStreamOrder,
 		}).Success
 	case *types.MessageReactionCreate:
+		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.makePortalKeyFromInbox(evt.ConversationID, inbox)
-		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReaction)
+		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.MessageReactionDelete:
+		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.makePortalKeyFromInbox(evt.ConversationID, inbox)
-		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReactionRemove)
+		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.ConversationCreate:
 		// honestly not sure when this is ever called... ? might be when they initialize the conversation with me?
@@ -650,13 +652,15 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}).Success
 
 	case *types.MessageReactionCreate:
+		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
-		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReaction)
+		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 
 	case *types.MessageReactionDelete:
+		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
-		wrappedEvt := tc.wrapReaction((*types.MessageReaction)(evt), portalKey, bridgev2.RemoteEventReactionRemove)
+		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 
 	case *types.ConversationRead:

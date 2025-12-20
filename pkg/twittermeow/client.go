@@ -133,6 +133,24 @@ func (c *Client) GetXChatToken(ctx context.Context) (string, error) {
 	return c.xchatToken.Token, nil
 }
 
+// refreshXChatToken forces a new token to be generated and updates the cache.
+func (c *Client) refreshXChatToken(ctx context.Context) (string, error) {
+	resp, err := c.GenerateXChatToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	token := resp.Data.UserGetXChatAuthToken.Token
+	c.xchatTokenMu.Lock()
+	c.xchatToken = &cachedXChatToken{
+		Token:     token,
+		FetchedAt: time.Now(),
+	}
+	c.xchatTokenMu.Unlock()
+
+	return token, nil
+}
+
 func (c *Client) Connect(ctx context.Context, cached bool) {
 	if c.eventHandler == nil {
 		panic(ErrConnectSetEventHandler)

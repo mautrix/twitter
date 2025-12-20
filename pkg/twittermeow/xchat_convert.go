@@ -169,6 +169,10 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 					},
 				},
 			}
+			// Store hash key for banner image download
+			if att.Url.BannerImageMediaHashKey != nil {
+				result.URLBannerMediaHashKey = ptr.Val(att.Url.BannerImageMediaHashKey.MediaHashKey)
+			}
 		}
 	}
 

@@ -359,6 +359,11 @@ type MessageBuilder struct {
 	entities       []*payload.RichTextEntity
 	reactionAdd    *payload.MessageReactionAdd
 	reactionRemove *payload.MessageReactionRemove
+	messageEdit    *payload.MessageEdit
+
+	// Pin/unpin fields
+	pinConversation   *payload.PinConversation
+	unpinConversation *payload.UnpinConversation
 
 	// Crypto fields (per-call overrides)
 	conversationKey     []byte
@@ -409,6 +414,35 @@ func (b *MessageBuilder) SetReactionRemove(targetMessageSequenceID, emoji string
 		Emoji:             &emoji,
 	}
 	b.reactionAdd = nil
+	return b
+}
+
+func (b *MessageBuilder) SetMessageEdit(targetMessageSequenceID, updatedText string, entities []*payload.RichTextEntity) *MessageBuilder {
+	b.messageEdit = &payload.MessageEdit{
+		MessageSequenceId: &targetMessageSequenceID,
+		UpdatedText:       &updatedText,
+		Entities:          entities,
+	}
+	b.reactionAdd = nil
+	b.reactionRemove = nil
+	return b
+}
+
+// SetPinConversation sets the conversation to pin.
+func (b *MessageBuilder) SetPinConversation(targetConversationID string) *MessageBuilder {
+	b.pinConversation = &payload.PinConversation{
+		ConversationId: &targetConversationID,
+	}
+	b.unpinConversation = nil
+	return b
+}
+
+// SetUnpinConversation sets the conversation to unpin.
+func (b *MessageBuilder) SetUnpinConversation(targetConversationID string) *MessageBuilder {
+	b.unpinConversation = &payload.UnpinConversation{
+		ConversationId: &targetConversationID,
+	}
+	b.pinConversation = nil
 	return b
 }
 
@@ -480,12 +514,18 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 		unencrypted = true
 	}
 
-	// Build MessageEntryContents (message or reaction).
+	// Build MessageEntryContents (message, reaction, pin/unpin, etc.).
 	entryContents := &payload.MessageEntryContents{}
-	if b.reactionAdd != nil {
+	if b.messageEdit != nil {
+		entryContents.MessageEdit = b.messageEdit
+	} else if b.reactionAdd != nil {
 		entryContents.ReactionAdd = b.reactionAdd
 	} else if b.reactionRemove != nil {
 		entryContents.ReactionRemove = b.reactionRemove
+	} else if b.pinConversation != nil {
+		entryContents.PinConversation = b.pinConversation
+	} else if b.unpinConversation != nil {
+		entryContents.UnpinConversation = b.unpinConversation
 	} else {
 		contents := &payload.MessageContents{
 			MessageText:       &b.text,
@@ -625,6 +665,17 @@ func EncodeMessageEventSignature(sig *payload.MessageEventSignature) (string, er
 	var buf bytes.Buffer
 	encoder := thrifter.NewEncoder(&buf)
 	if err := encoder.Encode(sig); err != nil {
+		return "", fmt.Errorf("thrift encode: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+}
+
+// EncodeMessageEventDetail encodes a MessageEventDetail to base64 Thrift binary protocol.
+// Used for delete message action signatures.
+func EncodeMessageEventDetail(detail *payload.MessageEventDetail) (string, error) {
+	var buf bytes.Buffer
+	encoder := thrifter.NewEncoder(&buf)
+	if err := encoder.Encode(detail); err != nil {
 		return "", fmt.Errorf("thrift encode: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil

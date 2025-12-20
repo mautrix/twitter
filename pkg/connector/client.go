@@ -189,6 +189,8 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	g.SetLimit(10)
 
 	var totalItems atomic.Int32
+	var missingUserIDs []string
+	var missingUserIDsMu sync.Mutex
 
 	// processPage spawns goroutines to process each item in a page immediately
 	processPage := func(page response.XChatInboxPage) {
@@ -197,8 +199,13 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			totalItems.Add(1)
 
 			g.Go(func() error {
-				// Collect users from item and cache them
-				tc.cacheUsersFromItem(item)
+				// Collect users from item and cache them, track missing IDs
+				missing := tc.cacheUsersFromItem(item)
+				if len(missing) > 0 {
+					missingUserIDsMu.Lock()
+					missingUserIDs = append(missingUserIDs, missing...)
+					missingUserIDsMu.Unlock()
+				}
 
 				// Process key changes first (needed for decryption)
 				if err := processor.ProcessKeyChangeEvents(gCtx, item); err != nil {
@@ -330,6 +337,16 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	// Wait for all page processing to complete
 	_ = g.Wait()
 
+	// Batch fetch any users that only had RestID without inline data
+	if len(missingUserIDs) > 0 {
+		log.Info().
+			Int("count", len(missingUserIDs)).
+			Msg("Fetching missing user info")
+		if err := tc.ensureUsersInCacheByID(ctx, missingUserIDs); err != nil {
+			log.Warn().Err(err).Msg("Failed to fetch some missing users")
+		}
+	}
+
 	// Start XChat websocket for real-time events after initial sync
 	if err := tc.client.StartXChatWebsocket(ctx); err != nil {
 		log.Err(err).Msg("Failed to start XChat websocket")
@@ -456,23 +473,40 @@ func (tc *TwitterClient) FullReconnect() {
 }
 
 // cacheUsersFromItem extracts user info from an XChatInboxItem and caches them.
-func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) {
+// Returns a list of user IDs that only have RestID without inline Result data.
+func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) []string {
 	tc.userCacheLock.Lock()
 	defer tc.userCacheLock.Unlock()
+
+	var missingIDs []string
 
 	for _, p := range item.ConversationDetail.ParticipantsResults {
 		if p.Result != nil {
 			tc.userCache[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+		} else if p.RestID != "" {
+			if _, ok := tc.userCache[p.RestID]; !ok {
+				missingIDs = append(missingIDs, p.RestID)
+			}
 		}
 	}
 	for _, p := range item.ConversationDetail.GroupMembersResults {
 		if p.Result != nil {
 			tc.userCache[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+		} else if p.RestID != "" {
+			if _, ok := tc.userCache[p.RestID]; !ok {
+				missingIDs = append(missingIDs, p.RestID)
+			}
 		}
 	}
 	for _, p := range item.ConversationDetail.GroupAdminsResults {
 		if p.Result != nil {
 			tc.userCache[p.RestID] = twittermeow.ConvertXChatUserToUser(p.Result)
+		} else if p.RestID != "" {
+			if _, ok := tc.userCache[p.RestID]; !ok {
+				missingIDs = append(missingIDs, p.RestID)
+			}
 		}
 	}
+
+	return missingIDs
 }

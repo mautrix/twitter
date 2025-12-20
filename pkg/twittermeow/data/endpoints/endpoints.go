@@ -40,6 +40,7 @@ const (
 	SEND_TYPING_NOTIFICATION           = BASE_URL + "/i/api/graphql/HL96-xZ3Y81IEzAdczDokg/useTypingNotifierMutation"
 	GENERATE_XCHAT_TOKEN_MUTATION_URL  = API_BASE_URL + "/graphql/Qh3fZRjPPtPoHYR_2sCZsA/GenerateXChatTokenMutation"
 	SEND_MESSAGE_MUTATION_URL          = API_BASE_URL + "/graphql/LkAIEchf8AGj-WgeLoTVcw/SendMessageMutation"
+	DELETE_MESSAGE_MUTATION_URL        = API_BASE_URL + "/graphql/4gsDQKEmYkOtvsSIpHXdQA/DeleteMessageMutation"
 	GET_INITIAL_XCHAT_PAGE_QUERY_URL   = API_BASE_URL + "/graphql/6gAgW7rM7oOZMq_um-zGyg/GetInitialXChatPageQuery"
 	GET_INBOX_PAGE_REQUEST_QUERY_URL   = API_BASE_URL + "/graphql/wmieJEOHm6twV06EXwRdiA/GetInboxPageRequestQuery"
 	GET_INBOX_PAGE_CONV_DATA_QUERY_URL = API_BASE_URL + "/graphql/uQEDp5FgdqNiG2jT5q07Jw/GetInboxPageConversationDataRequestQuery"

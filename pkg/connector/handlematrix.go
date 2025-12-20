@@ -36,6 +36,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
@@ -46,6 +47,7 @@ var (
 	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
 	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
+	_ bridgev2.RedactionHandlingNetworkAPI   = (*TwitterClient)(nil)
 	_ bridgev2.MembershipHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.RoomNameHandlingNetworkAPI    = (*TwitterClient)(nil)
@@ -254,25 +256,48 @@ func (tc *TwitterClient) lookupReplyMetadata(ctx context.Context, portalKey netw
 	return &merged
 }
 
+// lookupMessageSequenceID returns the XChat sequence ID for a message, looking up from metadata.
+func (tc *TwitterClient) lookupMessageSequenceID(ctx context.Context, portalKey networkid.PortalKey, msgID networkid.MessageID) string {
+	msgs, err := tc.connector.br.DB.Message.GetAllPartsByID(ctx, portalKey.Receiver, msgID)
+	if err != nil {
+		return ""
+	}
+	for _, m := range msgs {
+		if meta, ok := m.Metadata.(*MessageMetadata); ok && meta != nil && meta.XChatSequenceID != "" {
+			return meta.XChatSequenceID
+		}
+	}
+	return ""
+}
+
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
 	var senderID string
 	if msg.TargetReaction != nil {
 		senderID = string(msg.TargetReaction.SenderID)
 	}
+	conversationID := string(msg.Portal.ID)
+	targetMessageID := string(msg.TargetReaction.MessageID)
+
+	// Look up the XChat sequence ID for deduplication and sending
+	if seqID := tc.lookupMessageSequenceID(ctx, msg.Portal.PortalKey, msg.TargetReaction.MessageID); seqID != "" {
+		targetMessageID = seqID
+	}
+
+	emoji := variationselector.FullyQualify(msg.TargetReaction.Emoji)
 	zerolog.Ctx(ctx).Info().
-		Str("conversation_id", string(msg.Portal.ID)).
-		Str("target_message_id", string(msg.TargetReaction.MessageID)).
-		Str("emoji", msg.TargetReaction.Emoji).
+		Str("conversation_id", conversationID).
+		Str("target_message_id", targetMessageID).
+		Str("emoji", emoji).
 		Str("sender_id", senderID).
 		Str("sender_mxid", msg.Event.Sender.String()).
 		Msg("Handling Matrix reaction removal")
-	return tc.doHandleMatrixReaction(ctx, true, string(msg.Portal.ID), string(msg.TargetReaction.MessageID), msg.TargetReaction.Emoji)
+	return tc.doHandleMatrixReaction(ctx, true, conversationID, targetMessageID, emoji)
 }
 
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	emoji := variationselector.FullyQualify(msg.Content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
-		SenderID:     networkid.UserID(tc.userLogin.ID),
+		SenderID:     networkid.UserID(tc.client.GetCurrentUserID()),
 		EmojiID:      networkid.EmojiID(emoji),
 		Emoji:        emoji,
 		MaxReactions: 1,
@@ -280,14 +305,32 @@ func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev
 }
 
 func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
+	conversationID := string(msg.Portal.ID)
+	targetMessageID := string(msg.TargetMessage.ID)
+
+	// Look up the XChat sequence ID for deduplication and sending
+	if msg.TargetMessage.Metadata != nil {
+		if meta, ok := msg.TargetMessage.Metadata.(*MessageMetadata); ok && meta.XChatSequenceID != "" {
+			targetMessageID = meta.XChatSequenceID
+		}
+	}
+	if seqID := tc.lookupMessageSequenceID(ctx, msg.Portal.PortalKey, msg.TargetMessage.ID); seqID != "" {
+		targetMessageID = seqID
+	}
+
+	emoji := msg.PreHandleResp.Emoji
+	senderID := msg.PreHandleResp.SenderID
+	if senderID == "" {
+		senderID = networkid.UserID(tc.client.GetCurrentUserID())
+	}
 	zerolog.Ctx(ctx).Info().
-		Str("conversation_id", string(msg.Portal.ID)).
-		Str("target_message_id", string(msg.TargetMessage.ID)).
-		Str("emoji", msg.PreHandleResp.Emoji).
-		Str("sender_id", string(msg.PreHandleResp.SenderID)).
+		Str("conversation_id", conversationID).
+		Str("target_message_id", targetMessageID).
+		Str("emoji", emoji).
+		Str("sender_id", string(senderID)).
 		Str("sender_mxid", msg.Event.Sender.String()).
 		Msg("Handling Matrix reaction")
-	if err := tc.doHandleMatrixReaction(ctx, false, string(msg.Portal.ID), string(msg.TargetMessage.ID), msg.PreHandleResp.Emoji); err != nil {
+	if err := tc.doHandleMatrixReaction(ctx, false, conversationID, targetMessageID, emoji); err != nil {
 		return nil, err
 	}
 
@@ -295,12 +338,12 @@ func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2
 		Room:          msg.Portal.PortalKey,
 		MessageID:     msg.TargetMessage.ID,
 		MessagePartID: msg.TargetMessage.PartID,
-		SenderID:      msg.PreHandleResp.SenderID,
+		SenderID:      senderID,
 		SenderMXID:    msg.Event.Sender,
 		EmojiID:       msg.PreHandleResp.EmojiID,
 		MXID:          msg.Event.ID,
 		Timestamp:     time.Now(),
-		Emoji:         msg.PreHandleResp.Emoji,
+		Emoji:         emoji,
 	}, nil
 }
 
@@ -315,38 +358,69 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 }
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
-	params := &payload.MarkConversationReadQuery{
-		ConversationID: string(msg.Portal.ID),
-	}
+	conversationID := string(msg.Portal.ID)
+	lastReadEventID := ""
 
 	if msg.ExactMessage != nil {
-		params.LastReadEventID = string(msg.ExactMessage.ID)
+		lastReadEventID = string(msg.ExactMessage.ID)
 	} else {
 		lastMessage, err := tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, msg.ReadUpTo)
 		if err != nil {
 			return err
 		}
-		params.LastReadEventID = string(lastMessage.ID)
+		lastReadEventID = string(lastMessage.ID)
 	}
 
-	return tc.client.MarkConversationRead(ctx, params)
+	readAt := msg.ReadUpTo
+	if readAt.IsZero() {
+		readAt = time.Now()
+	}
+
+	if err := tc.client.SendXChatReadReceipt(ctx, conversationID, lastReadEventID, readAt); err != nil {
+		if errors.Is(err, crypto.ErrKeyNotFound) {
+			params := &payload.MarkConversationReadQuery{
+				ConversationID:  conversationID,
+				LastReadEventID: lastReadEventID,
+			}
+			return tc.client.MarkConversationRead(ctx, params)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
-	req := &payload.EditDirectMessagePayload{
-		ConversationID: string(edit.Portal.ID),
-		RequestID:      string(edit.InputTransactionID),
-		DMID:           string(edit.EditTarget.ID),
-		Text:           edit.Content.Body,
+	targetMessageID := string(edit.EditTarget.ID)
+	var meta *MessageMetadata
+	if edit.EditTarget != nil {
+		if typedMeta, ok := edit.EditTarget.Metadata.(*MessageMetadata); ok {
+			meta = typedMeta
+		}
 	}
-	if req.RequestID == "" {
-		req.RequestID = uuid.NewString()
+	if meta != nil && meta.XChatSequenceID != "" {
+		targetMessageID = meta.XChatSequenceID
 	}
-	resp, err := tc.client.EditDirectMessage(ctx, req)
+
+	messageID := string(edit.InputTransactionID)
+	if messageID == "" {
+		messageID = uuid.NewString()
+	}
+
+	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
+		ConversationID:          string(edit.Portal.ID),
+		MessageID:               messageID,
+		TargetMessageSequenceID: targetMessageID,
+		UpdatedText:             edit.Content.Body,
+	})
 	if err != nil {
 		return err
 	}
-	edit.EditTarget.Metadata.(*MessageMetadata).EditCount = resp.MessageData.EditCount
+	tc.client.Logger.Debug().Any("editResponse", resp).Msg("Edit response")
+	if meta != nil {
+		meta.EditCount++
+		meta.MessageText = edit.Content.Body
+	}
 	return nil
 }
 
@@ -366,6 +440,24 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	conversationID := string(chat.Portal.ID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
+}
+
+func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {
+	conversationID := string(msg.Portal.ID)
+	if msg.TargetMessage == nil {
+		return errors.New("target message not found")
+	}
+
+	sequenceID := string(msg.TargetMessage.ID)
+	if sequenceID == "" {
+		return errors.New("message sequence ID not found")
+	}
+
+	return tc.client.DeleteXChatMessage(ctx, twittermeow.DeleteXChatMessageOpts{
+		ConversationID: conversationID,
+		SequenceIDs:    []string{sequenceID},
+		DeleteForAll:   false, // Delete for self only
+	})
 }
 
 func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {

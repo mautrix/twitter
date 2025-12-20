@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -494,6 +495,15 @@ type SendEncryptedMessageOpts struct {
 	Entities       []*payload.RichTextEntity
 }
 
+// SendEncryptedEditOpts contains options for sending an encrypted message edit.
+type SendEncryptedEditOpts struct {
+	ConversationID          string
+	MessageID               string // optional, generates UUID if empty
+	TargetMessageSequenceID string
+	UpdatedText             string
+	Entities                []*payload.RichTextEntity
+}
+
 // SendEncryptedReaction sends a reaction add/remove via the XChat protocol.
 // targetMessageSequenceID must be the XChat message sequence ID of the message being reacted to.
 func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove bool) (*response.SendMessageMutationResponse, error) {
@@ -540,6 +550,74 @@ func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targ
 	c.Logger.Debug().
 		RawJSON("payload", jsonBody).
 		Msg("SendMessageMutation reaction payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp response.SendMessageMutationResponse
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+// SendEncryptedEdit sends a message edit via the XChat protocol.
+// targetMessageSequenceID must be the XChat message sequence ID of the message being edited.
+func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOpts) (*response.SendMessageMutationResponse, error) {
+	if opts.ConversationID == "" {
+		return nil, fmt.Errorf("conversation ID is required")
+	}
+	if opts.TargetMessageSequenceID == "" {
+		return nil, fmt.Errorf("target message sequence ID is required")
+	}
+
+	token, err := c.keyManager.GetConversationToken(ctx, opts.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation token: %w", err)
+	}
+
+	messageID := opts.MessageID
+	if messageID == "" {
+		messageID = uuid.NewString()
+	}
+
+	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
+		SetMessageID(messageID).
+		SetConversationID(opts.ConversationID).
+		SetMessageEdit(opts.TargetMessageSequenceID, opts.UpdatedText, opts.Entities)
+
+	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build edit: %w", err)
+	}
+
+	var sigPtr *string
+	if encodedSig != "" {
+		sigPtr = &encodedSig
+	}
+
+	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
+		ConversationID:               opts.ConversationID,
+		MessageID:                    messageID,
+		ConversationToken:            token,
+		EncodedMessageCreateEvent:    encodedMCE,
+		EncodedMessageEventSignature: sigPtr,
+	})
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("SendMessageMutation edit payload")
 
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
@@ -818,6 +896,127 @@ func (c *Client) GetConversationPage(ctx context.Context, variables *payload.Get
 
 	var resp response.GetConversationPageQueryResponse
 	return &resp, json.Unmarshal(respBody, &resp)
+}
+
+// DeleteXChatMessageOpts contains options for deleting messages via XChat.
+type DeleteXChatMessageOpts struct {
+	ConversationID string
+	SequenceIDs    []string // The sequence IDs of the messages to delete
+	DeleteForAll   bool     // If true, delete for everyone; if false, delete only for self
+}
+
+// DeleteXChatMessage deletes messages via the XChat DeleteMessageMutation GraphQL endpoint.
+func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessageOpts) error {
+	if opts.ConversationID == "" {
+		return fmt.Errorf("conversation ID is required")
+	}
+	if len(opts.SequenceIDs) == 0 {
+		return fmt.Errorf("at least one sequence ID is required")
+	}
+
+	senderID := c.GetCurrentUserID()
+	if senderID == "" {
+		return fmt.Errorf("sender ID is required")
+	}
+
+	token, err := c.keyManager.GetConversationToken(ctx, opts.ConversationID)
+	if err != nil {
+		return fmt.Errorf("get conversation token: %w", err)
+	}
+
+	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
+	}
+
+	deleteAction := payload.DeleteMessageActionTypeForSelf
+	thriftAction := int32(payload.DeleteMessageActionDeleteForSelf)
+	if opts.DeleteForAll {
+		deleteAction = payload.DeleteMessageActionTypeForAll
+		thriftAction = int32(payload.DeleteMessageActionDeleteForAll)
+	}
+
+	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
+
+	actionSignatures := make([]payload.DeleteMessageActionSignature, 0, len(opts.SequenceIDs))
+	for _, seqID := range opts.SequenceIDs {
+		messageID := uuid.NewString()
+
+		detail := &payload.MessageEventDetail{
+			MessageDeleteEvent: &payload.MessageDeleteEvent{
+				SequenceIds:         []string{seqID},
+				DeleteMessageAction: &thriftAction,
+			},
+		}
+
+		encodedDetail, err := crypto.EncodeMessageEventDetail(detail)
+		if err != nil {
+			return fmt.Errorf("encode message event detail for %s: %w", seqID, err)
+		}
+
+		actionSig := payload.DeleteMessageActionSignature{
+			MessageID:                 messageID,
+			EncodedMessageEventDetail: encodedDetail,
+		}
+
+		if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
+			signature, err := crypto.SignMessageDeleteEvent(
+				keyPair.SigningKey,
+				messageID,
+				senderID,
+				opts.ConversationID,
+				token,
+				createdAtMsec,
+				encodedDetail,
+			)
+			if err != nil {
+				return fmt.Errorf("sign delete event for %s: %w", seqID, err)
+			}
+
+			sigVersion := crypto.SignatureVersion4
+			actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
+				Signature:        signature,
+				PublicKeyVersion: keyPair.KeyVersion,
+				SignatureVersion: sigVersion,
+			}
+		}
+
+		actionSignatures = append(actionSignatures, actionSig)
+	}
+
+	pl := payload.NewDeleteMessageMutationPayload(payload.DeleteMessageMutationVariables{
+		SequenceIDs:         opts.SequenceIDs,
+		ConversationID:      opts.ConversationID,
+		DeleteMessageAction: deleteAction,
+		ActionSignatures:    actionSignatures,
+	})
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("DeleteMessageMutation payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.DELETE_MESSAGE_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Debug().
+		RawJSON("response", respBody).
+		Msg("DeleteMessageMutation response")
+
+	return nil
 }
 
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {

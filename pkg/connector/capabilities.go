@@ -56,7 +56,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 }
 
 var groupCaps = &event.RoomFeatures{
-	ID: "fi.mau.twitter.capabilities.2025_11_19",
+	ID: "fi.mau.twitter.capabilities.2025_12_20",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 	//	event.FmtUserLink: event.CapLevelFullySupported,
 	//},
@@ -119,6 +119,9 @@ var groupCaps = &event.RoomFeatures{
 	EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
 	Reaction:      event.CapLevelFullySupported,
 	ReactionCount: 1,
+
+	Delete:      event.CapLevelFullySupported,
+	DeleteForMe: true,
 
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,

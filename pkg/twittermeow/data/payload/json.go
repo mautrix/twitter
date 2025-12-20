@@ -42,6 +42,54 @@ type DMMessageDeleteMutationVariables struct {
 	RequestID string `json:"requestId,omitempty"`
 }
 
+// DeleteMessageActionType represents the action type for message deletion in the JSON API
+type DeleteMessageActionType string
+
+const (
+	DeleteMessageActionTypeForSelf DeleteMessageActionType = "DeleteForSelf"
+	DeleteMessageActionTypeForAll  DeleteMessageActionType = "DeleteForAll"
+)
+
+// DeleteMessageActionSignature represents the signature for a delete action
+type DeleteMessageActionSignature struct {
+	MessageID                 string                            `json:"message_id"`
+	EncodedMessageEventDetail string                            `json:"encoded_message_event_detail"`
+	MessageEventSignature     *DeleteMessageEventSignatureJSON  `json:"message_event_signature,omitempty"`
+}
+
+// DeleteMessageEventSignatureJSON is the JSON representation of a message event signature for delete
+type DeleteMessageEventSignatureJSON struct {
+	Signature        string `json:"signature"`
+	PublicKeyVersion string `json:"public_key_version"`
+	SignatureVersion string `json:"signature_version"`
+}
+
+// DeleteMessageMutationVariables contains the variables for the DeleteMessageMutation
+type DeleteMessageMutationVariables struct {
+	SequenceIDs         []string                       `json:"sequence_ids"`
+	ConversationID      string                         `json:"conversation_id"`
+	DeleteMessageAction DeleteMessageActionType        `json:"delete_message_action"`
+	ActionSignatures    []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+// DeleteMessageMutationPayload is the full payload for the DeleteMessageMutation GraphQL request
+type DeleteMessageMutationPayload struct {
+	OperationName string                         `json:"operationName"`
+	Variables     DeleteMessageMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions               `json:"extensions"`
+}
+
+// NewDeleteMessageMutationPayload creates a new DeleteMessageMutationPayload with default extensions
+func NewDeleteMessageMutationPayload(vars DeleteMessageMutationVariables) *DeleteMessageMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "4gsDQKEmYkOtvsSIpHXdQA"
+	return &DeleteMessageMutationPayload{
+		OperationName: "DeleteMessageMutation",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 type LabelType string
 
 const (

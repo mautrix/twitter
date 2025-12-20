@@ -89,7 +89,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
-	if len(textPart.Content.Body) > 0 {
+	if len(textPart.Content.Body) > 0 || len(textPart.Content.BeeperLinkPreviews) > 0 {
 		parts = append(parts, textPart)
 	}
 	displayName := tc.getDisplayNameForUser(ctx, msg.SenderID)
@@ -200,7 +200,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		}
 		content := event.MessageEventContent{
 			MsgType:            event.MsgText,
-			BeeperLinkPreviews: []*event.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, attachment.Card, urls)},
+			BeeperLinkPreviews: []*event.BeeperLinkPreview{tc.attachmentCardToMatrix(ctx, portal, intent, attachment, urls, msg.ConversationKeyVersion)},
 		}
 		return &bridgev2.ConvertedMessagePart{
 			ID:      networkid.PartID(""),
@@ -360,7 +360,8 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	return getResp, nil
 }
 
-func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types.AttachmentCard, urls []types.URLs) *event.BeeperLinkPreview {
+func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachment *types.Attachment, urls []types.URLs, keyVersion string) *event.BeeperLinkPreview {
+	card := attachment.Card
 	canonicalURL := card.BindingValues.CardURL.StringValue
 	for _, url := range urls {
 		if url.URL == canonicalURL {
@@ -375,10 +376,46 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, card *types
 			Description:  card.BindingValues.Description.StringValue,
 		},
 	}
+
+	// Download banner image if available (XChat encrypted)
+	if attachment.URLBannerMediaHashKey != "" {
+		conversationID := string(portal.ID)
+		decryptedData, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachment.URLBannerMediaHashKey, keyVersion)
+		if err != nil {
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to download URL attachment banner image")
+		} else {
+			preview.ImageType = "image/jpeg"
+			preview.ImageSize = event.IntOrString(len(decryptedData))
+			preview.ImageURL, _, err = intent.UploadMediaStream(ctx, portal.MXID, int64(len(decryptedData)), false, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+				_, err := io.Copy(file, bytes.NewReader(decryptedData))
+				if err != nil {
+					return nil, err
+				}
+				return &bridgev2.FileStreamResult{
+					MimeType: "image/jpeg",
+					FileName: "banner.jpeg",
+				}, nil
+			})
+			if err != nil {
+				zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to upload URL attachment banner image to Matrix")
+			}
+		}
+	}
+
 	return preview
 }
 
 func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, tweet *types.AttachmentTweet) *event.BeeperLinkPreview {
+	// Handle XChat Post attachments with empty Status (only URL available)
+	if tweet.Status.FullText == "" && tweet.ExpandedURL != "" {
+		return &event.BeeperLinkPreview{
+			LinkPreview: event.LinkPreview{
+				CanonicalURL: tweet.ExpandedURL,
+				Title:        "Post on X",
+			},
+		}
+	}
+
 	linkPreview := event.LinkPreview{
 		CanonicalURL: tweet.ExpandedURL,
 		Title:        tweet.Status.User.Name + " on X",
