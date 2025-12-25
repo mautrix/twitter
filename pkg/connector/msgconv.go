@@ -40,8 +40,14 @@ import (
 )
 
 func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
-	if ec := existing[0].Metadata.(*MessageMetadata).EditCount; ec >= data.EditCount {
-		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, ec, data.EditCount)
+	meta, ok := existing[0].Metadata.(*MessageMetadata)
+	if !ok || meta == nil {
+		meta = &MessageMetadata{}
+	}
+	if data.EditCount == 0 {
+		data.EditCount = meta.EditCount + 1
+	} else if meta.EditCount >= data.EditCount {
+		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, data.EditCount)
 	}
 	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
 	editPart := tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existing[0])

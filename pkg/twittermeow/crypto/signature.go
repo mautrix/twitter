@@ -91,6 +91,32 @@ func SignMessageDeleteEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, c
 	return Sign(privateKey, preimage)
 }
 
+// SignaturePreimageMuteConversation builds the preimage for signature version 4 for mute events.
+func SignaturePreimageMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
+	preimage := fmt.Sprintf("MuteConversation,%s,%s,%s,%s,%s,%s",
+		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	return []byte(preimage)
+}
+
+// SignMuteConversation creates a signature for a MuteConversation event.
+func SignMuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
+	preimage := SignaturePreimageMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	return Sign(privateKey, preimage)
+}
+
+// SignaturePreimageUnmuteConversation builds the preimage for signature version 4 for unmute events.
+func SignaturePreimageUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
+	preimage := fmt.Sprintf("UnmuteConversation,%s,%s,%s,%s,%s,%s",
+		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	return []byte(preimage)
+}
+
+// SignUnmuteConversation creates a signature for an UnmuteConversation event.
+func SignUnmuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
+	preimage := SignaturePreimageUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	return Sign(privateKey, preimage)
+}
+
 // Verify verifies an ECDSA P-256 signature.
 // signatureB64 is the raw 64-byte signature, base64-encoded.
 func Verify(publicKey *ecdsa.PublicKey, preimage []byte, signatureB64 string) error {

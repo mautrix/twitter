@@ -90,6 +90,54 @@ func NewDeleteMessageMutationPayload(vars DeleteMessageMutationVariables) *Delet
 	}
 }
 
+// MuteConversationMutationVariables contains the variables for the MuteConversation mutation
+type MuteConversationMutationVariables struct {
+	ConversationIDs  []string                       `json:"conversationIds"`
+	ActionSignatures []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+// MuteConversationMutationPayload is the full payload for the MuteConversation GraphQL request
+type MuteConversationMutationPayload struct {
+	OperationName string                            `json:"operationName"`
+	Variables     MuteConversationMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                  `json:"extensions"`
+}
+
+// NewMuteConversationMutationPayload creates a new MuteConversationMutationPayload with default extensions
+func NewMuteConversationMutationPayload(vars MuteConversationMutationVariables) *MuteConversationMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "Dy7geJg7CL5dqhsl6QBteg"
+	return &MuteConversationMutationPayload{
+		OperationName: "MuteConversation",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
+// UnmuteConversationMutationVariables contains the variables for the UnmuteConversation mutation
+type UnmuteConversationMutationVariables struct {
+	ConversationIDs  []string                       `json:"conversationIds"`
+	ActionSignatures []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+// UnmuteConversationMutationPayload is the full payload for the UnmuteConversation GraphQL request
+type UnmuteConversationMutationPayload struct {
+	OperationName string                              `json:"operationName"`
+	Variables     UnmuteConversationMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                    `json:"extensions"`
+}
+
+// NewUnmuteConversationMutationPayload creates a new UnmuteConversationMutationPayload with default extensions
+func NewUnmuteConversationMutationPayload(vars UnmuteConversationMutationVariables) *UnmuteConversationMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "LnNSeGu4vnbwqXAvh7OlGQ"
+	return &UnmuteConversationMutationPayload{
+		OperationName: "UnmuteConversation",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 type LabelType string
 
 const (

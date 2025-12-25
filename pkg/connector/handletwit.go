@@ -536,6 +536,64 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		Logger()
 
 	switch evt := rawEvt.(type) {
+	case *types.MessageEdit:
+		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		requiredKeyVersion := evt.ConversationKeyVersion
+		eventID := evt.SequenceID
+		if eventID == "" {
+			eventID = evt.ID
+		}
+		streamOrder := methods.ParseInt64(eventID)
+		if streamOrder == 0 {
+			streamOrder = methods.ParseInt64(evt.Time)
+		}
+		targetMessageID := evt.MessageData.ID
+		if targetMessageID == "" {
+			targetMessageID = eventID
+		}
+
+		if ctx == nil || ctx.Value(ensurePortalContextKey{}) == nil {
+			if _, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, requiredKeyVersion); err != nil {
+				log.Warn().
+					Err(err).
+					Str("conversation_id", evt.ConversationID).
+					Str("required_key_version", requiredKeyVersion).
+					Msg("Failed to ensure portal and key exist before handling XChat edit")
+				return false
+			}
+		}
+
+		txnID := evt.RequestID
+		if txnID == "" {
+			txnID = eventID
+		}
+
+		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventEdit,
+				LogContext: func(c zerolog.Context) zerolog.Context {
+					return c.
+						Str("message_id", targetMessageID).
+						Str("sender", evt.MessageData.SenderID).
+						Bool("is_from_me", isFromMe)
+				},
+				PortalKey:    portalKey,
+				CreatePortal: false,
+				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
+				StreamOrder:  streamOrder,
+				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+			},
+			ID:            networkid.MessageID(targetMessageID),
+			TransactionID: networkid.TransactionID(txnID),
+			TargetMessage: networkid.MessageID(targetMessageID),
+			Data:          &evt.MessageData,
+			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
+				return tc.convertToMatrix(ctx, portal, intent, data), nil
+			},
+			ConvertEditFunc: tc.convertEditToMatrix,
+		}).Success
+
 	case *types.Message:
 		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)

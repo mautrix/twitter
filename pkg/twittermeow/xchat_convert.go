@@ -56,6 +56,38 @@ func ConvertXChatMessageContentsToMessage(evt *payload.MessageEvent, contents *p
 	return convertXChatMessageToTwitterMessage(evt, contents, keyVersion)
 }
 
+// convertXChatMessageEdit converts an XChat MessageEdit to types.MessageEdit.
+func convertXChatMessageEdit(evt *payload.MessageEvent, edit *payload.MessageEdit, keyVersion string) *types.MessageEdit {
+	targetMsgID := ptr.Val(edit.MessageSequenceId)
+	if targetMsgID == "" {
+		targetMsgID = ptr.Val(evt.MessageId)
+	}
+	if targetMsgID == "" {
+		targetMsgID = ptr.Val(evt.SequenceId)
+	}
+
+	msgData := types.MessageData{
+		ID:                     targetMsgID,
+		Time:                   ptr.Val(evt.CreatedAtMsec),
+		SenderID:               ptr.Val(evt.SenderId),
+		Text:                   ptr.Val(edit.UpdatedText),
+		ConversationKeyVersion: keyVersion,
+	}
+	if len(edit.Entities) > 0 {
+		msgData.Entities = convertXChatEntities(edit.Entities)
+	}
+
+	return (*types.MessageEdit)(&types.Message{
+		ID:                     ptr.Val(evt.SequenceId),
+		Time:                   ptr.Val(evt.CreatedAtMsec),
+		SequenceID:             ptr.Val(evt.SequenceId),
+		RequestID:              ptr.Val(evt.MessageId),
+		ConversationID:         ptr.Val(evt.ConversationId),
+		ConversationKeyVersion: keyVersion,
+		MessageData:            msgData,
+	})
+}
+
 // convertXChatEntities converts XChat RichTextEntity to types.Entities
 func convertXChatEntities(entities []*payload.RichTextEntity) *types.Entities {
 	result := &types.Entities{

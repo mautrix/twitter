@@ -273,6 +273,10 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, convertXChatReactionRemove(evt, contents.ReactionRemove))
 	}
 
+	if contents.MessageEdit != nil {
+		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
+	}
+
 	p.log.Debug().
 		Str("sequence_id", ptr.Val(evt.SequenceId)).
 		Str("conversation_id", conversationID).

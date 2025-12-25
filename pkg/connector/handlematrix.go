@@ -51,6 +51,8 @@ var (
 	_ bridgev2.MembershipHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
 	_ bridgev2.RoomNameHandlingNetworkAPI    = (*TwitterClient)(nil)
+	_ bridgev2.TagHandlingNetworkAPI         = (*TwitterClient)(nil)
+	_ bridgev2.MuteHandlingNetworkAPI        = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -536,4 +538,22 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 		return false, err
 	}
 	return true, nil
+}
+
+func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.MatrixRoomTag) error {
+	conversationID := string(msg.Portal.ID)
+	_, isFavourite := msg.Content.Tags[event.RoomTagFavourite]
+
+	if isFavourite {
+		return tc.client.SendXChatPinConversation(ctx, conversationID)
+	}
+	return tc.client.SendXChatUnpinConversation(ctx, conversationID)
+}
+
+func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
+	conversationID := string(msg.Portal.ID)
+	if msg.Content.IsMuted() {
+		return tc.client.MuteConversation(ctx, conversationID)
+	}
+	return tc.client.UnmuteConversation(ctx, conversationID)
 }

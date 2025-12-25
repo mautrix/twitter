@@ -681,6 +681,26 @@ func EncodeMessageEventDetail(detail *payload.MessageEventDetail) (string, error
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
+// EncodeMuteConversation encodes a MuteConversation to base64 Thrift binary protocol.
+func EncodeMuteConversation(detail *payload.MuteConversation) (string, error) {
+	var buf bytes.Buffer
+	encoder := thrifter.NewEncoder(&buf)
+	if err := encoder.Encode(detail); err != nil {
+		return "", fmt.Errorf("thrift encode: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+}
+
+// EncodeUnmuteConversation encodes an UnmuteConversation to base64 Thrift binary protocol.
+func EncodeUnmuteConversation(detail *payload.UnmuteConversation) (string, error) {
+	var buf bytes.Buffer
+	encoder := thrifter.NewEncoder(&buf)
+	if err := encoder.Encode(detail); err != nil {
+		return "", fmt.Errorf("thrift encode: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+}
+
 // BuildForSend builds the encoded payloads needed for SendMessageMutation.
 // Returns: encodedMessageCreateEvent, encodedSignature, error
 func (b *MessageBuilder) BuildForSend(ctx context.Context) (string, string, error) {
