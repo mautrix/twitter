@@ -293,14 +293,17 @@ func (tc *TwitterClient) lookupMessageSequenceID(ctx context.Context, portalKey 
 }
 
 // filterReplyPreviewAttachments filters message attachments for inclusion in reply previews.
-// Only media attachments (images, videos, GIFs, audio) are included.
+// Includes media (images, videos, GIFs, audio), post (tweets), and URL attachments.
 func filterReplyPreviewAttachments(attachments []*payload.MessageAttachment) []*payload.MessageAttachment {
 	if len(attachments) == 0 {
 		return nil
 	}
 	result := make([]*payload.MessageAttachment, 0, len(attachments))
 	for _, att := range attachments {
-		if att != nil && att.Media != nil {
+		if att == nil {
+			continue
+		}
+		if att.Media != nil || att.Post != nil || att.Url != nil {
 			result = append(result, att)
 		}
 	}
