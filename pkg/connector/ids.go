@@ -27,18 +27,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
-
-func (tc *TwitterClient) makePortalKeyFromInbox(conversationID string, inbox *response.TwitterInboxData) networkid.PortalKey {
-	conv := inbox.GetConversationByID(conversationID)
-	if conv != nil {
-		return tc.MakePortalKey(conv)
-	} else {
-		return tc.MakePortalKeyFromID(conversationID)
-	}
-}
 
 func (tc *TwitterClient) MakePortalKey(conv *types.Conversation) networkid.PortalKey {
 	return tc.MakePortalKeyFromID(conv.ConversationID)

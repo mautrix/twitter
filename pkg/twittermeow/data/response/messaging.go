@@ -4,18 +4,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-type InboxTimelineResponse struct {
-	InboxTimeline *TwitterInboxData `json:"inbox_timeline"`
-}
-
-type ConversationDMResponse struct {
-	ConversationTimeline *TwitterInboxData `json:"conversation_timeline"`
-}
-
-type InboxInitialStateResponse struct {
-	InboxInitialState *TwitterInboxData `json:"inbox_initial_state,omitempty"`
-}
-
 type Trusted struct {
 	Status     types.PaginationStatus `json:"status,omitempty"`
 	MinEntryID string                 `json:"min_entry_id,omitempty"`

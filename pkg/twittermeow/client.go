@@ -49,10 +49,9 @@ type Client struct {
 	xchatEventHandler  XChatEventHandler
 	onCursorChanged    func(ctx context.Context)
 
-	currentUserID  string
-	jot            *JotClient
-	polling        *PollingClient
-	stream         *StreamClient
+	currentUserID string
+	jot           *JotClient
+	stream        *StreamClient
 	xchat          *xchatWebsocketClient
 	xchatProcessor *XChatEventProcessor
 	keyManager     *crypto.KeyManager
@@ -70,7 +69,6 @@ func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
 		Logger: logger,
 	}
 
-	cli.polling = cli.newPollingClient()
 	cli.stream = cli.newStreamClient()
 	cli.xchat = cli.newXChatWebsocketClient()
 	cli.jot = cli.newJotClient()
@@ -151,37 +149,25 @@ func (c *Client) refreshXChatToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-func (c *Client) Connect(ctx context.Context, cached bool) {
+func (c *Client) Connect(ctx context.Context) {
 	if c.eventHandler == nil {
 		panic(ErrConnectSetEventHandler)
 	}
-
-	c.polling.startPolling(c.Logger.WithContext(ctx))
 	c.StartXChatWebsocket(ctx)
-
-	if cached {
-		c.polling.doShortCircuit()
-	}
 }
 
 func (c *Client) Disconnect() {
-	c.polling.stopPolling()
 	c.stream.stopStream()
 	c.stopXChatWebsocket()
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := c.polling.pollingStopped.Wait(timeoutCtx)
-	if err != nil {
-		c.Logger.Warn().Msg("Timed out waiting for polling to stop")
-		return
-	}
-	err = c.stream.streamStopped.Wait(timeoutCtx)
+	err := c.stream.streamStopped.Wait(timeoutCtx)
 	if err != nil {
 		c.Logger.Warn().Msg("Timed out waiting for stream to stop")
 		return
 	}
-	c.Logger.Debug().Msg("Polling and stream clients stopped")
+	c.Logger.Debug().Msg("Stream client stopped")
 }
 
 func (c *Client) Logout(ctx context.Context) error {
@@ -468,12 +454,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 }
 
 func (c *Client) SetActiveConversation(conversationID string) {
-	c.polling.SetActiveConversation(conversationID)
 	c.stream.startOrUpdateEventStream(conversationID)
-}
-
-func (c *Client) PollConversation(conversationID string) {
-	c.polling.pollConversation(conversationID)
 }
 
 // FetchRaw performs an authenticated request to the given URL and returns the response and body.

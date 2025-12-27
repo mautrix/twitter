@@ -16,48 +16,45 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-// Deprecated: GetInitialInboxState uses the legacy Twitter DM API.
-// Use GetInitialXChatPage for the new XChat API.
-func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
-	encodedQuery, err := params.Encode()
-	if err != nil {
-		return nil, err
-	}
-	url := fmt.Sprintf("%s?%s", endpoints.INBOX_INITIAL_STATE_URL, string(encodedQuery))
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodGet,
-		WithClientUUID: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	data := response.InboxInitialStateResponse{}
-	return &data, json.Unmarshal(respBody, &data)
+// FormEncoder is implemented by types that can encode themselves to form data.
+type FormEncoder interface {
+	Encode() ([]byte, error)
 }
 
-// Deprecated: GetDMUserUpdates uses the legacy Twitter DM polling API.
-// Use XChat WebSocket for real-time updates.
-func (c *Client) GetDMUserUpdates(ctx context.Context, params *payload.DMRequestQuery) (*response.GetDMUserUpdatesResponse, error) {
-	encodedQuery, err := params.Encode()
+// makeXChatFormRequest is a generic helper for XChat API form-encoded POST requests.
+func makeXChatFormRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
+	formBody, err := variables.Encode()
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s?%s", endpoints.DM_USER_UPDATES_URL, string(encodedQuery))
+
+	c.Logger.Debug().
+		Str("url", url).
+		Str("form_body", string(formBody)).
+		Msg(opName + " payload")
 
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            url,
-		Method:         http.MethodGet,
+		Method:         http.MethodPost,
 		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+		Body:           formBody,
 	})
 	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg(opName + " failed")
 		return nil, err
 	}
 
-	data := response.GetDMUserUpdatesResponse{}
-	return &data, json.Unmarshal(respBody, &data)
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg(opName + " response")
+
+	var resp T
+	return &resp, json.Unmarshal(respBody, &resp)
 }
 
 func (c *Client) MarkConversationRead(ctx context.Context, params *payload.MarkConversationReadQuery) error {
@@ -79,108 +76,6 @@ func (c *Client) MarkConversationRead(ctx context.Context, params *payload.MarkC
 	}
 
 	return nil
-}
-
-// Deprecated: FetchConversationContext uses the legacy Twitter DM API.
-// Use GetConversationData for the new XChat API.
-func (c *Client) FetchConversationContext(ctx context.Context, conversationID string, params *payload.DMRequestQuery, context payload.ContextInfo) (*response.ConversationDMResponse, error) {
-	params.Context = context
-	encodedQuery, err := params.Encode()
-	if err != nil {
-		return nil, err
-	}
-	url := fmt.Sprintf("%s?%s", fmt.Sprintf(endpoints.CONVERSATION_FETCH_MESSAGES, conversationID), string(encodedQuery))
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodGet,
-		WithClientUUID: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	data := response.ConversationDMResponse{}
-	return &data, json.Unmarshal(respBody, &data)
-}
-
-// Deprecated: FetchTrustedThreads uses the legacy Twitter DM API.
-// Use XChat inbox API instead.
-func (c *Client) FetchTrustedThreads(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxTimelineResponse, error) {
-	encodedQuery, err := params.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            fmt.Sprintf("%s?%s", endpoints.TRUSTED_INBOX_TIMELINE_URL, string(encodedQuery)),
-		Method:         http.MethodGet,
-		WithClientUUID: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	data := response.InboxTimelineResponse{}
-	return &data, json.Unmarshal(respBody, &data)
-}
-
-// Deprecated: SendDirectMessage uses the legacy Twitter DM API.
-// Use SendXChatMessage for the new XChat API.
-func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMessagePayload) (*response.TwitterInboxData, error) {
-	if pl.RequestID == "" {
-		pl.RequestID = uuid.NewString()
-	}
-
-	jsonBody, err := pl.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	query, _ := (payload.DMSendQuery{}).Default().Encode()
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.SEND_DM_URL + "?" + string(query),
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Body:           jsonBody,
-		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, pl.ConversationID),
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	data := response.TwitterInboxData{}
-	return &data, json.Unmarshal(respBody, &data)
-}
-
-// Deprecated: EditDirectMessage uses the legacy Twitter DM API.
-// Use XChat edit API instead.
-func (c *Client) EditDirectMessage(ctx context.Context, payload *payload.EditDirectMessagePayload) (*types.Message, error) {
-	if payload.RequestID == "" {
-		payload.RequestID = uuid.NewString()
-	}
-
-	encodedQuery, err := payload.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            fmt.Sprintf("%s?%s", endpoints.EDIT_DM_URL, string(encodedQuery)),
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, payload.ConversationID),
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	data := types.Message{}
-	return &data, json.Unmarshal(respBody, &data)
 }
 
 func (c *Client) SendTypingNotification(ctx context.Context, conversationID string) error {
@@ -721,181 +616,23 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 }
 
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
-	formBody, err := variables.Encode()
-
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		Str("form_body", string(formBody)).
-		Str("url", endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL).
-		Msg("GetInitialXChatPage request payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
-	})
-
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg("GetInitialXChatPage request failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg("GetInitialXChatPage response")
-
-	var resp response.GetInitialXChatPageQueryResponse
-	return &resp, json.Unmarshal(respBody, &resp)
-
+	return makeXChatFormRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
-	formBody, err := variables.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		Str("form_body", string(formBody)).
-		Str("url", endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL).
-		Msg("GetInboxPageRequest payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
-	})
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg("GetInboxPageRequest request failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg("GetInboxPageRequest response")
-
-	var resp response.GetInboxPageRequestQueryResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return makeXChatFormRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
 }
 
 func (c *Client) GetConversationData(ctx context.Context, variables *payload.GetInboxPageConversationDataQueryVariables) (*response.GetInboxPageConversationDataResponse, error) {
-	formBody, err := variables.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		Str("url", endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL).
-		Str("form_body", string(formBody)).
-		Msg("GetInboxPageConversationData payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
-	})
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg("GetInboxPageConversationData failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg("GetInboxPageConversationData response")
-
-	var resp response.GetInboxPageConversationDataResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return makeXChatFormRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
 }
 
 func (c *Client) GetUsersByIdsForXChat(ctx context.Context, variables *payload.GetUsersByIdsForXChatVariables) (*response.GetUsersByIdsForXChatResponse, error) {
-	formBody, err := variables.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		Str("url", endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL).
-		Str("form_body", string(formBody)).
-		Msg("GetUsersByIdsForXChat payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
-	})
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg("GetUsersByIdsForXChat failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg("GetUsersByIdsForXChat response")
-
-	var resp response.GetUsersByIdsForXChatResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return makeXChatFormRequest[response.GetUsersByIdsForXChatResponse](c, ctx, endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL, variables, "GetUsersByIdsForXChat")
 }
 
 func (c *Client) GetConversationPage(ctx context.Context, variables *payload.GetConversationPageQueryVariables) (*response.GetConversationPageQueryResponse, error) {
-	formBody, err := variables.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		Str("url", endpoints.GET_CONVERSATION_PAGE_QUERY_URL).
-		Str("form_body", string(formBody)).
-		Msg("GetConversationPageQuery payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_CONVERSATION_PAGE_QUERY_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
-	})
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg("GetConversationPageQuery failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg("GetConversationPageQuery response")
-
-	var resp response.GetConversationPageQueryResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return makeXChatFormRequest[response.GetConversationPageQueryResponse](c, ctx, endpoints.GET_CONVERSATION_PAGE_QUERY_URL, variables, "GetConversationPage")
 }
 
 // DeleteXChatMessageOpts contains options for deleting messages via XChat.

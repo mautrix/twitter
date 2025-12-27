@@ -39,31 +39,18 @@ type OriginalInfo struct {
 	Width  int    `json:"width,omitempty"`
 	Height int    `json:"height,omitempty"`
 }
-type Thumb struct {
+// ImageSize represents dimensions and resize mode for an image variant.
+type ImageSize struct {
 	W      int    `json:"w,omitempty"`
 	H      int    `json:"h,omitempty"`
 	Resize string `json:"resize,omitempty"`
 }
-type Small struct {
-	W      int    `json:"w,omitempty"`
-	H      int    `json:"h,omitempty"`
-	Resize string `json:"resize,omitempty"`
-}
-type Large struct {
-	W      int    `json:"w,omitempty"`
-	H      int    `json:"h,omitempty"`
-	Resize string `json:"resize,omitempty"`
-}
-type Medium struct {
-	W      int    `json:"w,omitempty"`
-	H      int    `json:"h,omitempty"`
-	Resize string `json:"resize,omitempty"`
-}
+
 type Sizes struct {
-	Thumb  Thumb  `json:"thumb,omitempty"`
-	Small  Small  `json:"small,omitempty"`
-	Large  Large  `json:"large,omitempty"`
-	Medium Medium `json:"medium,omitempty"`
+	Thumb  ImageSize `json:"thumb,omitempty"`
+	Small  ImageSize `json:"small,omitempty"`
+	Large  ImageSize `json:"large,omitempty"`
+	Medium ImageSize `json:"medium,omitempty"`
 }
 type Variant struct {
 	Bitrate     int    `json:"bitrate,omitempty"`
@@ -82,9 +69,9 @@ func (v *VideoInfo) GetHighestBitrateVariant() (Variant, error) {
 	}
 
 	maxVariant := v.Variants[0]
-	for _, variant := range v.Variants[1:] {
-		if variant.Bitrate > maxVariant.Bitrate {
-			maxVariant = variant
+	for i := 1; i < len(v.Variants); i++ {
+		if v.Variants[i].Bitrate > maxVariant.Bitrate {
+			maxVariant = v.Variants[i]
 		}
 	}
 

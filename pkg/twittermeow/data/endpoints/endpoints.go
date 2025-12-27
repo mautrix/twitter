@@ -17,14 +17,7 @@ const (
 	API_BASE_URL  = "https://" + API_BASE_HOST
 
 	ACCOUNT_SETTINGS_URL               = API_BASE_URL + "/1.1/account/settings.json"
-	INBOX_INITIAL_STATE_URL            = BASE_URL + "/i/api/1.1/dm/inbox_initial_state.json"
-	DM_USER_UPDATES_URL                = BASE_URL + "/i/api/1.1/dm/user_updates.json"
 	CONVERSATION_MARK_READ_URL         = BASE_URL + "/i/api/1.1/dm/conversation/%s/mark_read.json"
-	CONVERSATION_FETCH_MESSAGES        = BASE_URL + "/i/api/1.1/dm/conversation/%s.json"
-	UPDATE_LAST_SEEN_EVENT_ID_URL      = BASE_URL + "/i/api/1.1/dm/update_last_seen_event_id.json"
-	TRUSTED_INBOX_TIMELINE_URL         = BASE_URL + "/i/api/1.1/dm/inbox_timeline/trusted.json"
-	SEND_DM_URL                        = BASE_URL + "/i/api/1.1/dm/new2.json"
-	EDIT_DM_URL                        = BASE_URL + "/i/api/1.1/dm/edit.json"
 	GRAPHQL_MESSAGE_DELETION_MUTATION  = BASE_URL + "/i/api/graphql/BJ6DtxA2llfjnRoRjaiIiw/DMMessageDeleteMutation"
 	SEARCH_TYPEAHEAD_URL               = BASE_URL + "/i/api/1.1/search/typeahead.json"
 	DM_PERMISSIONS_URL                 = BASE_URL + "/i/api/1.1/dm/permissions.json"

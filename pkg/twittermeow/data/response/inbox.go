@@ -9,11 +9,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-type GetDMUserUpdatesResponse struct {
-	InboxInitialState *TwitterInboxData `json:"inbox_initial_state,omitempty"`
-	UserEvents        *TwitterInboxData `json:"user_events,omitempty"`
-}
-
 type TwitterInboxData struct {
 	Status                   types.PaginationStatus         `json:"status,omitempty"`
 	MinEntryID               string                         `json:"min_entry_id,omitempty"`
