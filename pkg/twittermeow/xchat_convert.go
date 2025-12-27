@@ -32,6 +32,7 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	// Convert attachments
 	if len(contents.Attachments) > 0 {
 		msgData.Attachment = convertXChatAttachments(contents.Attachments)
+		msgData.OriginalAttachments = contents.Attachments
 	}
 
 	// Convert reply data
@@ -153,6 +154,8 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 				IDStr:         ptr.Val(media.AttachmentId),
 				MediaURLHTTPS: ptr.Val(media.LegacyMediaUrlHttps),
 				MediaHashKey:  ptr.Val(media.MediaHashKey),
+				Filename:      ptr.Val(media.Filename),
+				FilesizeBytes: ptr.Val(media.FilesizeBytes),
 			}
 
 			if media.Dimensions != nil {

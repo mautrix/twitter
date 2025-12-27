@@ -145,6 +145,8 @@ type AttachmentInfo struct {
 	DisplayURL    string        `json:"display_url,omitempty"`
 	ExpandedURL   string        `json:"expanded_url,omitempty"`
 	Type          string        `json:"type,omitempty"`
+	Filename      string        `json:"filename,omitempty"`
+	FilesizeBytes int64         `json:"filesize_bytes,omitempty"`
 	OriginalInfo  OriginalInfo  `json:"original_info,omitempty"`
 	Sizes         Sizes         `json:"sizes,omitempty"`
 	VideoInfo     VideoInfo     `json:"video_info,omitempty"`

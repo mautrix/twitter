@@ -136,12 +136,21 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		if replyMsgID == "" {
 			replyMsgID = replySeqID
 		}
+		zerolog.Ctx(ctx).Info().
+			Str("conversation_id", conversationID).
+			Str("reply_to_id", string(msg.ReplyTo.ID)).
+			Int("reply_attachments", len(metaCopy.ReplyAttachments)).
+			Str("reply_text", replyText).
+			Msg("Preparing reply preview")
 		opts.ReplyTo = &payload.ReplyingToPreview{
 			ReplyingToMessageId:         &replyMsgID,
 			ReplyingToMessageSequenceId: &replySeqID,
 			MessageText:                 &replyText,
 			SenderDisplayName:           ptr.Ptr(replyDisplayName),
 			SenderId:                    senderIDPtr,
+		}
+		if len(metaCopy.ReplyAttachments) > 0 {
+			opts.ReplyTo.Attachments = metaCopy.ReplyAttachments
 		}
 	}
 
@@ -203,6 +212,16 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
 	}
 
+	if opts.Text != "" {
+		urlAttachments, urlEntities := buildURLAttachments(opts.Text)
+		if len(urlAttachments) > 0 {
+			opts.Attachments = append(opts.Attachments, urlAttachments...)
+		}
+		if len(urlEntities) > 0 {
+			opts.Entities = append(opts.Entities, urlEntities...)
+		}
+	}
+
 	txnID := networkid.TransactionID(messageID)
 	dbMsg := &database.Message{
 		ID:        networkid.MessageID(messageID),
@@ -215,6 +234,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			MessageText:       text,
 			SenderID:          string(tc.userLogin.ID),
 			SenderDisplayName: tc.getDisplayNameForUser(ctx, string(tc.userLogin.ID)),
+			ReplyAttachments:  filterReplyPreviewAttachments(opts.Attachments),
 		},
 	}
 	msg.AddPendingToSave(dbMsg, txnID, func(remote bridgev2.RemoteMessage, db *database.Message) (bool, error) {
@@ -270,6 +290,24 @@ func (tc *TwitterClient) lookupMessageSequenceID(ctx context.Context, portalKey 
 		}
 	}
 	return ""
+}
+
+// filterReplyPreviewAttachments filters message attachments for inclusion in reply previews.
+// Only media attachments (images, videos, GIFs, audio) are included.
+func filterReplyPreviewAttachments(attachments []*payload.MessageAttachment) []*payload.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]*payload.MessageAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		if att != nil && att.Media != nil {
+			result = append(result, att)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {

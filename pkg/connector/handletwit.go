@@ -699,6 +699,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 								meta.SenderDisplayName = data.SenderID
 							}
 						}
+						if len(meta.ReplyAttachments) == 0 && len(data.OriginalAttachments) > 0 {
+							meta.ReplyAttachments = filterReplyPreviewAttachments(data.OriginalAttachments)
+						}
 					}
 					if data != nil && data.EditCount > meta.EditCount {
 						meta.EditCount = data.EditCount

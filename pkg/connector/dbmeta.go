@@ -26,6 +26,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
@@ -75,9 +76,10 @@ type MessageMetadata struct {
 	XChatSequenceID  string `json:"xchat_sequence_id,omitempty"`   // numeric sequence id from XChat events
 	XChatCreatedAtMS string `json:"xchat_created_at_ms,omitempty"` // message created_at_msec from XChat event
 
-	MessageText       string `json:"message_text,omitempty"`
-	SenderDisplayName string `json:"sender_display_name,omitempty"`
-	SenderID          string `json:"sender_id,omitempty"`
+	MessageText       string                       `json:"message_text,omitempty"`
+	SenderDisplayName string                       `json:"sender_display_name,omitempty"`
+	SenderID          string                       `json:"sender_id,omitempty"`
+	ReplyAttachments  []*payload.MessageAttachment `json:"reply_attachments,omitempty"`
 }
 
 func (m *MessageMetadata) CopyFrom(other any) {
@@ -105,6 +107,9 @@ func (m *MessageMetadata) CopyFrom(other any) {
 	}
 	if m.SenderID == "" {
 		m.SenderID = o.SenderID
+	}
+	if len(m.ReplyAttachments) == 0 && len(o.ReplyAttachments) > 0 {
+		m.ReplyAttachments = append([]*payload.MessageAttachment(nil), o.ReplyAttachments...)
 	}
 }
 

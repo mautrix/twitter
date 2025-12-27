@@ -109,6 +109,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 			MessageText:       msg.Text,
 			SenderID:          msg.SenderID,
 			SenderDisplayName: displayName,
+			ReplyAttachments:  filterReplyPreviewAttachments(msg.OriginalAttachments),
 		}
 	}
 
