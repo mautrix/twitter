@@ -47,6 +47,10 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			if end < start {
 				end = start
 			}
+			rawURL := ""
+			if start < end && start >= 0 && end <= charArrLen {
+				rawURL = string(charArr[start:end])
+			}
 			if startClamped || endClamped {
 				zerolog.Ctx(ctx).Debug().
 					Int("start_raw", url.Indices[0]).
@@ -63,12 +67,24 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 				body.WriteString(string(charArr[cursor:start]))
 				bodyHTML.WriteString(string(charArr[cursor:start]))
 			}
-			body.WriteString(url.ExpandedURL)
-			_, _ = fmt.Fprintf(&bodyHTML,
-				`<a href="%s">%s</a>`,
-				url.ExpandedURL,
-				url.DisplayURL,
-			)
+			expandedURL := url.ExpandedURL
+			displayURL := url.DisplayURL
+			if expandedURL == "" {
+				expandedURL = rawURL
+			}
+			if displayURL == "" {
+				displayURL = expandedURL
+			}
+			body.WriteString(expandedURL)
+			if expandedURL == "" {
+				bodyHTML.WriteString(rawURL)
+			} else {
+				_, _ = fmt.Fprintf(&bodyHTML,
+					`<a href="%s">%s</a>`,
+					expandedURL,
+					displayURL,
+				)
+			}
 			cursor = end
 		case types.UserMention:
 			mention := entity

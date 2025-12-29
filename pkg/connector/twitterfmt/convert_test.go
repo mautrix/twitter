@@ -34,7 +34,18 @@ func TestParse(t *testing.T) {
 				},
 			},
 			body: "🚀 https://x.com abc",
-			html: "🚀 https://x.com abc",
+			html: "🚀 <a href=\"https://x.com\">https://x.com</a> abc",
+		},
+		{
+			name: "xchat url without expanded",
+			ins:  "Check this https://example.com/path",
+			ine: &types.Entities{
+				URLs: []types.URLs{
+					{Indices: []int{11, 35}},
+				},
+			},
+			body: "Check this https://example.com/path",
+			html: "Check this <a href=\"https://example.com/path\">https://example.com/path</a>",
 		},
 	}
 
