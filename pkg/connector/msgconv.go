@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -64,6 +65,8 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 			MessageID: networkid.MessageID(msg.ReplyData.ID),
 		}
 	}
+
+	tc.populateMentionIDs(msg)
 
 	textPart := &bridgev2.ConvertedMessagePart{
 		ID:      "",
@@ -164,6 +167,97 @@ func (tc *TwitterClient) getDisplayNameForUser(ctx context.Context, userID strin
 		return user.Name
 	}
 	return user.ScreenName
+}
+
+func (tc *TwitterClient) populateMentionIDs(msg *types.MessageData) {
+	if msg == nil || msg.Entities == nil || len(msg.Entities.UserMentions) == 0 {
+		return
+	}
+
+	var textRunes []rune
+	textLen := 0
+	if msg.Text != "" {
+		textRunes = []rune(msg.Text)
+		textLen = len(textRunes)
+	}
+
+	for i := range msg.Entities.UserMentions {
+		mention := &msg.Entities.UserMentions[i]
+		if mention.IDStr != "" {
+			continue
+		}
+
+		screenName := strings.TrimSpace(mention.ScreenName)
+		screenName = strings.TrimPrefix(screenName, "@")
+
+		if screenName == "" && len(mention.Indices) >= 2 && textLen > 0 {
+			start := mention.Indices[0]
+			end := mention.Indices[1]
+			if start < 0 {
+				start = 0
+			}
+			if end < start {
+				end = start
+			}
+			if end > textLen {
+				end = textLen
+			}
+			if start < end {
+				mentionText := strings.TrimSpace(string(textRunes[start:end]))
+				mentionText = strings.TrimPrefix(mentionText, "@")
+				screenName = mentionText
+			}
+		}
+
+		if screenName == "" {
+			continue
+		}
+		mention.ScreenName = screenName
+
+		idStr, id := tc.lookupUserIDByScreenName(screenName)
+		if idStr == "" {
+			continue
+		}
+		mention.IDStr = idStr
+		if mention.ID == 0 && id != 0 {
+			mention.ID = id
+		}
+	}
+}
+
+func (tc *TwitterClient) lookupUserIDByScreenName(screenName string) (string, int64) {
+	normalized := strings.TrimSpace(screenName)
+	normalized = strings.TrimPrefix(normalized, "@")
+	if normalized == "" {
+		return "", 0
+	}
+
+	if tc.userLogin != nil {
+		if tc.userLogin.RemoteName != "" && strings.EqualFold(tc.userLogin.RemoteName, normalized) {
+			return string(tc.userLogin.ID), 0
+		}
+		if tc.userLogin.RemoteProfile.Username != "" && strings.EqualFold(tc.userLogin.RemoteProfile.Username, normalized) {
+			return string(tc.userLogin.ID), 0
+		}
+	}
+
+	tc.userCacheLock.RLock()
+	defer tc.userCacheLock.RUnlock()
+	for _, user := range tc.userCache {
+		if user == nil {
+			continue
+		}
+		if strings.EqualFold(user.ScreenName, normalized) {
+			if user.IDStr != "" {
+				return user.IDStr, user.ID
+			}
+			if user.ID != 0 {
+				return strconv.FormatInt(user.ID, 10), user.ID
+			}
+			return "", 0
+		}
+	}
+	return "", 0
 }
 
 func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {

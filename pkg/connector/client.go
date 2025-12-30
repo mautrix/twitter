@@ -194,19 +194,33 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 	// processPage spawns goroutines to process each item in a page immediately
 	processPage := func(page response.XChatInboxPage) {
+		var pageMissing []string
+
 		for i := range page.Items {
 			item := &page.Items[i]
 			totalItems.Add(1)
+			missing := tc.cacheUsersFromItem(item)
+			if len(missing) > 0 {
+				pageMissing = append(pageMissing, missing...)
+			}
+		}
+
+		if len(pageMissing) > 0 {
+			if err := tc.ensureUsersInCacheByID(gCtx, pageMissing); err != nil {
+				log.Warn().
+					Err(err).
+					Int("missing_users", len(pageMissing)).
+					Msg("Failed to prefetch missing users for inbox page")
+			}
+			missingUserIDsMu.Lock()
+			missingUserIDs = append(missingUserIDs, pageMissing...)
+			missingUserIDsMu.Unlock()
+		}
+
+		for i := range page.Items {
+			item := &page.Items[i]
 
 			g.Go(func() error {
-				// Collect users from item and cache them, track missing IDs
-				missing := tc.cacheUsersFromItem(item)
-				if len(missing) > 0 {
-					missingUserIDsMu.Lock()
-					missingUserIDs = append(missingUserIDs, missing...)
-					missingUserIDsMu.Unlock()
-				}
-
 				// Process key changes first (needed for decryption)
 				if err := processor.ProcessKeyChangeEvents(gCtx, item); err != nil {
 					log.Warn().
