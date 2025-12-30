@@ -220,6 +220,10 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		if len(urlEntities) > 0 {
 			opts.Entities = append(opts.Entities, urlEntities...)
 		}
+		mentionEntities := buildMentionEntities(opts.Text)
+		if len(mentionEntities) > 0 {
+			opts.Entities = append(opts.Entities, mentionEntities...)
+		}
 	}
 
 	txnID := networkid.TransactionID(messageID)
