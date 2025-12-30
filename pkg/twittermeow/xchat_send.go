@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -287,7 +288,7 @@ func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessag
 
 	_, _, err = c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
-		Method:         "POST",
+		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,

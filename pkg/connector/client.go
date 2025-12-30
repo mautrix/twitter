@@ -52,8 +52,6 @@ type TwitterClient struct {
 
 	matrixParser *format.HTMLParser
 
-	reconnectAttempted atomic.Bool
-
 	ensurePortalLocks sync.Map
 }
 

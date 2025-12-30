@@ -156,7 +156,17 @@ func EncodePrivateKeyScalar(priv *ecdsa.PrivateKey) string {
 // EncodePublicKeyUncompressed encodes an ECDSA public key to uncompressed format.
 // Returns: 0x04 || X (32 bytes) || Y (32 bytes) = 65 bytes
 func EncodePublicKeyUncompressed(pub *ecdsa.PublicKey) []byte {
-	return elliptic.Marshal(pub.Curve, pub.X, pub.Y)
+	if pub == nil || pub.Curve == nil || pub.X == nil || pub.Y == nil {
+		return nil
+	}
+	byteLen := (pub.Curve.Params().BitSize + 7) / 8
+	out := make([]byte, 1+2*byteLen)
+	out[0] = 0x04
+	xBytes := pub.X.Bytes()
+	yBytes := pub.Y.Bytes()
+	copy(out[1+byteLen-len(xBytes):1+byteLen], xBytes)
+	copy(out[1+2*byteLen-len(yBytes):], yBytes)
+	return out
 }
 
 // LoadSigningKeyPair creates a SigningKeyPair from stored base64 scalar values.

@@ -5,7 +5,10 @@ package juicebox
 #include <stdlib.h>
 */
 import "C"
-import "unsafe"
+import (
+	"net/http"
+	"unsafe"
+)
 
 // emptyDataPtr is C-allocated memory for non-null empty array pointers.
 // The Rust SDK asserts that array data pointers are non-null, even for zero-length arrays.
@@ -40,14 +43,14 @@ func unmanagedArrayToBytes(arr C.JuiceboxUnmanagedDataArray) []byte {
 func httpMethodToString(method C.JuiceboxHttpRequestMethod) string {
 	switch method {
 	case C.JuiceboxHttpRequestMethodGet:
-		return "GET"
+		return http.MethodGet
 	case C.JuiceboxHttpRequestMethodPut:
-		return "PUT"
+		return http.MethodPut
 	case C.JuiceboxHttpRequestMethodPost:
-		return "POST"
+		return http.MethodPost
 	case C.JuiceboxHttpRequestMethodDelete:
-		return "DELETE"
+		return http.MethodDelete
 	default:
-		return "GET"
+		return http.MethodGet
 	}
 }

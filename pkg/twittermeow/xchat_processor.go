@@ -241,28 +241,28 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Msg("Failed to decrypt message contents, skipping")
 			return nil
 		}
-		} else {
-			// No signature - parse as plaintext thrift
-			contents, err = crypto.ParseMessageEntryContentsBytes(contentsBytes)
-			if err != nil {
-				p.log.Warn().
+	} else {
+		// No signature - parse as plaintext thrift
+		contents, err = crypto.ParseMessageEntryContentsBytes(contentsBytes)
+		if err != nil {
+			p.log.Warn().
 				Err(err).
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
 				Str("contents_hex_prefix", truncateBytes(contentsBytes, 32)).
-					Msg("Failed to parse message contents, skipping")
-				return nil
-			}
+				Msg("Failed to parse message contents, skipping")
+			return nil
 		}
+	}
 
-		p.logDecodedMessageContents(evt, conversationID, contents)
+	p.logDecodedMessageContents(evt, conversationID, contents)
 
-		// MessageContents directly contains message data (MessageText, Attachments, etc.)
-		// Check if it has actual message content
-		if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
-			msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
-			return p.emitEvent(ctx, msg)
+	// MessageContents directly contains message data (MessageText, Attachments, etc.)
+	// Check if it has actual message content
+	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
+		msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
+		return p.emitEvent(ctx, msg)
 	}
 
 	if contents.ReactionAdd != nil {
@@ -383,7 +383,7 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 	for _, pk := range ckce.ConversationParticipantKeys {
 		if ptr.Val(pk.UserId) == ownUserID {
 			ourEncryptedKey = ptr.Val(pk.EncryptedConversationKey)
-			p.log.Info().Msgf("Our Encrypted Key Is Found")
+			p.log.Info().Msg("Found encrypted key for current user")
 			break
 		}
 	}

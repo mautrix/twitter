@@ -34,9 +34,9 @@ const (
 
 // DeleteMessageActionSignature represents the signature for a delete action
 type DeleteMessageActionSignature struct {
-	MessageID                 string                            `json:"message_id"`
-	EncodedMessageEventDetail string                            `json:"encoded_message_event_detail"`
-	MessageEventSignature     *DeleteMessageEventSignatureJSON  `json:"message_event_signature,omitempty"`
+	MessageID                 string                           `json:"message_id"`
+	EncodedMessageEventDetail string                           `json:"encoded_message_event_detail"`
+	MessageEventSignature     *DeleteMessageEventSignatureJSON `json:"message_event_signature,omitempty"`
 }
 
 // DeleteMessageEventSignatureJSON is the JSON representation of a message event signature for delete

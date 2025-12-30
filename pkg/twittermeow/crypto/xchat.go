@@ -3,7 +3,6 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -88,14 +87,13 @@ func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 		return nil, fmt.Errorf("private scalar must be 32 bytes, got %d", len(privScalar))
 	}
 
-	curve := elliptic.P256()
-	x, y := elliptic.Unmarshal(curve, ephPub)
-	if x == nil || y == nil {
-		return nil, errors.New("invalid ephemeral public key")
+	ephKey, err := ParsePublicKeyUncompressed(ephPub)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ephemeral public key: %w", err)
 	}
 
 	// Derive shared secret (x coordinate, 32 bytes big-endian).
-	sx, _ := curve.ScalarMult(x, y, privScalar)
+	sx, _ := ephKey.Curve.ScalarMult(ephKey.X, ephKey.Y, privScalar)
 	shared := sx.Bytes()
 	if len(shared) < 32 {
 		padded := make([]byte, 32)

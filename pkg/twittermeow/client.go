@@ -49,9 +49,9 @@ type Client struct {
 	xchatEventHandler  XChatEventHandler
 	onCursorChanged    func(ctx context.Context)
 
-	currentUserID string
-	jot           *JotClient
-	stream        *StreamClient
+	currentUserID  string
+	jot            *JotClient
+	stream         *StreamClient
 	xchat          *xchatWebsocketClient
 	xchatProcessor *XChatEventProcessor
 	keyManager     *crypto.KeyManager

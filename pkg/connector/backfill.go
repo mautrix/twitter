@@ -196,7 +196,6 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	}
 
 	var entry *payload.MessageEntryContents
-	var err error
 
 	if evt.MessageEventSignature != nil && evt.MessageEventSignature.Signature != nil {
 		km := tc.client.GetKeyManager()
@@ -211,11 +210,19 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 			Str("key_version", keyVersion).
 			Logger()
 
-		entry, err = crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
+		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
+		if err != nil {
+			return nil, time.Time{}, 0
+		}
+		entry = decrypted
 	} else {
-		entry, err = crypto.ParseMessageEntryContentsBytes(contentsBytes)
+		parsed, err := crypto.ParseMessageEntryContentsBytes(contentsBytes)
+		if err != nil {
+			return nil, time.Time{}, 0
+		}
+		entry = parsed
 	}
-	if err != nil || entry == nil || entry.Message == nil {
+	if entry == nil || entry.Message == nil {
 		return nil, time.Time{}, 0
 	}
 

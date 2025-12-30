@@ -26,14 +26,11 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-	bridgeEvt "maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -190,68 +187,6 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 		Name:        ptr.Ptr(tc.Config.FormatDisplayname(user.ScreenName, user.Name)),
 		Avatar:      makeAvatar(cli, avatarURL),
 		Identifiers: []string{fmt.Sprintf("twitter:%s", user.ScreenName)},
-	}
-}
-
-func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
-	memberList := tc.participantsToMemberList(conv.Participants, inbox)
-	var userLocal bridgev2.UserLocalPortalInfo
-	if conv.Muted {
-		userLocal.MutedUntil = ptr.Ptr(bridgeEvt.MutedForever)
-	} else {
-		userLocal.MutedUntil = ptr.Ptr(bridgev2.Unmuted)
-	}
-	chatInfo := &bridgev2.ChatInfo{
-		Members:     memberList,
-		Type:        tc.conversationTypeToRoomType(conv.Type),
-		UserLocal:   &userLocal,
-		CanBackfill: true,
-	}
-
-	if *chatInfo.Type != database.RoomTypeDM {
-		chatInfo.Name = &conv.Name
-		chatInfo.Avatar = tc.makeGroupAvatar(conv.ConversationID, conv.AvatarImageHttps, "")
-	} else {
-		chatInfo.Name = bridgev2.DefaultChatName
-	}
-
-	return chatInfo
-}
-
-func (tc *TwitterClient) conversationTypeToRoomType(convType types.ConversationType) *database.RoomType {
-	var roomType database.RoomType
-	switch convType {
-	case types.ConversationTypeOneToOne:
-		roomType = database.RoomTypeDM
-	case types.ConversationTypeGroupDM:
-		roomType = database.RoomTypeGroupDM
-	}
-
-	return &roomType
-}
-
-func (tc *TwitterClient) participantsToMemberList(participants []types.Participant, inbox *response.TwitterInboxData) *bridgev2.ChatMemberList {
-	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(participants))
-	for _, participant := range participants {
-		memberMap[networkid.UserID(participant.UserID)] = tc.participantToChatMember(participant, inbox)
-	}
-	return &bridgev2.ChatMemberList{
-		IsFull:           true,
-		TotalMemberCount: len(participants),
-		MemberMap:        memberMap,
-	}
-}
-
-func (tc *TwitterClient) participantToChatMember(participant types.Participant, inbox *response.TwitterInboxData) bridgev2.ChatMember {
-	var userInfo *bridgev2.UserInfo
-	if user := inbox.GetUserByID(participant.UserID); user != nil {
-		userInfo = tc.connector.wrapUserInfo(tc.client, user)
-	} else {
-		userInfo = tc.getCachedUserInfo(participant.UserID)
-	}
-	return bridgev2.ChatMember{
-		EventSender: tc.MakeEventSender(participant.UserID),
-		UserInfo:    userInfo,
 	}
 }
 

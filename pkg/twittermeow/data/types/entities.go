@@ -39,6 +39,7 @@ type OriginalInfo struct {
 	Width  int    `json:"width,omitempty"`
 	Height int    `json:"height,omitempty"`
 }
+
 // ImageSize represents dimensions and resize mode for an image variant.
 type ImageSize struct {
 	W      int    `json:"w,omitempty"`

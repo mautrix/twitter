@@ -240,9 +240,9 @@ type GetPublicKeysResult struct {
 }
 
 type PublicKeyWithTokenMap struct {
-	Typename              string                   `json:"__typename,omitempty"`
-	PublicKeyWithMetadata XChatPublicKeyWithMeta   `json:"public_key_with_metadata"`
-	TokenMap              KeyStoreTokenMap         `json:"token_map"`
+	Typename              string                 `json:"__typename,omitempty"`
+	PublicKeyWithMetadata XChatPublicKeyWithMeta `json:"public_key_with_metadata"`
+	TokenMap              KeyStoreTokenMap       `json:"token_map"`
 }
 
 type XChatPublicKeyWithMeta struct {
@@ -270,7 +270,7 @@ type KeyStoreTokenMap struct {
 
 type KeyStoreTokenEntry struct {
 	Typename string        `json:"__typename,omitempty"`
-	Key      string        `json:"key,omitempty"`   // Realm ID (hex)
+	Key      string        `json:"key,omitempty"` // Realm ID (hex)
 	Value    KeyStoreToken `json:"value,omitempty"`
 }
 

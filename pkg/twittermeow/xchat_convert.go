@@ -1,7 +1,6 @@
 package twittermeow
 
 import (
-	"fmt"
 	"strconv"
 
 	"go.mau.fi/util/ptr"
@@ -274,16 +273,6 @@ func convertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.Mes
 	})
 }
 
-// convertXChatMarkRead converts XChat MarkConversationRead to types.ConversationRead
-func convertXChatMarkRead(evt *payload.MessageEvent, read *payload.MarkConversationRead) *types.ConversationRead {
-	return &types.ConversationRead{
-		ID:              ptr.Val(evt.SequenceId),
-		Time:            ptr.Val(evt.CreatedAtMsec),
-		ConversationID:  ptr.Val(evt.ConversationId),
-		LastReadEventID: ptr.Val(read.SeenUntilSequenceId),
-	}
-}
-
 // convertXChatMarkReadEvent converts XChat MarkConversationReadEvent to types.ConversationRead
 func convertXChatMarkReadEvent(evt *payload.MessageEvent, read *payload.MarkConversationReadEvent) *types.ConversationRead {
 	return &types.ConversationRead{
@@ -388,11 +377,6 @@ func convertXChatTypingEvent(evt *payload.MessageEvent, typing *payload.MessageT
 	}
 	senderID = ptr.Val(evt.SenderId)
 	return
-}
-
-// formatTimestamp formats a millisecond timestamp as a string
-func formatTimestamp(msec int64) string {
-	return fmt.Sprintf("%d", msec)
 }
 
 // ConvertXChatUserToUser converts an XChatUser from the initial inbox response

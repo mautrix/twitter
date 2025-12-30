@@ -248,7 +248,7 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "shutdown")
 
-	log.Info().Str("url", wsURL.String()).Msg("Connected to XChat websocket")
+	log.Info().Stringer("url", wsURL).Msg("Connected to XChat websocket")
 	xc.conn.Store(conn)
 	defer func() {
 		if xc.conn.Load() == conn {
@@ -350,7 +350,9 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 					Interface("event", decoded).
 					Msg("Decoded XChat websocket payload (failed to format JSON)")
 			} else {
-				log.Debug().Msgf("Decoded XChat websocket payload:\n%s", pretty)
+				log.Debug().
+					RawJSON("payload", pretty).
+					Msg("Decoded XChat websocket payload")
 			}
 		}
 
