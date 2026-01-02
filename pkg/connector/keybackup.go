@@ -24,7 +24,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"go.mau.fi/mautrix-twitter/pkg/juicebox"
+	"go.mau.fi/mautrix-twitter/pkg/juiceboxgo"
 )
 
 // KeyBackupData represents the encryption keys stored in Juicebox.
@@ -42,15 +42,20 @@ func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens 
 		Int("config_json_len", len(configJSON)).
 		Msg("Creating Juicebox configuration from JSON")
 
-	config, err := juicebox.ConfigurationFromJSON(configJSON)
+	config, err := juiceboxgo.ConfigurationFromJSON(configJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse juicebox config: %w", err)
 	}
-	defer config.Destroy()
 
 	logger.Debug().Msg("Juicebox configuration created, creating client")
 
-	client, err := juicebox.NewClient(config, authTokens, nil, logger)
+	// Convert string auth tokens to AuthToken type
+	typedAuthTokens := make(map[string]juiceboxgo.AuthToken)
+	for k, v := range authTokens {
+		typedAuthTokens[k] = juiceboxgo.AuthToken(v)
+	}
+
+	client, err := juiceboxgo.NewClient(config, typedAuthTokens, nil, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create juicebox client: %w", err)
 	}

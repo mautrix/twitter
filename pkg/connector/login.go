@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 
+	"go.mau.fi/mautrix-twitter/pkg/juiceboxgo"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -207,6 +209,35 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	// Recover keys from Juicebox (user info must be empty)
 	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", juiceboxLogger)
 	if err != nil {
+		// Check if this is an invalid PIN error that allows retry
+		var recoverErr *juiceboxgo.RecoverError
+		if errors.As(err, &recoverErr) && recoverErr.GuessesRemaining != nil {
+			guessesLeft := *recoverErr.GuessesRemaining
+			if guessesLeft > 0 {
+				// Return the same step with error message to allow retry
+				return &bridgev2.LoginStep{
+					Type:   bridgev2.LoginStepTypeUserInput,
+					StepID: LoginStepJuiceboxPIN,
+					Instructions: fmt.Sprintf(
+						"**Invalid PIN.** You have %d guesses remaining.\n\nEnter your 4-digit PIN to recover your encryption keys from Juicebox.",
+						guessesLeft,
+					),
+					UserInputParams: &bridgev2.LoginUserInputParams{
+						Fields: []bridgev2.LoginInputDataField{
+							{
+								Type:        bridgev2.LoginInputFieldTypePassword,
+								ID:          "pin",
+								Name:        "PIN",
+								Description: "4-digit PIN for key recovery",
+							},
+						},
+					},
+				}, nil
+			}
+			// No guesses remaining - user is locked out
+			return nil, fmt.Errorf("PIN recovery failed: no guesses remaining, account is locked")
+		}
+		// Other errors (network, auth, etc.) - return as-is
 		return nil, fmt.Errorf("failed to recover keys from Juicebox: %w", err)
 	}
 
