@@ -26,8 +26,8 @@ import (
 
 // Proof is a DLEQ proof that the server evaluated the OPRF correctly.
 type Proof struct {
-	C      ristretto.Scalar // Challenge
-	BetaZ  ristretto.Scalar // Response
+	C     ristretto.Scalar // Challenge
+	BetaZ ristretto.Scalar // Response
 }
 
 // ErrInvalidProof is returned when DLEQ proof verification fails.

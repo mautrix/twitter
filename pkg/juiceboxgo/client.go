@@ -418,11 +418,11 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 // recoverPhase3 retrieves the encrypted secret from realms.
 func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion, realms []Realm, unlockKey UnlockKey, encryptionKeySeed [32]byte) (Secret, error) {
 	type phase3Result struct {
-		realm                Realm
-		scalarShare          secretsharing.ScalarShare
-		encryptedSecret      EncryptedUserSecret
-		commitment           EncryptedUserSecretCommitment
-		err                  error
+		realm           Realm
+		scalarShare     secretsharing.ScalarShare
+		encryptedSecret EncryptedUserSecret
+		commitment      EncryptedUserSecretCommitment
+		err             error
 	}
 
 	results := make(chan phase3Result, len(realms))

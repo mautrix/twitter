@@ -26,9 +26,9 @@ import (
 
 // Configuration holds the realm configuration for Juicebox operations.
 type Configuration struct {
-	Realms           []Realm        `json:"realms"`
-	RegisterThreshold uint32        `json:"register_threshold"`
-	RecoverThreshold  uint32        `json:"recover_threshold"`
+	Realms            []Realm        `json:"realms"`
+	RegisterThreshold uint32         `json:"register_threshold"`
+	RecoverThreshold  uint32         `json:"recover_threshold"`
 	PinHashingMode    PinHashingMode `json:"pin_hashing_mode"`
 }
 

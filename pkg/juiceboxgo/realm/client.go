@@ -76,7 +76,7 @@ func NewClient(realm types.Realm, httpClient *http.Client, authTokenProvider Aut
 		realm:             realm,
 		httpClient:        httpClient,
 		authTokenProvider: authTokenProvider,
-		logger:            logger.With().Str("realm_id", realm.ID.String()).Logger(),
+		logger:            logger.With().Stringer("realm_id", realm.ID).Logger(),
 	}
 }
 
@@ -108,7 +108,7 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 		Int("request_len", len(body)).
 		Msg("Sending software realm request")
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create http request: %w", err)
 	}
@@ -339,7 +339,7 @@ func (c *Client) sendClientRequest(ctx context.Context, req *requests.ClientRequ
 		Int("request_len", len(body)).
 		Msg("Sending hardware realm request")
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create http request: %w", err)
 	}

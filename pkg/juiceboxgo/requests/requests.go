@@ -36,11 +36,11 @@ const (
 
 // ClientRequest wraps a request to a realm.
 type ClientRequest struct {
-	Realm     types.RealmID      `cbor:"realm"`
-	AuthToken types.AuthToken    `cbor:"auth_token"`
-	SessionID types.SessionID    `cbor:"session_id"`
-	Kind      ClientRequestKind  `cbor:"kind"`
-	Encrypted NoiseRequest       `cbor:"encrypted"`
+	Realm     types.RealmID     `cbor:"realm"`
+	AuthToken types.AuthToken   `cbor:"auth_token"`
+	SessionID types.SessionID   `cbor:"session_id"`
+	Kind      ClientRequestKind `cbor:"kind"`
+	Encrypted NoiseRequest      `cbor:"encrypted"`
 }
 
 // NoiseHandshakeRequest wraps a handshake request (matches Rust enum variant).
@@ -207,8 +207,8 @@ type Recover3Response struct {
 
 // Recover3ResponseOk contains the secret shares from phase 3.
 type Recover3ResponseOk struct {
-	EncryptionKeyScalarShare  []byte                            `cbor:"encryption_key_scalar_share"`
-	EncryptedSecret           types.EncryptedUserSecret         `cbor:"encrypted_secret"`
+	EncryptionKeyScalarShare  []byte                              `cbor:"encryption_key_scalar_share"`
+	EncryptedSecret           types.EncryptedUserSecret           `cbor:"encrypted_secret"`
 	EncryptedSecretCommitment types.EncryptedUserSecretCommitment `cbor:"encrypted_secret_commitment"`
 }
 
