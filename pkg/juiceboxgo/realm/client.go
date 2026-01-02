@@ -22,11 +22,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-twitter/pkg/juiceboxgo/noise"
 	"go.mau.fi/mautrix-twitter/pkg/juiceboxgo/requests"
@@ -37,6 +41,7 @@ const (
 	juiceboxVersionHeader = "X-Juicebox-Version"
 	juiceboxVersion       = "0.3.4"
 	userAgent             = "JuiceboxSdk-Go/0.3.4"
+	requestPath           = "/req"
 )
 
 // AuthTokenProvider retrieves auth tokens for realms.
@@ -47,6 +52,7 @@ type Client struct {
 	realm             types.Realm
 	httpClient        *http.Client
 	authTokenProvider AuthTokenProvider
+	logger            zerolog.Logger
 
 	// Session state for hardware realms
 	sessionMu sync.Mutex
@@ -62,7 +68,7 @@ type Session struct {
 }
 
 // NewClient creates a new realm client.
-func NewClient(realm types.Realm, httpClient *http.Client, authTokenProvider AuthTokenProvider) *Client {
+func NewClient(realm types.Realm, httpClient *http.Client, authTokenProvider AuthTokenProvider, logger zerolog.Logger) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -70,6 +76,7 @@ func NewClient(realm types.Realm, httpClient *http.Client, authTokenProvider Aut
 		realm:             realm,
 		httpClient:        httpClient,
 		authTokenProvider: authTokenProvider,
+		logger:            logger.With().Str("realm_id", realm.ID.String()).Logger(),
 	}
 }
 
@@ -85,6 +92,7 @@ func (c *Client) MakeRequest(ctx context.Context, req *requests.SecretsRequest) 
 func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.SecretsRequest) (*requests.SecretsResponse, error) {
 	authToken, ok := c.authTokenProvider(c.realm.ID)
 	if !ok {
+		c.logger.Debug().Msg("No auth token found for realm")
 		return nil, types.ErrInvalidAuth
 	}
 
@@ -93,7 +101,14 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.realm.Address, bytes.NewReader(body))
+	reqURL := buildRequestURL(c.realm.Address)
+	c.logger.Debug().
+		Str("url", reqURL).
+		Str("request_cbor_hex", hex.EncodeToString(body)).
+		Int("request_len", len(body)).
+		Msg("Sending software realm request")
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create http request: %w", err)
 	}
@@ -105,21 +120,30 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		c.logger.Debug().Err(err).Msg("HTTP request failed")
 		return nil, types.ErrTransient
 	}
 	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logger.Debug().Err(err).Msg("Failed to read response body")
+		return nil, types.ErrTransient
+	}
+
+	c.logger.Debug().
+		Int("status_code", resp.StatusCode).
+		Str("response_cbor_hex", hex.EncodeToString(respBody)).
+		Int("response_len", len(respBody)).
+		Msg("Received software realm response")
 
 	if err := checkStatusCode(resp.StatusCode); err != nil {
 		return nil, err
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.ErrTransient
-	}
-
 	var secretsResp requests.SecretsResponse
 	if err := requests.Unmarshal(respBody, &secretsResp); err != nil {
+		c.logger.Debug().Err(err).Msg("Failed to unmarshal response")
 		return nil, types.ErrAssertion
 	}
 
@@ -305,7 +329,15 @@ func (c *Client) sendClientRequest(ctx context.Context, req *requests.ClientRequ
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.realm.Address, bytes.NewReader(body))
+	reqURL := buildRequestURL(c.realm.Address)
+	c.logger.Debug().
+		Str("url", reqURL).
+		Str("kind", string(req.Kind)).
+		Str("request_cbor_hex", hex.EncodeToString(body)).
+		Int("request_len", len(body)).
+		Msg("Sending hardware realm request")
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create http request: %w", err)
 	}
@@ -316,31 +348,43 @@ func (c *Client) sendClientRequest(ctx context.Context, req *requests.ClientRequ
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		c.logger.Debug().Err(err).Msg("HTTP request failed")
 		return nil, types.ErrTransient
 	}
 	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logger.Debug().Err(err).Msg("Failed to read response body")
+		return nil, types.ErrTransient
+	}
+
+	c.logger.Debug().
+		Int("status_code", resp.StatusCode).
+		Str("response_cbor_hex", hex.EncodeToString(respBody)).
+		Int("response_len", len(respBody)).
+		Msg("Received hardware realm response")
 
 	if err := checkStatusCode(resp.StatusCode); err != nil {
 		return nil, err
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.ErrTransient
-	}
-
 	var clientResp requests.ClientResponse
 	if err := requests.Unmarshal(respBody, &clientResp); err != nil {
+		c.logger.Debug().Err(err).Msg("Failed to unmarshal ClientResponse")
 		return nil, types.ErrAssertion
 	}
 
 	if clientResp.InvalidAuth {
+		c.logger.Debug().Msg("Realm returned InvalidAuth")
 		return nil, types.ErrInvalidAuth
 	}
 	if clientResp.RateLimitExceeded {
+		c.logger.Debug().Msg("Realm returned RateLimitExceeded")
 		return nil, types.ErrRateLimitExceeded
 	}
 	if clientResp.Unavailable {
+		c.logger.Debug().Msg("Realm returned Unavailable")
 		return nil, types.ErrTransient
 	}
 
@@ -366,4 +410,9 @@ func randomSessionID() types.SessionID {
 	var buf [4]byte
 	rand.Read(buf[:])
 	return types.SessionID(binary.LittleEndian.Uint32(buf[:]))
+}
+
+// buildRequestURL constructs the full URL for realm requests.
+func buildRequestURL(baseAddress string) string {
+	return strings.TrimSuffix(baseAddress, "/") + requestPath
 }

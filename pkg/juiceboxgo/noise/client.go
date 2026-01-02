@@ -44,14 +44,14 @@ var (
 
 // HandshakeRequest is sent from client to server during handshake.
 type HandshakeRequest struct {
-	ClientEphemeralPublic []byte
-	PayloadCiphertext     []byte
+	ClientEphemeralPublic []byte `cbor:"client_ephemeral_public"`
+	PayloadCiphertext     []byte `cbor:"payload_ciphertext"`
 }
 
 // HandshakeResponse is sent from server to client during handshake.
 type HandshakeResponse struct {
-	ServerEphemeralPublic []byte
-	PayloadCiphertext     []byte
+	ServerEphemeralPublic []byte `cbor:"server_ephemeral_public"`
+	PayloadCiphertext     []byte `cbor:"payload_ciphertext"`
 }
 
 // Transport handles encrypted communication after handshake.

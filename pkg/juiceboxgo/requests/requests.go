@@ -84,10 +84,37 @@ type NoiseTransportResponse struct {
 }
 
 // SecretsRequest is the inner request for secret operations.
+// It uses custom CBOR marshaling to match the expected format:
+// - Recover1: serializes as string "Recover1"
+// - Recover2/3: serialize as {"Recover2": {...}} or {"Recover3": {...}}
 type SecretsRequest struct {
-	Recover1 bool             `cbor:"Recover1,omitempty"`
-	Recover2 *Recover2Request `cbor:"Recover2,omitempty"`
-	Recover3 *Recover3Request `cbor:"Recover3,omitempty"`
+	Recover1 bool             `cbor:"-"`
+	Recover2 *Recover2Request `cbor:"-"`
+	Recover3 *Recover3Request `cbor:"-"`
+}
+
+// MarshalCBOR implements custom CBOR serialization for SecretsRequest.
+// The Juicebox realm expects:
+// - Empty structs (Recover1) as a string: "Recover1"
+// - Structs with fields (Recover2/3) as a map: {"Recover2": {...}}
+func (s *SecretsRequest) MarshalCBOR() ([]byte, error) {
+	if s.Recover1 {
+		// Recover1 is an empty struct, serialize as string "Recover1"
+		return cbor.Marshal("Recover1")
+	}
+	if s.Recover2 != nil {
+		// Serialize as {"Recover2": {...}}
+		return cbor.Marshal(map[string]*Recover2Request{
+			"Recover2": s.Recover2,
+		})
+	}
+	if s.Recover3 != nil {
+		// Serialize as {"Recover3": {...}}
+		return cbor.Marshal(map[string]*Recover3Request{
+			"Recover3": s.Recover3,
+		})
+	}
+	return nil, nil
 }
 
 // Recover2Request is the request for phase 2 of recovery.

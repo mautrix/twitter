@@ -56,7 +56,7 @@ func NewClient(config *Configuration, authTokens map[string]AuthToken, httpClien
 
 	realmClients := make(map[RealmID]*realm.Client)
 	for _, r := range config.Realms {
-		realmClients[r.ID] = realm.NewClient(r, httpClient, authProvider)
+		realmClients[r.ID] = realm.NewClient(r, httpClient, authProvider, logger)
 	}
 
 	return &Client{
