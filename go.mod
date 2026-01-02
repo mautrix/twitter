@@ -16,18 +16,18 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
 	github.com/thrift-iterator/go v0.0.0-20190402154806-9b5a67519118
-	go.mau.fi/util v0.9.3
-	golang.org/x/crypto v0.44.0
-	golang.org/x/sync v0.18.0
+	go.mau.fi/util v0.9.4
+	golang.org/x/crypto v0.46.0
+	golang.org/x/sync v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.26.1-0.20251119111538-57657d54eeac
+	maunium.net/go/mautrix v0.26.1
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
+	github.com/coreos/go-systemd/v22 v22.6.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/icholy/digest v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
@@ -36,7 +36,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-sqlite3 v1.14.32 // indirect
-	github.com/petermattis/goid v0.0.0-20250904145737-900bdf8bb490 // indirect
+	github.com/petermattis/goid v0.0.0-20251121121749-a11dd1a45f9a // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.56.0 // indirect
@@ -53,10 +53,10 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect
-	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	maunium.net/go/mauflag v1.0.0 // indirect
 )
