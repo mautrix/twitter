@@ -6,7 +6,9 @@ toolchain go1.25.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/bwesterb/go-ristretto v1.2.3
 	github.com/coder/websocket v1.8.14
+	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/google/go-querystring v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/imroc/req/v3 v3.56.0
@@ -48,6 +50,7 @@ require (
 	github.com/v2pro/plz v0.0.0-20221028024117-e5f9aec5b631 // indirect
 	github.com/v2pro/quokka v0.0.0-20171201153428-382cb39c6ee6 // indirect
 	github.com/v2pro/wombat v0.0.0-20180402055224-a56dbdcddef2 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
