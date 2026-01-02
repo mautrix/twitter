@@ -1,4 +1,6 @@
-./mautrix-twitter
+.DS_Store
+.claude/settings.local.json
+/mautrix-twitter
 logs/
 *.db*
 *.yaml
