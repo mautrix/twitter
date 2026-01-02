@@ -43,10 +43,15 @@ type ClientRequest struct {
 	Encrypted NoiseRequest       `cbor:"encrypted"`
 }
 
+// NoiseHandshakeRequest wraps a handshake request (matches Rust enum variant).
+type NoiseHandshakeRequest struct {
+	Handshake *noise.HandshakeRequest `cbor:"handshake"`
+}
+
 // NoiseRequest wraps either a handshake or transport message.
 type NoiseRequest struct {
-	Handshake *noise.HandshakeRequest `cbor:"Handshake,omitempty"`
-	Transport *NoiseTransportRequest  `cbor:"Transport,omitempty"`
+	Handshake *NoiseHandshakeRequest `cbor:"Handshake,omitempty"`
+	Transport *NoiseTransportRequest `cbor:"Transport,omitempty"`
 }
 
 // NoiseTransportRequest contains encrypted data.

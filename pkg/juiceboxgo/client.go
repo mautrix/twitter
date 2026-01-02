@@ -18,7 +18,9 @@ package juiceboxgo
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/subtle"
+	"encoding/binary"
 	"net/http"
 	"sync"
 
@@ -265,6 +267,13 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 			proofBetaZ.SetBytes(&betaZBytes)
 
 			proof := &oprf.Proof{C: proofC, BetaZ: proofBetaZ}
+
+			// Verify Ed25519 signature of OPRF public key
+			signatureMsg := buildOprfSignatureMessage(r.ID[:], ok.OprfSignedPublicKey.PublicKey)
+			if !ed25519.Verify(ok.OprfSignedPublicKey.VerifyingKey[:], signatureMsg, ok.OprfSignedPublicKey.Signature[:]) {
+				results <- phase2Result{err: ErrAssertion, realm: r}
+				return
+			}
 
 			// Parse public key
 			var publicKey oprf.PublicKey
@@ -532,4 +541,16 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 	}
 
 	return secret, nil
+}
+
+// buildOprfSignatureMessage constructs the message for Ed25519 signature verification.
+// Format: BE2(len(realm_id)) || realm_id || BE2(len(public_key)) || public_key
+func buildOprfSignatureMessage(realmID, publicKey []byte) []byte {
+	msg := make([]byte, 2+len(realmID)+2+len(publicKey))
+	binary.BigEndian.PutUint16(msg[0:2], uint16(len(realmID)))
+	copy(msg[2:], realmID)
+	offset := 2 + len(realmID)
+	binary.BigEndian.PutUint16(msg[offset:offset+2], uint16(len(publicKey)))
+	copy(msg[offset+2:], publicKey)
+	return msg
 }

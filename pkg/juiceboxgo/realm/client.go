@@ -257,7 +257,9 @@ func (c *Client) makeHandshakeRequest(ctx context.Context, payload []byte) (*Ses
 		SessionID: sessionID,
 		Kind:      kind,
 		Encrypted: requests.NoiseRequest{
-			Handshake: handshakeReq,
+			Handshake: &requests.NoiseHandshakeRequest{
+				Handshake: handshakeReq,
+			},
 		},
 	}
 

@@ -97,6 +97,7 @@ func Start(serverStaticPublic []byte, payloadPlaintext []byte) (*Handshake, *Han
 	ck := h
 
 	// mix_hash(prologue) - empty prologue
+	h = mixHash(h, []byte{})
 	// mix_hash(serverStaticPublic)
 	h = mixHash(h, serverStaticPublic)
 	// mix_hash(clientEphemeralPublic)
