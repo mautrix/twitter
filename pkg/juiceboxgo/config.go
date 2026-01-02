@@ -17,9 +17,11 @@
 package juiceboxgo
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // Configuration holds the realm configuration for Juicebox operations.
@@ -80,6 +82,12 @@ func ConfigurationFromJSON(jsonData string) (*Configuration, error) {
 
 		config.Realms[i] = realm
 	}
+
+	// Sort realms by ID to ensure consistent share indices.
+	// This matches the Rust SDK behavior which sorts realms before assigning share indices.
+	sort.Slice(config.Realms, func(i, j int) bool {
+		return bytes.Compare(config.Realms[i].ID[:], config.Realms[j].ID[:]) < 0
+	})
 
 	// Validate threshold
 	if config.RecoverThreshold == 0 {

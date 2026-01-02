@@ -88,6 +88,12 @@ func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (
 	// Hash PIN with Argon2
 	hashResult := pin.HashPIN(pinBytes, pin.HashingMode(c.config.PinHashingMode), [16]byte(version), userInfo)
 
+	// DEBUG: Log PIN hash results for comparison with Rust
+	c.logger.Debug().
+		Hex("access_key", hashResult.AccessKey[:]).
+		Hex("encryption_key_seed", hashResult.EncryptionKeySeed[:]).
+		Msg("PIN hash complete")
+
 	// Phase 2: OPRF evaluation
 	c.logger.Debug().Msg("Starting recovery phase 2")
 	unlockKey, err := c.recoverPhase2(ctx, version, realms, hashResult.AccessKey)
@@ -187,6 +193,12 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 	if err != nil {
 		return UnlockKey{}, err
 	}
+
+	// DEBUG: Log OPRF start results
+	c.logger.Debug().
+		Hex("oprf_input", accessKey[:]).
+		Hex("blinded_input", blindedInput.Bytes()).
+		Msg("OPRF started")
 
 	type phase2Result struct {
 		realm              Realm
@@ -297,6 +309,14 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 				return
 			}
 
+			// DEBUG: Log realm response
+			c.logger.Debug().
+				Str("realm", r.ID.String()).
+				Uint32("share_index", index).
+				Hex("blinded_result", ok.OprfBlindedResult).
+				Hex("commitment", ok.UnlockKeyCommitment[:]).
+				Msg("Realm phase 2 response")
+
 			results <- phase2Result{
 				realm: r,
 				blindedResultShare: secretsharing.PointShare{
@@ -370,6 +390,15 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 
 	// Derive unlock key
 	unlockKeyRaw, ourCommitment := crypto.DeriveUnlockKeyAndCommitment(oprfOutput)
+
+	// DEBUG: Log OPRF finalization results for comparison with Rust
+	c.logger.Debug().
+		Hex("combined_blinded_result", combinedBlindedResult.Bytes()).
+		Hex("oprf_output", oprfOutput[:]).
+		Hex("derived_commitment", ourCommitment[:]).
+		Hex("expected_commitment", unlockKeyCommitment[:]).
+		Hex("unlock_key", unlockKeyRaw[:]).
+		Msg("OPRF finalized")
 
 	// Verify commitment (constant time)
 	if subtle.ConstantTimeCompare(unlockKeyCommitment[:], ourCommitment[:]) != 1 {

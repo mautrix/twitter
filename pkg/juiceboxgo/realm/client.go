@@ -280,7 +280,7 @@ func (c *Client) makeHandshakeRequest(ctx context.Context, payload []byte) (*Ses
 	session := &Session{
 		ID:        sessionID,
 		Transport: transport,
-		Lifetime:  clientResp.Ok.Handshake.SessionLifetime,
+		Lifetime:  clientResp.Ok.Handshake.SessionLifetime.ToDuration(),
 		LastUsed:  time.Now(),
 	}
 

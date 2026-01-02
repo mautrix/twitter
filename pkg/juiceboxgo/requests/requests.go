@@ -77,10 +77,22 @@ type NoiseResponse struct {
 	Transport *NoiseTransportResponse `cbor:"Transport,omitempty"`
 }
 
+// Duration represents a Rust std::time::Duration serialized via serde.
+// Rust serializes Duration as {"secs": u64, "nanos": u32}.
+type Duration struct {
+	Secs  uint64 `cbor:"secs"`
+	Nanos uint32 `cbor:"nanos"`
+}
+
+// ToDuration converts to Go's time.Duration.
+func (d Duration) ToDuration() time.Duration {
+	return time.Duration(d.Secs)*time.Second + time.Duration(d.Nanos)*time.Nanosecond
+}
+
 // NoiseHandshakeResponse contains handshake data.
 type NoiseHandshakeResponse struct {
 	Handshake       noise.HandshakeResponse `cbor:"handshake"`
-	SessionLifetime time.Duration           `cbor:"session_lifetime"`
+	SessionLifetime Duration                `cbor:"session_lifetime"`
 }
 
 // NoiseTransportResponse contains encrypted data.
