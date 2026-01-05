@@ -114,7 +114,7 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 	detail := item.ConversationDetail
 
 	conv := &types.Conversation{
-		ConversationID: detail.ConversationID,
+		ConversationID: NormalizeConversationID(detail.ConversationID),
 		Trusted:        true, // XChat conversations are always trusted
 		Muted:          detail.IsMuted,
 	}

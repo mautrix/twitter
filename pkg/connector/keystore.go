@@ -23,8 +23,9 @@ type userLoginKeyStore struct {
 }
 
 // conversationCacheKey builds a cache key for conversation key storage.
+// Normalizes the conversation ID to ensure consistent lookups across ID formats.
 func conversationCacheKey(conversationID, keyVersion string) string {
-	return conversationID + ":" + keyVersion
+	return NormalizeConversationID(conversationID) + ":" + keyVersion
 }
 
 func newUserLoginKeyStore(login *bridgev2.UserLogin) *userLoginKeyStore {
@@ -149,9 +150,10 @@ func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversa
 
 func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conversationID string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
+	normalizedID := NormalizeConversationID(conversationID)
 	var latest *ConversationKeyData
 	var latestVersion string
-	prefix := conversationID + ":"
+	prefix := normalizedID + ":"
 
 	ks.mu.RLock()
 	var matchingKeys []string
@@ -250,8 +252,9 @@ func (ks *userLoginKeyStore) PutPublicKey(_ context.Context, _ *crypto.PublicKey
 }
 
 func (ks *userLoginKeyStore) GetConversationToken(_ context.Context, conversationID string) (string, error) {
+	normalizedID := NormalizeConversationID(conversationID)
 	ks.mu.RLock()
-	token, ok := ks.meta.ConversationTokens[conversationID]
+	token, ok := ks.meta.ConversationTokens[normalizedID]
 	ks.mu.RUnlock()
 
 	if !ok {
@@ -261,10 +264,11 @@ func (ks *userLoginKeyStore) GetConversationToken(_ context.Context, conversatio
 }
 
 func (ks *userLoginKeyStore) PutConversationToken(ctx context.Context, conversationID, token string) error {
+	normalizedID := NormalizeConversationID(conversationID)
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	ks.meta.ConversationTokens[conversationID] = token
+	ks.meta.ConversationTokens[normalizedID] = token
 	return ks.login.Save(ctx)
 }
 
