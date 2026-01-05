@@ -550,16 +550,11 @@ func (p *XChatEventProcessor) logDecodedMessageContents(evt *payload.MessageEven
 		return
 	}
 
-	logEvt := p.log.Info().
+	p.log.Info().
 		Str("sequence_id", seqID).
 		Str("conversation_id", conversationID).
-		Int("decoded_json_len", len(raw))
-	if len(raw) <= 4000 {
-		logEvt = logEvt.RawJSON("decrypted_contents", raw)
-	} else {
-		logEvt = logEvt.Str("decrypted_contents_prefix", string(raw[:4000]))
-	}
-	logEvt.Msg("Decrypted MessageCreateEvent contents")
+		Int("decoded_json_len", len(raw)).
+		Msg("Decrypted MessageCreateEvent contents")
 }
 
 // DecodeMessageEvent decodes a base64-encoded thrift MessageEvent string.

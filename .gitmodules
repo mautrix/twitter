@@ -1,3 +1,0 @@
-[submodule "pkg/juicebox/juicebox-sdk"]
-	path = pkg/juicebox/juicebox-sdk
-	url = https://github.com/juicebox-systems/juicebox-sdk.git

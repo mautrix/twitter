@@ -80,15 +80,10 @@ func DecryptMessageEntryContentsBytesDebug(ciphertext []byte, conversationKey []
 	}
 	if log != nil && entry.Message != nil {
 		if msgJSON, err := json.Marshal(entry.Message); err == nil {
-			evt := log.Info().
+			log.Info().
 				Int("decrypted_json_len", len(msgJSON)).
-				Int("plaintext_len", len(plaintext))
-			if len(msgJSON) <= 4000 {
-				evt = evt.RawJSON("decrypted_message", msgJSON)
-			} else {
-				evt = evt.Str("decrypted_message_prefix", string(msgJSON[:4000]))
-			}
-			evt.Msg("Decrypted XChat message contents")
+				Int("plaintext_len", len(plaintext)).
+				Msg("Decrypted XChat message contents")
 		}
 	}
 	return entry, nil
@@ -130,13 +125,7 @@ func logHolderContents(log *zerolog.Logger, holder *payload.MessageEntryHolder, 
 		}
 	}
 
-	// Also try to dump the holder as JSON for full visibility
-	holderJSON, jsonErr := json.Marshal(holder)
-	if jsonErr == nil && len(holderJSON) < 2000 {
-		evt = evt.RawJSON("holder_json", holderJSON)
-	}
-
-	evt = evt.Str("plaintext_full_hex", hex.EncodeToString(plaintext))
+	evt = evt.Int("plaintext_len", len(plaintext))
 	evt.Msg("Thrift decode into MessageEntryHolder succeeded")
 }
 
@@ -200,7 +189,7 @@ func decodeMessageEntryHolder(data []byte, log *zerolog.Logger) (_ *payload.Mess
 			if log != nil {
 				log.Warn().
 					Interface("panic", r).
-					Str("plaintext_full_hex", hex.EncodeToString(data)).
+					Int("plaintext_len", len(data)).
 					Msg("Thrift decode panic in MessageEntryHolder")
 			}
 			err = fmt.Errorf("thrift decode panic: %v", r)
@@ -213,7 +202,7 @@ func decodeMessageEntryHolder(data []byte, log *zerolog.Logger) (_ *payload.Mess
 		if log != nil {
 			log.Debug().
 				Err(err).
-				Str("plaintext_full_hex", hex.EncodeToString(data)).
+				Int("plaintext_len", len(data)).
 				Msg("Thrift decode into MessageEntryHolder failed")
 		}
 		return nil, err
