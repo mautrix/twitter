@@ -37,7 +37,7 @@ func (tc *TwitterClient) MakePortalKey(conv *types.Conversation) networkid.Porta
 func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.PortalKey {
 	var receiver networkid.UserLoginID
 	// 1:1 DM conversation IDs use `:` as delimiter between user IDs
-	if strings.Contains(conversationID, ":") || strings.HasPrefix(conversationID, "g") || tc.connector.br.Config.SplitPortals {
+	if strings.Contains(conversationID, ":") || tc.connector.br.Config.SplitPortals {
 		receiver = tc.userLogin.ID
 	}
 	return networkid.PortalKey{
