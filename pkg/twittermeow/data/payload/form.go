@@ -280,10 +280,10 @@ func (p *UpdateSubscriptionsPayload) Encode() ([]byte, error) {
 var XCHAT_MESSAGE_PULL_VERSION int = 1761251295
 
 type QuerySettings struct {
-	InboxConversationEventLimit int `url:"inbox_conversation_event_limit"`
-	InboxConversationLimit      int `url:"inbox_conversation_limit"`
-	ConversationEventLimit      int `url:"conversation_event_limit"`
-	UserEventLimit              int `url:"user_event_limit"`
+	InboxConversationEventLimit int `url:"inbox_conversation_event_limit" json:"inbox_conversation_event_limit"`
+	InboxConversationLimit      int `url:"inbox_conversation_limit" json:"inbox_conversation_limit"`
+	ConversationEventLimit      int `url:"conversation_event_limit" json:"conversation_event_limit"`
+	UserEventLimit              int `url:"user_event_limit" json:"user_event_limit"`
 }
 
 func DefaultQuerySettings() *QuerySettings {
@@ -304,8 +304,8 @@ func (p *QuerySettings) Encode() ([]byte, error) {
 }
 
 type XChatCursor struct {
-	CursorId        string `url:"cursor_id,omitempty"`
-	GraphSnapshotId string `url:"graph_snapshot_id,omitempty"`
+	CursorId        string `url:"cursor_id,omitempty" json:"cursor_id,omitempty"`
+	GraphSnapshotId string `url:"graph_snapshot_id,omitempty" json:"graph_snapshot_id,omitempty"`
 }
 
 func (p *XChatCursor) Encode() ([]byte, error) {
@@ -317,10 +317,10 @@ func (p *XChatCursor) Encode() ([]byte, error) {
 }
 
 type GetInitialXChatPageQueryVariables struct {
-	MaxLocalSequenceId string         `url:"max_local_sequence_id,omitempty"`
-	QuerySettings      *QuerySettings `url:"query_settings"`
-	MessagePullVersion *int           `url:"message_pull_version,omitempty"`
-	ContinueCursor     *XChatCursor   `url:"continue_cursor,omitempty"`
+	MaxLocalSequenceId string         `url:"max_local_sequence_id,omitempty" json:"max_local_sequence_id,omitempty"`
+	QuerySettings      *QuerySettings `url:"query_settings" json:"query_settings"`
+	MessagePullVersion *int           `url:"message_pull_version,omitempty" json:"message_pull_version,omitempty"`
+	ContinueCursor     *XChatCursor   `url:"continue_cursor,omitempty" json:"continue_cursor,omitempty"`
 }
 
 func NewInitialXChatPageQueryVariables(
@@ -334,11 +334,7 @@ func NewInitialXChatPageQueryVariables(
 }
 
 func (p *GetInitialXChatPageQueryVariables) Encode() ([]byte, error) {
-	values, err := query.Values(p)
-	if err != nil {
-		return nil, err
-	}
-	return []byte(values.Encode()), nil
+	return json.Marshal(p)
 }
 
 type GetInboxPageRequestQueryVariables struct {

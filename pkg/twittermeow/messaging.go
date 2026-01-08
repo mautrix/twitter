@@ -21,6 +21,42 @@ type FormEncoder interface {
 	Encode() ([]byte, error)
 }
 
+// makeXChatJSONRequest is a generic helper for XChat API JSON POST requests.
+func makeXChatJSONRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
+	jsonBody, err := variables.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		Str("url", url).
+		RawJSON("json_body", jsonBody).
+		Msg(opName + " payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		c.Logger.Debug().
+			Str("response_body", string(respBody)).
+			Err(err).
+			Msg(opName + " failed")
+		return nil, err
+	}
+
+	c.Logger.Trace().
+		Str("response_body", string(respBody)).
+		Msg(opName + " response")
+
+	var resp T
+	return &resp, json.Unmarshal(respBody, &resp)
+}
+
 // makeXChatFormRequest is a generic helper for XChat API form-encoded POST requests.
 func makeXChatFormRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
 	formBody, err := variables.Encode()
@@ -616,7 +652,7 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 }
 
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
-	return makeXChatFormRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
+	return makeXChatJSONRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
