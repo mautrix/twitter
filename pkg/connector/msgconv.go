@@ -110,7 +110,6 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		part.DBMetadata = &MessageMetadata{
 			EditCount:         msg.EditCount,
 			MessageText:       msg.Text,
-			SenderID:          msg.SenderID,
 			SenderDisplayName: displayName,
 			ReplyAttachments:  filterReplyPreviewAttachments(msg.OriginalAttachments),
 		}
@@ -451,15 +450,29 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 		return nil, fmt.Errorf("failed to prepare request: %w", err)
 	}
 
-	headers := twittermeow.BaseHeaders.Clone()
-	headers.Set("Cookie", cli.GetCookieString())
-	req.Header = headers
+	if isPublicCDNURL(url) {
+		// Public CDN URLs use minimal headers - no auth, no Origin/Referer
+		req.Header.Set("User-Agent", twittermeow.UserAgent)
+		req.Header.Set("Accept", "*/*")
+	} else {
+		// Authenticated requests use full headers with cookies
+		headers := twittermeow.BaseHeaders.Clone()
+		headers.Set("Cookie", cli.GetCookieString())
+		req.Header = headers
+	}
 
 	getResp, err := cli.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	return getResp, nil
+}
+
+// isPublicCDNURL returns true for Twitter CDN URLs that don't require authentication.
+func isPublicCDNURL(url string) bool {
+	return strings.Contains(url, "pbs.twimg.com") ||
+		strings.Contains(url, "abs.twimg.com") ||
+		strings.Contains(url, "video.twimg.com")
 }
 
 func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachment *types.Attachment, urls []types.URLs, keyVersion string) *event.BeeperLinkPreview {

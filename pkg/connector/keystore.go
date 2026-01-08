@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -13,35 +12,27 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 )
 
-// userLoginKeyStore stores cryptographic keys in the user login metadata.
-// Signing keys and conversation keys are persisted; public keys are not.
+// userLoginKeyStore stores cryptographic keys.
+// User-level keys (signing key) are stored in UserLoginMetadata.
+// Conversation-level keys (conversation keys, tokens) are stored in PortalMetadata.
 // All methods are thread-safe.
 type userLoginKeyStore struct {
-	login *bridgev2.UserLogin
-	meta  *UserLoginMetadata
-	mu    sync.RWMutex
+	login     *bridgev2.UserLogin
+	connector *TwitterConnector
+	meta      *UserLoginMetadata
+	mu        sync.RWMutex
 }
 
-// conversationCacheKey builds a cache key for conversation key storage.
-func conversationCacheKey(conversationID, keyVersion string) string {
-	return conversationID + ":" + keyVersion
-}
-
-func newUserLoginKeyStore(login *bridgev2.UserLogin) *userLoginKeyStore {
+func newUserLoginKeyStore(login *bridgev2.UserLogin, connector *TwitterConnector) *userLoginKeyStore {
 	return &userLoginKeyStore{
-		login: login,
-		meta:  ensureUserLoginMetadata(login),
+		login:     login,
+		connector: connector,
+		meta:      ensureUserLoginMetadata(login),
 	}
 }
 
 func ensureUserLoginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 	if meta, ok := login.Metadata.(*UserLoginMetadata); ok && meta != nil {
-		if meta.ConversationKeys == nil {
-			meta.ConversationKeys = make(map[string]*ConversationKeyData)
-		}
-		if meta.ConversationTokens == nil {
-			meta.ConversationTokens = make(map[string]string)
-		}
 		if meta.MaxUserSequenceID == "" && meta.MaxSequenceID != "" {
 			// Migrate old field name to the new one.
 			meta.MaxUserSequenceID = meta.MaxSequenceID
@@ -53,40 +44,61 @@ func ensureUserLoginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
 		return meta
 	}
 	meta := &UserLoginMetadata{
-		ConversationKeys:   make(map[string]*ConversationKeyData),
-		ConversationTokens: make(map[string]string),
-		UserID:             string(login.ID),
+		UserID: string(login.ID),
 	}
 	login.Metadata = meta
 	return meta
 }
 
+// getPortalMetadata looks up a portal by conversation ID and returns its metadata.
+func (ks *userLoginKeyStore) getPortalMetadata(ctx context.Context, conversationID string) (*PortalMetadata, *bridgev2.Portal, error) {
+	portalKey := MakePortalKeyForConversation(conversationID, ks.login.ID, ks.connector.br.Config.SplitPortals)
+	portal, err := ks.connector.br.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	meta := ensurePortalMetadata(portal)
+	return meta, portal, nil
+}
+
 func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
-	cacheKey := conversationCacheKey(conversationID, keyVersion)
 
-	ks.mu.RLock()
-	data, ok := ks.meta.ConversationKeys[cacheKey]
-	totalKeys := len(ks.meta.ConversationKeys)
-	ks.mu.RUnlock()
+	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("conversation_id", conversationID).
+			Str("key_version", keyVersion).
+			Msg("Failed to get portal metadata for conversation key")
+		return nil, err
+	}
 
+	if meta.ConversationKeys == nil {
+		log.Info().
+			Str("conversation_id", conversationID).
+			Str("key_version", keyVersion).
+			Msg("No conversation keys in portal metadata")
+		return nil, crypto.ErrKeyNotFound
+	}
+
+	data, ok := meta.ConversationKeys[keyVersion]
 	if !ok {
 		log.Info().
 			Str("conversation_id", conversationID).
 			Str("key_version", keyVersion).
-			Str("cache_key", cacheKey).
-			Int("total_stored_keys", totalKeys).
-			Msg("Conversation key not found in keystore")
+			Int("total_keys", len(meta.ConversationKeys)).
+			Msg("Conversation key not found in portal metadata")
 		return nil, crypto.ErrKeyNotFound
 	}
+
 	log.Info().
 		Str("conversation_id", conversationID).
 		Str("key_version", keyVersion).
-		Str("cache_key", cacheKey).
 		Int("key_length", len(data.Key)).
 		Str("key_prefix", truncateKeyHex(data.Key, 8)).
 		Time("created_at", data.CreatedAt).
-		Msg("Retrieved conversation key from keystore")
+		Msg("Retrieved conversation key from portal metadata")
+
 	return &crypto.ConversationKey{
 		ConversationID: conversationID,
 		KeyVersion:     data.KeyVersion,
@@ -101,93 +113,101 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	if key == nil {
 		return fmt.Errorf("conversation key cannot be nil")
 	}
-	cacheKey := conversationCacheKey(key.ConversationID, key.KeyVersion)
 
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
+	meta, portal, err := ks.getPortalMetadata(ctx, key.ConversationID)
+	if err != nil {
+		log.Err(err).
+			Str("conversation_id", key.ConversationID).
+			Str("key_version", key.KeyVersion).
+			Msg("Failed to get portal metadata for storing conversation key")
+		return err
+	}
+
+	if meta.ConversationKeys == nil {
+		meta.ConversationKeys = make(map[string]*ConversationKeyData)
+	}
 
 	log.Info().
 		Str("conversation_id", key.ConversationID).
 		Str("key_version", key.KeyVersion).
-		Str("cache_key", cacheKey).
 		Int("key_length", len(key.Key)).
 		Str("key_prefix", truncateKeyHex(key.Key, 8)).
-		Int("total_stored_keys_before", len(ks.meta.ConversationKeys)).
-		Msg("Storing conversation key in keystore")
-	ks.meta.ConversationKeys[cacheKey] = &ConversationKeyData{
+		Int("total_keys_before", len(meta.ConversationKeys)).
+		Msg("Storing conversation key in portal metadata")
+
+	meta.ConversationKeys[key.KeyVersion] = &ConversationKeyData{
 		KeyVersion: key.KeyVersion,
 		Key:        key.Key,
 		CreatedAt:  key.CreatedAt,
 		ExpiresAt:  key.ExpiresAt,
 	}
 
-	err := ks.login.Save(ctx)
+	err = portal.Save(ctx)
 	if err != nil {
 		log.Err(err).
 			Str("conversation_id", key.ConversationID).
 			Str("key_version", key.KeyVersion).
-			Msg("Failed to save conversation key to database")
+			Msg("Failed to save portal metadata with conversation key")
 	} else {
 		log.Info().
 			Str("conversation_id", key.ConversationID).
 			Str("key_version", key.KeyVersion).
-			Int("total_stored_keys_after", len(ks.meta.ConversationKeys)).
-			Msg("Successfully saved conversation key to database")
+			Int("total_keys_after", len(meta.ConversationKeys)).
+			Msg("Successfully saved conversation key to portal metadata")
 	}
 	return err
 }
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
-	cacheKey := conversationCacheKey(conversationID, keyVersion)
+	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
+	if err != nil {
+		return err
+	}
 
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
-
-	delete(ks.meta.ConversationKeys, cacheKey)
-	return ks.login.Save(ctx)
+	if meta.ConversationKeys != nil {
+		delete(meta.ConversationKeys, keyVersion)
+	}
+	return portal.Save(ctx)
 }
 
 func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conversationID string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
-	var latest *ConversationKeyData
-	var latestVersion string
-	prefix := conversationID + ":"
 
-	ks.mu.RLock()
-	var matchingKeys []string
-	for cacheKey, data := range ks.meta.ConversationKeys {
-		if !strings.HasPrefix(cacheKey, prefix) {
-			continue
-		}
-		matchingKeys = append(matchingKeys, cacheKey)
-		if latest == nil || data.CreatedAt.After(latest.CreatedAt) {
-			latest = data
-			latestVersion = data.KeyVersion
-		}
+	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to get portal metadata for latest conversation key")
+		return nil, err
 	}
-	totalKeys := len(ks.meta.ConversationKeys)
-	ks.mu.RUnlock()
 
-	if latest == nil {
+	if len(meta.ConversationKeys) == 0 {
 		log.Info().
 			Str("conversation_id", conversationID).
-			Int("total_stored_keys", totalKeys).
-			Msg("No conversation keys found for conversation")
+			Msg("No conversation keys found in portal metadata")
 		return nil, crypto.ErrKeyNotFound
+	}
+
+	// Find key with latest CreatedAt
+	var latest *ConversationKeyData
+	for _, data := range meta.ConversationKeys {
+		if latest == nil || data.CreatedAt.After(latest.CreatedAt) {
+			latest = data
+		}
 	}
 
 	log.Info().
 		Str("conversation_id", conversationID).
-		Str("latest_key_version", latestVersion).
-		Strs("matching_keys", matchingKeys).
+		Str("latest_key_version", latest.KeyVersion).
+		Int("total_keys", len(meta.ConversationKeys)).
 		Int("key_length", len(latest.Key)).
 		Str("key_prefix", truncateKeyHex(latest.Key, 8)).
 		Time("created_at", latest.CreatedAt).
-		Msg("Retrieved latest conversation key from keystore")
+		Msg("Retrieved latest conversation key from portal metadata")
 
 	return &crypto.ConversationKey{
 		ConversationID: conversationID,
-		KeyVersion:     latestVersion,
+		KeyVersion:     latest.KeyVersion,
 		Key:            latest.Key,
 		CreatedAt:      latest.CreatedAt,
 		ExpiresAt:      latest.ExpiresAt,
@@ -249,23 +269,31 @@ func (ks *userLoginKeyStore) PutPublicKey(_ context.Context, _ *crypto.PublicKey
 	return nil
 }
 
-func (ks *userLoginKeyStore) GetConversationToken(_ context.Context, conversationID string) (string, error) {
-	ks.mu.RLock()
-	token, ok := ks.meta.ConversationTokens[conversationID]
-	ks.mu.RUnlock()
+func (ks *userLoginKeyStore) GetConversationToken(ctx context.Context, conversationID string) (string, error) {
+	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
+	if err != nil {
+		return "", err
+	}
 
-	if !ok {
+	if meta.ConversationToken == "" {
 		return "", crypto.ErrKeyNotFound
 	}
-	return token, nil
+	return meta.ConversationToken, nil
 }
 
 func (ks *userLoginKeyStore) PutConversationToken(ctx context.Context, conversationID, token string) error {
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
+	log := zerolog.Ctx(ctx)
 
-	ks.meta.ConversationTokens[conversationID] = token
-	return ks.login.Save(ctx)
+	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
+	if err != nil {
+		log.Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to get portal metadata for storing conversation token")
+		return err
+	}
+
+	meta.ConversationToken = token
+	return portal.Save(ctx)
 }
 
 // truncateKeyHex returns a hex representation of the first n bytes of a key for logging.

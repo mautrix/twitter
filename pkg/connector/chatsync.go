@@ -63,6 +63,17 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		return
 	}
 
+	// XChat conversations are always trusted - set this first, never downgrade
+	meta := ensurePortalMetadata(portal)
+	if !meta.Trusted {
+		meta.Trusted = true
+		if err := portal.Save(ctx); err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", conv.ConversationID).
+				Msg("Failed to save portal metadata with Trusted=true")
+		}
+	}
+
 	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
 	// Beeper scrollback relies on the backfill task existing for the portal.
 	if portal.MXID != "" {
@@ -289,6 +300,8 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
+	// Include low quality / untrusted conversations (message requests)
+	reqQuery.FilterLowQuality = false
 	initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to fetch initial inbox state for untrusted conversations")
@@ -301,6 +314,18 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 		return
 	}
 
+	// Set the polling cursor for REST API polling
+	if inbox.Cursor != "" {
+		session := tc.client.GetSession()
+		if session.PollingCursor == "" {
+			session.PollingCursor = inbox.Cursor
+			log.Debug().Str("cursor", inbox.Cursor).Msg("Initialized polling cursor from inbox state")
+		}
+	}
+
+	// Update ghost info for users (ensures profile pictures are visible)
+	tc.updateTwitterUserInfo(ctx, inbox)
+
 	// Cache users from inbox
 	tc.userCacheLock.Lock()
 	for userID, user := range inbox.Users {
@@ -310,16 +335,25 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 
 	// Process only untrusted conversations (message requests)
 	untrustedCount := 0
+	trustedCount := 0
 	for _, conv := range inbox.SortedConversations() {
 		if conv.Trusted {
+			trustedCount++
 			continue // Skip trusted - handled by XChat
 		}
 		untrustedCount++
+		log.Debug().
+			Str("conversation_id", conv.ConversationID).
+			Bool("trusted", conv.Trusted).
+			Bool("low_quality", conv.LowQuality).
+			Str("type", string(conv.Type)).
+			Msg("Processing untrusted conversation")
 		tc.syncUntrustedConversation(ctx, conv, inbox)
 	}
 
 	log.Info().
 		Int("untrusted_conversations", untrustedCount).
+		Int("trusted_conversations", trustedCount).
 		Int("total_conversations", len(inbox.Conversations)).
 		Msg("Finished syncing untrusted conversations")
 }
@@ -338,6 +372,13 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		return
 	}
 
+	// Don't downgrade trust status - only set false if not already trusted
+	meta := ensurePortalMetadata(portal)
+	if !meta.Trusted {
+		// Keep as untrusted (Trusted stays false)
+		// No need to save since Trusted=false is the zero value
+	}
+
 	chatInfo := tc.conversationToChatInfo(conv, inbox)
 
 	// Create Matrix room if it doesn't exist
@@ -351,10 +392,39 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		}
 	}
 
+	// Process messages for this conversation from inbox entries
+	if inbox != nil {
+		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox)
+	}
+
 	log.Debug().
 		Str("conversation_id", conv.ConversationID).
 		Bool("trusted", conv.Trusted).
 		Msg("Synced untrusted conversation")
+}
+
+// processUntrustedMessages processes message entries for an untrusted conversation.
+func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversationID string, inbox *response.TwitterInboxData) {
+	log := zerolog.Ctx(ctx)
+
+	for _, entry := range inbox.Entries {
+		parsed := entry.ParseWithErrorLog(log)
+		if parsed == nil {
+			continue
+		}
+
+		// Only process messages for this conversation
+		msg, ok := parsed.(*types.Message)
+		if !ok {
+			continue
+		}
+		if msg.ConversationID != conversationID {
+			continue
+		}
+
+		// Queue the message event
+		tc.HandlePollingEvent(msg, inbox)
+	}
 }
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.

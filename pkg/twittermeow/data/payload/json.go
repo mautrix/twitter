@@ -15,6 +15,25 @@ func (p *GraphQLPayload) Encode() ([]byte, error) {
 	return json.Marshal(p)
 }
 
+// SendDirectMessagePayload is used for sending messages via the REST API (for untrusted conversations)
+type SendDirectMessagePayload struct {
+	ConversationID           string `json:"conversation_id,omitempty"`
+	MediaID                  string `json:"media_id,omitempty"`
+	ReplyToDMID              string `json:"reply_to_dm_id,omitempty"`
+	RecipientIDs             bool   `json:"recipient_ids"`
+	RequestID                string `json:"request_id,omitempty"`
+	Text                     string `json:"text"`
+	CardsPlatform            string `json:"cards_platform,omitempty"`
+	IncludeCards             int    `json:"include_cards,omitempty"`
+	IncludeQuoteCount        bool   `json:"include_quote_count"`
+	DMUsers                  bool   `json:"dm_users"`
+	AudioOnlyMediaAttachment bool   `json:"audio_only_media_attachment"`
+}
+
+func (p *SendDirectMessagePayload) Encode() ([]byte, error) {
+	return json.Marshal(p)
+}
+
 type SendTypingNotificationVariables struct {
 	ConversationID string `json:"conversationId,omitempty"`
 }

@@ -74,11 +74,16 @@ type AddParticipantsResponse struct {
 
 type SendMessageMutationResponse struct {
 	Data struct {
-		SendMessage struct {
-			Typename string `json:"__typename,omitempty"`
-		} `json:"send_message,omitempty"`
+		XChatSendCreateMessageEvent struct {
+			Typename            string `json:"__typename,omitempty"`
+			EncodedMessageEvent string `json:"encoded_message_event,omitempty"`
+		} `json:"xchat_send_create_message_event,omitempty"`
 	} `json:"data,omitempty"`
 	Errors []struct {
 		Message string `json:"message,omitempty"`
 	} `json:"errors,omitempty"`
+}
+
+type GetDMUserUpdatesResponse struct {
+	UserEvents *TwitterInboxData `json:"user_events,omitempty"`
 }

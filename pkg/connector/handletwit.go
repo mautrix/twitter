@@ -250,12 +250,6 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 						meta = &MessageMetadata{}
 						part.DBMetadata = meta
 					}
-					if meta.XChatSequenceID == "" {
-						meta.XChatSequenceID = msgID
-					}
-					if meta.XChatCreatedAtMS == "" {
-						meta.XChatCreatedAtMS = evt.Time
-					}
 					if clientMsgID != "" && meta.XChatClientMsgID == "" {
 						meta.XChatClientMsgID = clientMsgID
 					}
@@ -270,21 +264,12 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 						meta = &MessageMetadata{}
 						part.Metadata = meta
 					}
-					if meta.XChatSequenceID == "" {
-						meta.XChatSequenceID = msgID
-					}
-					if meta.XChatCreatedAtMS == "" {
-						meta.XChatCreatedAtMS = evt.Time
-					}
 					if clientMsgID != "" && meta.XChatClientMsgID == "" {
 						meta.XChatClientMsgID = clientMsgID
 					}
 					if data != nil {
 						if meta.MessageText == "" {
 							meta.MessageText = data.Text
-						}
-						if meta.SenderID == "" {
-							meta.SenderID = data.SenderID
 						}
 						if meta.SenderDisplayName == "" {
 							meta.SenderDisplayName = tc.getDisplayNameForUser(ctx, data.SenderID)
@@ -464,6 +449,25 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Str("reason", evt.Reason).
 			Msg("Conversation became trusted (message request accepted)")
 
+		// Update portal metadata to mark as trusted
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", evt.ConversationID).
+				Msg("Failed to get portal for TrustConversation event")
+		} else {
+			meta := ensurePortalMetadata(portal)
+			if !meta.Trusted {
+				meta.Trusted = true
+				if err := portal.Save(ctx); err != nil {
+					log.Warn().Err(err).
+						Str("conversation_id", evt.ConversationID).
+						Msg("Failed to save portal metadata with Trusted=true")
+				}
+			}
+		}
+
 		// Fetch updated conversation data and create ChatInfo with MessageRequest: false
 		chatInfo := tc.getTrustedChatInfo(ctx, evt.ConversationID)
 		if chatInfo == nil {
@@ -495,3 +499,232 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 
 // ignorePayloadImport is used to prevent the import from being removed
 var _ = payload.FailureType(0)
+
+// HandlePollingEvent handles events from REST API polling.
+// This is used for untrusted (message request) conversations that don't
+// receive real-time updates via XChat WebSocket.
+// Returns true to continue polling, false to stop.
+func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
+	if evt == nil {
+		// nil event with inbox means initial poll - update user info and cache users
+		if inbox != nil {
+			tc.updateTwitterUserInfo(context.Background(), inbox)
+			tc.userCacheLock.Lock()
+			for userID, user := range inbox.Users {
+				tc.userCache[userID] = user
+			}
+			tc.userCacheLock.Unlock()
+		}
+		return true
+	}
+
+	log := tc.userLogin.Log.With().
+		Str("handler", "polling").
+		Type("event_type", evt).
+		Logger()
+
+	// Get conversation ID from the event
+	var conversationID string
+	switch e := evt.(type) {
+	case *types.Message:
+		conversationID = e.ConversationID
+	case *types.MessageReactionCreate:
+		conversationID = e.ConversationID
+	case *types.MessageReactionDelete:
+		conversationID = e.ConversationID
+	case *types.ConversationRead:
+		conversationID = e.ConversationID
+	case *types.ConversationDelete:
+		conversationID = e.ConversationID
+	case *types.TrustConversation:
+		conversationID = e.ConversationID
+	case *types.PollingError:
+		// Handle polling errors
+		if e.IsAuth {
+			log.Warn().Err(e.Error).Msg("Authentication error during polling")
+			return false
+		}
+		if e.Error != nil {
+			log.Warn().Err(e.Error).Msg("Polling error")
+		}
+		return true
+	default:
+		// For other event types, let them through
+		log.Debug().Msg("Received unhandled polling event type")
+		return true
+	}
+
+	if conversationID == "" {
+		return true
+	}
+
+	// Check if conversation is trusted - skip if trusted (XChat handles those)
+	if inbox != nil {
+		if conv := inbox.GetConversationByID(conversationID); conv != nil && conv.Trusted {
+			log.Debug().
+				Str("conversation_id", conversationID).
+				Msg("Skipping trusted conversation event (handled by XChat)")
+			return true
+		}
+	}
+
+	// Dispatch to the appropriate handler based on event type
+	switch e := evt.(type) {
+	case *types.Message:
+		return tc.handlePollingMessage(e, inbox)
+	case *types.MessageReactionCreate:
+		reaction := (*types.MessageReaction)(e)
+		portalKey := tc.MakePortalKeyFromID(conversationID)
+		return tc.userLogin.QueueRemoteEvent(tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)).Success
+	case *types.MessageReactionDelete:
+		reaction := (*types.MessageReaction)(e)
+		portalKey := tc.MakePortalKeyFromID(conversationID)
+		return tc.userLogin.QueueRemoteEvent(tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)).Success
+	case *types.ConversationRead:
+		lastTarget := networkid.MessageID(e.LastReadEventID)
+		readUpTo := methods.ParseMsecTimestamp(e.Time)
+		readUpToStreamOrder := methods.ParseInt64(e.LastReadEventID)
+		if readUpToStreamOrder == 0 {
+			readUpToStreamOrder = methods.ParseInt64(e.ID)
+		}
+		var targets []networkid.MessageID
+		if lastTarget != "" {
+			targets = []networkid.MessageID{lastTarget}
+		}
+		return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventReadReceipt,
+				PortalKey: tc.MakePortalKeyFromID(conversationID),
+				Sender:    tc.MakeEventSender(string(tc.userLogin.ID)),
+				Timestamp: readUpTo,
+			},
+			LastTarget:          lastTarget,
+			Targets:             targets,
+			ReadUpTo:            readUpTo,
+			ReadUpToStreamOrder: readUpToStreamOrder,
+		}).Success
+	case *types.ConversationDelete:
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatDelete{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventChatDelete,
+				PortalKey:   tc.MakePortalKeyFromID(conversationID),
+				StreamOrder: methods.ParseInt64(e.ID),
+				Timestamp:   methods.ParseMsecTimestamp(e.Time),
+			},
+			OnlyForMe: true,
+		}).Success
+	case *types.TrustConversation:
+		// Conversation became trusted - update the portal
+		log.Info().
+			Str("conversation_id", conversationID).
+			Str("reason", e.Reason).
+			Msg("Conversation became trusted via polling")
+
+		chatInfo := tc.getTrustedChatInfo(context.Background(), conversationID)
+		if chatInfo == nil {
+			return false
+		}
+
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+			EventMeta: simplevent.EventMeta{
+				Type:         bridgev2.RemoteEventChatResync,
+				PortalKey:    tc.MakePortalKeyFromID(conversationID),
+				CreatePortal: true,
+				Timestamp:    methods.ParseMsecTimestamp(e.Time),
+				StreamOrder:  methods.ParseInt64(e.ID),
+			},
+			ChatInfo: chatInfo,
+		}).Success
+	}
+
+	return true
+}
+
+// handlePollingMessage handles a message event from REST API polling.
+func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *response.TwitterInboxData) bool {
+	isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
+	portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+	msgID := evt.ID
+
+	// For polling messages, ensure the portal exists
+	ctx := context.Background()
+	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		tc.userLogin.Log.Warn().
+			Err(err).
+			Str("conversation_id", evt.ConversationID).
+			Msg("Failed to get portal for polling message")
+		return false
+	}
+
+	// Create portal if it doesn't exist
+	if portal.MXID == "" {
+		var conv *types.Conversation
+		if inbox != nil {
+			conv = inbox.GetConversationByID(evt.ConversationID)
+		}
+		if conv == nil {
+			tc.userLogin.Log.Warn().
+				Str("conversation_id", evt.ConversationID).
+				Msg("Conversation not found in inbox for polling message")
+			return false
+		}
+		chatInfo := tc.conversationToChatInfo(conv, inbox)
+		if err := portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo); err != nil {
+			tc.userLogin.Log.Warn().
+				Err(err).
+				Str("conversation_id", evt.ConversationID).
+				Msg("Failed to create Matrix room for polling message")
+			return false
+		}
+	}
+
+	return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+		EventMeta: simplevent.EventMeta{
+			Type: bridgev2.RemoteEventMessage,
+			LogContext: func(c zerolog.Context) zerolog.Context {
+				return c.
+					Str("message_id", msgID).
+					Str("sender", evt.MessageData.SenderID).
+					Bool("is_from_me", isFromMe).
+					Str("handler", "polling")
+			},
+			PortalKey:    portalKey,
+			CreatePortal: true,
+			Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
+			StreamOrder:  methods.ParseInt64(msgID),
+			Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+		},
+		ID:            networkid.MessageID(msgID),
+		TransactionID: networkid.TransactionID(evt.RequestID),
+		TargetMessage: networkid.MessageID(msgID),
+		Data:          &evt.MessageData,
+		ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
+			return tc.convertToMatrix(ctx, portal, intent, data), nil
+		},
+		ConvertEditFunc: tc.convertEditToMatrix,
+	}).Success
+}
+
+// updateTwitterUserInfo updates ghost info when user data changes.
+// This ensures profile pictures are visible for users in message request conversations.
+func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *response.TwitterInboxData) {
+	if inbox == nil || inbox.Users == nil {
+		return
+	}
+	log := zerolog.Ctx(ctx)
+	tc.userCacheLock.RLock()
+	defer tc.userCacheLock.RUnlock()
+
+	for userID, user := range inbox.Users {
+		cached := tc.userCache[userID]
+		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
+			ghost, err := tc.connector.br.GetGhostByID(ctx, networkid.UserID(userID))
+			if err != nil {
+				log.Debug().Err(err).Str("user_id", userID).Msg("Failed to get ghost by ID for user info update")
+				continue
+			}
+			ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
+		}
+	}
+}

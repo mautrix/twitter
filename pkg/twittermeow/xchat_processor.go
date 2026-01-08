@@ -572,6 +572,21 @@ func DecodeMessageEvent(encoded string) (*payload.MessageEvent, error) {
 	return &evt, nil
 }
 
+// DecodeSendMessageEventResponse decodes the base64-encoded thrift response from SendMessageMutation.
+func DecodeSendMessageEventResponse(encoded string) (*payload.SendMessageEventResponse, error) {
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+
+	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
+	var resp payload.SendMessageEventResponse
+	if err := decoder.Decode(&resp); err != nil {
+		return nil, fmt.Errorf("thrift decode: %w", err)
+	}
+	return &resp, nil
+}
+
 type decodedInboxMessageEvent struct {
 	seq int64
 	evt *payload.MessageEvent

@@ -284,7 +284,7 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 			LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
 				ensureUserLoginMetadata(login)
 				if t.client != nil {
-					t.client.SetKeyStore(newUserLoginKeyStore(login))
+					t.client.SetKeyStore(newUserLoginKeyStore(login, t.tc))
 				}
 				t.client.Logger = login.Log.With().Str("component", "twitter_client").Logger()
 				login.Client = NewTwitterClient(login, t.tc, t.client)

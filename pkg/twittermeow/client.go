@@ -51,6 +51,7 @@ type Client struct {
 
 	currentUserID  string
 	jot            *JotClient
+	polling        *PollingClient
 	stream         *StreamClient
 	xchat          *xchatWebsocketClient
 	xchatProcessor *XChatEventProcessor
@@ -69,6 +70,7 @@ func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
 		Logger: logger,
 	}
 
+	cli.polling = cli.newPollingClient()
 	cli.stream = cli.newStreamClient()
 	cli.xchat = cli.newXChatWebsocketClient()
 	cli.jot = cli.newJotClient()
@@ -157,17 +159,38 @@ func (c *Client) Connect(ctx context.Context) {
 }
 
 func (c *Client) Disconnect() {
+	c.polling.stopPolling()
 	c.stream.stopStream()
 	c.stopXChatWebsocket()
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := c.stream.streamStopped.Wait(timeoutCtx)
+	err := c.polling.pollingStopped.Wait(timeoutCtx)
+	if err != nil {
+		c.Logger.Warn().Msg("Timed out waiting for polling to stop")
+	}
+	err = c.stream.streamStopped.Wait(timeoutCtx)
 	if err != nil {
 		c.Logger.Warn().Msg("Timed out waiting for stream to stop")
 		return
 	}
-	c.Logger.Debug().Msg("Stream client stopped")
+	c.Logger.Debug().Msg("Polling and stream clients stopped")
+}
+
+// StartPolling starts the REST API polling for DM updates.
+// This is used for untrusted (message request) conversations that don't
+// receive real-time updates via XChat WebSocket.
+func (c *Client) StartPolling(ctx context.Context) {
+	if c.eventHandler == nil {
+		c.Logger.Warn().Msg("Cannot start polling without event handler")
+		return
+	}
+	c.polling.startPolling(c.Logger.WithContext(ctx))
+}
+
+// StopPolling stops the REST API polling.
+func (c *Client) StopPolling() {
+	c.polling.stopPolling()
 }
 
 func (c *Client) Logout(ctx context.Context) error {

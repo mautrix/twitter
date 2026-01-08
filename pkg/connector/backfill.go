@@ -48,6 +48,16 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		return nil, fmt.Errorf("portal is nil")
 	}
 
+	// Skip XChat backfill for untrusted (message request) conversations.
+	// XChat GraphQL API returns 503 for untrusted conversations.
+	meta := ensurePortalMetadata(fetchParams.Portal)
+	if !meta.IsTrusted() {
+		zerolog.Ctx(ctx).Debug().
+			Str("conversation_id", string(fetchParams.Portal.PortalKey.ID)).
+			Msg("Skipping XChat backfill for untrusted conversation")
+		return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
+	}
+
 	conversationID := string(fetchParams.Portal.PortalKey.ID)
 	if fetchParams.AnchorMessage == nil {
 		zerolog.Ctx(ctx).Warn().

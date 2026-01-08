@@ -23,6 +23,7 @@ import (
 
 	"go.mau.fi/util/exerrors"
 	"go.mau.fi/util/random"
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -32,7 +33,9 @@ import (
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 	return database.MetaTypes{
 		Reaction: nil,
-		Portal:   nil,
+		Portal: func() any {
+			return &PortalMetadata{}
+		},
 		Message: func() any {
 			return &MessageMetadata{}
 		},
@@ -43,6 +46,39 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 	}
 }
 
+// PortalMetadata stores per-conversation data in the portal.
+type PortalMetadata struct {
+	// Trusted indicates we can use XChat protocol (not a message request).
+	// This is the sole routing flag - NOT derived from key/token presence.
+	// Rules:
+	//   - XChat sync → set true (never downgrade)
+	//   - Untrusted REST sync → set false only if currently unset
+	//   - First outbound message (REST) → set true after success
+	//   - TrustConversation event → set true
+	Trusted bool `json:"trusted,omitempty"`
+
+	// Encryption keys for XChat messages, keyed by keyVersion
+	ConversationKeys map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
+
+	// Server token for XChat API
+	ConversationToken string `json:"conversation_token,omitempty"`
+}
+
+// IsTrusted returns true if this conversation is trusted (not a message request)
+func (m *PortalMetadata) IsTrusted() bool {
+	return m != nil && m.Trusted
+}
+
+// ensurePortalMetadata returns the portal's metadata, creating it if needed.
+func ensurePortalMetadata(portal *bridgev2.Portal) *PortalMetadata {
+	meta, ok := portal.Metadata.(*PortalMetadata)
+	if !ok || meta == nil {
+		meta = &PortalMetadata{}
+		portal.Metadata = meta
+	}
+	return meta
+}
+
 type UserLoginMetadata struct {
 	Cookies           string    `json:"cookies"`
 	SecretKey         string    `json:"secret_key,omitempty"`
@@ -51,20 +87,15 @@ type UserLoginMetadata struct {
 	UserID            string    `json:"user_id,omitempty"`
 	PushKeys          *PushKeys `json:"push_keys,omitempty"`
 
-	Session *twittermeow.CachedSession `json:"session,omitempty"`
-
-	// TODO this should not be in user login metadata. Refactor into a new DB table
-	//      (or if it's a global key shared by all users, put it in portal metadata)
-	ConversationKeys   map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
-	ConversationTokens map[string]string               `json:"conversation_tokens,omitempty"`  // conversationID -> server-provided token
-	MaxUserSequenceID  string                          `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
+	Session           *twittermeow.CachedSession `json:"session,omitempty"`
+	MaxUserSequenceID string                     `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
 	// Deprecated: kept for backward compatibility with older saves; prefer MaxUserSequenceID.
 	MaxSequenceID      string `json:"max_sequence_id,omitempty"`
 	MessagePullVersion *int   `json:"message_pull_version,omitempty"`
 }
 
 // ConversationKeyData stores a conversation encryption key.
-// The map key in UserLoginMetadata.ConversationKeys is "conversationID:keyVersion".
+// Stored in PortalMetadata.ConversationKeys, keyed by keyVersion.
 type ConversationKeyData struct {
 	KeyVersion string     `json:"key_version"`
 	Key        []byte     `json:"key"`
@@ -78,12 +109,9 @@ type MessageMetadata struct {
 	EditCount int `json:"edit_count,omitempty"`
 
 	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages
-	XChatSequenceID  string `json:"xchat_sequence_id,omitempty"`   // numeric sequence id from XChat events
-	XChatCreatedAtMS string `json:"xchat_created_at_ms,omitempty"` // message created_at_msec from XChat event
 
 	MessageText       string                       `json:"message_text,omitempty"`
 	SenderDisplayName string                       `json:"sender_display_name,omitempty"`
-	SenderID          string                       `json:"sender_id,omitempty"`
 	ReplyAttachments  []*payload.MessageAttachment `json:"reply_attachments,omitempty"`
 }
 
@@ -98,20 +126,11 @@ func (m *MessageMetadata) CopyFrom(other any) {
 	if m.XChatClientMsgID == "" {
 		m.XChatClientMsgID = o.XChatClientMsgID
 	}
-	if m.XChatSequenceID == "" {
-		m.XChatSequenceID = o.XChatSequenceID
-	}
-	if m.XChatCreatedAtMS == "" {
-		m.XChatCreatedAtMS = o.XChatCreatedAtMS
-	}
 	if m.MessageText == "" {
 		m.MessageText = o.MessageText
 	}
 	if m.SenderDisplayName == "" {
 		m.SenderDisplayName = o.SenderDisplayName
-	}
-	if m.SenderID == "" {
-		m.SenderID = o.SenderID
 	}
 	if len(m.ReplyAttachments) == 0 && len(o.ReplyAttachments) > 0 {
 		m.ReplyAttachments = append([]*payload.MessageAttachment(nil), o.ReplyAttachments...)

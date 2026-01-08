@@ -198,9 +198,11 @@ func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
 			if err != nil {
 				return nil, err
 			}
-			data, err := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			return data, err
+			defer resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				return nil, fmt.Errorf("failed to download avatar: HTTP %d", resp.StatusCode)
+			}
+			return io.ReadAll(resp.Body)
 		},
 		Remove: avatarURL == "",
 	}

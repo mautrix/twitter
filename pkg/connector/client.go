@@ -66,6 +66,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		participantCache: make(map[string][]types.Participant),
 	}
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
+	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
 	// Ensure current user ID is available even if cookies omit twid
 	meta := ensureUserLoginMetadata(login)
 	if meta.UserID != "" {
@@ -103,7 +104,7 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 	} else {
 		client.SetCurrentUserID(string(login.ID))
 	}
-	client.SetKeyStore(newUserLoginKeyStore(login))
+	client.SetKeyStore(newUserLoginKeyStore(login, tc))
 	login.Client = NewTwitterClient(login, tc, client)
 	return nil
 }
@@ -160,6 +161,13 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			return
 		}
 	}
+
+	// Start REST API sync for untrusted conversations in parallel
+	go func() {
+		tc.syncUntrustedChannels(ctx)
+		// Start REST API polling for untrusted conversation updates
+		tc.client.StartPolling(ctx)
+	}()
 
 	// Set up XChat processor and sequence ID tracking
 	processor := tc.client.GetXChatProcessor()
@@ -367,9 +375,6 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	log.Info().
 		Int("conversations", int(totalItems.Load())).
 		Msg("Finished fetching XChat inbox")
-
-	// Sync untrusted conversations (message requests) via REST API
-	tc.syncUntrustedChannels(ctx)
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 

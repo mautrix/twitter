@@ -962,6 +962,26 @@ func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMReq
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+func (c *Client) GetDMUserUpdates(ctx context.Context, params *payload.DMRequestQuery) (*response.GetDMUserUpdatesResponse, error) {
+	encodedQuery, err := params.Encode()
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s?%s", endpoints.DM_USER_UPDATES_URL, string(encodedQuery))
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodGet,
+		WithClientUUID: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.GetDMUserUpdatesResponse{}
+	return &data, json.Unmarshal(respBody, &data)
+}
+
 func (c *Client) AcceptConversation(ctx context.Context, conversationID string) error {
 	resp, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            fmt.Sprintf(endpoints.ACCEPT_CONVERSATION_URL, conversationID),
@@ -980,6 +1000,35 @@ func (c *Client) AcceptConversation(ctx context.Context, conversationID string) 
 	}
 
 	return nil
+}
+
+// SendDirectMessage sends a message via the REST API (used for untrusted conversations)
+func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMessagePayload) (*response.TwitterInboxData, error) {
+	if pl.RequestID == "" {
+		pl.RequestID = uuid.NewString()
+	}
+
+	jsonBody, err := pl.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	query, _ := (payload.DMSendQuery{}).Default().Encode()
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.SEND_DM_URL + "?" + string(query),
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Body:           jsonBody,
+		Referer:        fmt.Sprintf("%s/%s", endpoints.BASE_MESSAGES_URL, pl.ConversationID),
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.TwitterInboxData{}
+	return &data, json.Unmarshal(respBody, &data)
 }
 
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {

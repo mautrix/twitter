@@ -647,3 +647,11 @@ type UrlAttachmentImage struct {
 
 type UrlRichTextContent struct {
 }
+
+// SendMessageEventResponse is the decoded response from the SendMessageMutation.
+// The encoded_message_event field in the GraphQL response is base64-encoded thrift.
+type SendMessageEventResponse struct {
+	MessageEvent         *string `thrift:"messageEvent,1" json:"messageEvent,omitempty"`
+	MessageInstruction   *string `thrift:"messageInstruction,2" json:"messageInstruction,omitempty"`
+	BatchedMessageEvents *string `thrift:"batchedMessageEvents,3" json:"batchedMessageEvents,omitempty"`
+}
