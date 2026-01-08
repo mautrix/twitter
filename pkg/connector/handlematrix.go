@@ -41,18 +41,19 @@ import (
 )
 
 var (
-	_ bridgev2.ReactionHandlingNetworkAPI    = (*TwitterClient)(nil)
-	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*TwitterClient)(nil)
-	_ bridgev2.EditHandlingNetworkAPI        = (*TwitterClient)(nil)
-	_ bridgev2.TypingHandlingNetworkAPI      = (*TwitterClient)(nil)
-	_ bridgev2.ChatViewingNetworkAPI         = (*TwitterClient)(nil)
-	_ bridgev2.DeleteChatHandlingNetworkAPI  = (*TwitterClient)(nil)
-	_ bridgev2.RedactionHandlingNetworkAPI   = (*TwitterClient)(nil)
-	_ bridgev2.MembershipHandlingNetworkAPI  = (*TwitterClient)(nil)
-	_ bridgev2.RoomAvatarHandlingNetworkAPI  = (*TwitterClient)(nil)
-	_ bridgev2.RoomNameHandlingNetworkAPI    = (*TwitterClient)(nil)
-	_ bridgev2.TagHandlingNetworkAPI         = (*TwitterClient)(nil)
-	_ bridgev2.MuteHandlingNetworkAPI        = (*TwitterClient)(nil)
+	_ bridgev2.ReactionHandlingNetworkAPI        = (*TwitterClient)(nil)
+	_ bridgev2.ReadReceiptHandlingNetworkAPI     = (*TwitterClient)(nil)
+	_ bridgev2.EditHandlingNetworkAPI            = (*TwitterClient)(nil)
+	_ bridgev2.TypingHandlingNetworkAPI          = (*TwitterClient)(nil)
+	_ bridgev2.ChatViewingNetworkAPI             = (*TwitterClient)(nil)
+	_ bridgev2.DeleteChatHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.RedactionHandlingNetworkAPI       = (*TwitterClient)(nil)
+	_ bridgev2.MembershipHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.MessageRequestAcceptingNetworkAPI = (*TwitterClient)(nil)
+	_ bridgev2.RoomAvatarHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.RoomNameHandlingNetworkAPI        = (*TwitterClient)(nil)
+	_ bridgev2.TagHandlingNetworkAPI             = (*TwitterClient)(nil)
+	_ bridgev2.MuteHandlingNetworkAPI            = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -601,4 +602,8 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 		return tc.client.MuteConversation(ctx, conversationID)
 	}
 	return tc.client.UnmuteConversation(ctx, conversationID)
+}
+
+func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
+	return tc.client.AcceptConversation(ctx, string(msg.Portal.ID))
 }

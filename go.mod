@@ -2,10 +2,12 @@ module go.mau.fi/mautrix-twitter
 
 go 1.24.0
 
-toolchain go1.25.4
+toolchain go1.25.5
+
+tool go.mau.fi/util/cmd/maubuild
 
 require (
-	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/bwesterb/go-ristretto v1.2.3
 	github.com/coder/websocket v1.8.14
 	github.com/fxamacker/cbor/v2 v2.9.0
@@ -54,6 +56,7 @@ require (
 	github.com/yuin/goldmark v1.7.13 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
+	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect

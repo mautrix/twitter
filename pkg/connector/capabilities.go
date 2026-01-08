@@ -43,7 +43,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 6
+	return 1, 8
 }
 
 const MaxTextLength = 10000
@@ -56,7 +56,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 }
 
 var groupCaps = &event.RoomFeatures{
-	ID: "fi.mau.twitter.capabilities.2025_12_20",
+	ID: "fi.mau.twitter.capabilities.2026_01_08",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 	//	event.FmtUserLink: event.CapLevelFullySupported,
 	//},
@@ -125,6 +125,9 @@ var groupCaps = &event.RoomFeatures{
 
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,
+	MessageRequest: &event.MessageRequestFeatures{
+		AcceptWithButton: event.CapLevelFullySupported,
+	},
 }
 
 var dmCaps = ptr.Clone(groupCaps)

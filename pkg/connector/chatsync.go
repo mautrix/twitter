@@ -115,7 +115,7 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 
 	conv := &types.Conversation{
 		ConversationID: detail.ConversationID,
-		Trusted:        true, // XChat conversations are always trusted
+		Trusted:        true, // XChat conversations are always trusted // FIXME no they're not?
 		Muted:          detail.IsMuted,
 	}
 
@@ -176,6 +176,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		}
 	}
 
+	// TODO message request status
 	info := &bridgev2.ChatInfo{
 		Members: &bridgev2.ChatMemberList{
 			IsFull:           true,
