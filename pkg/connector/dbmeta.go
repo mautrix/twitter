@@ -51,7 +51,10 @@ type UserLoginMetadata struct {
 	UserID            string    `json:"user_id,omitempty"`
 	PushKeys          *PushKeys `json:"push_keys,omitempty"`
 
-	Session            *twittermeow.CachedSession      `json:"session,omitempty"`
+	Session *twittermeow.CachedSession `json:"session,omitempty"`
+
+	// TODO this should not be in user login metadata. Refactor into a new DB table
+	//      (or if it's a global key shared by all users, put it in portal metadata)
 	ConversationKeys   map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
 	ConversationTokens map[string]string               `json:"conversation_tokens,omitempty"`  // conversationID -> server-provided token
 	MaxUserSequenceID  string                          `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
@@ -70,6 +73,8 @@ type ConversationKeyData struct {
 }
 
 type MessageMetadata struct {
+	// TODO remove redundant fields that just duplicate standard message fields (sender ID, message ID, timestamp)
+	//      also remove message text, attachments and sender displayname
 	EditCount int `json:"edit_count,omitempty"`
 
 	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages

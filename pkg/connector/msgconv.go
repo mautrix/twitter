@@ -343,6 +343,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if attachmentInfo.MediaHashKey != "" {
 		// Download and decrypt XChat media
 		conversationID := string(portal.ID)
+		// TODO direct media support
 		decryptedData, downloadErr := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
 		if downloadErr != nil {
 			return nil, nil, fmt.Errorf("failed to download XChat media: %w", downloadErr)

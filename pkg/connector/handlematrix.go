@@ -230,8 +230,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	txnID := networkid.TransactionID(messageID)
 	dbMsg := &database.Message{
 		ID:        networkid.MessageID(messageID),
-		MXID:      msg.Event.ID,
-		Room:      msg.Portal.PortalKey,
 		SenderID:  networkid.UserID(tc.userLogin.ID),
 		Timestamp: time.Now(),
 		Metadata: &MessageMetadata{
@@ -244,12 +242,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 	msg.AddPendingToSave(dbMsg, txnID, func(remote bridgev2.RemoteMessage, db *database.Message) (bool, error) {
 		// Store the real (numeric) XChat message ID when the remote echo arrives.
-		if remote != nil {
-			db.ID = remote.GetID()
-			if meta, ok := db.Metadata.(*MessageMetadata); ok && meta != nil {
-				meta.XChatSequenceID = string(remote.GetID())
-			}
-		}
+		db.Metadata.(*MessageMetadata).XChatSequenceID = string(remote.GetID())
 		return true, nil
 	})
 

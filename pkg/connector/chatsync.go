@@ -187,6 +187,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	}
 
 	if isGroup {
+		// TODO this is wrong, should be default
 		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
 		if conv != nil && conv.AvatarImageHttps != "" {
 			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, conv.AvatarImageHttps, "")
