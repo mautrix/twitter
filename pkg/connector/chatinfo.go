@@ -206,6 +206,31 @@ func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
 	}
 }
 
+// getTrustedChatInfo returns a ChatInfo with MessageRequest: false for a conversation that became trusted.
+func (tc *TwitterClient) getTrustedChatInfo(ctx context.Context, conversationID string) *bridgev2.ChatInfo {
+	// Try to fetch conversation data via XChat API first
+	item, users, err := tc.fetchConversationData(ctx, conversationID)
+	if err == nil && item != nil {
+		conv := tc.xchatItemToConversation(ctx, item, users)
+		if conv != nil {
+			// Override Trusted to true since this conversation was just accepted
+			conv.Trusted = true
+			return tc.xchatItemToChatInfo(ctx, item, users, conv)
+		}
+	}
+
+	// If XChat fetch failed, return minimal ChatInfo with MessageRequest: false
+	zerolog.Ctx(ctx).Debug().
+		Str("conversation_id", conversationID).
+		Err(err).
+		Msg("Could not fetch conversation data for trust event, returning minimal ChatInfo")
+
+	messageRequest := false
+	return &bridgev2.ChatInfo{
+		MessageRequest: &messageRequest,
+	}
+}
+
 // makeGroupAvatar downloads and attempts to decrypt a group avatar using the conversation key.
 // If decryption fails or no key is found, it falls back to returning the raw bytes.
 func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion string) *bridgev2.Avatar {

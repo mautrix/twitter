@@ -457,6 +457,33 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Msg("Message failure event received")
 		return true
 
+	case *types.TrustConversation:
+		// Conversation was accepted (became trusted) - emit ChatResync to update MessageRequest status
+		log.Info().
+			Str("conversation_id", evt.ConversationID).
+			Str("reason", evt.Reason).
+			Msg("Conversation became trusted (message request accepted)")
+
+		// Fetch updated conversation data and create ChatInfo with MessageRequest: false
+		chatInfo := tc.getTrustedChatInfo(ctx, evt.ConversationID)
+		if chatInfo == nil {
+			log.Warn().
+				Str("conversation_id", evt.ConversationID).
+				Msg("Failed to get chat info for trusted conversation")
+			return false
+		}
+
+		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+			EventMeta: simplevent.EventMeta{
+				Type:         bridgev2.RemoteEventChatResync,
+				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
+				CreatePortal: true,
+				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+				StreamOrder:  methods.ParseInt64(evt.ID),
+			},
+			ChatInfo: chatInfo,
+		}).Success
+
 	default:
 		log.Debug().
 			Type("event_data_type", rawEvt).

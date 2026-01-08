@@ -31,6 +31,7 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
@@ -176,14 +177,20 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		}
 	}
 
-	// TODO message request status
+	// MessageRequest is true for untrusted conversations (message requests)
+	var messageRequest *bool
+	if conv != nil {
+		messageRequest = ptr.Ptr(!conv.Trusted)
+	}
+
 	info := &bridgev2.ChatInfo{
 		Members: &bridgev2.ChatMemberList{
 			IsFull:           true,
 			TotalMemberCount: len(detail.ParticipantsResults),
 			MemberMap:        memberMap,
 		},
-		CanBackfill: true,
+		CanBackfill:    true,
+		MessageRequest: messageRequest,
 	}
 
 	if isGroup {
@@ -275,4 +282,128 @@ func (tc *TwitterClient) decryptGroupName(ctx context.Context, conversationID, e
 		return ""
 	}
 	return string(plaintext)
+}
+
+// syncUntrustedChannels fetches and syncs untrusted (message request) conversations via the REST API.
+func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
+	log := zerolog.Ctx(ctx)
+
+	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
+	initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to fetch initial inbox state for untrusted conversations")
+		return
+	}
+
+	inbox := initialInboxState.InboxInitialState
+	if inbox == nil {
+		log.Debug().Msg("No inbox data in initial state response")
+		return
+	}
+
+	// Cache users from inbox
+	tc.userCacheLock.Lock()
+	for userID, user := range inbox.Users {
+		tc.userCache[userID] = user
+	}
+	tc.userCacheLock.Unlock()
+
+	// Process only untrusted conversations (message requests)
+	untrustedCount := 0
+	for _, conv := range inbox.SortedConversations() {
+		if conv.Trusted {
+			continue // Skip trusted - handled by XChat
+		}
+		untrustedCount++
+		tc.syncUntrustedConversation(ctx, conv, inbox)
+	}
+
+	log.Info().
+		Int("untrusted_conversations", untrustedCount).
+		Int("total_conversations", len(inbox.Conversations)).
+		Msg("Finished syncing untrusted conversations")
+}
+
+// syncUntrustedConversation syncs a single untrusted conversation.
+func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
+	log := zerolog.Ctx(ctx)
+
+	portalKey := tc.MakePortalKey(conv)
+
+	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("conversation_id", conv.ConversationID).
+			Msg("Failed to get/create portal for untrusted conversation")
+		return
+	}
+
+	chatInfo := tc.conversationToChatInfo(conv, inbox)
+
+	// Create Matrix room if it doesn't exist
+	if portal.MXID == "" {
+		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", conv.ConversationID).
+				Msg("Failed to create Matrix room for untrusted conversation")
+			return
+		}
+	}
+
+	log.Debug().
+		Str("conversation_id", conv.ConversationID).
+		Bool("trusted", conv.Trusted).
+		Msg("Synced untrusted conversation")
+}
+
+// conversationToChatInfo converts a REST API conversation to bridgev2 chat info.
+func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
+	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(conv.Participants))
+	for _, participant := range conv.Participants {
+		var userInfo *bridgev2.UserInfo
+		if inbox != nil {
+			if user, ok := inbox.Users[participant.UserID]; ok {
+				userInfo = tc.connector.wrapUserInfo(tc.client, user)
+			}
+		}
+		if userInfo == nil {
+			tc.userCacheLock.RLock()
+			if user, ok := tc.userCache[participant.UserID]; ok {
+				userInfo = tc.connector.wrapUserInfo(tc.client, user)
+			}
+			tc.userCacheLock.RUnlock()
+		}
+		memberMap[networkid.UserID(participant.UserID)] = bridgev2.ChatMember{
+			EventSender: tc.MakeEventSender(participant.UserID),
+			UserInfo:    userInfo,
+		}
+	}
+
+	messageRequest := !conv.Trusted
+
+	info := &bridgev2.ChatInfo{
+		Members: &bridgev2.ChatMemberList{
+			IsFull:           true,
+			TotalMemberCount: len(conv.Participants),
+			MemberMap:        memberMap,
+		},
+		CanBackfill:    true,
+		MessageRequest: &messageRequest,
+	}
+
+	isGroup := conv.Type == ConversationTypeGroupDM
+	if isGroup {
+		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
+		if conv.AvatarImageHttps != "" {
+			info.Avatar = makeAvatar(tc.client, conv.AvatarImageHttps)
+		}
+		if conv.Name != "" {
+			info.Name = &conv.Name
+		}
+	} else {
+		info.Type = ptr.Ptr(database.RoomTypeDM)
+	}
+
+	return info
 }

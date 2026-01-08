@@ -125,6 +125,7 @@ var groupCaps = &event.RoomFeatures{
 
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,
+
 	MessageRequest: &event.MessageRequestFeatures{
 		AcceptWithButton: event.CapLevelFullySupported,
 	},

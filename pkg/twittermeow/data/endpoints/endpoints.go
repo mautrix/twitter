@@ -17,12 +17,15 @@ const (
 	API_BASE_URL  = "https://" + API_BASE_HOST
 
 	ACCOUNT_SETTINGS_URL               = API_BASE_URL + "/1.1/account/settings.json"
+	INBOX_INITIAL_STATE_URL            = BASE_URL + "/i/api/1.1/dm/inbox_initial_state.json"
+	DM_USER_UPDATES_URL                = BASE_URL + "/i/api/1.1/dm/user_updates.json"
+	TRUSTED_INBOX_TIMELINE_URL         = BASE_URL + "/i/api/1.1/dm/inbox_timeline/trusted.json"
+	ACCEPT_CONVERSATION_URL            = BASE_URL + "/i/api/1.1/dm/conversation/%s/accept.json"
 	CONVERSATION_MARK_READ_URL         = BASE_URL + "/i/api/1.1/dm/conversation/%s/mark_read.json"
 	GRAPHQL_MESSAGE_DELETION_MUTATION  = BASE_URL + "/i/api/graphql/BJ6DtxA2llfjnRoRjaiIiw/DMMessageDeleteMutation"
 	SEARCH_TYPEAHEAD_URL               = BASE_URL + "/i/api/1.1/search/typeahead.json"
-	DM_PERMISSIONS_URL                 = BASE_URL + "/i/api/1.1/dm/permissions.json"
-	ACCEPT_CONVERSATION_URL            = BASE_URL + "/i/api/1.1/dm/conversation/%s/accept.json"
-	DELETE_CONVERSATION_URL            = BASE_URL + "/i/api/1.1/dm/conversation/%s/delete.json"
+	DM_PERMISSIONS_URL             = BASE_URL + "/i/api/1.1/dm/permissions.json"
+	DELETE_CONVERSATION_URL        = BASE_URL + "/i/api/1.1/dm/conversation/%s/delete.json"
 	UPDATE_CONVERSATION_AVATAR_URL     = BASE_URL + "/i/api/1.1/dm/conversation/%s/update_avatar.json"
 	UPDATE_CONVERSATION_NAME_URL       = BASE_URL + "/i/api/1.1/dm/conversation/%s/update_name.json"
 	PIN_CONVERSATION_URL               = BASE_URL + "/i/api/graphql/o0aymgGiJY-53Y52YSUGVA/DMPinnedInboxAppend_Mutation"

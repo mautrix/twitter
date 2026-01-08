@@ -942,6 +942,46 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 	return nil
 }
 
+func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
+	encodedQuery, err := params.Encode()
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s?%s", endpoints.INBOX_INITIAL_STATE_URL, string(encodedQuery))
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodGet,
+		WithClientUUID: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.InboxInitialStateResponse{}
+	return &data, json.Unmarshal(respBody, &data)
+}
+
+func (c *Client) AcceptConversation(ctx context.Context, conversationID string) error {
+	resp, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            fmt.Sprintf(endpoints.ACCEPT_CONVERSATION_URL, conversationID),
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Referer:        endpoints.BASE_MESSAGES_URL,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeForm,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode > 204 {
+		return fmt.Errorf("failed to accept conversation id=%s (status_code=%d, response_body=%s)", conversationID, resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {
 	variables := payload.NewGetPublicKeysQueryVariables(userIDs)
 
@@ -977,24 +1017,4 @@ func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response
 
 	var resp response.GetPublicKeysResponse
 	return &resp, json.Unmarshal(respBody, &resp)
-}
-
-func (c *Client) AcceptConversation(ctx context.Context, conversationID string) error {
-	resp, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            fmt.Sprintf(endpoints.ACCEPT_CONVERSATION_URL, conversationID),
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Referer:        endpoints.BASE_MESSAGES_URL,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-	})
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode > 204 {
-		return fmt.Errorf("failed to accept conversation id=%s (status_code=%d, response_body=%s)", conversationID, resp.StatusCode, string(respBody))
-	}
-
-	return nil
 }

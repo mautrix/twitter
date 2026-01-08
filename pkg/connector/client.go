@@ -368,6 +368,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		Int("conversations", int(totalItems.Load())).
 		Msg("Finished fetching XChat inbox")
 
+	// Sync untrusted conversations (message requests) via REST API
+	tc.syncUntrustedChannels(ctx)
+
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 
 	// Update remote profile from cached user data
