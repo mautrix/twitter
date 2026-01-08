@@ -296,3 +296,38 @@ func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessag
 	})
 	return err
 }
+
+// SendXChatTypingNotification sends a typing indicator via XChat WebSocket.
+func (c *Client) SendXChatTypingNotification(ctx context.Context, conversationID string) error {
+	if conversationID == "" {
+		return errors.New("conversation ID is required")
+	}
+
+	conversationToken, err := c.ensureConversationToken(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+
+	senderID := c.GetCurrentUserID()
+	if senderID == "" {
+		return errors.New("sender ID is required")
+	}
+
+	messageID := uuid.NewString()
+	createdAtMsec := strconv.FormatInt(time.Now().UnixMilli(), 10)
+
+	event := &payload.MessageEvent{
+		MessageId:         &messageID,
+		SenderId:          &senderID,
+		ConversationId:    &conversationID,
+		ConversationToken: &conversationToken,
+		CreatedAtMsec:     &createdAtMsec,
+		Detail: &payload.MessageEventDetail{
+			MessageTypingEvent: &payload.MessageTypingEvent{
+				ConversationId: &conversationID,
+			},
+		},
+	}
+
+	return c.SendXChatPayload(ctx, &payload.Message{MessageEvent: event})
+}

@@ -61,10 +61,18 @@ var (
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
 
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
-	if msg.IsTyping && msg.Type == bridgev2.TypingTypeText {
-		return tc.client.SendTypingNotification(ctx, string(msg.Portal.ID))
+	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
+		return nil
 	}
-	return nil
+
+	conversationID := string(msg.Portal.ID)
+	meta := ensurePortalMetadata(msg.Portal)
+
+	// Use WebSocket for trusted conversations, GraphQL for untrusted
+	if meta.IsTrusted() {
+		return tc.client.SendXChatTypingNotification(ctx, conversationID)
+	}
+	return tc.client.SendTypingNotification(ctx, conversationID)
 }
 
 func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.RoomID, eventType event.Type) networkid.RawTransactionID {
