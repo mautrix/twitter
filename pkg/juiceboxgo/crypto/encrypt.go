@@ -23,6 +23,7 @@ import (
 	"errors"
 	"hash"
 
+	"go.mau.fi/util/exerrors"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/chacha20poly1305"
 
@@ -53,7 +54,7 @@ func DeriveUnlockKeyAndCommitment(oprfOutput oprf.Output) ([32]byte, [32]byte) {
 func DeriveUnlockKeyTag(unlockKey [32]byte, realmID [16]byte) [16]byte {
 	label := []byte("Unlock Key Tag")
 
-	mac, _ := blake2s.New128(unlockKey[:])
+	mac := exerrors.Must(blake2s.New128(unlockKey[:]))
 	writeLengthPrefixed(mac, label)
 	writeLengthPrefixed(mac, realmID[:])
 
@@ -68,7 +69,7 @@ func DeriveEncryptionKey(seed [32]byte, scalar *ristretto.Scalar) [32]byte {
 	label := []byte("User Secret Encryption Key")
 	scalarBytes := scalar.Bytes()
 
-	mac, _ := blake2s.New256(seed[:])
+	mac := exerrors.Must(blake2s.New256(seed[:]))
 	writeLengthPrefixed(mac, label)
 	writeLengthPrefixed(mac, scalarBytes[:])
 
@@ -117,7 +118,7 @@ func DeriveEncryptedUserSecretCommitment(
 	label := []byte("Encrypted User Secret Commitment")
 	scalarBytes := scalarShare.Bytes()
 
-	mac, _ := blake2s.New128(unlockKey[:])
+	mac := exerrors.Must(blake2s.New128(unlockKey[:]))
 	writeLengthPrefixed(mac, label)
 	writeLengthPrefixed(mac, realmID[:])
 	writeLengthPrefixed(mac, scalarBytes[:])

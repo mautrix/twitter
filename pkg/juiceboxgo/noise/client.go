@@ -25,6 +25,7 @@ import (
 	"hash"
 	"io"
 
+	"go.mau.fi/util/exerrors"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
@@ -197,13 +198,19 @@ func (cs *cipherState) nextNonce() []byte {
 }
 
 func (cs *cipherState) encryptWithAD(plaintext, ad []byte) ([]byte, error) {
-	cipher, _ := chacha20poly1305.New(cs.key[:])
+	cipher, err := chacha20poly1305.New(cs.key[:])
+	if err != nil {
+		return nil, err
+	}
 	nonce := cs.nextNonce()
 	return cipher.Seal(nil, nonce, plaintext, ad), nil
 }
 
 func (cs *cipherState) decryptWithAD(ciphertext, ad []byte) ([]byte, error) {
-	cipher, _ := chacha20poly1305.New(cs.key[:])
+	cipher, err := chacha20poly1305.New(cs.key[:])
+	if err != nil {
+		return nil, err
+	}
 	nonce := cs.nextNonce()
 	return cipher.Open(nil, nonce, ciphertext, ad)
 }
@@ -216,7 +223,7 @@ const (
 )
 
 func mixHash(h [hashLen]byte, data []byte) [hashLen]byte {
-	hasher, _ := blake2s.New256(nil)
+	hasher := exerrors.Must(blake2s.New256(nil))
 	hasher.Write(h[:])
 	hasher.Write(data)
 	var result [hashLen]byte
@@ -248,7 +255,7 @@ func split(ck [hashLen]byte, r role) *Transport {
 func hkdfPair(salt, ikm []byte) ([hashLen]byte, [hashLen]byte) {
 	reader := hkdf.New(newBlake2sHash, ikm, salt, nil)
 	var okm [hashLen * 2]byte
-	io.ReadFull(reader, okm[:])
+	exerrors.Must(io.ReadFull(reader, okm[:]))
 
 	var first, second [hashLen]byte
 	copy(first[:], okm[:hashLen])
@@ -258,6 +265,5 @@ func hkdfPair(salt, ikm []byte) ([hashLen]byte, [hashLen]byte) {
 
 // newBlake2sHash returns a new blake2s-256 hash for use with hkdf.
 func newBlake2sHash() hash.Hash {
-	h, _ := blake2s.New256(nil)
-	return h
+	return exerrors.Must(blake2s.New256(nil))
 }

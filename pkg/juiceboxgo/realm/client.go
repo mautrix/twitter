@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -177,7 +178,7 @@ func (c *Client) makeHardwareRealmRequest(ctx context.Context, req *requests.Sec
 			// Need forward secrecy but no session - establish session first
 			session, _, err = c.makeHandshakeRequest(ctx, nil)
 			if err != nil {
-				if err == types.ErrTransient && attempt < 5 {
+				if errors.Is(err, types.ErrTransient) && attempt < 5 {
 					time.Sleep(time.Duration(attempt*5) * time.Millisecond)
 					continue
 				}
@@ -191,7 +192,7 @@ func (c *Client) makeHardwareRealmRequest(ctx context.Context, req *requests.Sec
 			var newSession *Session
 			newSession, respBytes, err = c.makeHandshakeRequest(ctx, reqBytes)
 			if err != nil {
-				if err == types.ErrTransient && attempt < 5 {
+				if errors.Is(err, types.ErrTransient) && attempt < 5 {
 					time.Sleep(time.Duration(attempt*5) * time.Millisecond)
 					continue
 				}
@@ -206,7 +207,7 @@ func (c *Client) makeHardwareRealmRequest(ctx context.Context, req *requests.Sec
 				continue
 			}
 			if err != nil {
-				if err == types.ErrTransient && attempt < 5 {
+				if errors.Is(err, types.ErrTransient) && attempt < 5 {
 					time.Sleep(time.Duration(attempt*5) * time.Millisecond)
 					continue
 				}
