@@ -219,13 +219,19 @@ func convertXChatReplyPreview(preview *payload.ReplyingToPreview) types.ReplyDat
 		return types.ReplyData{}
 	}
 
+	// Use SequenceId as primary ID (matches how messages are stored in DB)
+	replyID := ptr.Val(preview.ReplyingToMessageSequenceId)
+	if replyID == "" {
+		replyID = ptr.Val(preview.ReplyingToMessageId)
+	}
+
 	senderID := ""
 	if preview.SenderId != nil {
 		senderID = strconv.FormatInt(*preview.SenderId, 10)
 	}
 
 	return types.ReplyData{
-		ID:       ptr.Val(preview.ReplyingToMessageId),
+		ID:       replyID,
 		SenderID: senderID,
 		Text:     ptr.Val(preview.MessageText),
 	}

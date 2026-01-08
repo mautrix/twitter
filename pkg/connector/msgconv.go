@@ -108,10 +108,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 
 	for _, part := range parts {
 		part.DBMetadata = &MessageMetadata{
-			EditCount:         msg.EditCount,
-			MessageText:       msg.Text,
-			SenderDisplayName: displayName,
-			ReplyAttachments:  filterReplyPreviewAttachments(msg.OriginalAttachments),
+			EditCount: msg.EditCount,
 		}
 	}
 
@@ -340,48 +337,66 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var err error
 	// Check if this is XChat encrypted media
 	if attachmentInfo.MediaHashKey != "" {
-		// Download and decrypt XChat media
 		conversationID := string(portal.ID)
-		// TODO direct media support
-		decryptedData, downloadErr := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
-		if downloadErr != nil {
-			return nil, nil, fmt.Errorf("failed to download XChat media: %w", downloadErr)
-		}
-		content.Info.Size = len(decryptedData)
-		content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, int64(len(decryptedData)), audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-			n, err := io.Copy(file, bytes.NewReader(decryptedData))
+		if tc.connector.directMedia {
+			// Generate direct media URI with encrypted media info
+			encMediaID := MakeEncryptedMediaID(EncryptedMediaInfo{
+				UserID:         portal.Receiver,
+				ConversationID: conversationID,
+				MediaHashKey:   attachmentInfo.MediaHashKey,
+				KeyVersion:     msg.ConversationKeyVersion,
+			})
+			content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, encMediaID)
 			if err != nil {
-				return nil, err
+				return nil, nil, fmt.Errorf("failed to generate direct media URI: %w", err)
 			}
-			if audioOnly && ffmpeg.Supported() {
-				outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
-				if err == nil {
-					mimeType = "audio/ogg"
-					content.Info.MimeType = mimeType
-					content.Info.Width = 0
-					content.Info.Height = 0
-					content.MsgType = event.MsgAudio
-					content.Body += ".ogg"
-					return &bridgev2.FileStreamResult{
-						ReplacementFile: outFile,
-						MimeType:        mimeType,
-						FileName:        content.Body,
-					}, nil
-				} else {
-					zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
-				}
-			} else {
-				content.Info.Size = int(n)
-			}
+			// Add file extension based on mime type
 			ext := exmime.ExtensionFromMimetype(mimeType)
 			if !strings.HasSuffix(content.Body, ext) {
 				content.Body += ext
 			}
-			return &bridgev2.FileStreamResult{
-				MimeType: content.Info.MimeType,
-				FileName: content.Body,
-			}, nil
-		})
+		} else {
+			// Download and decrypt XChat media for re-upload
+			decryptedData, downloadErr := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
+			if downloadErr != nil {
+				return nil, nil, fmt.Errorf("failed to download XChat media: %w", downloadErr)
+			}
+			content.Info.Size = len(decryptedData)
+			content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, int64(len(decryptedData)), audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+				n, err := io.Copy(file, bytes.NewReader(decryptedData))
+				if err != nil {
+					return nil, err
+				}
+				if audioOnly && ffmpeg.Supported() {
+					outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
+					if err == nil {
+						mimeType = "audio/ogg"
+						content.Info.MimeType = mimeType
+						content.Info.Width = 0
+						content.Info.Height = 0
+						content.MsgType = event.MsgAudio
+						content.Body += ".ogg"
+						return &bridgev2.FileStreamResult{
+							ReplacementFile: outFile,
+							MimeType:        mimeType,
+							FileName:        content.Body,
+						}, nil
+					} else {
+						zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
+					}
+				} else {
+					content.Info.Size = int(n)
+				}
+				ext := exmime.ExtensionFromMimetype(mimeType)
+				if !strings.HasSuffix(content.Body, ext) {
+					content.Body += ext
+				}
+				return &bridgev2.FileStreamResult{
+					MimeType: content.Info.MimeType,
+					FileName: content.Body,
+				}, nil
+			})
+		}
 	} else {
 		// Legacy media download
 		fileResp, downloadErr := downloadFile(ctx, tc.client, attachmentURL)

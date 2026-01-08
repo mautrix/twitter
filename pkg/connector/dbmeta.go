@@ -27,7 +27,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
@@ -104,15 +103,8 @@ type ConversationKeyData struct {
 }
 
 type MessageMetadata struct {
-	// TODO remove redundant fields that just duplicate standard message fields (sender ID, message ID, timestamp)
-	//      also remove message text, attachments and sender displayname
-	EditCount int `json:"edit_count,omitempty"`
-
+	EditCount        int    `json:"edit_count,omitempty"`
 	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages
-
-	MessageText       string                       `json:"message_text,omitempty"`
-	SenderDisplayName string                       `json:"sender_display_name,omitempty"`
-	ReplyAttachments  []*payload.MessageAttachment `json:"reply_attachments,omitempty"`
 }
 
 func (m *MessageMetadata) CopyFrom(other any) {
@@ -125,15 +117,6 @@ func (m *MessageMetadata) CopyFrom(other any) {
 	}
 	if m.XChatClientMsgID == "" {
 		m.XChatClientMsgID = o.XChatClientMsgID
-	}
-	if m.MessageText == "" {
-		m.MessageText = o.MessageText
-	}
-	if m.SenderDisplayName == "" {
-		m.SenderDisplayName = o.SenderDisplayName
-	}
-	if len(m.ReplyAttachments) == 0 && len(o.ReplyAttachments) > 0 {
-		m.ReplyAttachments = append([]*payload.MessageAttachment(nil), o.ReplyAttachments...)
 	}
 }
 

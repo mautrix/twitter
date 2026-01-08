@@ -60,11 +60,23 @@ func (tc *TwitterClient) MakeEventSender(userID string) bridgev2.EventSender {
 	}
 }
 
+// MediaInfo stores legacy (non-encrypted) media info for direct media.
+// Version 1 format.
 type MediaInfo struct {
 	UserID networkid.UserLoginID
 	URL    string
 }
 
+// EncryptedMediaInfo stores encrypted XChat media info for direct media.
+// Version 2 format.
+type EncryptedMediaInfo struct {
+	UserID         networkid.UserLoginID
+	ConversationID string
+	MediaHashKey   string
+	KeyVersion     string
+}
+
+// MakeMediaID creates a version 1 media ID for legacy (non-encrypted) media.
 func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
 	mediaID := []byte{1}
 	uID, err := strconv.ParseUint(string(userID), 10, 64)
@@ -83,17 +95,53 @@ func MakeMediaID(userID networkid.UserLoginID, URL string) networkid.MediaID {
 	return mediaID
 }
 
-func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
+// MakeEncryptedMediaID creates a version 2 media ID for encrypted XChat media.
+func MakeEncryptedMediaID(info EncryptedMediaInfo) networkid.MediaID {
+	mediaID := []byte{2}
+	uID, err := strconv.ParseUint(string(info.UserID), 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	mediaID = binary.AppendUvarint(mediaID, uID)
+
+	// Encode conversation ID
+	convIDBytes := []byte(info.ConversationID)
+	mediaID = binary.AppendUvarint(mediaID, uint64(len(convIDBytes)))
+	mediaID = append(mediaID, convIDBytes...)
+
+	// Encode media hash key
+	hashKeyBytes := []byte(info.MediaHashKey)
+	mediaID = binary.AppendUvarint(mediaID, uint64(len(hashKeyBytes)))
+	mediaID = append(mediaID, hashKeyBytes...)
+
+	// Encode key version
+	keyVersionBytes := []byte(info.KeyVersion)
+	mediaID = binary.AppendUvarint(mediaID, uint64(len(keyVersionBytes)))
+	mediaID = append(mediaID, keyVersionBytes...)
+
+	return mediaID
+}
+
+// ParseMediaID parses a media ID and returns either *MediaInfo (v1) or *EncryptedMediaInfo (v2).
+func ParseMediaID(mediaID networkid.MediaID) (any, error) {
 	buf := bytes.NewReader(mediaID)
 	version := make([]byte, 1)
 	_, err := io.ReadFull(buf, version)
 	if err != nil {
 		return nil, err
 	}
-	if version[0] != byte(1) {
-		return nil, fmt.Errorf("unknown mediaID version: %v", version)
-	}
 
+	switch version[0] {
+	case 1:
+		return parseMediaIDV1(buf)
+	case 2:
+		return parseMediaIDV2(buf)
+	default:
+		return nil, fmt.Errorf("unknown mediaID version: %v", version[0])
+	}
+}
+
+func parseMediaIDV1(buf *bytes.Reader) (*MediaInfo, error) {
 	mediaInfo := &MediaInfo{}
 	uID, err := binary.ReadUvarint(buf)
 	if err != nil {
@@ -113,4 +161,50 @@ func ParseMediaID(mediaID networkid.MediaID) (*MediaInfo, error) {
 	mediaInfo.URL = string(bs)
 
 	return mediaInfo, nil
+}
+
+func parseMediaIDV2(buf *bytes.Reader) (*EncryptedMediaInfo, error) {
+	info := &EncryptedMediaInfo{}
+
+	// Read user ID
+	uID, err := binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	info.UserID = networkid.UserLoginID(strconv.FormatUint(uID, 10))
+
+	// Read conversation ID
+	size, err := binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	bs := make([]byte, size)
+	if _, err := io.ReadFull(buf, bs); err != nil {
+		return nil, err
+	}
+	info.ConversationID = string(bs)
+
+	// Read media hash key
+	size, err = binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	bs = make([]byte, size)
+	if _, err := io.ReadFull(buf, bs); err != nil {
+		return nil, err
+	}
+	info.MediaHashKey = string(bs)
+
+	// Read key version
+	size, err = binary.ReadUvarint(buf)
+	if err != nil {
+		return nil, err
+	}
+	bs = make([]byte, size)
+	if _, err := io.ReadFull(buf, bs); err != nil {
+		return nil, err
+	}
+	info.KeyVersion = string(bs)
+
+	return info, nil
 }

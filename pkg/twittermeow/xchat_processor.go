@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -255,8 +254,6 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			return nil
 		}
 	}
-
-	p.logDecodedMessageContents(evt, conversationID, contents)
 
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
@@ -533,28 +530,6 @@ func truncateBytes(b []byte, n int) string {
 		return hex.EncodeToString(b)
 	}
 	return hex.EncodeToString(b[:n]) + "..."
-}
-
-func (p *XChatEventProcessor) logDecodedMessageContents(evt *payload.MessageEvent, conversationID string, contents *payload.MessageEntryContents) {
-	if contents == nil {
-		return
-	}
-	seqID := ptr.Val(evt.SequenceId)
-	raw, err := json.Marshal(contents)
-	if err != nil {
-		p.log.Warn().
-			Err(err).
-			Str("sequence_id", seqID).
-			Str("conversation_id", conversationID).
-			Msg("Failed to marshal decrypted message contents")
-		return
-	}
-
-	p.log.Info().
-		Str("sequence_id", seqID).
-		Str("conversation_id", conversationID).
-		Int("decoded_json_len", len(raw)).
-		Msg("Decrypted MessageCreateEvent contents")
 }
 
 // DecodeMessageEvent decodes a base64-encoded thrift MessageEvent string.

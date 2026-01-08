@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -93,10 +94,8 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	if msg.ReplyTo != nil {
 		replySeqID := string(msg.ReplyTo.ID)
 		replyMsgID := replySeqID
-		var replyText string
-		var replyDisplayName string
-		var senderIDStr string
 
+		// Get XChatClientMsgID from metadata (still stored for transaction ID matching)
 		var metaCopy MessageMetadata
 		if meta, ok := msg.ReplyTo.Metadata.(*MessageMetadata); ok && meta != nil {
 			metaCopy = *meta
@@ -104,51 +103,63 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		if extra := tc.lookupReplyMetadata(ctx, msg.Portal.PortalKey, msg.ReplyTo.ID); extra != nil {
 			metaCopy.CopyFrom(extra)
 		}
-
 		if metaCopy.XChatClientMsgID != "" {
 			replyMsgID = metaCopy.XChatClientMsgID
 		}
-		replyText = metaCopy.MessageText
-		replyDisplayName = metaCopy.SenderDisplayName
 
+		// Fetch text, display name, and attachments from Matrix event
+		replyText, replyDisplayName, replyAttachments, ok := tc.fetchReplyInfoFromMatrix(ctx, msg.Portal, msg.ReplyTo)
+
+		// Get sender ID
+		var senderIDStr string
 		if msg.ReplyTo.SenderID != "" {
 			senderIDStr = string(msg.ReplyTo.SenderID)
 		}
+
+		// Fallback for display name if fetch failed
 		if replyDisplayName == "" && senderIDStr != "" {
 			replyDisplayName = tc.getDisplayNameForUser(ctx, senderIDStr)
 			if replyDisplayName == "" {
 				replyDisplayName = senderIDStr
 			}
 		}
-		var senderIDPtr *int64
-		if senderIDStr != "" {
-			if parsed, err := strconv.ParseInt(senderIDStr, 10, 64); err == nil {
-				senderIDPtr = &parsed
-			} else {
-				zerolog.Ctx(ctx).Debug().
-					Str("raw_sender_id", senderIDStr).
-					Err(err).
-					Msg("Failed to parse sender_id for reply preview")
+
+		// If we couldn't fetch reply info, skip reply metadata
+		if !ok {
+			zerolog.Ctx(ctx).Debug().
+				Str("reply_to_id", string(msg.ReplyTo.ID)).
+				Msg("Could not fetch reply content, sending as standalone message")
+		} else {
+			var senderIDPtr *int64
+			if senderIDStr != "" {
+				if parsed, err := strconv.ParseInt(senderIDStr, 10, 64); err == nil {
+					senderIDPtr = &parsed
+				} else {
+					zerolog.Ctx(ctx).Debug().
+						Str("raw_sender_id", senderIDStr).
+						Err(err).
+						Msg("Failed to parse sender_id for reply preview")
+				}
 			}
-		}
-		if replyMsgID == "" {
-			replyMsgID = replySeqID
-		}
-		zerolog.Ctx(ctx).Info().
-			Str("conversation_id", conversationID).
-			Str("reply_to_id", string(msg.ReplyTo.ID)).
-			Int("reply_attachments", len(metaCopy.ReplyAttachments)).
-			Str("reply_text", replyText).
-			Msg("Preparing reply preview")
-		opts.ReplyTo = &payload.ReplyingToPreview{
-			ReplyingToMessageId:         &replyMsgID,
-			ReplyingToMessageSequenceId: &replySeqID,
-			MessageText:                 &replyText,
-			SenderDisplayName:           ptr.Ptr(replyDisplayName),
-			SenderId:                    senderIDPtr,
-		}
-		if len(metaCopy.ReplyAttachments) > 0 {
-			opts.ReplyTo.Attachments = metaCopy.ReplyAttachments
+			if replyMsgID == "" {
+				replyMsgID = replySeqID
+			}
+			zerolog.Ctx(ctx).Info().
+				Str("conversation_id", conversationID).
+				Str("reply_to_id", string(msg.ReplyTo.ID)).
+				Int("reply_attachments", len(replyAttachments)).
+				Str("reply_text", replyText).
+				Msg("Preparing reply preview")
+			opts.ReplyTo = &payload.ReplyingToPreview{
+				ReplyingToMessageId:         &replyMsgID,
+				ReplyingToMessageSequenceId: &replySeqID,
+				MessageText:                 &replyText,
+				SenderDisplayName:           ptr.Ptr(replyDisplayName),
+				SenderId:                    senderIDPtr,
+			}
+			if len(replyAttachments) > 0 {
+				opts.ReplyTo.Attachments = replyAttachments
+			}
 		}
 	}
 
@@ -230,10 +241,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		SenderID:  networkid.UserID(tc.userLogin.ID),
 		Timestamp: time.Now(),
 		Metadata: &MessageMetadata{
-			XChatClientMsgID:  messageID,
-			MessageText:       text,
-			SenderDisplayName: tc.getDisplayNameForUser(ctx, string(tc.userLogin.ID)),
-			ReplyAttachments:  filterReplyPreviewAttachments(opts.Attachments),
+			XChatClientMsgID: messageID,
 		},
 	}
 	// Check portal metadata for trust status
@@ -398,25 +406,144 @@ func (tc *TwitterClient) lookupReplyMetadata(ctx context.Context, portalKey netw
 	return &merged
 }
 
-// filterReplyPreviewAttachments filters message attachments for inclusion in reply previews.
-// Includes media (images, videos, GIFs, audio), post (tweets), and URL attachments.
-func filterReplyPreviewAttachments(attachments []*payload.MessageAttachment) []*payload.MessageAttachment {
-	if len(attachments) == 0 {
+// fetchReplyInfoFromMatrix fetches reply text and sender display name from the Matrix event.
+// Returns (messageText, senderDisplayName, attachments, ok).
+// If GetEvent fails or the event can't be parsed, returns empty values with ok=false.
+// The caller should send without reply metadata when ok=false.
+func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *bridgev2.Portal, replyTo *database.Message) (text string, displayName string, attachments []*payload.MessageAttachment, ok bool) {
+	if replyTo == nil || replyTo.MXID == "" {
+		return "", "", nil, false
+	}
+
+	log := zerolog.Ctx(ctx)
+
+	evt, err := tc.connector.br.Bot.GetEvent(ctx, portal.MXID, replyTo.MXID)
+	if err != nil {
+		log.Debug().
+			Err(err).
+			Stringer("event_id", replyTo.MXID).
+			Msg("Failed to fetch Matrix event for reply, will send without reply metadata")
+		return "", "", nil, false
+	}
+
+	// Parse message content (skip if already parsed by GetEvent)
+	if evt.Content.Parsed == nil {
+		if err := evt.Content.ParseRaw(event.EventMessage); err != nil {
+			log.Debug().
+				Err(err).
+				Msg("Failed to parse Matrix event content for reply")
+			return "", "", nil, false
+		}
+	}
+	content := evt.Content.AsMessage()
+	if content == nil {
+		return "", "", nil, false
+	}
+
+	// Get message text
+	messageText := content.Body
+
+	// Get sender display name
+	var senderDisplayName string
+	// Try to get from ghost
+	if networkUserID, ok := tc.connector.br.Matrix.ParseGhostMXID(evt.Sender); ok {
+		ghost, err := tc.connector.br.GetGhostByID(ctx, networkUserID)
+		if err == nil && ghost != nil && ghost.Name != "" {
+			senderDisplayName = ghost.Name
+		}
+	}
+	// Fallback to network user lookup
+	if senderDisplayName == "" && replyTo.SenderID != "" {
+		senderDisplayName = tc.getDisplayNameForUser(ctx, string(replyTo.SenderID))
+	}
+
+	// Build attachments from Matrix media (will extract MediaHashKey when direct media is enabled)
+	if content.MsgType.IsMedia() {
+		attachments = tc.buildReplyAttachmentsFromMatrixContent(ctx, portal, content)
+	}
+
+	return messageText, senderDisplayName, attachments, true
+}
+
+// buildReplyAttachmentsFromMatrixContent builds Twitter reply attachments from Matrix message content.
+// When direct media is enabled and the content URL contains an encrypted media ID, extracts the MediaHashKey.
+// Otherwise, just includes the media type for the reply preview.
+func (tc *TwitterClient) buildReplyAttachmentsFromMatrixContent(ctx context.Context, portal *bridgev2.Portal, content *event.MessageEventContent) []*payload.MessageAttachment {
+	if content == nil || content.URL == "" {
 		return nil
 	}
-	result := make([]*payload.MessageAttachment, 0, len(attachments))
-	for _, att := range attachments {
-		if att == nil {
-			continue
-		}
-		if att.Media != nil || att.Post != nil || att.Url != nil {
-			result = append(result, att)
-		}
-	}
-	if len(result) == 0 {
+
+	// Determine media type
+	var mediaType payload.MediaType
+	switch content.MsgType {
+	case event.MsgImage:
+		mediaType = payload.MediaTypeImage
+	case event.MsgVideo:
+		mediaType = payload.MediaTypeVideo
+	case event.MsgAudio:
+		mediaType = payload.MediaTypeAudio
+	default:
 		return nil
 	}
-	return result
+
+	mediaTypeInt := int32(mediaType)
+	att := &payload.MessageAttachment{
+		Media: &payload.MediaAttachment{
+			Type: &mediaTypeInt,
+		},
+	}
+
+	// Try to extract MediaHashKey from direct media URL if available
+	if tc.connector.directMedia {
+		if mediaHashKey := tc.extractMediaHashKeyFromContentURL(content.URL); mediaHashKey != "" {
+			att.Media.MediaHashKey = &mediaHashKey
+		}
+	}
+
+	// Include dimensions if available
+	if content.Info != nil {
+		if content.Info.Width > 0 || content.Info.Height > 0 {
+			width := int64(content.Info.Width)
+			height := int64(content.Info.Height)
+			att.Media.Dimensions = &payload.MediaDimensions{
+				Width:  &width,
+				Height: &height,
+			}
+		}
+		if content.Info.Size > 0 {
+			size := int64(content.Info.Size)
+			att.Media.FilesizeBytes = &size
+		}
+	}
+
+	return []*payload.MessageAttachment{att}
+}
+
+// extractMediaHashKeyFromContentURL extracts the MediaHashKey from an encrypted media URL.
+// Returns empty string if the URL is not an encrypted media URL or extraction fails.
+func (tc *TwitterClient) extractMediaHashKeyFromContentURL(contentURL id.ContentURIString) string {
+	// Parse the mxc:// URL
+	uri, err := contentURL.Parse()
+	if err != nil {
+		return ""
+	}
+
+	// The FileID is base64url-encoded (without padding) mediaID bytes
+	mediaIDBytes, err := base64.RawURLEncoding.DecodeString(uri.FileID)
+	if err != nil {
+		return ""
+	}
+
+	// Parse the media ID to check if it's encrypted media (version 2)
+	parsed, err := ParseMediaID(networkid.MediaID(mediaIDBytes))
+	if err != nil {
+		return ""
+	}
+
+	if encInfo, ok := parsed.(*EncryptedMediaInfo); ok {
+		return encInfo.MediaHashKey
+	}
+	return ""
 }
 
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
@@ -562,7 +689,6 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	tc.client.Logger.Debug().Any("editResponse", resp).Msg("Edit response")
 	if meta != nil {
 		meta.EditCount++
-		meta.MessageText = edit.Content.Body
 	}
 	return nil
 }
