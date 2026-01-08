@@ -101,10 +101,6 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	if len(textPart.Content.Body) > 0 || len(textPart.Content.BeeperLinkPreviews) > 0 {
 		parts = append(parts, textPart)
 	}
-	displayName := tc.getDisplayNameForUser(ctx, msg.SenderID)
-	if displayName == "" {
-		displayName = msg.SenderID
-	}
 
 	for _, part := range parts {
 		part.DBMetadata = &MessageMetadata{
