@@ -53,6 +53,7 @@ type PortalMetadata struct {
 	//   - Untrusted REST sync → set false only if currently unset
 	//   - First outbound message (REST) → set true after success
 	//   - TrustConversation event → set true
+	// TODO delete this and use the standard MessageRequest field in Portal
 	Trusted bool `json:"trusted,omitempty"`
 
 	// Encryption keys for XChat messages, keyed by keyVersion

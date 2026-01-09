@@ -76,7 +76,9 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 		Logger()
 
 	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
-	if err == nil && portal != nil && portal.MXID != "" {
+	if err != nil {
+		return nil, err
+	} else if portal.MXID != "" {
 		if requiredKeyVersion == "" || tc.hasConversationKey(ctx, conversationID, requiredKeyVersion) {
 			log.Debug().Msg("Portal already exists and required key is present")
 			return portal, nil
@@ -106,16 +108,6 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	bootstrapCtx := context.WithValue(ctx, ensurePortalContextKey{}, true)
 	if err := processor.ProcessMessageAndReadEvents(bootstrapCtx, item); err != nil {
 		log.Warn().Err(err).Msg("Failed to process message/read events for fetched conversation data")
-	}
-
-	portal, err = tc.connector.br.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to find portal after fetching conversation data")
-		return nil, err
-	}
-
-	if portal == nil || portal.MXID == "" {
-		return nil, fmt.Errorf("portal not found for conversation %s after sync", conversationID)
 	}
 
 	if requiredKeyVersion != "" && !tc.hasConversationKey(ctx, conversationID, requiredKeyVersion) {
