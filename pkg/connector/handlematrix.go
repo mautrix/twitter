@@ -69,9 +69,10 @@ func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.M
 
 	// Use WebSocket for trusted conversations, GraphQL for untrusted
 	if msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
+		// FIXME this fails if no key is found, fall back to legacy API
 		return tc.client.SendXChatTypingNotification(ctx, conversationID)
 	}
-	return tc.client.SendTypingNotification(ctx, conversationID)
+	return tc.client.SendTypingNotification(ctx, ConvertConversationIDToREST(conversationID))
 }
 
 func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.RoomID, eventType event.Type) networkid.RawTransactionID {
@@ -293,6 +294,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 	dbMsg *database.Message,
 	_ networkid.TransactionID,
 ) (*bridgev2.MatrixMessageResponse, error) {
+	conversationID = ConvertConversationIDToREST(conversationID)
 	log := zerolog.Ctx(ctx)
 	log.Debug().
 		Str("conversation_id", conversationID).
@@ -595,6 +597,7 @@ func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2
 }
 
 func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, conversationID, messageID, emoji string) error {
+	// TODO unencrypted reactions?
 	// XChat reactions are sent as encrypted MessageCreateEvents (reaction_add/reaction_remove).
 	resp, err := tc.client.SendEncryptedReaction(ctx, conversationID, messageID, emoji, remove)
 	if err != nil {
@@ -627,7 +630,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	if !msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
 		// Untrusted - only use REST API
 		params := &payload.MarkConversationReadQuery{
-			ConversationID:  conversationID,
+			ConversationID:  ConvertConversationIDToREST(conversationID),
 			LastReadEventID: lastReadEventID,
 		}
 		return tc.client.MarkConversationRead(ctx, params)
@@ -637,7 +640,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	if err := tc.client.SendXChatReadReceipt(ctx, conversationID, lastReadEventID, readAt); err != nil {
 		if errors.Is(err, crypto.ErrKeyNotFound) {
 			params := &payload.MarkConversationReadQuery{
-				ConversationID:  conversationID,
+				ConversationID:  ConvertConversationIDToREST(conversationID),
 				LastReadEventID: lastReadEventID,
 			}
 			return tc.client.MarkConversationRead(ctx, params)
@@ -683,7 +686,7 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 	if chat.Portal != nil {
 		conversationID = ParsePortalID(chat.Portal.ID)
 	}
-	tc.client.SetActiveConversation(conversationID)
+	tc.client.SetActiveConversation(ConvertConversationIDToREST(conversationID))
 	return nil
 }
 
@@ -707,6 +710,7 @@ func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bri
 		return errors.New("message sequence ID not found")
 	}
 
+	// TODO unencrypted chats?
 	return tc.client.DeleteXChatMessage(ctx, twittermeow.DeleteXChatMessageOpts{
 		ConversationID: conversationID,
 		SequenceIDs:    []string{sequenceID},

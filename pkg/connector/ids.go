@@ -30,12 +30,16 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func MakePortalID(conversationID string) networkid.PortalID {
+func ConvertConversationIDToREST(conversationID string) string {
 	if strings.HasPrefix(conversationID, "g") {
-		return networkid.PortalID(conversationID)
+		return conversationID
 	}
+	return strings.ReplaceAll(conversationID, ":", "-")
+}
+
+func MakePortalID(conversationID string) networkid.PortalID {
 	// Backwards compat for old pre-xchat portal IDs
-	return networkid.PortalID(strings.ReplaceAll(conversationID, ":", "-"))
+	return networkid.PortalID(ConvertConversationIDToREST(conversationID))
 }
 
 func ParsePortalID(portalID networkid.PortalID) string {
