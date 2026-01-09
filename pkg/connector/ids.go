@@ -30,6 +30,16 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
+// NormalizeConversationID converts XChat-style colon-delimited IDs to legacy
+// dash-delimited format for portal matching with existing rooms from the main branch.
+// Group IDs (starting with "g") are returned unchanged.
+func NormalizeConversationID(conversationID string) string {
+	if strings.HasPrefix(conversationID, "g") {
+		return conversationID
+	}
+	return strings.ReplaceAll(conversationID, ":", "-")
+}
+
 func (tc *TwitterClient) MakePortalKey(conv *types.Conversation) networkid.PortalKey {
 	return tc.MakePortalKeyFromID(conv.ConversationID)
 }
@@ -42,12 +52,13 @@ func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.Po
 // This is used by the keystore which doesn't have direct access to TwitterClient.
 func MakePortalKeyForConversation(conversationID string, loginID networkid.UserLoginID, splitPortals bool) networkid.PortalKey {
 	var receiver networkid.UserLoginID
+	normalizedID := NormalizeConversationID(conversationID)
 	// 1:1 DM conversation IDs use `:` as delimiter between user IDs
-	if strings.Contains(conversationID, ":") || strings.HasPrefix(conversationID, "g") || splitPortals {
+	if strings.Contains(conversationID, "-") || splitPortals {
 		receiver = loginID
 	}
 	return networkid.PortalKey{
-		ID:       networkid.PortalID(conversationID),
+		ID:       networkid.PortalID(normalizedID),
 		Receiver: receiver,
 	}
 }

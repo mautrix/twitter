@@ -91,6 +91,10 @@ type UserLoginMetadata struct {
 	// Deprecated: kept for backward compatibility with older saves; prefer MaxUserSequenceID.
 	MaxSequenceID      string `json:"max_sequence_id,omitempty"`
 	MessagePullVersion *int   `json:"message_pull_version,omitempty"`
+
+	// Migration tracking fields
+	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration
+	PendingEncryptedSync bool       `json:"pending_encrypted_sync,omitempty"` // True if encrypted rooms need full backfill after migration
 }
 
 // ConversationKeyData stores a conversation encryption key.

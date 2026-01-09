@@ -128,6 +128,27 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
 
+	// Migration detection: user has valid cookies but is missing encryption keys.
+	// This happens when upgrading from the main branch (non-encrypted) to xchat/juicebox branch.
+	if meta.Cookies != "" && meta.SecretKey == "" && meta.SigningKey == "" {
+		log.Info().
+			Str("user_id", string(tc.userLogin.ID)).
+			Msg("Migration detected: user has cookies but missing encryption keys, triggering PIN-only reauth")
+		tc.userLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateBadCredentials,
+			Error:      "twitter-migration-reauth",
+			Message:    "Please re-authenticate to enable encrypted messaging. You only need to enter your PIN.",
+		})
+		return
+	}
+
+	// If pending encrypted sync after migration, force full resync
+	if meta.PendingEncryptedSync {
+		log.Info().Msg("Post-migration: forcing full resync for encrypted rooms")
+		meta.Session = nil          // Clear cached session
+		meta.MaxUserSequenceID = "" // Reset sequence to fetch all messages
+	}
+
 	// Check for cached session
 	useCachedSession := tc.connector.Config.CacheSession &&
 		meta.Session != nil &&
@@ -415,6 +436,12 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	// Persist message pull version if received
 	if msgPullVersion != nil {
 		meta.MessagePullVersion = msgPullVersion
+	}
+
+	// Clear pending encrypted sync flag after successful sync
+	if meta.PendingEncryptedSync {
+		meta.PendingEncryptedSync = false
+		log.Info().Msg("Post-migration: encrypted room sync completed")
 	}
 
 	// Save session state

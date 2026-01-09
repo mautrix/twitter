@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -41,6 +42,7 @@ type TwitterLogin struct {
 	SigningKey        string
 	SigningKeyVersion string
 	tc                *TwitterConnector
+	isMigration       bool // True if upgrading from main branch (had cookies but no encryption keys)
 
 	client   *twittermeow.Client
 	settings *response.AccountSettingsResponse
@@ -55,6 +57,7 @@ var (
 
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
 var _ bridgev2.LoginProcessUserInput = (*TwitterLogin)(nil)
+var _ bridgev2.LoginProcessWithOverride = (*TwitterLogin)(nil)
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
@@ -74,7 +77,6 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 }
 
 func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
-
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
 		StepID:       LoginStepIDCookies,
@@ -103,6 +105,48 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 }
 
 func (t *TwitterLogin) Cancel() {}
+
+// StartWithOverride is called when re-authenticating an existing login.
+// For migration users (cookies but no encryption keys), this skips to PIN step.
+func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2.UserLogin) (*bridgev2.LoginStep, error) {
+	meta, ok := override.Metadata.(*UserLoginMetadata)
+	if !ok || meta == nil || meta.Cookies == "" {
+		return t.Start(ctx)
+	}
+
+	// Migration case: validate existing cookies and skip to PIN
+	cookieStruct := twitCookies.NewCookiesFromString(meta.Cookies)
+	t.client = twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+
+	settings, err := t.client.LoadMessagesPage(ctx)
+	if err != nil {
+		// Cookies expired, fall back to normal flow
+		t.User.Log.Warn().Err(err).Msg("Migration: cookies invalid, falling back to full login")
+		return t.Start(ctx)
+	}
+
+	t.settings = settings
+	t.Cookies = t.client.GetCookieString()
+	t.client.SetCurrentUserID(t.client.GetCurrentUserID())
+	t.isMigration = true
+
+	t.User.Log.Info().Msg("Migration: cookies validated, skipping to PIN step")
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeUserInput,
+		StepID:       LoginStepJuiceboxPIN,
+		Instructions: "Your session is being upgraded for encrypted messaging.\n\nEnter your 4-digit PIN to recover your encryption keys from Juicebox.",
+		UserInputParams: &bridgev2.LoginUserInputParams{
+			Fields: []bridgev2.LoginInputDataField{
+				{
+					Type:        bridgev2.LoginInputFieldTypePassword,
+					ID:          "pin",
+					Name:        "PIN",
+					Description: "4-digit PIN for key recovery",
+				},
+			},
+		},
+	}, nil
+}
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
 	cookieStruct := twitCookies.NewCookies(cookies)
@@ -264,6 +308,16 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		SigningKey:        t.SigningKey,
 		SigningKeyVersion: t.SigningKeyVersion,
 		UserID:            t.client.GetCurrentUserID(),
+	}
+
+	// If this is a migration, mark it and flag for full encrypted room sync
+	if t.isMigration {
+		now := time.Now()
+		meta.MigratedAt = &now
+		meta.PendingEncryptedSync = true
+		meta.Session = nil          // Clear cached session to force full resync
+		meta.MaxUserSequenceID = "" // Reset sequence ID to fetch all messages
+		t.User.Log.Info().Msg("Migration: flagged for full encrypted room backfill")
 	}
 
 	remoteProfile := &status.RemoteProfile{

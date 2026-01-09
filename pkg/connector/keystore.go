@@ -62,6 +62,7 @@ func (ks *userLoginKeyStore) getPortalMetadata(ctx context.Context, conversation
 }
 
 func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*crypto.ConversationKey, error) {
+	conversationID = NormalizeConversationID(conversationID)
 	log := zerolog.Ctx(ctx)
 
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
@@ -109,15 +110,16 @@ func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversatio
 }
 
 func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto.ConversationKey) error {
+	conversationID := NormalizeConversationID(key.ConversationID)
 	log := zerolog.Ctx(ctx)
 	if key == nil {
 		return fmt.Errorf("conversation key cannot be nil")
 	}
 
-	meta, portal, err := ks.getPortalMetadata(ctx, key.ConversationID)
+	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
 		log.Err(err).
-			Str("conversation_id", key.ConversationID).
+			Str("conversation_id", conversationID).
 			Str("key_version", key.KeyVersion).
 			Msg("Failed to get portal metadata for storing conversation key")
 		return err
@@ -128,7 +130,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	}
 
 	log.Info().
-		Str("conversation_id", key.ConversationID).
+		Str("conversation_id", conversationID).
 		Str("key_version", key.KeyVersion).
 		Int("key_length", len(key.Key)).
 		Str("key_prefix", truncateKeyHex(key.Key, 8)).
@@ -145,12 +147,12 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	err = portal.Save(ctx)
 	if err != nil {
 		log.Err(err).
-			Str("conversation_id", key.ConversationID).
+			Str("conversation_id", conversationID).
 			Str("key_version", key.KeyVersion).
 			Msg("Failed to save portal metadata with conversation key")
 	} else {
 		log.Info().
-			Str("conversation_id", key.ConversationID).
+			Str("conversation_id", conversationID).
 			Str("key_version", key.KeyVersion).
 			Int("total_keys_after", len(meta.ConversationKeys)).
 			Msg("Successfully saved conversation key to portal metadata")
@@ -159,6 +161,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 }
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
+	conversationID = NormalizeConversationID(conversationID)
 	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
 		return err
@@ -171,6 +174,7 @@ func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversa
 }
 
 func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conversationID string) (*crypto.ConversationKey, error) {
+	conversationID = NormalizeConversationID(conversationID)
 	log := zerolog.Ctx(ctx)
 
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)

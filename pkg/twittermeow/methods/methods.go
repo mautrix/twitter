@@ -67,5 +67,5 @@ func SortMessagesByTime(messages []*types.Message) {
 
 func CreateConversationID(conversationIDs []string) string {
 	sort.Strings(conversationIDs)
-	return strings.Join(conversationIDs, ":")
+	return strings.Join(conversationIDs, "-")
 }
