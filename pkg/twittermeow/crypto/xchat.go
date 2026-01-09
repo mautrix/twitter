@@ -3,13 +3,14 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
+	"crypto/ecdh"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 
+	"go.mau.fi/util/random"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -24,14 +25,10 @@ func SecretboxEncrypt(plaintext, key []byte) ([]byte, error) {
 	if len(key) != secretboxKeySize {
 		return nil, fmt.Errorf("secretbox key must be %d bytes", secretboxKeySize)
 	}
-	var nonce [secretboxNonceSize]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return nil, fmt.Errorf("generate nonce: %w", err)
-	}
-	var k [secretboxKeySize]byte
-	copy(k[:], key)
+	nonce := (*[secretboxNonceSize]byte)(random.Bytes(secretboxNonceSize))
+	k := (*[secretboxKeySize]byte)(key)
 
-	ct := secretbox.Seal(nil, plaintext, &nonce, &k)
+	ct := secretbox.Seal(nil, plaintext, nonce, k)
 	out := make([]byte, 0, len(nonce)+len(ct))
 	out = append(out, nonce[:]...)
 	out = append(out, ct...)
@@ -47,14 +44,11 @@ func SecretboxDecrypt(nonceCiphertext, key []byte) ([]byte, error) {
 	if len(nonceCiphertext) < secretboxNonceSize+secretbox.Overhead {
 		return nil, errors.New("secretbox payload too short")
 	}
-	var nonce [secretboxNonceSize]byte
-	copy(nonce[:], nonceCiphertext[:secretboxNonceSize])
+	nonce := (*[secretboxNonceSize]byte)(nonceCiphertext[:secretboxNonceSize])
 	ciphertext := nonceCiphertext[secretboxNonceSize:]
+	k := (*[secretboxKeySize]byte)(key)
 
-	var k [secretboxKeySize]byte
-	copy(k[:], key)
-
-	plaintext, ok := secretbox.Open(nil, ciphertext, &nonce, &k)
+	plaintext, ok := secretbox.Open(nil, ciphertext, nonce, k)
 	if !ok {
 		return nil, errors.New("secretbox decrypt failed")
 	}
@@ -87,18 +81,17 @@ func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 		return nil, fmt.Errorf("private scalar must be 32 bytes, got %d", len(privScalar))
 	}
 
-	ephKey, err := ParsePublicKeyUncompressed(ephPub)
+	ephKey, err := ecdh.P256().NewPublicKey(ephPub)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ephemeral public key: %w", err)
 	}
-
-	// Derive shared secret (x coordinate, 32 bytes big-endian).
-	sx, _ := ephKey.Curve.ScalarMult(ephKey.X, ephKey.Y, privScalar)
-	shared := sx.Bytes()
-	if len(shared) < 32 {
-		padded := make([]byte, 32)
-		copy(padded[32-len(shared):], shared)
-		shared = padded
+	ecdhPriv, err := ecdh.P256().NewPrivateKey(privScalar)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ecdh private key: %w", err)
+	}
+	shared, err := ecdhPriv.ECDH(ephKey)
+	if err != nil {
+		return nil, fmt.Errorf("ecdh: %w", err)
 	}
 
 	kdfOut, err := kdf2SHA256(shared, ephPub, 32)
@@ -155,27 +148,17 @@ func kdf2SHA256(shared, other []byte, length int) ([]byte, error) {
 	return out[:length], nil
 }
 
+var base64Cleaner = strings.NewReplacer(
+	"\n", "",
+	"\r", "",
+	" ", "",
+	"=", "",
+	"-", "+",
+	"_", "/",
+)
+
 // decodeBase64Flexible trims whitespace and tries standard and URL-safe base64
 // decodings (with and without padding).
 func decodeBase64Flexible(s string) ([]byte, error) {
-	clean := strings.TrimSpace(s)
-	clean = strings.ReplaceAll(clean, "\n", "")
-	clean = strings.ReplaceAll(clean, "\r", "")
-	clean = strings.ReplaceAll(clean, " ", "")
-
-	encodings := []*base64.Encoding{
-		base64.StdEncoding,
-		base64.URLEncoding,
-		base64.RawStdEncoding,
-		base64.RawURLEncoding,
-	}
-	var lastErr error
-	for _, enc := range encodings {
-		if dec, err := enc.DecodeString(clean); err == nil {
-			return dec, nil
-		} else {
-			lastErr = err
-		}
-	}
-	return nil, lastErr
+	return base64.RawStdEncoding.DecodeString(base64Cleaner.Replace(s))
 }

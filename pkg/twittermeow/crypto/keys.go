@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 )
 
@@ -93,42 +92,7 @@ func ParsePrivateKeyScalar(scalarB64 string) (*ecdsa.PrivateKey, error) {
 		return nil, fmt.Errorf("decode scalar base64: %w", err)
 	}
 
-	if len(scalar) != 32 {
-		return nil, fmt.Errorf("%w: scalar must be 32 bytes, got %d", ErrInvalidKeyFormat, len(scalar))
-	}
-
-	curve := elliptic.P256()
-	priv := new(ecdsa.PrivateKey)
-	priv.PublicKey.Curve = curve
-	priv.D = new(big.Int).SetBytes(scalar)
-	priv.PublicKey.X, priv.PublicKey.Y = curve.ScalarBaseMult(scalar)
-
-	return priv, nil
-}
-
-// ParsePublicKeyUncompressed parses a 65-byte uncompressed P-256 public key.
-// Format: 0x04 || X (32 bytes) || Y (32 bytes)
-func ParsePublicKeyUncompressed(data []byte) (*ecdsa.PublicKey, error) {
-	if len(data) != 65 {
-		return nil, fmt.Errorf("%w: expected 65 bytes, got %d", ErrInvalidKeyFormat, len(data))
-	}
-	if data[0] != 0x04 {
-		return nil, fmt.Errorf("%w: expected uncompressed point (0x04 prefix)", ErrInvalidKeyFormat)
-	}
-
-	curve := elliptic.P256()
-	x := new(big.Int).SetBytes(data[1:33])
-	y := new(big.Int).SetBytes(data[33:65])
-
-	if !curve.IsOnCurve(x, y) {
-		return nil, fmt.Errorf("%w: point is not on P-256 curve", ErrInvalidKeyFormat)
-	}
-
-	return &ecdsa.PublicKey{
-		Curve: curve,
-		X:     x,
-		Y:     y,
-	}, nil
+	return ecdsa.ParseRawPrivateKey(elliptic.P256(), scalar)
 }
 
 // EncodePublicKeySPKI encodes an ECDSA public key to base64 SPKI format.
@@ -138,35 +102,6 @@ func EncodePublicKeySPKI(pub *ecdsa.PublicKey) (string, error) {
 		return "", fmt.Errorf("marshal SPKI: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(der), nil
-}
-
-// EncodePrivateKeyScalar encodes the private scalar as base64.
-// The result is a 32-byte scalar in big-endian format, base64-encoded.
-func EncodePrivateKeyScalar(priv *ecdsa.PrivateKey) string {
-	scalar := priv.D.Bytes()
-	// Pad to 32 bytes if necessary
-	if len(scalar) < 32 {
-		padded := make([]byte, 32)
-		copy(padded[32-len(scalar):], scalar)
-		scalar = padded
-	}
-	return base64.StdEncoding.EncodeToString(scalar)
-}
-
-// EncodePublicKeyUncompressed encodes an ECDSA public key to uncompressed format.
-// Returns: 0x04 || X (32 bytes) || Y (32 bytes) = 65 bytes
-func EncodePublicKeyUncompressed(pub *ecdsa.PublicKey) []byte {
-	if pub == nil || pub.Curve == nil || pub.X == nil || pub.Y == nil {
-		return nil
-	}
-	byteLen := (pub.Curve.Params().BitSize + 7) / 8
-	out := make([]byte, 1+2*byteLen)
-	out[0] = 0x04
-	xBytes := pub.X.Bytes()
-	yBytes := pub.Y.Bytes()
-	copy(out[1+byteLen-len(xBytes):1+byteLen], xBytes)
-	copy(out[1+2*byteLen-len(yBytes):], yBytes)
-	return out
 }
 
 // LoadSigningKeyPair creates a SigningKeyPair from stored base64 scalar values.
