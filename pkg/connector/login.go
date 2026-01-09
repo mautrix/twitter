@@ -115,7 +115,7 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 
 	// Migration case: validate existing cookies and skip to PIN
 	cookieStruct := twitCookies.NewCookiesFromString(meta.Cookies)
-	t.client = twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+	t.client = twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
 	settings, err := t.client.LoadMessagesPage(ctx)
 	if err != nil {
@@ -151,7 +151,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	cookieStruct := twitCookies.NewCookies(cookies)
 	t.Cookies = cookieStruct.String()
 
-	client := twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
 	settings, err := client.LoadMessagesPage(ctx)
 	if err != nil {
@@ -195,7 +195,7 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 			return nil, fmt.Errorf("cookies must be submitted before PIN")
 		}
 		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
-		t.client = twittermeow.NewClient(cookieStruct, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+		t.client = twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 		settings, err := t.client.LoadMessagesPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load messages page: %w", err)

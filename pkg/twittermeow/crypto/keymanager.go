@@ -3,8 +3,6 @@ package crypto
 import (
 	"context"
 	"crypto/ecdsa"
-	"sync"
-	"time"
 )
 
 // KeyStore provides persistent storage for cryptographic keys.
@@ -72,78 +70,26 @@ func (n *NoOpKeyStore) PutConversationToken(ctx context.Context, conversationID,
 	return nil
 }
 
-// KeyManagerConfig configures the KeyManager behavior.
-type KeyManagerConfig struct {
-	CacheTTL        time.Duration // How long keys stay in memory cache
-	MaxCacheEntries int           // Maximum number of cached entries
-}
-
-// DefaultKeyManagerConfig returns sensible defaults.
-func DefaultKeyManagerConfig() KeyManagerConfig {
-	return KeyManagerConfig{
-		CacheTTL:        time.Hour,
-		MaxCacheEntries: 1000,
-	}
-}
-
-type cacheEntry[T any] struct {
-	value     T
-	expiresAt time.Time
-}
-
 // KeyManager manages cryptographic keys with in-memory caching.
 // All methods are thread-safe.
 type KeyManager struct {
-	store  KeyStore
-	config KeyManagerConfig
-
-	mu           sync.RWMutex
-	convKeyCache map[string]*cacheEntry[*ConversationKey] // key: "convID:version"
-	pubKeyCache  map[string]*cacheEntry[*PublicKeyInfo]   // key: "userID:version"
-
-	ownSigningKey   *SigningKeyPair
-	ownSigningKeyMu sync.RWMutex
+	store KeyStore
 }
 
 // NewKeyManager creates a KeyManager with the given store and config.
 // If store is nil, a NoOpKeyStore is used.
-func NewKeyManager(store KeyStore, config KeyManagerConfig) *KeyManager {
+func NewKeyManager(store KeyStore) *KeyManager {
 	if store == nil {
 		store = &NoOpKeyStore{}
 	}
 	return &KeyManager{
-		store:        store,
-		config:       config,
-		convKeyCache: make(map[string]*cacheEntry[*ConversationKey]),
-		pubKeyCache:  make(map[string]*cacheEntry[*PublicKeyInfo]),
+		store: store,
 	}
 }
 
 // GetConversationKey retrieves a conversation key, checking cache first.
 func (km *KeyManager) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*ConversationKey, error) {
-	cacheKey := conversationID + ":" + keyVersion
-
-	km.mu.RLock()
-	if entry, ok := km.convKeyCache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
-		km.mu.RUnlock()
-		return entry.value, nil
-	}
-	km.mu.RUnlock()
-
-	key, err := km.store.GetConversationKey(ctx, conversationID, keyVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	km.mu.Lock()
-	km.convKeyCache[cacheKey] = &cacheEntry[*ConversationKey]{
-		value:     key,
-		expiresAt: time.Now().Add(km.config.CacheTTL),
-	}
-	km.evictIfNeeded()
-	km.mu.Unlock()
-
-	return key, nil
+	return km.store.GetConversationKey(ctx, conversationID, keyVersion)
 }
 
 // GetLatestConversationKey retrieves the latest conversation key for a conversation.
@@ -153,41 +99,12 @@ func (km *KeyManager) GetLatestConversationKey(ctx context.Context, conversation
 
 // PutConversationKey stores a conversation key in both cache and persistent store.
 func (km *KeyManager) PutConversationKey(ctx context.Context, key *ConversationKey) error {
-	if err := km.store.PutConversationKey(ctx, key); err != nil {
-		return err
-	}
-
-	cacheKey := key.ConversationID + ":" + key.KeyVersion
-	km.mu.Lock()
-	km.convKeyCache[cacheKey] = &cacheEntry[*ConversationKey]{
-		value:     key,
-		expiresAt: time.Now().Add(km.config.CacheTTL),
-	}
-	km.evictIfNeeded()
-	km.mu.Unlock()
-
-	return nil
+	return km.store.PutConversationKey(ctx, key)
 }
 
 // GetOwnSigningKey returns the user's own signing key for message signing.
 func (km *KeyManager) GetOwnSigningKey(ctx context.Context) (*SigningKeyPair, error) {
-	km.ownSigningKeyMu.RLock()
-	if km.ownSigningKey != nil {
-		km.ownSigningKeyMu.RUnlock()
-		return km.ownSigningKey, nil
-	}
-	km.ownSigningKeyMu.RUnlock()
-
-	key, err := km.store.GetOwnSigningKey(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	km.ownSigningKeyMu.Lock()
-	km.ownSigningKey = key
-	km.ownSigningKeyMu.Unlock()
-
-	return key, nil
+	return km.store.GetOwnSigningKey(ctx)
 }
 
 // SetOwnSigningKey sets the user's signing key from a base64-encoded private scalar.
@@ -197,42 +114,17 @@ func (km *KeyManager) SetOwnSigningKey(ctx context.Context, privateKeyB64 string
 		return err
 	}
 
-	if err := km.store.PutOwnSigningKey(ctx, key); err != nil {
-		return err
-	}
-
-	km.ownSigningKeyMu.Lock()
-	km.ownSigningKey = key
-	km.ownSigningKeyMu.Unlock()
-
-	return nil
+	return km.store.PutOwnSigningKey(ctx, key)
 }
 
 // SetOwnSigningKeyPair sets the user's signing key directly.
 func (km *KeyManager) SetOwnSigningKeyPair(ctx context.Context, key *SigningKeyPair) error {
-	if err := km.store.PutOwnSigningKey(ctx, key); err != nil {
-		return err
-	}
-
-	km.ownSigningKeyMu.Lock()
-	km.ownSigningKey = key
-	km.ownSigningKeyMu.Unlock()
-
-	return nil
+	return km.store.PutOwnSigningKey(ctx, key)
 }
 
 // GetPublicKeyForVerification retrieves a public key for verifying a signature.
 // If spkiB64 is provided, it parses and caches it; otherwise loads from store.
 func (km *KeyManager) GetPublicKeyForVerification(ctx context.Context, userID, keyVersion, spkiB64 string) (*ecdsa.PublicKey, error) {
-	cacheKey := userID + ":" + keyVersion
-
-	km.mu.RLock()
-	if entry, ok := km.pubKeyCache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
-		km.mu.RUnlock()
-		return entry.value.PublicKey, nil
-	}
-	km.mu.RUnlock()
-
 	var info *PublicKeyInfo
 	var err error
 
@@ -250,48 +142,7 @@ func (km *KeyManager) GetPublicKeyForVerification(ctx context.Context, userID, k
 		}
 	}
 
-	km.mu.Lock()
-	km.pubKeyCache[cacheKey] = &cacheEntry[*PublicKeyInfo]{
-		value:     info,
-		expiresAt: time.Now().Add(km.config.CacheTTL),
-	}
-	km.evictIfNeeded()
-	km.mu.Unlock()
-
 	return info.PublicKey, nil
-}
-
-// evictIfNeeded removes expired entries if cache is too large.
-// Must be called with mu held.
-func (km *KeyManager) evictIfNeeded() {
-	total := len(km.convKeyCache) + len(km.pubKeyCache)
-	if total <= km.config.MaxCacheEntries {
-		return
-	}
-
-	now := time.Now()
-	for k, v := range km.convKeyCache {
-		if now.After(v.expiresAt) {
-			delete(km.convKeyCache, k)
-		}
-	}
-	for k, v := range km.pubKeyCache {
-		if now.After(v.expiresAt) {
-			delete(km.pubKeyCache, k)
-		}
-	}
-}
-
-// ClearCache clears all cached keys.
-func (km *KeyManager) ClearCache() {
-	km.mu.Lock()
-	km.convKeyCache = make(map[string]*cacheEntry[*ConversationKey])
-	km.pubKeyCache = make(map[string]*cacheEntry[*PublicKeyInfo])
-	km.mu.Unlock()
-
-	km.ownSigningKeyMu.Lock()
-	km.ownSigningKey = nil
-	km.ownSigningKeyMu.Unlock()
 }
 
 // GetConversationToken retrieves a server-provided conversation token.

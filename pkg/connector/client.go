@@ -93,9 +93,8 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 	meta := login.Metadata.(*UserLoginMetadata)
 	c := cookies.NewCookiesFromString(meta.Cookies)
 	log := login.Log.With().Str("component", "twitter_client").Logger()
-	client := twittermeow.NewClient(c, log)
+	client := twittermeow.NewClient(c, newUserLoginKeyStore(login, tc), log)
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
-	client.SetKeyStore(newUserLoginKeyStore(login, tc))
 	login.Client = NewTwitterClient(login, tc, client)
 	return nil
 }

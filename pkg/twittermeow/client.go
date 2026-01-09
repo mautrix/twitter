@@ -61,7 +61,7 @@ type Client struct {
 	xchatTokenMu sync.Mutex
 }
 
-func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
+func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.Logger) *Client {
 	cli := Client{
 		HTTP: &http.Client{
 			Transport: req.NewClient().ImpersonateChrome().DisableHTTP3().GetTransport(),
@@ -78,7 +78,7 @@ func NewClient(cookies *cookies.Cookies, logger zerolog.Logger) *Client {
 	cli.session = &CachedSession{
 		ClientUUID: uuid.NewString(),
 	}
-	cli.keyManager = crypto.NewKeyManager(nil, crypto.DefaultKeyManagerConfig())
+	cli.keyManager = crypto.NewKeyManager(store)
 	cli.xchatProcessor = newXChatEventProcessor(&cli)
 
 	return &cli
@@ -109,7 +109,7 @@ func (c *Client) GetXChatProcessor() *XChatEventProcessor {
 // SetKeyStore sets a custom KeyStore for persistent key storage.
 // This replaces the current KeyManager with a new one using the provided store.
 func (c *Client) SetKeyStore(store crypto.KeyStore) {
-	c.keyManager = crypto.NewKeyManager(store, crypto.DefaultKeyManagerConfig())
+	c.keyManager = crypto.NewKeyManager(store)
 }
 
 // GetXChatToken returns a valid XChat token, refreshing if expired.
