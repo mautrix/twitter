@@ -30,14 +30,43 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-// NormalizeConversationID converts XChat-style colon-delimited IDs to legacy
-// dash-delimited format for portal matching with existing rooms from the main branch.
-// Group IDs (starting with "g") are returned unchanged.
-func NormalizeConversationID(conversationID string) string {
+func MakePortalID(conversationID string) networkid.PortalID {
 	if strings.HasPrefix(conversationID, "g") {
-		return conversationID
+		return networkid.PortalID(conversationID)
 	}
-	return strings.ReplaceAll(conversationID, ":", "-")
+	// Backwards compat for old pre-xchat portal IDs
+	return networkid.PortalID(strings.ReplaceAll(conversationID, ":", "-"))
+}
+
+func ParsePortalID(portalID networkid.PortalID) string {
+	if strings.HasPrefix(string(portalID), "g") {
+		return string(portalID)
+	}
+	return strings.ReplaceAll(string(portalID), "-", ":")
+}
+
+func MakeUserID(userID string) networkid.UserID {
+	return networkid.UserID(userID)
+}
+
+func MakeUserLoginID(userID string) networkid.UserLoginID {
+	return networkid.UserLoginID(userID)
+}
+
+func ParseUserLoginID(userLoginID networkid.UserLoginID) string {
+	return string(userLoginID)
+}
+
+func ParseUserID(userID networkid.UserID) string {
+	return string(userID)
+}
+
+func MakeMessageID(seqID string) networkid.MessageID {
+	return networkid.MessageID(seqID)
+}
+
+func ParseMessageID(messageID networkid.MessageID) string {
+	return string(messageID)
 }
 
 func (tc *TwitterClient) MakePortalKey(conv *types.Conversation) networkid.PortalKey {
@@ -50,24 +79,20 @@ func (tc *TwitterClient) MakePortalKeyFromID(conversationID string) networkid.Po
 
 // MakePortalKeyForConversation creates a portal key using the same logic as MakePortalKeyFromID.
 // This is used by the keystore which doesn't have direct access to TwitterClient.
-func MakePortalKeyForConversation(conversationID string, loginID networkid.UserLoginID, splitPortals bool) networkid.PortalKey {
-	var receiver networkid.UserLoginID
-	normalizedID := NormalizeConversationID(conversationID)
+func MakePortalKeyForConversation(conversationID string, loginID networkid.UserLoginID, splitPortals bool) (key networkid.PortalKey) {
+	key.ID = MakePortalID(conversationID)
 	// 1:1 DM conversation IDs use `:` as delimiter between user IDs
-	if strings.Contains(conversationID, "-") || splitPortals {
-		receiver = loginID
+	if strings.Contains(string(key.ID), "-") || splitPortals {
+		key.Receiver = loginID
 	}
-	return networkid.PortalKey{
-		ID:       networkid.PortalID(normalizedID),
-		Receiver: receiver,
-	}
+	return
 }
 
 func (tc *TwitterClient) MakeEventSender(userID string) bridgev2.EventSender {
 	return bridgev2.EventSender{
 		IsFromMe:    userID == tc.client.GetCurrentUserID(),
-		SenderLogin: networkid.UserLoginID(userID),
-		Sender:      networkid.UserID(userID),
+		SenderLogin: MakeUserLoginID(userID),
+		Sender:      MakeUserID(userID),
 	}
 }
 
@@ -158,7 +183,7 @@ func parseMediaIDV1(buf *bytes.Reader) (*MediaInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	mediaInfo.UserID = networkid.UserLoginID(strconv.FormatUint(uID, 10))
+	mediaInfo.UserID = MakeUserLoginID(strconv.FormatUint(uID, 10))
 
 	size, err := binary.ReadUvarint(buf)
 	if err != nil {
@@ -182,7 +207,7 @@ func parseMediaIDV2(buf *bytes.Reader) (*EncryptedMediaInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	info.UserID = networkid.UserLoginID(strconv.FormatUint(uID, 10))
+	info.UserID = MakeUserLoginID(strconv.FormatUint(uID, 10))
 
 	// Read conversation ID
 	size, err := binary.ReadUvarint(buf)

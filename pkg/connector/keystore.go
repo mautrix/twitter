@@ -27,27 +27,8 @@ func newUserLoginKeyStore(login *bridgev2.UserLogin, connector *TwitterConnector
 	return &userLoginKeyStore{
 		login:     login,
 		connector: connector,
-		meta:      ensureUserLoginMetadata(login),
+		meta:      login.Metadata.(*UserLoginMetadata),
 	}
-}
-
-func ensureUserLoginMetadata(login *bridgev2.UserLogin) *UserLoginMetadata {
-	if meta, ok := login.Metadata.(*UserLoginMetadata); ok && meta != nil {
-		if meta.MaxUserSequenceID == "" && meta.MaxSequenceID != "" {
-			// Migrate old field name to the new one.
-			meta.MaxUserSequenceID = meta.MaxSequenceID
-			meta.MaxSequenceID = ""
-		}
-		if meta.UserID == "" {
-			meta.UserID = string(login.ID)
-		}
-		return meta
-	}
-	meta := &UserLoginMetadata{
-		UserID: string(login.ID),
-	}
-	login.Metadata = meta
-	return meta
 }
 
 // getPortalMetadata looks up a portal by conversation ID and returns its metadata.
@@ -57,12 +38,10 @@ func (ks *userLoginKeyStore) getPortalMetadata(ctx context.Context, conversation
 	if err != nil {
 		return nil, nil, err
 	}
-	meta := ensurePortalMetadata(portal)
-	return meta, portal, nil
+	return portal.Metadata.(*PortalMetadata), portal, nil
 }
 
 func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*crypto.ConversationKey, error) {
-	conversationID = NormalizeConversationID(conversationID)
 	log := zerolog.Ctx(ctx)
 
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
@@ -110,16 +89,15 @@ func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversatio
 }
 
 func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto.ConversationKey) error {
-	conversationID := NormalizeConversationID(key.ConversationID)
 	log := zerolog.Ctx(ctx)
 	if key == nil {
 		return fmt.Errorf("conversation key cannot be nil")
 	}
 
-	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
+	meta, portal, err := ks.getPortalMetadata(ctx, key.ConversationID)
 	if err != nil {
 		log.Err(err).
-			Str("conversation_id", conversationID).
+			Str("conversation_id", key.ConversationID).
 			Str("key_version", key.KeyVersion).
 			Msg("Failed to get portal metadata for storing conversation key")
 		return err
@@ -130,7 +108,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	}
 
 	log.Info().
-		Str("conversation_id", conversationID).
+		Str("conversation_id", key.ConversationID).
 		Str("key_version", key.KeyVersion).
 		Int("key_length", len(key.Key)).
 		Str("key_prefix", truncateKeyHex(key.Key, 8)).
@@ -147,12 +125,12 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	err = portal.Save(ctx)
 	if err != nil {
 		log.Err(err).
-			Str("conversation_id", conversationID).
+			Str("conversation_id", key.ConversationID).
 			Str("key_version", key.KeyVersion).
 			Msg("Failed to save portal metadata with conversation key")
 	} else {
 		log.Info().
-			Str("conversation_id", conversationID).
+			Str("conversation_id", key.ConversationID).
 			Str("key_version", key.KeyVersion).
 			Int("total_keys_after", len(meta.ConversationKeys)).
 			Msg("Successfully saved conversation key to portal metadata")
@@ -161,7 +139,6 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 }
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
-	conversationID = NormalizeConversationID(conversationID)
 	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
 		return err
@@ -174,7 +151,6 @@ func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversa
 }
 
 func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conversationID string) (*crypto.ConversationKey, error) {
-	conversationID = NormalizeConversationID(conversationID)
 	log := zerolog.Ctx(ctx)
 
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
@@ -225,7 +201,7 @@ func (ks *userLoginKeyStore) GetOwnSigningKey(ctx context.Context) (*crypto.Sign
 	secretKey := ks.meta.SecretKey
 	signingKey := ks.meta.SigningKey
 	signingKeyVersion := ks.meta.SigningKeyVersion
-	loginID := string(ks.login.ID)
+	loginID := ParseUserLoginID(ks.login.ID)
 	ks.mu.RUnlock()
 
 	log.Info().

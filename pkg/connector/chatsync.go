@@ -26,7 +26,6 @@ import (
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -64,7 +63,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 	}
 
 	// XChat conversations are always trusted - set this first, never downgrade
-	meta := ensurePortalMetadata(portal)
+	meta := portal.Metadata.(*PortalMetadata)
 	if !meta.Trusted {
 		meta.Trusted = true
 		if err := portal.Save(ctx); err != nil {
@@ -117,7 +116,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 
 	log.Debug().
 		Str("conversation_id", conv.ConversationID).
-		Str("portal_mxid", string(portal.MXID)).
+		Stringer("portal_mxid", portal.MXID).
 		Msg("XChat channel synced")
 }
 
@@ -126,7 +125,7 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 	detail := item.ConversationDetail
 
 	conv := &types.Conversation{
-		ConversationID: NormalizeConversationID(detail.ConversationID),
+		ConversationID: detail.ConversationID,
 		Trusted:        true, // XChat conversations are always trusted
 		Muted:          detail.IsMuted,
 	}
@@ -163,7 +162,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 
 	isGroup := len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil
 
-	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(detail.ParticipantsResults))
+	memberMap := make(bridgev2.ChatMemberMap, len(detail.ParticipantsResults))
 	for _, p := range detail.ParticipantsResults {
 		var userInfo *bridgev2.UserInfo
 		// First try inline Result from participants_results, then fall back to users map or cache
@@ -182,10 +181,10 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 			}
 			tc.userCacheLock.RUnlock()
 		}
-		memberMap[networkid.UserID(p.RestID)] = bridgev2.ChatMember{
+		memberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
 			UserInfo:    userInfo,
-		}
+		})
 	}
 
 	// MessageRequest is true for untrusted conversations (message requests)
@@ -373,7 +372,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 	}
 
 	// Don't downgrade trust status - only set false if not already trusted
-	meta := ensurePortalMetadata(portal)
+	meta := portal.Metadata.(*PortalMetadata)
 	if !meta.Trusted {
 		// Keep as untrusted (Trusted stays false)
 		// No need to save since Trusted=false is the zero value
@@ -429,7 +428,7 @@ func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversat
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.
 func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
-	memberMap := make(map[networkid.UserID]bridgev2.ChatMember, len(conv.Participants))
+	memberMap := make(bridgev2.ChatMemberMap, len(conv.Participants))
 	for _, participant := range conv.Participants {
 		var userInfo *bridgev2.UserInfo
 		if inbox != nil {
@@ -444,10 +443,10 @@ func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox 
 			}
 			tc.userCacheLock.RUnlock()
 		}
-		memberMap[networkid.UserID(participant.UserID)] = bridgev2.ChatMember{
+		memberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(participant.UserID),
 			UserInfo:    userInfo,
-		}
+		})
 	}
 
 	messageRequest := !conv.Trusted
@@ -464,7 +463,7 @@ func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox 
 
 	isGroup := conv.Type == ConversationTypeGroupDM
 	if isGroup {
-		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
+		info.Type = ptr.Ptr(database.RoomTypeDefault)
 		if conv.AvatarImageHttps != "" {
 			info.Avatar = makeAvatar(tc.client, conv.AvatarImageHttps)
 		}

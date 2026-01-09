@@ -126,7 +126,7 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 }
 
 func (tc *TwitterClient) getEnsurePortalLock(conversationID string) *sync.Mutex {
-	lock, _ := tc.ensurePortalLocks.LoadOrStore(NormalizeConversationID(conversationID), &sync.Mutex{})
+	lock, _ := tc.ensurePortalLocks.LoadOrStore(conversationID, &sync.Mutex{})
 	return lock.(*sync.Mutex)
 }
 

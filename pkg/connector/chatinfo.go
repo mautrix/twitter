@@ -83,7 +83,7 @@ func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Porta
 		return nil, fmt.Errorf("portal is nil")
 	}
 
-	conversationID := string(portal.PortalKey.ID)
+	conversationID := ParsePortalID(portal.PortalKey.ID)
 	item, users, err := tc.fetchConversationData(ctx, conversationID)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Porta
 }
 
 func (tc *TwitterClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
-	userID := string(ghost.ID)
+	userID := ParseUserID(ghost.ID)
 	userInfo := tc.getCachedUserInfo(userID)
 	if userInfo == nil {
 		if err := tc.ensureUsersInCacheByID(ctx, []string{userID}); err != nil {

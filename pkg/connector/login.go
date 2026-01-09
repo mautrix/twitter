@@ -25,7 +25,6 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 
 	"go.mau.fi/mautrix-twitter/pkg/juiceboxgo"
@@ -307,7 +306,6 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		SecretKey:         t.SecretKey,
 		SigningKey:        t.SigningKey,
 		SigningKeyVersion: t.SigningKeyVersion,
-		UserID:            t.client.GetCurrentUserID(),
 	}
 
 	// If this is a migration, mark it and flag for full encrypted room sync
@@ -323,7 +321,7 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	remoteProfile := &status.RemoteProfile{
 		Username: t.settings.ScreenName,
 	}
-	id := networkid.UserLoginID(t.client.GetCurrentUserID())
+	id := MakeUserLoginID(t.client.GetCurrentUserID())
 	ul, err := t.User.NewLogin(
 		ctx,
 		&database.UserLogin{
@@ -336,7 +334,6 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 			DeleteOnConflict:  true,
 			DontReuseExisting: false,
 			LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
-				ensureUserLoginMetadata(login)
 				if t.client != nil {
 					t.client.SetKeyStore(newUserLoginKeyStore(login, t.tc))
 				}

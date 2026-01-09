@@ -65,11 +65,10 @@ func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.M
 		return nil
 	}
 
-	conversationID := string(msg.Portal.ID)
-	meta := ensurePortalMetadata(msg.Portal)
+	conversationID := ParsePortalID(msg.Portal.ID)
 
 	// Use WebSocket for trusted conversations, GraphQL for untrusted
-	if meta.IsTrusted() {
+	if msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
 		return tc.client.SendXChatTypingNotification(ctx, conversationID)
 	}
 	return tc.client.SendTypingNotification(ctx, conversationID)
@@ -80,7 +79,7 @@ func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.Ro
 }
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
-	conversationID := string(msg.Portal.ID)
+	conversationID := ParsePortalID(msg.Portal.ID)
 	content := msg.Content
 
 	text := content.Body
@@ -100,7 +99,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	if msg.ReplyTo != nil {
-		replySeqID := string(msg.ReplyTo.ID)
+		replySeqID := ParseMessageID(msg.ReplyTo.ID)
 		replyMsgID := replySeqID
 
 		// Get XChatClientMsgID from metadata (still stored for transaction ID matching)
@@ -121,7 +120,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		// Get sender ID
 		var senderIDStr string
 		if msg.ReplyTo.SenderID != "" {
-			senderIDStr = string(msg.ReplyTo.SenderID)
+			senderIDStr = ParseUserID(msg.ReplyTo.SenderID)
 		}
 
 		// Fallback for display name if fetch failed
@@ -135,7 +134,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		// If we couldn't fetch reply info, skip reply metadata
 		if !ok {
 			zerolog.Ctx(ctx).Debug().
-				Str("reply_to_id", string(msg.ReplyTo.ID)).
+				Str("reply_to_id", ParseMessageID(msg.ReplyTo.ID)).
 				Msg("Could not fetch reply content, sending as standalone message")
 		} else {
 			var senderIDPtr *int64
@@ -154,7 +153,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			}
 			zerolog.Ctx(ctx).Info().
 				Str("conversation_id", conversationID).
-				Str("reply_to_id", string(msg.ReplyTo.ID)).
+				Str("reply_to_id", ParseMessageID(msg.ReplyTo.ID)).
 				Int("reply_attachments", len(replyAttachments)).
 				Str("reply_text", replyText).
 				Msg("Preparing reply preview")
@@ -245,16 +244,16 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 	txnID := networkid.TransactionID(messageID)
 	dbMsg := &database.Message{
+		// TODO this is wrong, txn ID != message ID
 		ID:        networkid.MessageID(messageID),
-		SenderID:  networkid.UserID(tc.userLogin.ID),
+		SenderID:  MakeUserID(ParseUserLoginID(tc.userLogin.ID)),
 		Timestamp: time.Now(),
 		Metadata: &MessageMetadata{
 			XChatClientMsgID: messageID,
 		},
 	}
 	// Check portal metadata for trust status
-	meta := ensurePortalMetadata(msg.Portal)
-	if !meta.IsTrusted() {
+	if !msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
 		// Untrusted conversation - use REST API
 		return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 	}
@@ -274,7 +273,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	// Extract sequence ID from the response
 	if resp != nil && resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent != "" {
 		if decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent); err == nil && decoded.MessageEvent != nil {
-			dbMsg.ID = networkid.MessageID(*decoded.MessageEvent)
+			dbMsg.ID = MakeMessageID(*decoded.MessageEvent)
 		}
 	}
 
@@ -368,14 +367,14 @@ func (tc *TwitterClient) sendDirectMessageREST(
 		for _, entry := range resp.Entries {
 			parsed := entry.ParseWithErrorLog(log)
 			if msgEvt, ok := parsed.(*types.Message); ok && msgEvt.ConversationID == conversationID {
-				dbMsg.ID = networkid.MessageID(msgEvt.ID)
+				dbMsg.ID = MakeMessageID(msgEvt.ID)
 				break
 			}
 		}
 	}
 
 	// Successfully sent - mark conversation as trusted
-	meta := ensurePortalMetadata(msg.Portal)
+	meta := msg.Portal.Metadata.(*PortalMetadata)
 	if !meta.Trusted {
 		meta.Trusted = true
 		if err := msg.Portal.Save(ctx); err != nil {
@@ -400,8 +399,8 @@ func (tc *TwitterClient) lookupReplyMetadata(ctx context.Context, portalKey netw
 	if err != nil {
 		zerolog.Ctx(ctx).Debug().
 			Err(err).
-			Str("conversation_id", string(portalKey.ID)).
-			Str("reply_to_id", string(msgID)).
+			Str("conversation_id", ParsePortalID(portalKey.ID)).
+			Str("reply_to_id", ParseMessageID(msgID)).
 			Msg("Failed to load reply target metadata from DB")
 		return nil
 	}
@@ -462,7 +461,7 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 	}
 	// Fallback to network user lookup
 	if senderDisplayName == "" && replyTo.SenderID != "" {
-		senderDisplayName = tc.getDisplayNameForUser(ctx, string(replyTo.SenderID))
+		senderDisplayName = tc.getDisplayNameForUser(ctx, ParseUserID(replyTo.SenderID))
 	}
 
 	// Build attachments from Matrix media (will extract MediaHashKey when direct media is enabled)
@@ -557,10 +556,10 @@ func (tc *TwitterClient) extractMediaHashKeyFromContentURL(contentURL id.Content
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
 	var senderID string
 	if msg.TargetReaction != nil {
-		senderID = string(msg.TargetReaction.SenderID)
+		senderID = ParseUserID(msg.TargetReaction.SenderID)
 	}
-	conversationID := string(msg.Portal.ID)
-	targetMessageID := string(msg.TargetReaction.MessageID)
+	conversationID := ParsePortalID(msg.Portal.ID)
+	targetMessageID := ParseMessageID(msg.TargetReaction.MessageID)
 
 	emoji := variationselector.FullyQualify(msg.TargetReaction.Emoji)
 	zerolog.Ctx(ctx).Info().
@@ -568,7 +567,7 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 		Str("target_message_id", targetMessageID).
 		Str("emoji", emoji).
 		Str("sender_id", senderID).
-		Str("sender_mxid", msg.Event.Sender.String()).
+		Stringer("sender_mxid", msg.Event.Sender).
 		Msg("Handling Matrix reaction removal")
 	return tc.doHandleMatrixReaction(ctx, true, conversationID, targetMessageID, emoji)
 }
@@ -576,7 +575,7 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	emoji := variationselector.FullyQualify(msg.Content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
-		SenderID:     networkid.UserID(tc.client.GetCurrentUserID()),
+		SenderID:     MakeUserID(tc.client.GetCurrentUserID()),
 		EmojiID:      networkid.EmojiID(emoji),
 		Emoji:        emoji,
 		MaxReactions: 1,
@@ -584,36 +583,15 @@ func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev
 }
 
 func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (reaction *database.Reaction, err error) {
-	conversationID := string(msg.Portal.ID)
-	targetMessageID := string(msg.TargetMessage.ID)
+	conversationID := ParsePortalID(msg.Portal.ID)
+	targetMessageID := ParseMessageID(msg.TargetMessage.ID)
 
 	emoji := msg.PreHandleResp.Emoji
-	senderID := msg.PreHandleResp.SenderID
-	if senderID == "" {
-		senderID = networkid.UserID(tc.client.GetCurrentUserID())
-	}
-	zerolog.Ctx(ctx).Info().
-		Str("conversation_id", conversationID).
-		Str("target_message_id", targetMessageID).
-		Str("emoji", emoji).
-		Str("sender_id", string(senderID)).
-		Str("sender_mxid", msg.Event.Sender.String()).
-		Msg("Handling Matrix reaction")
 	if err := tc.doHandleMatrixReaction(ctx, false, conversationID, targetMessageID, emoji); err != nil {
 		return nil, err
 	}
 
-	return &database.Reaction{
-		Room:          msg.Portal.PortalKey,
-		MessageID:     msg.TargetMessage.ID,
-		MessagePartID: msg.TargetMessage.PartID,
-		SenderID:      senderID,
-		SenderMXID:    msg.Event.Sender,
-		EmojiID:       msg.PreHandleResp.EmojiID,
-		MXID:          msg.Event.ID,
-		Timestamp:     time.Now(),
-		Emoji:         emoji,
-	}, nil
+	return &database.Reaction{}, nil
 }
 
 func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, conversationID, messageID, emoji string) error {
@@ -627,17 +605,17 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 }
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
-	conversationID := string(msg.Portal.ID)
+	conversationID := ParsePortalID(msg.Portal.ID)
 	lastReadEventID := ""
 
 	if msg.ExactMessage != nil {
-		lastReadEventID = string(msg.ExactMessage.ID)
+		lastReadEventID = ParseMessageID(msg.ExactMessage.ID)
 	} else {
 		lastMessage, err := tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, msg.ReadUpTo)
 		if err != nil {
 			return err
 		}
-		lastReadEventID = string(lastMessage.ID)
+		lastReadEventID = ParseMessageID(lastMessage.ID)
 	}
 
 	readAt := msg.ReadUpTo
@@ -646,8 +624,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	}
 
 	// Check portal metadata for trust status
-	meta := ensurePortalMetadata(msg.Portal)
-	if !meta.IsTrusted() {
+	if !msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
 		// Untrusted - only use REST API
 		params := &payload.MarkConversationReadQuery{
 			ConversationID:  conversationID,
@@ -672,7 +649,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 }
 
 func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
-	targetMessageID := string(edit.EditTarget.ID)
+	targetMessageID := ParseMessageID(edit.EditTarget.ID)
 	var meta *MessageMetadata
 	if edit.EditTarget != nil {
 		if typedMeta, ok := edit.EditTarget.Metadata.(*MessageMetadata); ok {
@@ -686,7 +663,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	}
 
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
-		ConversationID:          string(edit.Portal.ID),
+		ConversationID:          ParsePortalID(edit.Portal.ID),
 		MessageID:               messageID,
 		TargetMessageSequenceID: targetMessageID,
 		UpdatedText:             edit.Content.Body,
@@ -704,7 +681,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *bridgev2.MatrixViewingChat) error {
 	conversationID := ""
 	if chat.Portal != nil {
-		conversationID = string(chat.Portal.ID)
+		conversationID = ParsePortalID(chat.Portal.ID)
 	}
 	tc.client.SetActiveConversation(conversationID)
 	return nil
@@ -714,18 +691,18 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	if chat.Content.DeleteForEveryone {
 		return errors.New("delete for everyone is not supported")
 	}
-	conversationID := string(chat.Portal.ID)
+	conversationID := ParsePortalID(chat.Portal.ID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
 }
 
 func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {
-	conversationID := string(msg.Portal.ID)
+	conversationID := ParsePortalID(msg.Portal.ID)
 	if msg.TargetMessage == nil {
 		return errors.New("target message not found")
 	}
 
-	sequenceID := string(msg.TargetMessage.ID)
+	sequenceID := ParseMessageID(msg.TargetMessage.ID)
 	if sequenceID == "" {
 		return errors.New("message sequence ID not found")
 	}
@@ -766,7 +743,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		updateAvatarParams := &payload.DMRequestQuery{
 			AvatarID: uploadedMediaResponse.MediaIDString,
 		}
-		err = tc.client.UpdateConversationAvatar(ctx, string(msg.Portal.ID), updateAvatarParams)
+		err = tc.client.UpdateConversationAvatar(ctx, ParsePortalID(msg.Portal.ID), updateAvatarParams)
 		if err != nil {
 			return false, err
 		}
@@ -783,7 +760,7 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 	updateNameParams := &payload.DMRequestQuery{
 		Name: msg.Content.Name,
 	}
-	err := tc.client.UpdateConversationName(ctx, string(msg.Portal.ID), updateNameParams)
+	err := tc.client.UpdateConversationName(ctx, ParsePortalID(msg.Portal.ID), updateNameParams)
 	if err != nil {
 		return false, err
 	}
@@ -801,12 +778,12 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 	var participantID string
 	switch target := msg.Target.(type) {
 	case *bridgev2.Ghost:
-		participantID = string(target.ID)
+		participantID = ParseUserID(target.ID)
 	case *bridgev2.UserLogin:
-		participantID = string(target.ID)
+		participantID = ParseUserLoginID(target.ID)
 	}
 	_, err := tc.client.AddParticipants(ctx, &payload.AddParticipantsPayload{
-		ConversationID:    string(msg.Portal.ID),
+		ConversationID:    ParsePortalID(msg.Portal.ID),
 		AddedParticipants: []string{participantID},
 	})
 	if err != nil {
@@ -816,7 +793,7 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 }
 
 func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.MatrixRoomTag) error {
-	conversationID := string(msg.Portal.ID)
+	conversationID := ParsePortalID(msg.Portal.ID)
 	_, isFavourite := msg.Content.Tags[event.RoomTagFavourite]
 
 	if isFavourite {
@@ -826,7 +803,7 @@ func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.Matrix
 }
 
 func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
-	conversationID := string(msg.Portal.ID)
+	conversationID := ParsePortalID(msg.Portal.ID)
 	if msg.Content.IsMuted() {
 		return tc.client.MuteConversation(ctx, conversationID)
 	}
@@ -834,5 +811,5 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 }
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
-	return tc.client.AcceptConversation(ctx, string(msg.Portal.ID))
+	return tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
 }

@@ -68,12 +68,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
 	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
 	// Ensure current user ID is available even if cookies omit twid
-	meta := ensureUserLoginMetadata(login)
-	if meta.UserID != "" {
-		client.SetCurrentUserID(meta.UserID)
-	} else {
-		client.SetCurrentUserID(string(login.ID))
-	}
+	client.SetCurrentUserID(ParseUserLoginID(login.ID))
 	tc.matrixParser = &format.HTMLParser{
 		TabsToSpaces:   4,
 		Newline:        "\n",
@@ -95,15 +90,11 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 }
 
 func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
-	meta := ensureUserLoginMetadata(login)
+	meta := login.Metadata.(*UserLoginMetadata)
 	c := cookies.NewCookiesFromString(meta.Cookies)
 	log := login.Log.With().Str("component", "twitter_client").Logger()
 	client := twittermeow.NewClient(c, log)
-	if meta.UserID != "" {
-		client.SetCurrentUserID(meta.UserID)
-	} else {
-		client.SetCurrentUserID(string(login.ID))
-	}
+	client.SetCurrentUserID(ParseUserLoginID(login.ID))
 	client.SetKeyStore(newUserLoginKeyStore(login, tc))
 	login.Client = NewTwitterClient(login, tc, client)
 	return nil
@@ -132,7 +123,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	// This happens when upgrading from the main branch (non-encrypted) to xchat/juicebox branch.
 	if meta.Cookies != "" && meta.SecretKey == "" && meta.SigningKey == "" {
 		log.Info().
-			Str("user_id", string(tc.userLogin.ID)).
+			Str("user_id", ParseUserLoginID(tc.userLogin.ID)).
 			Msg("Migration detected: user has cookies but missing encryption keys, triggering PIN-only reauth")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateBadCredentials,
@@ -401,9 +392,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 	// Update remote profile from cached user data
 	currentUserID := tc.client.GetCurrentUserID()
-	if networkid.UserLoginID(currentUserID) != tc.userLogin.ID {
+	if MakeUserLoginID(currentUserID) != tc.userLogin.ID {
 		log.Warn().
-			Str("user_login_id", string(tc.userLogin.ID)).
+			Str("user_login_id", ParseUserLoginID(tc.userLogin.ID)).
 			Str("current_user_id", currentUserID).
 			Msg("User login ID mismatch")
 	}
@@ -430,7 +421,6 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			Str("new_max_seq", maxSeqID).
 			Msg("Updating max sequence ID")
 		meta.MaxUserSequenceID = maxSeqID
-		meta.MaxSequenceID = ""
 	}
 
 	// Persist message pull version if received
@@ -451,7 +441,8 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 // makeXChatRemoteProfile creates a RemoteProfile from XChat user data.
 func (tc *TwitterClient) makeXChatRemoteProfile(user *types.User) *status.RemoteProfile {
 	var avatarMXC id.ContentURIString
-	ownGhost, err := tc.connector.br.GetGhostByID(context.Background(), networkid.UserID(user.IDStr))
+	// TODO context.Background is forbidden
+	ownGhost, err := tc.connector.br.GetGhostByID(context.Background(), MakeUserID(user.IDStr))
 	if err == nil && ownGhost != nil {
 		avatarMXC = ownGhost.AvatarMXC
 	}
@@ -502,7 +493,7 @@ func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
 }
 
 func (tc *TwitterClient) IsThisUser(_ context.Context, userID networkid.UserID) bool {
-	return networkid.UserID(tc.userLogin.ID) == userID
+	return MakeUserID(ParseUserLoginID(tc.userLogin.ID)) == userID
 }
 
 func (tc *TwitterClient) FullReconnect() {

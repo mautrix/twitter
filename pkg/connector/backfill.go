@@ -10,7 +10,6 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -21,44 +20,29 @@ import (
 )
 
 var _ bridgev2.BackfillingNetworkAPI = (*TwitterClient)(nil)
-var _ bridgev2.BackfillingNetworkAPIWithLimits = (*TwitterClient)(nil)
 
 const xchatBackfillMaxInt = "9223372036854775807"
 
-func (tc *TwitterClient) GetBackfillMaxBatchCount(_ context.Context, portal *bridgev2.Portal, _ *database.BackfillTask) int {
-	key := "channel"
-	if portal != nil {
-		switch portal.RoomType {
-		case database.RoomTypeDM:
-			key = "dm"
-		case database.RoomTypeGroupDM:
-			key = "group_dm"
-		}
-	}
-	return tc.connector.br.Config.Backfill.Queue.GetOverride(key)
-}
-
 func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	if fetchParams.Forward {
+		// FIXME this is completely wrong
 		return &bridgev2.FetchMessagesResponse{
 			Forward: true,
 		}, nil
 	}
-	if fetchParams.Portal == nil {
-		return nil, fmt.Errorf("portal is nil")
-	}
 
+	conversationID := ParsePortalID(fetchParams.Portal.PortalKey.ID)
 	// Skip XChat backfill for untrusted (message request) conversations.
 	// XChat GraphQL API returns 503 for untrusted conversations.
-	meta := ensurePortalMetadata(fetchParams.Portal)
+	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
 	if !meta.IsTrusted() {
+		// FIXME this shouldn't be skipped, use legacy API if needed?
 		zerolog.Ctx(ctx).Debug().
-			Str("conversation_id", string(fetchParams.Portal.PortalKey.ID)).
+			Str("conversation_id", conversationID).
 			Msg("Skipping XChat backfill for untrusted conversation")
 		return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
 	}
 
-	conversationID := string(fetchParams.Portal.PortalKey.ID)
 	if fetchParams.AnchorMessage == nil {
 		zerolog.Ctx(ctx).Warn().
 			Str("conversation_id", conversationID).
@@ -66,7 +50,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 			Msg("XChat backfill requested without anchor message")
 		return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
 	}
-	minSeqID := string(fetchParams.AnchorMessage.ID)
+	minSeqID := ParseMessageID(fetchParams.AnchorMessage.ID)
 
 	zerolog.Ctx(ctx).Info().
 		Str("conversation_id", conversationID).
@@ -165,7 +149,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		msgs = append(msgs, &bridgev2.BackfillMessage{
 			ConvertedMessage: converted,
 			Sender:           tc.MakeEventSender(msg.MessageData.SenderID),
-			ID:               networkid.MessageID(msgID),
+			ID:               MakeMessageID(msgID),
 			TxnID:            networkid.TransactionID(msgID),
 			Timestamp:        ts,
 			StreamOrder:      streamOrder,

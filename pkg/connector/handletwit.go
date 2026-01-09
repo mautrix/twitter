@@ -63,7 +63,7 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 		},
 		EmojiID:       emojiID,
 		Emoji:         data.EmojiReaction,
-		TargetMessage: networkid.MessageID(data.MessageID),
+		TargetMessage: MakeMessageID(data.MessageID),
 	}
 }
 
@@ -93,10 +93,10 @@ func (tc *TwitterClient) buildMemberChangeEvent(
 		MemberMap: make(map[networkid.UserID]bridgev2.ChatMember, len(participants)),
 	}
 	for _, p := range participants {
-		memberChanges.MemberMap[networkid.UserID(p.UserID)] = bridgev2.ChatMember{
+		memberChanges.MemberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.UserID),
 			Membership:  membership,
-		}
+		})
 	}
 	return &simplevent.ChatInfoChange{
 		EventMeta: simplevent.EventMeta{
@@ -130,7 +130,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 
 	switch evt := rawEvt.(type) {
 	case *types.MessageEdit:
-		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
+		isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		requiredKeyVersion := evt.ConversationKeyVersion
 		eventID := evt.SequenceID
@@ -177,9 +177,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				StreamOrder:  streamOrder,
 				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
 			},
-			ID:            networkid.MessageID(targetMessageID),
+			ID:            MakeMessageID(targetMessageID),
 			TransactionID: networkid.TransactionID(txnID),
-			TargetMessage: networkid.MessageID(targetMessageID),
+			TargetMessage: MakeMessageID(targetMessageID),
 			Data:          &evt.MessageData,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
 				return tc.convertToMatrix(ctx, portal, intent, data), nil
@@ -188,7 +188,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}).Success
 
 	case *types.Message:
-		isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
+		isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		requiredKeyVersion := evt.ConversationKeyVersion
 		msgID := evt.SequenceID
@@ -232,9 +232,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				StreamOrder:  streamOrder,
 				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
 			},
-			ID:            networkid.MessageID(msgID),
+			ID:            MakeMessageID(msgID),
 			TransactionID: networkid.TransactionID(txnID),
-			TargetMessage: networkid.MessageID(msgID),
+			TargetMessage: MakeMessageID(msgID),
 			Data:          &evt.MessageData,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
 				converted := tc.convertToMatrix(ctx, portal, intent, data)
@@ -289,7 +289,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 
 	case *types.ConversationRead:
-		lastTarget := networkid.MessageID(evt.LastReadEventID)
+		lastTarget := MakeMessageID(evt.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(evt.Time)
 		readUpToStreamOrder := methods.ParseInt64(evt.LastReadEventID)
 		if readUpToStreamOrder == 0 {
@@ -303,7 +303,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
-				Sender:    tc.MakeEventSender(string(tc.userLogin.ID)),
+				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
 				Timestamp: readUpTo,
 				PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
 					if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
@@ -332,7 +332,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 					Timestamp:   methods.ParseMsecTimestamp(evt.Time),
 					StreamOrder: methods.ParseInt64(evt.ID),
 				},
-				TargetMessage: networkid.MessageID(deletedMsg.MessageID),
+				TargetMessage: MakeMessageID(deletedMsg.MessageID),
 			}
 			allSuccess = tc.userLogin.QueueRemoteEvent(messageDeleteRemoteEvent).Success && allSuccess
 		}
@@ -443,7 +443,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Str("conversation_id", evt.ConversationID).
 				Msg("Failed to get portal for TrustConversation event")
 		} else {
-			meta := ensurePortalMetadata(portal)
+			meta := portal.Metadata.(*PortalMetadata)
 			if !meta.Trusted {
 				meta.Trusted = true
 				if err := portal.Save(ctx); err != nil {
@@ -567,7 +567,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		portalKey := tc.MakePortalKeyFromID(conversationID)
 		return tc.userLogin.QueueRemoteEvent(tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)).Success
 	case *types.ConversationRead:
-		lastTarget := networkid.MessageID(e.LastReadEventID)
+		lastTarget := MakeMessageID(e.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(e.Time)
 		readUpToStreamOrder := methods.ParseInt64(e.LastReadEventID)
 		if readUpToStreamOrder == 0 {
@@ -581,7 +581,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.MakePortalKeyFromID(conversationID),
-				Sender:    tc.MakeEventSender(string(tc.userLogin.ID)),
+				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
 				Timestamp: readUpTo,
 			},
 			LastTarget:          lastTarget,
@@ -628,7 +628,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 
 // handlePollingMessage handles a message event from REST API polling.
 func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *response.TwitterInboxData) bool {
-	isFromMe := evt.MessageData.SenderID == string(tc.userLogin.ID)
+	isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
 	portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 	msgID := evt.ID
 
@@ -681,9 +681,9 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 			StreamOrder:  methods.ParseInt64(msgID),
 			Timestamp:    methods.ParseMsecTimestamp(evt.Time),
 		},
-		ID:            networkid.MessageID(msgID),
+		ID:            MakeMessageID(msgID),
 		TransactionID: networkid.TransactionID(evt.RequestID),
-		TargetMessage: networkid.MessageID(msgID),
+		TargetMessage: MakeMessageID(msgID),
 		Data:          &evt.MessageData,
 		ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
 			return tc.convertToMatrix(ctx, portal, intent, data), nil
@@ -705,7 +705,7 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
 		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
-			ghost, err := tc.connector.br.GetGhostByID(ctx, networkid.UserID(userID))
+			ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
 			if err != nil {
 				log.Debug().Err(err).Str("user_id", userID).Msg("Failed to get ghost by ID for user info update")
 				continue

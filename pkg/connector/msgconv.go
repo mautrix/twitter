@@ -62,7 +62,7 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	var replyTo *networkid.MessageOptionalPartID
 	if msg.ReplyData.ID != "" {
 		replyTo = &networkid.MessageOptionalPartID{
-			MessageID: networkid.MessageID(msg.ReplyData.ID),
+			MessageID: MakeMessageID(msg.ReplyData.ID),
 		}
 	}
 
@@ -226,10 +226,10 @@ func (tc *TwitterClient) lookupUserIDByScreenName(screenName string) (string, in
 
 	if tc.userLogin != nil {
 		if tc.userLogin.RemoteName != "" && strings.EqualFold(tc.userLogin.RemoteName, normalized) {
-			return string(tc.userLogin.ID), 0
+			return ParseUserLoginID(tc.userLogin.ID), 0
 		}
 		if tc.userLogin.RemoteProfile.Username != "" && strings.EqualFold(tc.userLogin.RemoteProfile.Username, normalized) {
-			return string(tc.userLogin.ID), 0
+			return ParseUserLoginID(tc.userLogin.ID), 0
 		}
 	}
 
@@ -333,7 +333,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var err error
 	// Check if this is XChat encrypted media
 	if attachmentInfo.MediaHashKey != "" {
-		conversationID := string(portal.ID)
+		conversationID := ParsePortalID(portal.ID)
 		if tc.connector.directMedia {
 			// Generate direct media URI with encrypted media info
 			encMediaID := MakeEncryptedMediaID(EncryptedMediaInfo{
@@ -505,7 +505,7 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bri
 
 	// Download banner image if available (XChat encrypted)
 	if attachment.URLBannerMediaHashKey != "" {
-		conversationID := string(portal.ID)
+		conversationID := ParsePortalID(portal.ID)
 		decryptedData, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachment.URLBannerMediaHashKey, keyVersion)
 		if err != nil {
 			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to download URL attachment banner image")

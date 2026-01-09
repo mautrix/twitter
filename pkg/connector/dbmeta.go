@@ -23,7 +23,6 @@ import (
 
 	"go.mau.fi/util/exerrors"
 	"go.mau.fi/util/random"
-	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -68,29 +67,16 @@ func (m *PortalMetadata) IsTrusted() bool {
 	return m != nil && m.Trusted
 }
 
-// ensurePortalMetadata returns the portal's metadata, creating it if needed.
-func ensurePortalMetadata(portal *bridgev2.Portal) *PortalMetadata {
-	meta, ok := portal.Metadata.(*PortalMetadata)
-	if !ok || meta == nil {
-		meta = &PortalMetadata{}
-		portal.Metadata = meta
-	}
-	return meta
-}
-
 type UserLoginMetadata struct {
 	Cookies           string    `json:"cookies"`
 	SecretKey         string    `json:"secret_key,omitempty"`
 	SigningKey        string    `json:"signing_key,omitempty"`
 	SigningKeyVersion string    `json:"signing_key_version,omitempty"`
-	UserID            string    `json:"user_id,omitempty"`
 	PushKeys          *PushKeys `json:"push_keys,omitempty"`
 
-	Session           *twittermeow.CachedSession `json:"session,omitempty"`
-	MaxUserSequenceID string                     `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
-	// Deprecated: kept for backward compatibility with older saves; prefer MaxUserSequenceID.
-	MaxSequenceID      string `json:"max_sequence_id,omitempty"`
-	MessagePullVersion *int   `json:"message_pull_version,omitempty"`
+	Session            *twittermeow.CachedSession `json:"session,omitempty"`
+	MaxUserSequenceID  string                     `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
+	MessagePullVersion *int                       `json:"message_pull_version,omitempty"`
 
 	// Migration tracking fields
 	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration
