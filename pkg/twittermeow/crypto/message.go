@@ -1,7 +1,6 @@
 package crypto
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/base64"
@@ -11,7 +10,6 @@ import (
 	"fmt"
 
 	"github.com/rs/zerolog"
-	thrifter "github.com/thrift-iterator/go"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
@@ -151,8 +149,7 @@ func DecryptMessageContents(contentsHex string, conversationKey []byte) (*payloa
 func ParseMessageContentsBytes(data []byte) (*payload.MessageContents, error) {
 	// First try decoding directly as MessageContents
 	var contents payload.MessageContents
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
-	if err := decoder.Decode(&contents); err == nil {
+	if err := payload.Decode(data, &contents); err == nil {
 		// Check if we got valid content
 		if contents.MessageText != nil || len(contents.Attachments) > 0 {
 			return &contents, nil
@@ -197,8 +194,7 @@ func decodeMessageEntryHolder(data []byte, log *zerolog.Logger) (_ *payload.Mess
 	}()
 
 	var holder payload.MessageEntryHolder
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
-	if err := decoder.Decode(&holder); err != nil {
+	if err := payload.Decode(data, &holder); err != nil {
 		if log != nil {
 			log.Debug().
 				Err(err).
@@ -274,12 +270,11 @@ func EncodeMessageEntryContents(contents *payload.MessageEntryContents) ([]byte,
 
 	holder := &payload.MessageEntryHolder{Contents: contents}
 
-	var buf bytes.Buffer
-	encoder := thrifter.NewEncoder(&buf)
-	if err := encoder.Encode(holder); err != nil {
+	data, err := payload.Encode(holder)
+	if err != nil {
 		return nil, fmt.Errorf("thrift encode: %w", err)
 	}
-	return buf.Bytes(), nil
+	return data, nil
 }
 
 // EncryptMessageEntryContentsRaw encrypts MessageEntryContents to raw ciphertext bytes.
@@ -641,53 +636,48 @@ func (b *MessageBuilder) BuildContentsOnly(ctx context.Context) (contentsHex, ke
 
 // EncodeMessageCreateEvent encodes a MessageCreateEvent to base64 Thrift binary protocol.
 func EncodeMessageCreateEvent(mce *payload.MessageCreateEvent) (string, error) {
-	var buf bytes.Buffer
-	encoder := thrifter.NewEncoder(&buf)
-	if err := encoder.Encode(mce); err != nil {
+	data, err := payload.Encode(mce)
+	if err != nil {
 		return "", fmt.Errorf("thrift encode: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // EncodeMessageEventSignature encodes a MessageEventSignature to base64 Thrift binary protocol.
 func EncodeMessageEventSignature(sig *payload.MessageEventSignature) (string, error) {
-	var buf bytes.Buffer
-	encoder := thrifter.NewEncoder(&buf)
-	if err := encoder.Encode(sig); err != nil {
+	data, err := payload.Encode(sig)
+	if err != nil {
 		return "", fmt.Errorf("thrift encode: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // EncodeMessageEventDetail encodes a MessageEventDetail to base64 Thrift binary protocol.
 // Used for delete message action signatures.
 func EncodeMessageEventDetail(detail *payload.MessageEventDetail) (string, error) {
-	var buf bytes.Buffer
-	encoder := thrifter.NewEncoder(&buf)
-	if err := encoder.Encode(detail); err != nil {
+	data, err := payload.Encode(detail)
+	if err != nil {
 		return "", fmt.Errorf("thrift encode: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // EncodeMuteConversation encodes a MuteConversation to base64 Thrift binary protocol.
 func EncodeMuteConversation(detail *payload.MuteConversation) (string, error) {
-	var buf bytes.Buffer
-	encoder := thrifter.NewEncoder(&buf)
-	if err := encoder.Encode(detail); err != nil {
+	data, err := payload.Encode(detail)
+	if err != nil {
 		return "", fmt.Errorf("thrift encode: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // EncodeUnmuteConversation encodes an UnmuteConversation to base64 Thrift binary protocol.
 func EncodeUnmuteConversation(detail *payload.UnmuteConversation) (string, error) {
-	var buf bytes.Buffer
-	encoder := thrifter.NewEncoder(&buf)
-	if err := encoder.Encode(detail); err != nil {
+	data, err := payload.Encode(detail)
+	if err != nil {
 		return "", fmt.Errorf("thrift encode: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // BuildForSend builds the encoded payloads needed for SendMessageMutation.

@@ -1,7 +1,6 @@
 package twittermeow
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -14,8 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/rs/zerolog"
-	thrifter "github.com/thrift-iterator/go"
-	thriftergeneral "github.com/thrift-iterator/go/general"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -28,9 +25,8 @@ const (
 	reconnectBackoffMultiplier = 2.0
 )
 
-// decodeXChatPayload tries binary first, then compact thrift decoding.
+// decodeXChatPayload decodes binary thrift data.
 func decodeXChatPayload(data []byte) (out *payload.Message, err error) {
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("thrift decode panic: %v", r)
@@ -38,35 +34,22 @@ func decodeXChatPayload(data []byte) (out *payload.Message, err error) {
 	}()
 
 	var decoded payload.Message
-	if err = decoder.Decode(&decoded); err != nil {
+	if err = payload.Decode(data, &decoded); err != nil {
 		return nil, fmt.Errorf("thrift binary decode failed (no envelope expected): %w", err)
 	}
 
 	return &decoded, nil
 }
 
-// decodeXChatPayloadGeneric decodes without a schema for debugging.
-func decodeXChatPayloadGeneric(data []byte) (out thriftergeneral.Struct, err error) {
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("generic thrift decode panic: %v", r)
-		}
-	}()
-	err = decoder.Decode(&out)
-	return out, err
-}
-
 func encodeXChatPayload(msg *payload.Message) ([]byte, error) {
 	if msg == nil {
 		return nil, errors.New("xchat payload is nil")
 	}
-	var buffer bytes.Buffer
-	encoder := thrifter.NewEncoder(&buffer)
-	if err := encoder.Encode(msg); err != nil {
+	data, err := payload.Encode(msg)
+	if err != nil {
 		return nil, fmt.Errorf("thrift encode: %w", err)
 	}
-	return buffer.Bytes(), nil
+	return data, nil
 }
 
 type xchatWebsocketClient struct {
@@ -274,21 +257,19 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 						KeepAliveInstruction: &payload.KeepAliveInstruction{},
 					},
 				}
-				var buffer bytes.Buffer
-				encoder := thrifter.NewEncoder(&buffer)
-				if err := encoder.Encode(instruction); err != nil {
+				data, err := payload.Encode(&instruction)
+				if err != nil {
 					log.Err(err).Msg("Failed to encode XChat Ping Instruction")
 					continue
 				}
-				bytes := buffer.Bytes()
 				xc.writeMu.Lock()
-				err := conn.Write(pingCtx, websocket.MessageBinary, bytes)
+				err = conn.Write(pingCtx, websocket.MessageBinary, data)
 				xc.writeMu.Unlock()
 				if err != nil {
 					log.Warn().Err(err).Msg("Failed to send XChat ping frame")
 					return
 				}
-				log.Debug().Int("bytes", len(bytes)).Msg("Sent XChat ping frame")
+				log.Debug().Int("bytes", len(data)).Msg("Sent XChat ping frame")
 			}
 		}
 	}()
@@ -325,20 +306,12 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 
 		decoded, err := decodeXChatPayload(data)
 		if err != nil {
-			prefixLen := min(32, len(data))
+			prefixLen := min(64, len(data))
 			log.Warn().
 				Err(err).
 				Int("bytes", len(data)).
 				Str("hex_prefix", hex.EncodeToString(data[:prefixLen])).
 				Msg("Failed to decode XChat websocket payload")
-
-			if gen, gerr := decodeXChatPayloadGeneric(data); gerr == nil {
-				log.Debug().
-					Interface("generic", gen).
-					Msg("XChat websocket payload (generic decode)")
-			} else {
-				log.Trace().Err(gerr).Msg("Generic thrift decode also failed")
-			}
 			continue
 		}
 

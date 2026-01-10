@@ -8,6 +8,7 @@ tool go.mau.fi/util/cmd/maubuild
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/apache/thrift v0.21.0
 	github.com/bwesterb/go-ristretto v1.2.3
 	github.com/coder/websocket v1.8.14
 	github.com/fxamacker/cbor/v2 v2.9.0
@@ -17,7 +18,6 @@ require (
 	github.com/openziti/secretstream v0.1.42
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
-	github.com/thrift-iterator/go v0.0.0-20190402154806-9b5a67519118
 	go.mau.fi/util v0.9.4
 	golang.org/x/crypto v0.46.0
 	golang.org/x/sync v0.19.0
@@ -49,9 +49,6 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	github.com/v2pro/plz v0.0.0-20221028024117-e5f9aec5b631 // indirect
-	github.com/v2pro/quokka v0.0.0-20171201153428-382cb39c6ee6 // indirect
-	github.com/v2pro/wombat v0.0.0-20180402055224-a56dbdcddef2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect

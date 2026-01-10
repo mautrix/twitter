@@ -1,7 +1,6 @@
 package twittermeow
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	thrifter "github.com/thrift-iterator/go"
 	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -539,9 +537,8 @@ func DecodeMessageEvent(encoded string) (*payload.MessageEvent, error) {
 		return nil, fmt.Errorf("base64 decode: %w", err)
 	}
 
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
 	var evt payload.MessageEvent
-	if err := decoder.Decode(&evt); err != nil {
+	if err := payload.Decode(data, &evt); err != nil {
 		return nil, fmt.Errorf("thrift decode: %w", err)
 	}
 	return &evt, nil
@@ -554,9 +551,8 @@ func DecodeSendMessageEventResponse(encoded string) (*payload.SendMessageEventRe
 		return nil, fmt.Errorf("base64 decode: %w", err)
 	}
 
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
 	var resp payload.SendMessageEventResponse
-	if err := decoder.Decode(&resp); err != nil {
+	if err := payload.Decode(data, &resp); err != nil {
 		return nil, fmt.Errorf("thrift decode: %w", err)
 	}
 	return &resp, nil
