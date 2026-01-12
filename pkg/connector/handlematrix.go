@@ -17,9 +17,7 @@
 package connector
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +27,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/tidwall/gjson"
+	"go.mau.fi/util/exgjson"
+	"go.mau.fi/util/exstrings"
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
@@ -461,124 +462,23 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 
 	// Build attachments from Matrix media
 	if content.MsgType.IsMedia() {
-		attachments = tc.buildReplyAttachmentsFromMatrixContent(ctx, portal, content, evt.Content.Raw)
+		attachments = findAttachmentsFromMatrixContent(evt.Content.VeryRaw)
 	}
 
 	return messageText, senderDisplayName, attachments, true
 }
 
-// buildReplyAttachmentsFromMatrixContent builds Twitter reply attachments from Matrix message content.
-// First tries to use stored OriginalAttachments from Matrix event's Extra field, then falls back to reconstructing from URL.
-func (tc *TwitterClient) buildReplyAttachmentsFromMatrixContent(ctx context.Context, portal *bridgev2.Portal, content *event.MessageEventContent, rawContent map[string]any) []*payload.MessageAttachment {
-	// Check if content has media (either unencrypted URL or encrypted File)
-	if content == nil || (content.URL == "" && content.File == nil) {
+func findAttachmentsFromMatrixContent(rawContent json.RawMessage) []*payload.MessageAttachment {
+	res := gjson.GetBytes(rawContent, exgjson.Path("com.beeper.xchat.original_attachments"))
+	if !res.IsObject() {
 		return nil
 	}
-
-	// Try to use stored OriginalAttachments from Matrix event's Extra field (preferred - has all fields Twitter needs)
-	if rawContent != nil {
-		if attachmentsJSON, ok := rawContent["com.beeper.xchat.original_attachments"].(string); ok && attachmentsJSON != "" {
-			var attachments []*payload.MessageAttachment
-			if err := json.Unmarshal([]byte(attachmentsJSON), &attachments); err == nil && len(attachments) > 0 {
-				return attachments
-			}
-		}
-	}
-
-	// Fallback: reconstruct attachment from available info
-	var mediaType payload.MediaType
-	switch content.MsgType {
-	case event.MsgImage:
-		mediaType = payload.MediaTypeImage
-	case event.MsgVideo:
-		mediaType = payload.MediaTypeVideo
-	case event.MsgAudio:
-		mediaType = payload.MediaTypeAudio
-	default:
+	var attachments []*payload.MessageAttachment
+	err := json.Unmarshal(exstrings.UnsafeBytes(res.Raw), &attachments)
+	if err != nil {
 		return nil
 	}
-
-	mediaTypeInt := int32(mediaType)
-	att := &payload.MessageAttachment{
-		Media: &payload.MediaAttachment{
-			Type: &mediaTypeInt,
-		},
-	}
-
-	// Try to extract MediaHashKey from direct media URL if available
-	if tc.connector.directMedia {
-		mediaURL := content.URL
-		if mediaURL == "" && content.File != nil {
-			mediaURL = content.File.URL
-		}
-		if mediaHashKey := tc.extractMediaHashKeyFromContentURL(mediaURL); mediaHashKey != "" {
-			att.Media.MediaHashKey = &mediaHashKey
-		}
-	}
-
-	// Include dimensions if available
-	if content.Info != nil {
-		if content.Info.Width > 0 || content.Info.Height > 0 {
-			width := int64(content.Info.Width)
-			height := int64(content.Info.Height)
-			att.Media.Dimensions = &payload.MediaDimensions{
-				Width:  &width,
-				Height: &height,
-			}
-		}
-		if content.Info.Size > 0 {
-			size := int64(content.Info.Size)
-			att.Media.FilesizeBytes = &size
-		}
-	}
-
-	return []*payload.MessageAttachment{att}
-}
-
-// extractMediaHashKeyFromContentURL extracts the MediaHashKey from an encrypted media URL.
-// Returns empty string if the URL is not an encrypted media URL or extraction fails.
-func (tc *TwitterClient) extractMediaHashKeyFromContentURL(contentURL id.ContentURIString) string {
-	// Parse the mxc:// URL
-	uri, err := contentURL.Parse()
-	if err != nil {
-		return ""
-	}
-
-	// Base64url decode the FileID
-	decoded, err := base64.RawURLEncoding.DecodeString(uri.FileID)
-	if err != nil {
-		return ""
-	}
-
-	// mautrix prepends a cat emoji prefix (4 bytes UTF-8) and appends a 16-byte HMAC
-	// Format: cat_emoji (4 bytes) + mediaID + HMAC (16 bytes)
-	const catEmojiLen = 4 // "\U0001F408" in UTF-8
-	const hmacLen = 16
-	minLen := catEmojiLen + 1 + hmacLen // At least 1 byte of mediaID
-
-	if len(decoded) < minLen {
-		return ""
-	}
-
-	// Verify cat emoji prefix
-	catEmoji := []byte("\U0001F408")
-	if !bytes.HasPrefix(decoded, catEmoji) {
-		return ""
-	}
-
-	// Extract the actual mediaID (between cat emoji and HMAC)
-	mediaIDBytes := decoded[catEmojiLen : len(decoded)-hmacLen]
-
-	// Parse the media ID to check if it's encrypted media (version 2)
-	parsed, err := ParseMediaID(networkid.MediaID(mediaIDBytes))
-	if err != nil {
-		return ""
-	}
-
-	if encInfo, ok := parsed.(*EncryptedMediaInfo); ok {
-		return encInfo.MediaHashKey
-	}
-	return ""
+	return attachments
 }
 
 func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {

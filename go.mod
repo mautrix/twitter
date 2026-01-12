@@ -18,6 +18,7 @@ require (
 	github.com/openziti/secretstream v0.1.42
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
+	github.com/tidwall/gjson v1.18.0
 	go.mau.fi/util v0.9.4
 	golang.org/x/crypto v0.46.0
 	golang.org/x/sync v0.19.0
@@ -45,7 +46,6 @@ require (
 	github.com/refraction-networking/utls v1.8.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
