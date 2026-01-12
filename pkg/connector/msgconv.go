@@ -19,6 +19,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -445,13 +446,20 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if audioOnly {
 		content.MSC3245Voice = &event.MSC3245Voice{}
 	}
+	extra := map[string]any{
+		"info": extraInfo,
+	}
+	// Store OriginalAttachments for reply previews (needed for Twitter to display image thumbnails)
+	if len(msg.OriginalAttachments) > 0 {
+		if attachmentsJSON, err := json.Marshal(msg.OriginalAttachments); err == nil {
+			extra["com.beeper.xchat.original_attachments"] = string(attachmentsJSON)
+		}
+	}
 	return &bridgev2.ConvertedMessagePart{
 		ID:      networkid.PartID(""),
 		Type:    event.EventMessage,
 		Content: &content,
-		Extra: map[string]any{
-			"info": extraInfo,
-		},
+		Extra:   extra,
 	}, attachmentInfo.Indices, nil
 }
 

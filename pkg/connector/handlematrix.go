@@ -17,8 +17,10 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -466,23 +468,33 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 		senderDisplayName = tc.getDisplayNameForUser(ctx, ParseUserID(replyTo.SenderID))
 	}
 
-	// Build attachments from Matrix media (will extract MediaHashKey when direct media is enabled)
+	// Build attachments from Matrix media
 	if content.MsgType.IsMedia() {
-		attachments = tc.buildReplyAttachmentsFromMatrixContent(ctx, portal, content)
+		attachments = tc.buildReplyAttachmentsFromMatrixContent(ctx, portal, content, evt.Content.Raw)
 	}
 
 	return messageText, senderDisplayName, attachments, true
 }
 
 // buildReplyAttachmentsFromMatrixContent builds Twitter reply attachments from Matrix message content.
-// When direct media is enabled and the content URL contains an encrypted media ID, extracts the MediaHashKey.
-// Otherwise, just includes the media type for the reply preview.
-func (tc *TwitterClient) buildReplyAttachmentsFromMatrixContent(ctx context.Context, portal *bridgev2.Portal, content *event.MessageEventContent) []*payload.MessageAttachment {
-	if content == nil || content.URL == "" {
+// First tries to use stored OriginalAttachments from Matrix event's Extra field, then falls back to reconstructing from URL.
+func (tc *TwitterClient) buildReplyAttachmentsFromMatrixContent(ctx context.Context, portal *bridgev2.Portal, content *event.MessageEventContent, rawContent map[string]any) []*payload.MessageAttachment {
+	// Check if content has media (either unencrypted URL or encrypted File)
+	if content == nil || (content.URL == "" && content.File == nil) {
 		return nil
 	}
 
-	// Determine media type
+	// Try to use stored OriginalAttachments from Matrix event's Extra field (preferred - has all fields Twitter needs)
+	if rawContent != nil {
+		if attachmentsJSON, ok := rawContent["com.beeper.xchat.original_attachments"].(string); ok && attachmentsJSON != "" {
+			var attachments []*payload.MessageAttachment
+			if err := json.Unmarshal([]byte(attachmentsJSON), &attachments); err == nil && len(attachments) > 0 {
+				return attachments
+			}
+		}
+	}
+
+	// Fallback: reconstruct attachment from available info
 	var mediaType payload.MediaType
 	switch content.MsgType {
 	case event.MsgImage:
@@ -504,7 +516,11 @@ func (tc *TwitterClient) buildReplyAttachmentsFromMatrixContent(ctx context.Cont
 
 	// Try to extract MediaHashKey from direct media URL if available
 	if tc.connector.directMedia {
-		if mediaHashKey := tc.extractMediaHashKeyFromContentURL(content.URL); mediaHashKey != "" {
+		mediaURL := content.URL
+		if mediaURL == "" && content.File != nil {
+			mediaURL = content.File.URL
+		}
+		if mediaHashKey := tc.extractMediaHashKeyFromContentURL(mediaURL); mediaHashKey != "" {
 			att.Media.MediaHashKey = &mediaHashKey
 		}
 	}
@@ -537,11 +553,30 @@ func (tc *TwitterClient) extractMediaHashKeyFromContentURL(contentURL id.Content
 		return ""
 	}
 
-	// The FileID is base64url-encoded (without padding) mediaID bytes
-	mediaIDBytes, err := base64.RawURLEncoding.DecodeString(uri.FileID)
+	// Base64url decode the FileID
+	decoded, err := base64.RawURLEncoding.DecodeString(uri.FileID)
 	if err != nil {
 		return ""
 	}
+
+	// mautrix prepends a cat emoji prefix (4 bytes UTF-8) and appends a 16-byte HMAC
+	// Format: cat_emoji (4 bytes) + mediaID + HMAC (16 bytes)
+	const catEmojiLen = 4 // "\U0001F408" in UTF-8
+	const hmacLen = 16
+	minLen := catEmojiLen + 1 + hmacLen // At least 1 byte of mediaID
+
+	if len(decoded) < minLen {
+		return ""
+	}
+
+	// Verify cat emoji prefix
+	catEmoji := []byte("\U0001F408")
+	if !bytes.HasPrefix(decoded, catEmoji) {
+		return ""
+	}
+
+	// Extract the actual mediaID (between cat emoji and HMAC)
+	mediaIDBytes := decoded[catEmojiLen : len(decoded)-hmacLen]
 
 	// Parse the media ID to check if it's encrypted media (version 2)
 	parsed, err := ParseMediaID(networkid.MediaID(mediaIDBytes))
