@@ -437,16 +437,7 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 		return "", "", nil, false
 	}
 
-	// Parse message content (skip if already parsed by GetEvent)
-	if evt.Content.Parsed == nil {
-		if err := evt.Content.ParseRaw(event.EventMessage); err != nil {
-			log.Debug().
-				Err(err).
-				Msg("Failed to parse Matrix event content for reply")
-			return "", "", nil, false
-		}
-	}
-	content := evt.Content.AsMessage()
+	content, _ := evt.Content.Parsed.(*event.MessageEventContent)
 	if content == nil {
 		return "", "", nil, false
 	}
