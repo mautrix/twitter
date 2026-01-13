@@ -230,7 +230,7 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "shutdown")
 
-	log.Info().Stringer("url", wsURL).Msg("Connected to XChat websocket")
+	log.Info().Msg("Connected to XChat websocket")
 	xc.conn.Store(conn)
 	defer func() {
 		if xc.conn.Load() == conn {
