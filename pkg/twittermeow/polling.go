@@ -13,7 +13,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-var defaultPollingInterval = 10 * time.Second
+var defaultPollingInterval = 30 * time.Second
 
 // PollingClient handles REST API polling for DM updates.
 // Used primarily for untrusted (message request) conversations
