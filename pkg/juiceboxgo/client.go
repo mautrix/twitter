@@ -89,7 +89,7 @@ func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (
 	hashResult := pin.HashPIN(pinBytes, pin.HashingMode(c.config.PinHashingMode), [16]byte(version), userInfo)
 
 	// DEBUG: Log PIN hash results for comparison with Rust
-	c.logger.Debug().
+	c.logger.Trace().
 		Hex("access_key", hashResult.AccessKey[:]).
 		Hex("encryption_key_seed", hashResult.EncryptionKeySeed[:]).
 		Msg("PIN hash complete")
@@ -195,7 +195,7 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 	}
 
 	// DEBUG: Log OPRF start results
-	c.logger.Debug().
+	c.logger.Trace().
 		Hex("oprf_input", accessKey[:]).
 		Hex("blinded_input", blindedInput.Bytes()).
 		Msg("OPRF started")
@@ -310,7 +310,7 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 			}
 
 			// DEBUG: Log realm response
-			c.logger.Debug().
+			c.logger.Trace().
 				Str("realm", r.ID.String()).
 				Uint32("share_index", index).
 				Hex("blinded_result", ok.OprfBlindedResult).
@@ -392,7 +392,7 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 	unlockKeyRaw, ourCommitment := crypto.DeriveUnlockKeyAndCommitment(oprfOutput)
 
 	// DEBUG: Log OPRF finalization results for comparison with Rust
-	c.logger.Debug().
+	c.logger.Trace().
 		Hex("combined_blinded_result", combinedBlindedResult.Bytes()).
 		Hex("oprf_output", oprfOutput[:]).
 		Hex("derived_commitment", ourCommitment[:]).
