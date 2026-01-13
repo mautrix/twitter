@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -39,7 +40,12 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 		resp, respDat, err := c.makeRequestDirect(ctx, url, method, headers, payload, contentType)
 		dur := time.Since(start)
 		if err == nil {
-			log.Debug().
+			logLevel := zerolog.DebugLevel
+			if strings.Contains(url, "dm/user_updates.json") {
+				// Don't spam log full of user_updates requests
+				logLevel = zerolog.TraceLevel
+			}
+			log.WithLevel(logLevel).
 				Dur("duration", dur).
 				Msg("Request successful")
 			return resp, respDat, nil
