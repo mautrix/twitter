@@ -3,7 +3,6 @@ package twittermeow
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -315,19 +314,9 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 			continue
 		}
 
-		// Log the decoded message for debugging
-		if log.Debug().Enabled() {
-			if pretty, err := json.MarshalIndent(decoded, "", "  "); err != nil {
-				log.Debug().
-					Err(err).
-					Interface("event", decoded).
-					Msg("Decoded XChat websocket payload (failed to format JSON)")
-			} else {
-				log.Debug().
-					RawJSON("payload", pretty).
-					Msg("Decoded XChat websocket payload")
-			}
-		}
+		log.Trace().
+			Any("payload", decoded).
+			Msg("Decoded XChat websocket payload")
 
 		// Process the message through the XChat processor
 		if err := xc.client.xchatProcessor.ProcessMessage(ctx, decoded); err != nil {
