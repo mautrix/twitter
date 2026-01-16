@@ -62,7 +62,8 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		return
 	}
 
-	// XChat conversations are always trusted - set this first, never downgrade
+	// XChat conversations are socially trusted (not message requests).
+	// Note: Independent of whether encryption keys are available yet.
 	meta := portal.Metadata.(*PortalMetadata)
 	if !meta.Trusted {
 		meta.Trusted = true

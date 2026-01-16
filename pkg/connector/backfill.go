@@ -32,14 +32,15 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	}
 
 	conversationID := ParsePortalID(fetchParams.Portal.PortalKey.ID)
-	// Skip XChat backfill for untrusted (message request) conversations.
-	// XChat GraphQL API returns 503 for untrusted conversations.
+	// Skip XChat backfill for conversations without encryption keys.
+	// XChat GraphQL API requires encryption keys to decrypt messages.
 	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
-	if !meta.IsTrusted() {
+	if !meta.CanUseXChat() {
 		// FIXME this shouldn't be skipped, use legacy API if needed?
 		zerolog.Ctx(ctx).Debug().
 			Str("conversation_id", conversationID).
-			Msg("Skipping XChat backfill for untrusted conversation")
+			Bool("trusted", meta.IsTrusted()).
+			Msg("Skipping XChat backfill - no encryption keys")
 		return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
 	}
 

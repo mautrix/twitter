@@ -70,9 +70,8 @@ func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.M
 
 	conversationID := ParsePortalID(msg.Portal.ID)
 
-	// Use WebSocket for trusted conversations, GraphQL for untrusted
-	if msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
-		// FIXME this fails if no key is found, fall back to legacy API
+	// Use WebSocket for encrypted conversations, GraphQL for unencrypted
+	if msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
 		return tc.client.SendXChatTypingNotification(ctx, conversationID)
 	}
 	return tc.client.SendTypingNotification(ctx, ConvertConversationIDToREST(conversationID))
@@ -256,13 +255,13 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			XChatClientMsgID: messageID,
 		},
 	}
-	// Check portal metadata for trust status
-	if !msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
-		// Untrusted conversation - use REST API
+	// Check portal metadata for encryption capability
+	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+		// No encryption keys - use REST API
 		return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 	}
 
-	// Trusted conversation - use XChat encrypted protocol, with REST fallback on key/token not found
+	// Encrypted conversation - use XChat protocol, with REST fallback on key/token not found
 	resp, err := tc.client.SendEncryptedMessage(ctx, opts)
 	if err != nil {
 		if errors.Is(err, crypto.ErrKeyNotFound) {
@@ -378,7 +377,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 		}
 	}
 
-	// Successfully sent - mark conversation as trusted
+	// Successfully sent - mark conversation as trusted (message request accepted)
 	meta := msg.Portal.Metadata.(*PortalMetadata)
 	if !meta.Trusted {
 		meta.Trusted = true
@@ -389,7 +388,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 		} else {
 			log.Debug().
 				Str("conversation_id", conversationID).
-				Msg("Marked conversation as trusted after first REST message")
+				Msg("Marked conversation as trusted after REST message send")
 		}
 	}
 
@@ -552,9 +551,9 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 		readAt = time.Now()
 	}
 
-	// Check portal metadata for trust status
-	if !msg.Portal.Metadata.(*PortalMetadata).IsTrusted() {
-		// Untrusted - only use REST API
+	// Check portal metadata for encryption capability
+	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+		// No encryption keys - use REST API
 		params := &payload.MarkConversationReadQuery{
 			ConversationID:  ConvertConversationIDToREST(conversationID),
 			LastReadEventID: lastReadEventID,
@@ -562,7 +561,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 		return tc.client.MarkConversationRead(ctx, params)
 	}
 
-	// Trusted - use XChat, with REST fallback on key not found
+	// Encrypted conversation - use XChat, with REST fallback on key not found
 	if err := tc.client.SendXChatReadReceipt(ctx, conversationID, lastReadEventID, readAt); err != nil {
 		if errors.Is(err, crypto.ErrKeyNotFound) {
 			params := &payload.MarkConversationReadQuery{
@@ -578,7 +577,16 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 }
 
 func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.MatrixEdit) error {
+	portalMeta := edit.Portal.Metadata.(*PortalMetadata)
+
+	// Editing is only supported for encrypted XChat conversations
+	if !portalMeta.CanUseXChat() {
+		return errors.New("editing is not supported for unencrypted conversations")
+	}
+
 	targetMessageID := ParseMessageID(edit.EditTarget.ID)
+	conversationID := ParsePortalID(edit.Portal.ID)
+
 	var meta *MessageMetadata
 	if edit.EditTarget != nil {
 		if typedMeta, ok := edit.EditTarget.Metadata.(*MessageMetadata); ok {
@@ -592,7 +600,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	}
 
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
-		ConversationID:          ParsePortalID(edit.Portal.ID),
+		ConversationID:          conversationID,
 		MessageID:               messageID,
 		TargetMessageSequenceID: targetMessageID,
 		UpdatedText:             edit.Content.Body,
@@ -600,7 +608,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	if err != nil {
 		return err
 	}
-	tc.client.Logger.Debug().Any("editResponse", resp).Msg("Edit response")
+	tc.client.Logger.Debug().Any("editResponse", resp).Msg("XChat edit response")
 	if meta != nil {
 		meta.EditCount++
 	}

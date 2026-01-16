@@ -140,8 +140,18 @@ func init() {
 }
 
 func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	baseCaps := groupCaps
 	if portal.RoomType == database.RoomTypeDM {
-		return dmCaps
+		baseCaps = dmCaps
 	}
-	return groupCaps
+
+	// Disable editing for conversations without encryption keys
+	if meta, ok := portal.Metadata.(*PortalMetadata); ok && !meta.CanUseXChat() {
+		caps := ptr.Clone(baseCaps)
+		caps.Edit = event.CapLevelRejected
+		caps.ID += "+no-edit"
+		return caps
+	}
+
+	return baseCaps
 }

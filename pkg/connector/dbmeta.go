@@ -46,12 +46,13 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 
 // PortalMetadata stores per-conversation data in the portal.
 type PortalMetadata struct {
-	// Trusted indicates we can use XChat protocol (not a message request).
-	// This is the sole routing flag - NOT derived from key/token presence.
+	// Trusted indicates social trust status (not a message request).
+	// This controls the MessageRequest UI state in Matrix clients.
+	// Note: INDEPENDENT of encryption - use CanUseXChat() for routing.
 	// Rules:
 	//   - XChat sync → set true (never downgrade)
 	//   - Untrusted REST sync → set false only if currently unset
-	//   - First outbound message (REST) → set true after success
+	//   - First outbound message → set true (accepting message request)
 	//   - TrustConversation event → set true
 	// TODO delete this and use the standard MessageRequest field in Portal
 	Trusted bool `json:"trusted,omitempty"`
@@ -63,9 +64,16 @@ type PortalMetadata struct {
 	ConversationToken string `json:"conversation_token,omitempty"`
 }
 
-// IsTrusted returns true if this conversation is trusted (not a message request)
+// IsTrusted returns true if this conversation is trusted (not a message request).
+// This controls the MessageRequest UI state in Matrix clients.
 func (m *PortalMetadata) IsTrusted() bool {
 	return m != nil && m.Trusted
+}
+
+// CanUseXChat returns true if this conversation has encryption keys
+// to use the XChat protocol. Independent of social trust status.
+func (m *PortalMetadata) CanUseXChat() bool {
+	return m != nil && len(m.ConversationKeys) > 0
 }
 
 type UserLoginMetadata struct {

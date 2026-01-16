@@ -606,7 +606,27 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			Str("reason", e.Reason).
 			Msg("Conversation became trusted via polling")
 
-		chatInfo := tc.getTrustedChatInfo(context.Background(), conversationID)
+		// Update portal metadata to mark as trusted (same as XChat path)
+		ctx := context.Background()
+		portalKey := tc.MakePortalKeyFromID(conversationID)
+		portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", conversationID).
+				Msg("Failed to get portal for TrustConversation event")
+		} else {
+			meta := portal.Metadata.(*PortalMetadata)
+			if !meta.Trusted {
+				meta.Trusted = true
+				if err := portal.Save(ctx); err != nil {
+					log.Warn().Err(err).
+						Str("conversation_id", conversationID).
+						Msg("Failed to save portal metadata with Trusted=true")
+				}
+			}
+		}
+
+		chatInfo := tc.getTrustedChatInfo(ctx, conversationID)
 		if chatInfo == nil {
 			return false
 		}
