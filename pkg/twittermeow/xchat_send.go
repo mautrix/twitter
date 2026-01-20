@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -330,4 +332,82 @@ func (c *Client) SendXChatTypingNotification(ctx context.Context, conversationID
 	}
 
 	return c.SendXChatPayload(ctx, &payload.Message{MessageEvent: event})
+}
+
+// RefreshConversationKeys fetches conversation data and processes key change events.
+// Called when message decryption fails due to missing keys.
+// Also invokes the conversation data callback (if set) to sync room data.
+func (c *Client) RefreshConversationKeys(ctx context.Context, conversationID string) error {
+	vars := payload.NewInboxPageConversationDataQueryVariables(conversationID, true)
+	resp, err := c.GetConversationData(ctx, vars)
+	if err != nil {
+		return fmt.Errorf("fetch conversation data: %w", err)
+	}
+
+	item := resp.Data.GetInboxPageConversationData.Data
+
+	// Process key change events to store conversation keys
+	if err := c.processKeyChangeEventsFromItem(ctx, conversationID, &item); err != nil {
+		return err
+	}
+
+	// Notify callback to sync room data (members, name, avatar, etc.)
+	if c.onConversationDataRefresh != nil {
+		c.onConversationDataRefresh(ctx, conversationID, &item)
+	}
+
+	return nil
+}
+
+func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversationID string, item *response.XChatInboxItem) error {
+	if item == nil || len(item.LatestConversationKeyChangeEvents) == 0 {
+		return nil
+	}
+
+	signingKey, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
+	}
+	ownUserID := c.GetCurrentUserID()
+	if ownUserID == "" {
+		return fmt.Errorf("current user ID is empty")
+	}
+
+	for _, encoded := range item.LatestConversationKeyChangeEvents {
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			continue
+		}
+		var evt payload.MessageEvent
+		if err := payload.Decode(data, &evt); err != nil {
+			continue
+		}
+		ckce := evt.Detail.ConversationKeyChangeEvent
+		if ckce == nil {
+			continue
+		}
+
+		var ourEncryptedKey string
+		for _, pk := range ckce.ConversationParticipantKeys {
+			if ptr.Val(pk.UserId) == ownUserID {
+				ourEncryptedKey = ptr.Val(pk.EncryptedConversationKey)
+				break
+			}
+		}
+		if ourEncryptedKey == "" {
+			continue
+		}
+
+		convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
+		if err != nil {
+			continue
+		}
+		c.keyManager.PutConversationKey(ctx, &crypto.ConversationKey{
+			ConversationID: conversationID,
+			KeyVersion:     ptr.Val(ckce.ConversationKeyVersion),
+			Key:            convKeyBytes,
+			CreatedAt:      time.Now(),
+		})
+	}
+	return nil
 }

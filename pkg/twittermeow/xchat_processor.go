@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -211,6 +212,17 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	if evt.MessageEventSignature != nil && evt.MessageEventSignature.Signature != nil {
 		// Encrypted message - decrypt using conversation key
 		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+		if errors.Is(err, crypto.ErrKeyNotFound) {
+			// Try to fetch missing keys
+			if refreshErr := p.client.RefreshConversationKeys(ctx, conversationID); refreshErr != nil {
+				p.log.Warn().Err(refreshErr).
+					Str("conversation_id", conversationID).
+					Msg("Failed to refresh conversation keys")
+			} else {
+				// Retry after refresh
+				convKey, err = p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+			}
+		}
 		if err != nil {
 			p.log.Warn().
 				Err(err).

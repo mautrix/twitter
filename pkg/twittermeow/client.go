@@ -30,6 +30,10 @@ import (
 type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool
 type StreamEventHandler func(evt response.StreamEvent)
 
+// ConversationDataCallback is called when conversation data is refreshed (e.g., during key refresh).
+// The callback receives the conversation ID and the inbox item containing the latest conversation data.
+type ConversationDataCallback func(ctx context.Context, conversationID string, item *response.XChatInboxItem)
+
 // XChatTokenTTL is how long an XChat token is considered valid.
 const XChatTokenTTL = 5 * time.Minute
 
@@ -44,10 +48,11 @@ type Client struct {
 	session *CachedSession
 	HTTP    *http.Client
 
-	eventHandler       EventHandler
-	streamEventHandler StreamEventHandler
-	xchatEventHandler  XChatEventHandler
-	onCursorChanged    func(ctx context.Context)
+	eventHandler              EventHandler
+	streamEventHandler        StreamEventHandler
+	xchatEventHandler         XChatEventHandler
+	onCursorChanged           func(ctx context.Context)
+	onConversationDataRefresh ConversationDataCallback
 
 	currentUserID  string
 	jot            *JotClient
@@ -260,6 +265,12 @@ func (c *Client) SetEventHandler(handler EventHandler, streamHandler StreamEvent
 func (c *Client) SetXChatEventHandler(handler XChatEventHandler) {
 	c.xchatEventHandler = handler
 	c.xchatProcessor.SetEventHandler(handler)
+}
+
+// SetConversationDataCallback sets the callback for conversation data refresh events.
+// This is called when conversation data is fetched on-demand (e.g., during key refresh).
+func (c *Client) SetConversationDataCallback(callback ConversationDataCallback) {
+	c.onConversationDataRefresh = callback
 }
 
 func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {

@@ -67,6 +67,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 	}
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
 	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
+	client.SetConversationDataCallback(tc.HandleConversationDataRefresh)
 	// Ensure current user ID is available even if cookies omit twid
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
 	tc.matrixParser = &format.HTMLParser{
@@ -528,4 +529,80 @@ func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) []str
 	missingIDs = append(missingIDs, tc.collectAndCacheUserResults(item.ConversationDetail.GroupMembersResults)...)
 	missingIDs = append(missingIDs, tc.collectAndCacheUserResults(item.ConversationDetail.GroupAdminsResults)...)
 	return missingIDs
+}
+
+// HandleConversationDataRefresh is called when conversation data is fetched on-demand.
+// It syncs the room data (members, name, avatar, etc.) from the fetched conversation data.
+func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conversationID string, item *response.XChatInboxItem) {
+	if item == nil {
+		return
+	}
+
+	log := zerolog.Ctx(ctx).With().
+		Str("conversation_id", conversationID).
+		Logger()
+
+	// Build users map from item and collect missing IDs
+	users := make(map[string]*types.User)
+	var missingIDs []string
+
+	collect := func(results []response.XChatUserResult) {
+		for _, r := range results {
+			if r.Result != nil {
+				users[r.RestID] = twittermeow.ConvertXChatUserToUser(r.Result)
+			} else if r.RestID != "" {
+				missingIDs = append(missingIDs, r.RestID)
+			}
+		}
+	}
+	collect(item.ConversationDetail.ParticipantsResults)
+	collect(item.ConversationDetail.GroupMembersResults)
+	collect(item.ConversationDetail.GroupAdminsResults)
+
+	// Fallback for 1:1 DMs: if no participants in response, parse from conversation ID
+	if len(item.ConversationDetail.ParticipantsResults) == 0 && !strings.HasPrefix(conversationID, "g") {
+		parts := strings.Split(conversationID, ":")
+		if len(parts) == 2 {
+			for _, userID := range parts {
+				if userID != "" && users[userID] == nil {
+					missingIDs = append(missingIDs, userID)
+				}
+			}
+			// Populate ParticipantsResults so syncXChatChannel can build member list
+			for _, userID := range parts {
+				if userID != "" {
+					item.ConversationDetail.ParticipantsResults = append(
+						item.ConversationDetail.ParticipantsResults,
+						response.XChatUserResult{RestID: userID},
+					)
+				}
+			}
+			log.Debug().
+				Strs("parsed_user_ids", parts).
+				Msg("Parsed user IDs from conversation ID (no participants in response)")
+		}
+	}
+
+	// Fetch missing users via API
+	if err := tc.ensureUsersInCacheByID(ctx, missingIDs); err != nil {
+		log.Warn().Err(err).Msg("Failed to fetch missing users for conversation data refresh")
+	}
+
+	// Pull missing users from cache
+	tc.userCacheLock.RLock()
+	for _, id := range missingIDs {
+		if users[id] == nil {
+			if u := tc.userCache[id]; u != nil {
+				users[id] = u
+			}
+		}
+	}
+	tc.userCacheLock.RUnlock()
+
+	log.Debug().
+		Int("users_count", len(users)).
+		Int("missing_fetched", len(missingIDs)).
+		Msg("Syncing conversation data from refresh callback")
+
+	tc.syncXChatChannel(ctx, item, users)
 }
