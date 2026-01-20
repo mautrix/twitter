@@ -87,3 +87,7 @@ type SendMessageMutationResponse struct {
 type GetDMUserUpdatesResponse struct {
 	UserEvents *TwitterInboxData `json:"user_events,omitempty"`
 }
+
+type ConversationDMResponse struct {
+	ConversationTimeline *TwitterInboxData `json:"conversation_timeline,omitempty"`
+}

@@ -752,6 +752,11 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 				PublicKeyVersion: keyPair.KeyVersion,
 				SignatureVersion: sigVersion,
 			}
+		} else {
+			c.Logger.Warn().
+				Str("conversation_id", opts.ConversationID).
+				Str("sequence_id", seqID).
+				Msg("Proceeding with unsigned message deletion")
 		}
 
 		actionSignatures = append(actionSignatures, actionSig)
@@ -978,6 +983,106 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 	return nil
 }
 
+// DeleteXChatConversation deletes a conversation via the XChat ConversationDeletion GraphQL endpoint.
+func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID string) error {
+	if conversationID == "" {
+		return fmt.Errorf("conversation ID is required")
+	}
+
+	senderID := c.GetCurrentUserID()
+	if senderID == "" {
+		return fmt.Errorf("sender ID is required")
+	}
+
+	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("get conversation token: %w", err)
+	}
+
+	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
+	}
+
+	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
+	messageID := uuid.NewString()
+
+	detail := &payload.ConversationDeleteEvent{
+		ConversationId: &conversationID,
+	}
+
+	encodedDetail, err := crypto.EncodeConversationDeleteEvent(detail)
+	if err != nil {
+		return fmt.Errorf("encode conversation delete event: %w", err)
+	}
+
+	actionSig := payload.DeleteMessageActionSignature{
+		MessageID:                 messageID,
+		EncodedMessageEventDetail: encodedDetail,
+	}
+
+	if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
+		signature, err := crypto.SignConversationDeletion(
+			keyPair.SigningKey,
+			messageID,
+			senderID,
+			conversationID,
+			token,
+			createdAtMsec,
+			encodedDetail,
+		)
+		if err != nil {
+			return fmt.Errorf("sign conversation deletion event: %w", err)
+		}
+
+		sigVersion := crypto.SignatureVersion4
+		actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
+			Signature:        signature,
+			PublicKeyVersion: keyPair.KeyVersion,
+			SignatureVersion: sigVersion,
+		}
+	} else {
+		c.Logger.Warn().
+			Str("conversation_id", conversationID).
+			Bool("has_keypair", keyPair != nil).
+			Bool("has_signing_key", keyPair != nil && keyPair.SigningKey != nil).
+			Bool("has_key_version", keyPair != nil && keyPair.KeyVersion != "").
+			Msg("Proceeding with unsigned conversation deletion")
+	}
+
+	pl := payload.NewDeleteConversationMutationPayload(payload.DeleteConversationMutationVariables{
+		ConversationID:   conversationID,
+		ActionSignatures: []payload.DeleteMessageActionSignature{actionSig},
+	})
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("DeleteXChatConversation payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.DELETE_CONVERSATION_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Debug().
+		RawJSON("response", respBody).
+		Msg("DeleteXChatConversation response")
+
+	return nil
+}
+
 func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
@@ -1015,6 +1120,29 @@ func (c *Client) GetDMUserUpdates(ctx context.Context, params *payload.DMRequest
 	}
 
 	data := response.GetDMUserUpdatesResponse{}
+	return &data, json.Unmarshal(respBody, &data)
+}
+
+// FetchConversationContext fetches messages for a conversation via the REST API.
+// Used for backfill in unencrypted/untrusted conversations.
+func (c *Client) FetchConversationContext(ctx context.Context, conversationID string, params *payload.DMRequestQuery, context payload.ContextInfo) (*response.ConversationDMResponse, error) {
+	params.Context = context
+	encodedQuery, err := params.Encode()
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s?%s", fmt.Sprintf(endpoints.CONVERSATION_FETCH_MESSAGES_URL, conversationID), string(encodedQuery))
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodGet,
+		WithClientUUID: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.ConversationDMResponse{}
 	return &data, json.Unmarshal(respBody, &data)
 }
 

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
@@ -31,6 +32,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -210,25 +212,114 @@ func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
 
 // getTrustedChatInfo returns a ChatInfo with MessageRequest: false for a conversation that became trusted.
 func (tc *TwitterClient) getTrustedChatInfo(ctx context.Context, conversationID string) *bridgev2.ChatInfo {
+	log := zerolog.Ctx(ctx)
+
 	// Try to fetch conversation data via XChat API first
 	item, users, err := tc.fetchConversationData(ctx, conversationID)
 	if err == nil && item != nil {
-		conv := tc.xchatItemToConversation(ctx, item, users)
-		if conv != nil {
-			// Override Trusted to true since this conversation was just accepted
-			conv.Trusted = true
-			return tc.xchatItemToChatInfo(ctx, item, users, conv)
+		log.Debug().
+			Str("conversation_id", conversationID).
+			Int("participants_count", len(item.ConversationDetail.ParticipantsResults)).
+			Int("users_count", len(users)).
+			Msg("getTrustedChatInfo fetched conversation data via XChat API")
+
+		// If XChat API returns empty participants, fall back to building from conversation ID
+		if len(item.ConversationDetail.ParticipantsResults) == 0 {
+			log.Warn().
+				Str("conversation_id", conversationID).
+				Msg("XChat API returned empty participants, falling back to conversation ID parsing")
+		} else {
+			conv := tc.xchatItemToConversation(ctx, item, users)
+			if conv != nil {
+				// Override Trusted to true since this conversation was just accepted
+				conv.Trusted = true
+				return tc.xchatItemToChatInfo(ctx, item, users, conv)
+			}
+			log.Warn().
+				Str("conversation_id", conversationID).
+				Msg("xchatItemToConversation returned nil")
 		}
 	}
 
-	// If XChat fetch failed, return minimal ChatInfo with MessageRequest: false
-	zerolog.Ctx(ctx).Debug().
+	log.Debug().
 		Str("conversation_id", conversationID).
 		Err(err).
-		Msg("Could not fetch conversation data for trust event, returning minimal ChatInfo")
+		Bool("item_nil", item == nil).
+		Msg("Could not fetch conversation data via XChat API for trust event, building from conversation ID")
 
+	// XChat API failed or returned empty participants - build ChatInfo from conversation ID and user cache
+	// This ensures we still have member info even if the conversation hasn't fully migrated to XChat
+	return tc.buildChatInfoFromConversationID(ctx, conversationID)
+}
+
+// buildChatInfoFromConversationID builds a ChatInfo from a conversation ID by parsing user IDs
+// and fetching user info from the cache. This is used as a fallback when XChat API fails.
+func (tc *TwitterClient) buildChatInfoFromConversationID(ctx context.Context, conversationID string) *bridgev2.ChatInfo {
+	log := zerolog.Ctx(ctx)
 	messageRequest := false
+
+	// Normalize to colon format for parsing 1:1 DM conversation IDs
+	conversationID = NormalizeConversationID(conversationID)
+
+	// Parse user IDs from conversation ID
+	// 1:1 DMs use format "userID1:userID2" (lower ID first)
+	// Group chats use format "g[snowflake]"
+	if strings.HasPrefix(conversationID, "g") {
+		// Group chat - we can't easily determine members from the conversation ID
+		log.Debug().
+			Str("conversation_id", conversationID).
+			Msg("Group chat trust event - returning minimal ChatInfo")
+		return &bridgev2.ChatInfo{
+			MessageRequest: &messageRequest,
+		}
+	}
+
+	// Parse 1:1 DM conversation ID
+	parts := strings.Split(conversationID, ":")
+	if len(parts) != 2 {
+		log.Warn().
+			Str("conversation_id", conversationID).
+			Msg("Could not parse 1:1 conversation ID - returning minimal ChatInfo")
+		return &bridgev2.ChatInfo{
+			MessageRequest: &messageRequest,
+		}
+	}
+
+	// Try to ensure we have both users in the cache
+	if err := tc.ensureUsersInCacheByID(ctx, parts); err != nil {
+		log.Warn().
+			Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to fetch users for trust event")
+	}
+
+	// Build member map from parsed user IDs
+	memberMap := make(bridgev2.ChatMemberMap, len(parts))
+	for _, userID := range parts {
+		var userInfo *bridgev2.UserInfo
+		tc.userCacheLock.RLock()
+		if user, ok := tc.userCache[userID]; ok {
+			userInfo = tc.connector.wrapUserInfo(tc.client, user)
+		}
+		tc.userCacheLock.RUnlock()
+
+		memberMap.Set(bridgev2.ChatMember{
+			EventSender: tc.MakeEventSender(userID),
+			UserInfo:    userInfo,
+		})
+	}
+
+	log.Debug().
+		Str("conversation_id", conversationID).
+		Int("member_count", len(parts)).
+		Msg("Built ChatInfo from conversation ID for trust event")
+
 	return &bridgev2.ChatInfo{
+		Members: &bridgev2.ChatMemberList{
+			IsFull:           true,
+			TotalMemberCount: len(parts),
+			MemberMap:        memberMap,
+		},
 		MessageRequest: &messageRequest,
 	}
 }
@@ -285,4 +376,57 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 		},
 		Remove: false,
 	}
+}
+
+// getOrFetchChatInfoForPolling gets ChatInfo for a conversation, trying multiple sources:
+// 1. From the polling inbox data (if conversation is present)
+// 2. By fetching via REST API FetchConversationContext
+// 3. By building minimal info from conversation ID (for 1:1 DMs)
+func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conversationID string, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
+	log := zerolog.Ctx(ctx).With().
+		Str("conversation_id", conversationID).
+		Str("handler", "polling").
+		Logger()
+
+	// Try 1: Get from inbox if present
+	if inbox != nil {
+		if conv := inbox.GetConversationByID(conversationID); conv != nil {
+			log.Debug().Msg("Found conversation in polling inbox")
+			return tc.conversationToChatInfo(conv, inbox)
+		}
+	}
+
+	// Try 2: Fetch via REST API
+	log.Debug().Msg("Conversation not in inbox, fetching via REST API")
+	restConvID := ConvertConversationIDToREST(conversationID)
+	reqQuery := payload.DMRequestQuery{}.Default()
+	resp, err := tc.client.FetchConversationContext(ctx, restConvID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to fetch conversation via REST API")
+	} else if resp.ConversationTimeline != nil {
+		// Cache users from the fetched data
+		if resp.ConversationTimeline.Users != nil {
+			tc.userCacheLock.Lock()
+			for userID, user := range resp.ConversationTimeline.Users {
+				tc.userCache[userID] = user
+			}
+			tc.userCacheLock.Unlock()
+		}
+
+		// Try to get conversation from fetched data
+		if conv := resp.ConversationTimeline.GetConversationByID(restConvID); conv != nil {
+			log.Debug().Msg("Got conversation from REST API fetch")
+			return tc.conversationToChatInfo(conv, resp.ConversationTimeline)
+		}
+		log.Warn().Msg("REST API returned data but conversation not found in response")
+	}
+
+	// Try 3: Build minimal ChatInfo from conversation ID (works for 1:1 DMs)
+	// For group chats, we can't determine members from the ID alone, so return nil
+	if strings.HasPrefix(conversationID, "g") {
+		log.Warn().Msg("Cannot build ChatInfo for group chat without conversation data")
+		return nil
+	}
+	log.Debug().Msg("Building minimal ChatInfo from conversation ID")
+	return tc.buildChatInfoFromConversationID(ctx, conversationID)
 }

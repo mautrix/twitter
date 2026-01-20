@@ -428,6 +428,51 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Msg("Message failure event received")
 		return true
 
+	case *types.ConversationCreate:
+		// Conversation created or became active - ensure portal exists and trigger backfill.
+		// This event is emitted when we receive an empty MessageCreateEvent, which often
+		// happens when a message request is accepted.
+		log.Info().
+			Str("conversation_id", evt.ConversationID).
+			Str("event_id", evt.ID).
+			Msg("Conversation create event received, ensuring portal exists")
+
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		portal, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, "")
+		if err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", evt.ConversationID).
+				Msg("Failed to ensure portal for ConversationCreate event")
+			return false
+		}
+
+		// If the portal was just created or doesn't have a room yet, trigger a resync
+		// to ensure it gets created and backfilled
+		if portal.MXID == "" {
+			chatInfo := tc.getTrustedChatInfo(ctx, evt.ConversationID)
+			if chatInfo == nil {
+				log.Warn().
+					Str("conversation_id", evt.ConversationID).
+					Msg("Failed to get chat info for ConversationCreate event")
+				return false
+			}
+
+			return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+				EventMeta: simplevent.EventMeta{
+					Type:         bridgev2.RemoteEventChatResync,
+					PortalKey:    portalKey,
+					CreatePortal: true,
+					Timestamp:    methods.ParseMsecTimestamp(evt.Time),
+					StreamOrder:  methods.ParseInt64(evt.ID),
+				},
+				ChatInfo: chatInfo,
+				CheckNeedsBackfillFunc: func(ctx context.Context, latestMessage *database.Message) (bool, error) {
+					return true, nil
+				},
+			}).Success
+		}
+		return true
+
 	case *types.TrustConversation:
 		// Conversation was accepted (became trusted) - emit ChatResync to update MessageRequest status
 		log.Info().
@@ -491,16 +536,18 @@ var _ = payload.FailureType(0)
 // receive real-time updates via XChat WebSocket.
 // Returns true to continue polling, false to stop.
 func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
-	if evt == nil {
-		// nil event with inbox means initial poll - update user info and cache users
-		if inbox != nil {
-			tc.updateTwitterUserInfo(context.Background(), inbox)
-			tc.userCacheLock.Lock()
-			for userID, user := range inbox.Users {
-				tc.userCache[userID] = user
-			}
-			tc.userCacheLock.Unlock()
+	// Always cache users from inbox when available - needed for portal creation
+	if inbox != nil {
+		tc.updateTwitterUserInfo(context.Background(), inbox)
+		tc.userCacheLock.Lock()
+		for userID, user := range inbox.Users {
+			tc.userCache[userID] = user
 		}
+		tc.userCacheLock.Unlock()
+	}
+
+	if evt == nil {
+		// nil event with inbox means initial poll - nothing more to do
 		return true
 	}
 
@@ -544,12 +591,15 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		return true
 	}
 
-	// Check if conversation is trusted - skip if trusted (XChat handles those)
-	if inbox != nil {
-		if conv := inbox.GetConversationByID(conversationID); conv != nil && conv.Trusted {
+	// Skip if conversation can use XChat (has encryption keys) - XChat WebSocket handles those
+	portalKey := tc.MakePortalKeyFromID(conversationID)
+	ctx := context.Background()
+	if portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey); err == nil && portal != nil {
+		meta := portal.Metadata.(*PortalMetadata)
+		if meta.CanUseXChat() {
 			log.Debug().
 				Str("conversation_id", conversationID).
-				Msg("Skipping trusted conversation event (handled by XChat)")
+				Msg("Skipping conversation event (handled by XChat WebSocket)")
 			return true
 		}
 	}
@@ -665,23 +715,27 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 
 	// Create portal if it doesn't exist
 	if portal.MXID == "" {
-		var conv *types.Conversation
-		if inbox != nil {
-			conv = inbox.GetConversationByID(evt.ConversationID)
-		}
-		if conv == nil {
+		chatInfo := tc.getOrFetchChatInfoForPolling(ctx, evt.ConversationID, inbox)
+		if chatInfo == nil {
 			tc.userLogin.Log.Warn().
 				Str("conversation_id", evt.ConversationID).
-				Msg("Conversation not found in inbox for polling message")
+				Msg("Failed to get chat info for polling message")
 			return false
 		}
-		chatInfo := tc.conversationToChatInfo(conv, inbox)
 		if err := portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo); err != nil {
 			tc.userLogin.Log.Warn().
 				Err(err).
 				Str("conversation_id", evt.ConversationID).
 				Msg("Failed to create Matrix room for polling message")
 			return false
+		}
+		// Register backfill task for the newly created room
+		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
+			tc.userLogin.Log.Warn().Err(err).
+				Str("conversation_id", evt.ConversationID).
+				Msg("Failed to ensure backfill task exists for new polling room")
+		} else {
+			tc.connector.br.WakeupBackfillQueue()
 		}
 	}
 

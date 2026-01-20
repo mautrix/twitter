@@ -629,8 +629,12 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 		return errors.New("delete for everyone is not supported")
 	}
 	conversationID := ParsePortalID(chat.Portal.ID)
+	meta := chat.Portal.Metadata.(*PortalMetadata)
+	if meta.CanUseXChat() {
+		return tc.client.DeleteXChatConversation(ctx, conversationID)
+	}
 	reqQuery := payload.DMRequestQuery{}.Default()
-	return tc.client.DeleteConversation(ctx, conversationID, &reqQuery)
+	return tc.client.DeleteConversation(ctx, ConvertConversationIDToREST(conversationID), &reqQuery)
 }
 
 func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {

@@ -99,6 +99,16 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 				Msg("Failed to create Matrix room")
 			return
 		}
+		// Register backfill task for the newly created room
+		if chatInfo.CanBackfill {
+			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
+				log.Warn().Err(err).
+					Str("conversation_id", conv.ConversationID).
+					Msg("Failed to ensure backfill task exists for new room")
+			} else {
+				tc.connector.br.WakeupBackfillQueue()
+			}
+		}
 	} else {
 		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
 		if (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil {
@@ -159,34 +169,54 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 
 // xchatItemToChatInfo converts an XChatInboxItem to bridgev2 chat info.
 func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User, conv *types.Conversation) *bridgev2.ChatInfo {
+	log := zerolog.Ctx(ctx)
 	detail := item.ConversationDetail
+
+	log.Debug().
+		Str("conversation_id", detail.ConversationID).
+		Int("participants_count", len(detail.ParticipantsResults)).
+		Int("group_members_count", len(detail.GroupMembersResults)).
+		Int("users_map_count", len(users)).
+		Msg("xchatItemToChatInfo building member list")
 
 	isGroup := len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil
 
 	memberMap := make(bridgev2.ChatMemberMap, len(detail.ParticipantsResults))
 	for _, p := range detail.ParticipantsResults {
 		var userInfo *bridgev2.UserInfo
-		// First try inline Result from participants_results, then fall back to users map or cache
+		// First try inline Result from participants_results
 		if p.Result != nil {
 			user := twittermeow.ConvertXChatUserToUser(p.Result)
 			userInfo = tc.connector.wrapUserInfo(tc.client, user)
-		} else if users != nil {
+		}
+		// Then try users map if provided
+		if userInfo == nil && users != nil {
 			if user, ok := users[p.RestID]; ok {
 				userInfo = tc.connector.wrapUserInfo(tc.client, user)
 			}
-		} else {
-			// Fall back to user cache when users map is nil
+		}
+		// Finally fall back to user cache
+		if userInfo == nil {
 			tc.userCacheLock.RLock()
 			if user, ok := tc.userCache[p.RestID]; ok {
 				userInfo = tc.connector.wrapUserInfo(tc.client, user)
 			}
 			tc.userCacheLock.RUnlock()
 		}
+		log.Debug().
+			Str("rest_id", p.RestID).
+			Bool("has_result", p.Result != nil).
+			Bool("has_user_info", userInfo != nil).
+			Msg("xchatItemToChatInfo adding participant")
 		memberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
 			UserInfo:    userInfo,
 		})
 	}
+
+	log.Debug().
+		Int("final_member_count", len(memberMap)).
+		Msg("xchatItemToChatInfo finished building members")
 
 	// MessageRequest is true for untrusted conversations (message requests)
 	var messageRequest *bool

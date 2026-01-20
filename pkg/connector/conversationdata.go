@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -16,10 +17,20 @@ import (
 
 type ensurePortalContextKey struct{}
 
+// NormalizeConversationID converts a conversation ID from dash format (REST API / portal ID)
+// to colon format (XChat API). Group chat IDs (prefixed with "g") are returned unchanged.
+func NormalizeConversationID(id string) string {
+	if strings.HasPrefix(id, "g") {
+		return id
+	}
+	return strings.ReplaceAll(id, "-", ":")
+}
+
 // fetchConversationData retrieves conversation details via the conversation data endpoint
 // and converts them into an inbox item plus a user cache map to feed into existing sync logic.
 func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversationID string) (*response.XChatInboxItem, map[string]*types.User, error) {
-	vars := payload.NewInboxPageConversationDataQueryVariables(conversationID, true)
+	xchatConvID := NormalizeConversationID(conversationID)
+	vars := payload.NewInboxPageConversationDataQueryVariables(xchatConvID, true)
 	resp, err := tc.client.GetConversationData(ctx, vars)
 	if err != nil {
 		return nil, nil, err

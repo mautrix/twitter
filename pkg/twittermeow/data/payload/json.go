@@ -139,6 +139,30 @@ func NewUnmuteConversationMutationPayload(vars UnmuteConversationMutationVariabl
 	}
 }
 
+// DeleteConversationMutationVariables contains the variables for the ConversationDeletion mutation
+type DeleteConversationMutationVariables struct {
+	ConversationID   string                         `json:"conversation_id"`
+	ActionSignatures []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+// DeleteConversationMutationPayload is the full payload for the ConversationDeletion GraphQL request
+type DeleteConversationMutationPayload struct {
+	OperationName string                              `json:"operationName"`
+	Variables     DeleteConversationMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                    `json:"extensions"`
+}
+
+// NewDeleteConversationMutationPayload creates a new DeleteConversationMutationPayload with default extensions
+func NewDeleteConversationMutationPayload(vars DeleteConversationMutationVariables) *DeleteConversationMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "9nsAnKrQvpifR3UmdtIdOg"
+	return &DeleteConversationMutationPayload{
+		OperationName: "ConversationDeletion",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 type LabelType string
 
 const (

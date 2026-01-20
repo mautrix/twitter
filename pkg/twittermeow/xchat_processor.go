@@ -272,12 +272,19 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
 	}
 
+	// Empty MessageCreateEvent - this often happens when a message request is accepted.
+	// Emit a ConversationCreate event so the connector can create the room and backfill.
 	p.log.Debug().
 		Str("sequence_id", ptr.Val(evt.SequenceId)).
 		Str("conversation_id", conversationID).
-		Msg("MessageCreateEvent parsed but no message text, attachments, or reactions")
+		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
 
-	return nil
+	return p.emitEvent(ctx, &types.ConversationCreate{
+		ID:             ptr.Val(evt.SequenceId),
+		Time:           ptr.Val(evt.CreatedAtMsec),
+		ConversationID: conversationID,
+		RequestID:      ptr.Val(evt.MessageId),
+	})
 }
 
 // processGroupChangeEvent handles group-related changes.
