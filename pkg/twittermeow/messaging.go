@@ -1007,11 +1007,13 @@ func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID str
 	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
 	messageID := uuid.NewString()
 
-	detail := &payload.ConversationDeleteEvent{
-		ConversationId: &conversationID,
+	detail := &payload.MessageEventDetail{
+		ConversationDeleteEvent: &payload.ConversationDeleteEvent{
+			ConversationId: &conversationID,
+		},
 	}
 
-	encodedDetail, err := crypto.EncodeConversationDeleteEvent(detail)
+	encodedDetail, err := crypto.EncodeMessageEventDetail(detail)
 	if err != nil {
 		return fmt.Errorf("encode conversation delete event: %w", err)
 	}

@@ -680,15 +680,6 @@ func EncodeUnmuteConversation(detail *payload.UnmuteConversation) (string, error
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
-// EncodeConversationDeleteEvent encodes a ConversationDeleteEvent to base64 Thrift binary protocol.
-func EncodeConversationDeleteEvent(detail *payload.ConversationDeleteEvent) (string, error) {
-	data, err := payload.Encode(detail)
-	if err != nil {
-		return "", fmt.Errorf("thrift encode: %w", err)
-	}
-	return base64.StdEncoding.EncodeToString(data), nil
-}
-
 // BuildForSend builds the encoded payloads needed for SendMessageMutation.
 // Returns: encodedMessageCreateEvent, encodedSignature, error
 func (b *MessageBuilder) BuildForSend(ctx context.Context) (string, string, error) {

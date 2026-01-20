@@ -420,6 +420,18 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 				Msg("Failed to create Matrix room for untrusted conversation")
 			return
 		}
+	} else {
+		// Room already exists - update MessageRequest status via ChatInfoChange
+		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventChatInfoChange,
+				PortalKey: portal.PortalKey,
+				Timestamp: time.Now(),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: chatInfo,
+			},
+		})
 	}
 
 	// Process messages for this conversation from inbox entries
