@@ -27,7 +27,6 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
-	"go.mau.fi/util/exmime"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -272,11 +271,14 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			extraInfo["fi.mau.autoplay"] = true
 			extraInfo["fi.mau.hide_controls"] = true
 			extraInfo["fi.mau.no_audio"] = true
+			// Use image/gif MIME type for proper client handling
+			mimeType = "image/gif"
+			msgType = event.MsgImage
 		} else {
 			attachmentInfo = attachment.Video
+			mimeType = "video/mp4"
+			msgType = event.MsgVideo
 		}
-		mimeType = "video/mp4"
-		msgType = event.MsgVideo
 
 		// For XChat encrypted media, skip variant lookup - we'll use MediaHashKey
 		if attachmentInfo.MediaHashKey == "" {
@@ -346,11 +348,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to generate direct media URI: %w", err)
 			}
-			// Add file extension based on mime type
-			ext := exmime.ExtensionFromMimetype(mimeType)
-			if !strings.HasSuffix(content.Body, ext) {
-				content.Body += ext
-			}
 		} else {
 			// Download and decrypt XChat media for re-upload
 			decryptedData, downloadErr := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
@@ -382,10 +379,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 					}
 				} else {
 					content.Info.Size = int(n)
-				}
-				ext := exmime.ExtensionFromMimetype(mimeType)
-				if !strings.HasSuffix(content.Body, ext) {
-					content.Body += ext
 				}
 				return &bridgev2.FileStreamResult{
 					MimeType: content.Info.MimeType,
@@ -427,10 +420,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				} else {
 					content.Info.Size = int(n)
 				}
-				ext := exmime.ExtensionFromMimetype(mimeType)
-				if !strings.HasSuffix(content.Body, ext) {
-					content.Body += ext
-				}
 				return &bridgev2.FileStreamResult{
 					MimeType: content.Info.MimeType,
 					FileName: content.Body,
@@ -452,6 +441,10 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	if len(msg.OriginalAttachments) > 0 {
 		extra["com.beeper.xchat.original_attachments"] = msg.OriginalAttachments
 	}
+
+	// Set FileName explicitly to ensure it matches Body
+	content.FileName = content.Body
+
 	return &bridgev2.ConvertedMessagePart{
 		ID:      networkid.PartID(""),
 		Type:    event.EventMessage,
