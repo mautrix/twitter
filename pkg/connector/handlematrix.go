@@ -181,52 +181,56 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			opts.Text = ""
 		}
 
-		data, err := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
-		if err != nil {
-			return nil, err
-		}
-
-		// Convert audio to mp4 if needed
-		if content.MsgType == event.MsgAudio && content.Info.MimeType != "video/mp4" {
-			converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+		// Only upload via XChat for encrypted conversations
+		// REST path handles media upload in sendDirectMessageREST
+		if msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+			data, err := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
 			if err != nil {
 				return nil, err
 			}
-			data = converted
-		}
 
-		// Upload media using encrypted XChat flow
-		uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
-		if err != nil {
-			return nil, err
-		}
+			// Convert audio to mp4 if needed
+			if content.MsgType == event.MsgAudio && content.Info.MimeType != "video/mp4" {
+				converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+				if err != nil {
+					return nil, err
+				}
+				data = converted
+			}
 
-		zerolog.Ctx(ctx).Debug().
-			Str("media_hash_key", uploadResult.MediaHashKey).
-			Msg("Successfully uploaded encrypted media to XChat")
+			// Upload media using encrypted XChat flow
+			uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
+			if err != nil {
+				return nil, err
+			}
 
-		attType := payload.MediaTypeImage
-		switch content.MsgType {
-		case event.MsgVideo:
-			attType = payload.MediaTypeVideo
-		case event.MsgAudio:
-			attType = payload.MediaTypeAudio
-		}
-		width := int64(content.Info.Width)
-		height := int64(content.Info.Height)
-		size := int64(len(data))
-		opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
-			Media: &payload.MediaAttachment{
-				MediaHashKey: &uploadResult.MediaHashKey,
-				Type:         ptr.Ptr(int32(attType)),
-				Dimensions: &payload.MediaDimensions{
-					Width:  &width,
-					Height: &height,
+			zerolog.Ctx(ctx).Debug().
+				Str("media_hash_key", uploadResult.MediaHashKey).
+				Msg("Successfully uploaded encrypted media to XChat")
+
+			attType := payload.MediaTypeImage
+			switch content.MsgType {
+			case event.MsgVideo:
+				attType = payload.MediaTypeVideo
+			case event.MsgAudio:
+				attType = payload.MediaTypeAudio
+			}
+			width := int64(content.Info.Width)
+			height := int64(content.Info.Height)
+			size := int64(len(data))
+			opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
+				Media: &payload.MediaAttachment{
+					MediaHashKey: &uploadResult.MediaHashKey,
+					Type:         ptr.Ptr(int32(attType)),
+					Dimensions: &payload.MediaDimensions{
+						Width:  &width,
+						Height: &height,
+					},
+					FilesizeBytes: &size,
+					Filename:      ptr.Ptr(content.FileName),
 				},
-				FilesizeBytes: &size,
-				Filename:      ptr.Ptr(content.FileName),
-			},
-		})
+			})
+		}
 	default:
 		return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
 	}
