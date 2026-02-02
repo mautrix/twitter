@@ -298,7 +298,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			// Try to get video variant URL first
 			highestBitRateVariant, err := attachmentInfo.VideoInfo.GetHighestBitrateVariant()
 			var variantURL string
-			if err == nil && highestBitRateVariant != nil {
+			if err == nil {
 				variantURL = highestBitRateVariant.URL
 			}
 			zerolog.Ctx(ctx).Debug().
