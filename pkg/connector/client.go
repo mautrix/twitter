@@ -124,11 +124,11 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	if meta.Cookies != "" && meta.SecretKey == "" && meta.SigningKey == "" {
 		log.Info().
 			Str("user_id", ParseUserLoginID(tc.userLogin.ID)).
-			Msg("Migration detected: user has cookies but missing encryption keys, triggering PIN-only reauth")
+			Msg("Migration detected: user has cookies but missing encryption keys, triggering passcode-only reauth")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateBadCredentials,
 			Error:      "twitter-migration-reauth",
-			Message:    "Please re-authenticate to enable encrypted messaging. You only need to enter your PIN.",
+			Message:    "Please re-authenticate to enable X Chat. You only need to enter your passcode.",
 		})
 		return
 	}
