@@ -98,6 +98,47 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
+	// Generate link previews for X.com URLs in message text
+	// This runs even if there's an attachment, to enhance minimal previews
+	log := zerolog.Ctx(ctx)
+	log.Info().
+		Str("msg_text", msg.Text).
+		Int("existing_previews", len(textPart.Content.BeeperLinkPreviews)).
+		Bool("has_attachment", msg.Attachment != nil).
+		Msg("[LinkPreview] About to call fetchAndGenerateTweetPreviews")
+
+	if msg.Text != "" {
+		tweetPreviews, replacementIndices := tc.fetchAndGenerateTweetPreviews(ctx, portal, intent, msg.Text, textPart.Content.BeeperLinkPreviews)
+		log.Info().
+			Int("new_previews", len(tweetPreviews)).
+			Int("replacements", len(replacementIndices)).
+			Msg("[LinkPreview] fetchAndGenerateTweetPreviews returned")
+
+		if len(tweetPreviews) > 0 {
+			// Replace minimal previews with better ones
+			for originalIdx, newPreview := range tweetPreviews {
+				if idx, hasReplacement := replacementIndices[originalIdx]; hasReplacement && idx >= 0 && idx < len(textPart.Content.BeeperLinkPreviews) {
+					// Replace the minimal preview
+					log.Info().
+						Int("original_idx", originalIdx).
+						Int("replacement_idx", idx).
+						Str("new_title", newPreview.LinkPreview.Title).
+						Msg("[LinkPreview] Replacing preview")
+					textPart.Content.BeeperLinkPreviews[idx] = newPreview
+				} else {
+					// Append new preview if it's not replacing anything
+					log.Info().
+						Int("original_idx", originalIdx).
+						Str("new_title", newPreview.LinkPreview.Title).
+						Msg("[LinkPreview] Appending new preview")
+					textPart.Content.BeeperLinkPreviews = append(textPart.Content.BeeperLinkPreviews, newPreview)
+				}
+			}
+		}
+	} else {
+		log.Info().Msg("[LinkPreview] msg.Text is empty, skipping")
+	}
+
 	if len(textPart.Content.Body) > 0 || len(textPart.Content.BeeperLinkPreviews) > 0 {
 		parts = append(parts, textPart)
 	}

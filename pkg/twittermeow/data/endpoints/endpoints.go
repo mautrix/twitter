@@ -47,6 +47,7 @@ const (
 	GET_USERS_BY_IDS_FOR_XCHAT_URL     = API_BASE_URL + "/graphql/U5qYdpM3QOzlHh5K7ubs2A/GetUsersByIdsForXChat"
 	GET_CONVERSATION_PAGE_QUERY_URL    = API_BASE_URL + "/graphql/IVlXls9JTnbgQ1gxsGAfJA/GetConversationPageQuery"
 	GET_PUBLIC_KEYS_QUERY_URL          = API_BASE_URL + "/graphql/RQAjOoIX9dIsHoVjuVV0Iw/GetPublicKeys"
+	FETCH_POST_QUERY_URL               = BASE_URL + "/i/api/graphql/PxDHdZiymPnLejKcDNRlEA/fetchPostQuery"
 
 	XCHAT_WEBSOCKET_URL = "wss://chat-ws.x.com/ws"
 
