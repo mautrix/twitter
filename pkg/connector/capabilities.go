@@ -118,8 +118,6 @@ var groupCaps = &event.RoomFeatures{
 	EditMaxCount:  10,
 	EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
 	Reaction:      event.CapLevelFullySupported,
-	ReactionCount: 1,
-
 	Delete:      event.CapLevelFullySupported,
 	DeleteForMe: true,
 

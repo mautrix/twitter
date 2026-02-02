@@ -507,10 +507,9 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	emoji := variationselector.FullyQualify(msg.Content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
-		SenderID:     MakeUserID(tc.client.GetCurrentUserID()),
-		EmojiID:      networkid.EmojiID(emoji),
-		Emoji:        emoji,
-		MaxReactions: 1,
+		SenderID: MakeUserID(tc.client.GetCurrentUserID()),
+		EmojiID:  networkid.EmojiID(emoji),
+		Emoji:    emoji,
 	}, nil
 }
 
