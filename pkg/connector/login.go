@@ -60,9 +60,8 @@ var _ bridgev2.LoginProcessUserInput = (*TwitterLogin)(nil)
 var _ bridgev2.LoginProcessWithOverride = (*TwitterLogin)(nil)
 
 const (
-	pinRegex      = "^[0-9]{4}$"
-	passcodeTitle = "Enter Passcode"
-	passcodeBody  = "To retrieve your encrypted messages, please enter your passcode below."
+	pinRegex     = "^[0-9]{4}$"
+	passcodeBody = "To retrieve your encrypted messages, please enter your passcode below."
 )
 
 var (
@@ -151,9 +150,9 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 func (t *TwitterLogin) Cancel() {}
 
 func makePINStep(errorLine string) *bridgev2.LoginStep {
-	instructions := fmt.Sprintf("%s\n\n%s", passcodeTitle, passcodeBody)
+	instructions := passcodeBody
 	if errorLine != "" {
-		instructions = fmt.Sprintf("**%s**\n\n%s", errorLine, instructions)
+		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -302,14 +301,14 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 				}
 				// Return the same step with error message to allow retry
 				return makePINStep(
-					fmt.Sprintf("Invalid Passcode. You have %d %s remaining.", guessesLeft, guessWord),
+					fmt.Sprintf("Invalid passcode. You have %d %s remaining.", guessesLeft, guessWord),
 				), nil
 			}
 			// No guesses remaining - user is locked out
 			return nil, ErrJuiceboxLocked
 		}
 		if errors.As(err, &recoverErr) && recoverErr.GuessesRemaining == nil {
-			return makePINStep("Invalid Passcode."), nil
+			return makePINStep("Invalid passcode."), nil
 		}
 		if errors.Is(err, juiceboxgo.ErrRateLimitExceeded) {
 			return nil, ErrJuiceboxRateLimited
