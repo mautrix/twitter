@@ -149,9 +149,13 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 
 		if att.Media != nil {
 			media := att.Media
+			legacyURL := ptr.Val(media.LegacyMediaUrlHttps)
+			if legacyURL == "" {
+				legacyURL = ptr.Val(media.LegacyMediaPreviewUrl)
+			}
 			info := types.AttachmentInfo{
 				IDStr:         ptr.Val(media.AttachmentId),
-				MediaURLHTTPS: ptr.Val(media.LegacyMediaUrlHttps),
+				MediaURLHTTPS: legacyURL,
 				MediaHashKey:  ptr.Val(media.MediaHashKey),
 				Filename:      ptr.Val(media.Filename),
 				FilesizeBytes: ptr.Val(media.FilesizeBytes),

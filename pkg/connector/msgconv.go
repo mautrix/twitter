@@ -260,11 +260,20 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var msgType event.MessageType
 	extraInfo := map[string]any{}
 	canUseXChat := portal.Metadata.(*PortalMetadata).CanUseXChat()
+	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil {
+		if attachment.Media != nil {
+			applyMediaInfo(attachment, attachment.Media)
+		}
+		if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && msg.Entities != nil && len(msg.Entities.Media) > 0 {
+			media := msg.Entities.Media[0]
+			applyMediaInfo(attachment, &media)
+		}
+	}
 	if attachment.Photo != nil {
 		attachmentInfo = attachment.Photo
 		mimeType = "image/jpeg" // attachment doesn't include this specifically
 		msgType = event.MsgImage
-		attachmentURL = attachmentInfo.MediaURLHTTPS
+		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
 		isGif := attachment.AnimatedGif != nil
 		if isGif {
@@ -305,14 +314,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				Err(err).
 				Str("variant_url", variantURL).
 				Msg("Attempted to get highest bitrate variant")
-			if variantURL != "" {
-				attachmentURL = variantURL
-			} else if attachmentInfo.MediaURLHTTPS != "" {
-				// Fall back to MediaURLHTTPS (common for AnimatedGifs)
-				attachmentURL = attachmentInfo.MediaURLHTTPS
-				zerolog.Ctx(ctx).Debug().Str("fallback_url", attachmentURL).Msg("Using MediaURLHTTPS fallback")
-			} else {
-				return nil, nil, fmt.Errorf("no media URL available (variant_err=%v, variant_url=%q, media_url_https=%q)", err, variantURL, attachmentInfo.MediaURLHTTPS)
+			attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, variantURL)
+			if attachmentURL == "" {
+				return nil, nil, fmt.Errorf("no media URL available (variant_err=%v, variant_url=%q, media_url_https=%q, media_url=%q, expanded_url=%q, url=%q)", err, variantURL, attachmentInfo.MediaURLHTTPS, attachmentInfo.MediaURL, attachmentInfo.ExpandedURL, attachmentInfo.URL)
 			}
 		}
 	} else if attachment.Card != nil {
@@ -358,168 +362,35 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
+	detectMime := attachment.AnimatedGif == nil
 
-	var err error
-	// Check if this is XChat encrypted media (requires both MediaHashKey and XChat capability)
+	useXChatMedia := attachmentInfo.MediaHashKey != ""
+	if useXChatMedia && !canUseXChat {
+		conversationID := ParsePortalID(portal.ID)
+		if err := tc.client.RefreshConversationKeys(ctx, conversationID); err != nil {
+			zerolog.Ctx(ctx).Warn().Err(err).
+				Str("conversation_id", conversationID).
+				Str("key_version", msg.ConversationKeyVersion).
+				Msg("Failed to refresh conversation keys for XChat media")
+		}
+		canUseXChat = portal.Metadata.(*PortalMetadata).CanUseXChat()
+	}
+
 	zerolog.Ctx(ctx).Debug().
 		Str("media_hash_key", attachmentInfo.MediaHashKey).
 		Bool("can_use_xchat", canUseXChat).
 		Str("attachment_url", attachmentURL).
-		Bool("use_xchat_path", attachmentInfo.MediaHashKey != "" && canUseXChat).
+		Bool("use_xchat_path", useXChatMedia).
 		Msg("Media download decision")
-	if attachmentInfo.MediaHashKey != "" && canUseXChat {
-		conversationID := ParsePortalID(portal.ID)
-		if tc.connector.directMedia {
-			// Generate direct media URI with encrypted media info
-			// Use portal.Receiver if set, otherwise fall back to current user login ID
-			// (portal.Receiver may be empty for group chats without split portals)
-			userID := portal.Receiver
-			if userID == "" {
-				userID = tc.userLogin.ID
-			}
-			encMediaID := MakeEncryptedMediaID(EncryptedMediaInfo{
-				UserID:         userID,
-				ConversationID: conversationID,
-				MediaHashKey:   attachmentInfo.MediaHashKey,
-				KeyVersion:     msg.ConversationKeyVersion,
-			})
-			content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, encMediaID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to generate direct media URI: %w", err)
-			}
-			addFileExtension(&content.Body, mimeType)
-		} else {
-			// Download and decrypt XChat media for re-upload
-			decryptedData, downloadErr := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
-			if downloadErr != nil {
-				return nil, nil, fmt.Errorf("failed to download XChat media: %w", downloadErr)
-			}
-			content.Info.Size = len(decryptedData)
 
-			// Detect actual MIME type from decrypted data, but skip for animated GIFs
-			// since Twitter serves them as video/mp4 but we want to keep image/gif
-			if attachment.AnimatedGif == nil {
-				detectedMime := http.DetectContentType(decryptedData)
-				if detectedMime != "" && detectedMime != "application/octet-stream" {
-					mimeType = detectedMime
-					content.Info.MimeType = detectedMime
-					// Update message type based on detected MIME
-					if strings.HasPrefix(detectedMime, "image/") {
-						content.MsgType = event.MsgImage
-					} else if strings.HasPrefix(detectedMime, "video/") {
-						content.MsgType = event.MsgVideo
-					} else if strings.HasPrefix(detectedMime, "audio/") {
-						content.MsgType = event.MsgAudio
-					}
-				}
-			}
-
-			content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, int64(len(decryptedData)), audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-				n, err := io.Copy(file, bytes.NewReader(decryptedData))
-				if err != nil {
-					return nil, err
-				}
-				if audioOnly && ffmpeg.Supported() {
-					outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
-					if err == nil {
-						mimeType = "audio/ogg"
-						content.Info.MimeType = mimeType
-						content.Info.Width = 0
-						content.Info.Height = 0
-						content.MsgType = event.MsgAudio
-						content.Body += ".ogg"
-						return &bridgev2.FileStreamResult{
-							ReplacementFile: outFile,
-							MimeType:        mimeType,
-							FileName:        content.Body,
-						}, nil
-					} else {
-						zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
-					}
-				} else {
-					content.Info.Size = int(n)
-				}
-				addFileExtension(&content.Body, mimeType)
-				return &bridgev2.FileStreamResult{
-					MimeType: content.Info.MimeType,
-					FileName: content.Body,
-				}, nil
-			})
-		}
-	} else {
-		// Legacy media download
-		zerolog.Ctx(ctx).Debug().Str("attachment_url", attachmentURL).Msg("Using legacy media download")
-		fileResp, downloadErr := downloadFile(ctx, tc.client, attachmentURL)
-		if downloadErr != nil {
-			return nil, nil, downloadErr
-		}
-		// Get mime type from HTTP response header, but skip for animated GIFs
-		// since Twitter serves them as video/mp4 but we want to keep image/gif
-		if attachment.AnimatedGif == nil {
-			if respContentType := fileResp.Header.Get("content-type"); respContentType != "" {
-				// Strip any parameters from content-type (e.g., "; charset=utf-8")
-				if idx := strings.Index(respContentType, ";"); idx != -1 {
-					respContentType = strings.TrimSpace(respContentType[:idx])
-				}
-				mimeType = respContentType
-				content.Info.MimeType = mimeType
-				// Update message type based on detected mime
-				if strings.HasPrefix(mimeType, "image/") {
-					content.MsgType = event.MsgImage
-				} else if strings.HasPrefix(mimeType, "video/") {
-					content.MsgType = event.MsgVideo
-				} else if strings.HasPrefix(mimeType, "audio/") {
-					content.MsgType = event.MsgAudio
-				}
-				zerolog.Ctx(ctx).Debug().
-					Str("content_type", mimeType).
-					Msg("Got mime type from HTTP response")
-			}
-		}
-		if tc.connector.directMedia {
-			// Use portal.Receiver if set, otherwise fall back to current user login ID
-			userID := portal.Receiver
-			if userID == "" {
-				userID = tc.userLogin.ID
-			}
-			content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
-			addFileExtension(&content.Body, mimeType)
-		} else {
-			content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, fileResp.ContentLength, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-				n, err := io.Copy(file, fileResp.Body)
-				if err != nil {
-					return nil, err
-				}
-				if audioOnly && ffmpeg.Supported() {
-					outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
-					if err == nil {
-						mimeType = "audio/ogg"
-						content.Info.MimeType = mimeType
-						content.Info.Width = 0
-						content.Info.Height = 0
-						content.MsgType = event.MsgAudio
-						content.Body += ".ogg"
-						return &bridgev2.FileStreamResult{
-							ReplacementFile: outFile,
-							MimeType:        mimeType,
-							FileName:        content.Body,
-						}, nil
-					} else {
-						zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
-					}
-				} else {
-					content.Info.Size = int(n)
-				}
-				addFileExtension(&content.Body, mimeType)
-				return &bridgev2.FileStreamResult{
-					MimeType: content.Info.MimeType,
-					FileName: content.Body,
-				}, nil
-			})
-		}
-	}
+	handled, err := tc.tryHandleXChatMedia(ctx, portal, intent, msg, attachmentInfo, attachmentURL, audioOnly, detectMime, &content, &mimeType, canUseXChat)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !handled {
+		if err := tc.handleLegacyMedia(ctx, portal, intent, attachmentInfo, attachmentURL, audioOnly, detectMime, &content, &mimeType); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	if audioOnly {
@@ -552,6 +423,227 @@ func addFileExtension(body *string, mimeType string) {
 	if ext != "" && !strings.HasSuffix(*body, ext) {
 		*body += ext
 	}
+}
+
+func resolveLegacyAttachmentURL(info *types.AttachmentInfo, variantURL string) string {
+	candidates := []string{
+		variantURL,
+		info.MediaURLHTTPS,
+		info.MediaURL,
+		info.ExpandedURL,
+		info.URL,
+	}
+	for _, candidate := range candidates {
+		normalized := normalizeMediaURL(candidate)
+		if normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func normalizeMediaURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "//") {
+		return "https:" + trimmed
+	}
+	if strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "http://") {
+		if isPublicCDNURL(trimmed) {
+			return "https://" + strings.TrimPrefix(trimmed, "http://")
+		}
+		return trimmed
+	}
+	// No scheme: assume https if it looks like a hostname/path.
+	if strings.Contains(trimmed, ".") {
+		return "https://" + trimmed
+	}
+	return trimmed
+}
+
+func applyMediaInfo(attachment *types.Attachment, info *types.AttachmentInfo) {
+	if attachment == nil || info == nil {
+		return
+	}
+
+	switch strings.ToLower(info.Type) {
+	case "photo":
+		attachment.Photo = info
+	case "animated_gif", "gif":
+		attachment.AnimatedGif = info
+	case "video":
+		attachment.Video = info
+	case "audio":
+		info.AudioOnly = true
+		attachment.Video = info
+	default:
+		if len(info.VideoInfo.Variants) > 0 || info.VideoInfo.DurationMillis > 0 {
+			attachment.Video = info
+		} else {
+			attachment.Photo = info
+		}
+	}
+}
+
+func updateContentMime(content *event.MessageEventContent, mimeType *string, contentType string) bool {
+	if contentType == "" {
+		return false
+	}
+	if idx := strings.Index(contentType, ";"); idx != -1 {
+		contentType = strings.TrimSpace(contentType[:idx])
+	}
+	if contentType == "" {
+		return false
+	}
+	*mimeType = contentType
+	content.Info.MimeType = contentType
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		content.MsgType = event.MsgImage
+	case strings.HasPrefix(contentType, "video/"):
+		content.MsgType = event.MsgVideo
+	case strings.HasPrefix(contentType, "audio/"):
+		content.MsgType = event.MsgAudio
+	}
+	return true
+}
+
+func directMediaUserID(portal *bridgev2.Portal, loginID networkid.UserLoginID) networkid.UserLoginID {
+	if portal.Receiver != "" {
+		return portal.Receiver
+	}
+	return loginID
+}
+
+func (tc *TwitterClient) uploadMediaReader(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, content *event.MessageEventContent, size int64, audioOnly bool, mimeType *string, reader io.Reader) error {
+	var err error
+	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, size, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+		n, err := io.Copy(file, reader)
+		if err != nil {
+			return nil, err
+		}
+		if audioOnly && ffmpeg.Supported() {
+			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
+			if err == nil {
+				*mimeType = "audio/ogg"
+				content.Info.MimeType = *mimeType
+				content.Info.Width = 0
+				content.Info.Height = 0
+				content.MsgType = event.MsgAudio
+				content.Body += ".ogg"
+				return &bridgev2.FileStreamResult{
+					ReplacementFile: outFile,
+					MimeType:        *mimeType,
+					FileName:        content.Body,
+				}, nil
+			}
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
+		} else {
+			content.Info.Size = int(n)
+		}
+		addFileExtension(&content.Body, *mimeType)
+		return &bridgev2.FileStreamResult{
+			MimeType: content.Info.MimeType,
+			FileName: content.Body,
+		}, nil
+	})
+	return err
+}
+
+func (tc *TwitterClient) tryHandleXChatMedia(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData, attachmentInfo *types.AttachmentInfo, attachmentURL string, audioOnly bool, detectMime bool, content *event.MessageEventContent, mimeType *string, canUseXChat bool) (bool, error) {
+	if attachmentInfo.MediaHashKey == "" {
+		return false, nil
+	}
+
+	conversationID := ParsePortalID(portal.ID)
+	if tc.connector.directMedia {
+		if !canUseXChat {
+			if attachmentURL == "" {
+				return false, fmt.Errorf("no conversation keys available for encrypted media")
+			}
+			return false, nil
+		}
+		userID := directMediaUserID(portal, tc.userLogin.ID)
+		encMediaID := MakeEncryptedMediaID(EncryptedMediaInfo{
+			UserID:         userID,
+			ConversationID: conversationID,
+			MediaHashKey:   attachmentInfo.MediaHashKey,
+			KeyVersion:     msg.ConversationKeyVersion,
+		})
+		var err error
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, encMediaID)
+		if err != nil {
+			return true, fmt.Errorf("failed to generate direct media URI: %w", err)
+		}
+		addFileExtension(&content.Body, *mimeType)
+		return true, nil
+	}
+
+	if !canUseXChat {
+		if attachmentURL == "" {
+			return false, fmt.Errorf("no conversation keys available for encrypted media")
+		}
+		return false, nil
+	}
+
+	decryptedData, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
+	if err != nil {
+		if attachmentURL == "" {
+			return true, fmt.Errorf("failed to download XChat media: %w", err)
+		}
+		zerolog.Ctx(ctx).Warn().Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to download XChat media, falling back to legacy URL")
+		return false, nil
+	}
+
+	content.Info.Size = len(decryptedData)
+	if detectMime {
+		detectedMime := http.DetectContentType(decryptedData)
+		if detectedMime != "" && detectedMime != "application/octet-stream" {
+			updateContentMime(content, mimeType, detectedMime)
+		}
+	}
+
+	if err := tc.uploadMediaReader(ctx, portal, intent, content, int64(len(decryptedData)), audioOnly, mimeType, bytes.NewReader(decryptedData)); err != nil {
+		return true, err
+	}
+
+	return true, nil
+}
+
+func (tc *TwitterClient) handleLegacyMedia(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachmentInfo *types.AttachmentInfo, attachmentURL string, audioOnly bool, detectMime bool, content *event.MessageEventContent, mimeType *string) error {
+	if attachmentURL == "" {
+		return fmt.Errorf("no media URL available (media_url_https=%q, media_url=%q, expanded_url=%q, url=%q)", attachmentInfo.MediaURLHTTPS, attachmentInfo.MediaURL, attachmentInfo.ExpandedURL, attachmentInfo.URL)
+	}
+	zerolog.Ctx(ctx).Debug().Str("attachment_url", attachmentURL).Msg("Using legacy media download")
+
+	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
+	if err != nil {
+		return err
+	}
+
+	if detectMime {
+		if updateContentMime(content, mimeType, fileResp.Header.Get("content-type")) {
+			zerolog.Ctx(ctx).Debug().
+				Str("content_type", *mimeType).
+				Msg("Got mime type from HTTP response")
+		}
+	}
+
+	if tc.connector.directMedia {
+		userID := directMediaUserID(portal, tc.userLogin.ID)
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
+		addFileExtension(&content.Body, *mimeType)
+		return err
+	}
+
+	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, mimeType, fileResp.Body)
 }
 
 func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*http.Response, error) {

@@ -9,6 +9,9 @@ type Attachment struct {
 	Card        *AttachmentCard  `json:"card,omitempty"`
 	Tweet       *AttachmentTweet `json:"tweet,omitempty"`
 
+	// Legacy REST DM attachments use attachment.media
+	Media *AttachmentInfo `json:"media,omitempty"`
+
 	// XChat-specific fields for URL attachment images
 	URLBannerMediaHashKey string `json:"url_banner_media_hash_key,omitempty"`
 }
