@@ -111,7 +111,11 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		}
 	} else {
 		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
-		if (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil {
+		needsUpdate := (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil
+		if !needsUpdate && chatInfo.Type != nil && portal.RoomType != *chatInfo.Type {
+			needsUpdate = true
+		}
+		if needsUpdate {
 			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 				EventMeta: simplevent.EventMeta{
 					Type:      bridgev2.RemoteEventChatInfoChange,
@@ -141,8 +145,9 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 		Muted:          detail.IsMuted,
 	}
 
-	// Determine conversation type based on participants
-	if len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil {
+	// Determine conversation type based on conversation ID and metadata.
+	if strings.HasPrefix(detail.ConversationID, "g") || detail.GroupMetadata != nil ||
+		len(detail.GroupMembersResults) > 0 || len(detail.GroupAdminsResults) > 0 {
 		conv.Type = ConversationTypeGroupDM
 	} else {
 		conv.Type = ConversationTypeOneToOne
@@ -179,10 +184,33 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		Int("users_map_count", len(users)).
 		Msg("xchatItemToChatInfo building member list")
 
-	isGroup := len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil
+	isGroup := strings.HasPrefix(detail.ConversationID, "g") || detail.GroupMetadata != nil ||
+		len(detail.GroupMembersResults) > 0 || len(detail.GroupAdminsResults) > 0
 
-	memberMap := make(bridgev2.ChatMemberMap, len(detail.ParticipantsResults))
-	for _, p := range detail.ParticipantsResults {
+	memberResults := make([]response.XChatUserResult, 0, len(detail.ParticipantsResults)+len(detail.GroupMembersResults)+len(detail.GroupAdminsResults))
+	memberResults = append(memberResults, detail.ParticipantsResults...)
+	memberResults = append(memberResults, detail.GroupMembersResults...)
+	memberResults = append(memberResults, detail.GroupAdminsResults...)
+
+	memberByID := make(map[string]response.XChatUserResult, len(memberResults))
+	memberOrder := make([]string, 0, len(memberResults))
+	for _, r := range memberResults {
+		if r.RestID == "" {
+			continue
+		}
+		if existing, ok := memberByID[r.RestID]; ok {
+			if existing.Result == nil && r.Result != nil {
+				memberByID[r.RestID] = r
+			}
+			continue
+		}
+		memberByID[r.RestID] = r
+		memberOrder = append(memberOrder, r.RestID)
+	}
+
+	memberMap := make(bridgev2.ChatMemberMap, len(memberByID))
+	for _, restID := range memberOrder {
+		p := memberByID[restID]
 		var userInfo *bridgev2.UserInfo
 		// First try inline Result from participants_results
 		if p.Result != nil {
@@ -227,7 +255,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	info := &bridgev2.ChatInfo{
 		Members: &bridgev2.ChatMemberList{
 			IsFull:           true,
-			TotalMemberCount: len(detail.ParticipantsResults),
+			TotalMemberCount: len(memberMap),
 			MemberMap:        memberMap,
 		},
 		CanBackfill:    true,
@@ -235,8 +263,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	}
 
 	if isGroup {
-		// TODO this is wrong, should be default
-		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
+		info.Type = ptr.Ptr(database.RoomTypeDefault)
 		if conv != nil && conv.AvatarImageHttps != "" {
 			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, conv.AvatarImageHttps, "")
 		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
