@@ -414,6 +414,7 @@ func (tc *TwitterClient) fetchRESTMessages(ctx context.Context, conversationID s
 			TxnID:            networkid.TransactionID(msg.ID),
 			Timestamp:        ts,
 			StreamOrder:      streamOrder,
+			Reactions:        tc.convertBackfillReactions(msg.MessageReactions),
 		})
 	}
 
@@ -450,4 +451,19 @@ func (tc *TwitterClient) fetchRESTMessages(ctx context.Context, conversationID s
 		Msg("REST API backfill response")
 
 	return result, nil
+}
+
+func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReaction) []*bridgev2.BackfillReaction {
+	if len(reactions) == 0 {
+		return nil
+	}
+	backfillReactions := make([]*bridgev2.BackfillReaction, 0, len(reactions))
+	for _, reaction := range reactions {
+		backfillReactions = append(backfillReactions, &bridgev2.BackfillReaction{
+			Timestamp: methods.ParseSnowflake(reaction.ID),
+			Sender:    tc.MakeEventSender(reaction.SenderID),
+			Emoji:     reaction.EmojiReaction,
+		})
+	}
+	return backfillReactions
 }

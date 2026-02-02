@@ -500,7 +500,8 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 		Str("sender_id", senderID).
 		Stringer("sender_mxid", msg.Event.Sender).
 		Msg("Handling Matrix reaction removal")
-	return tc.doHandleMatrixReaction(ctx, true, conversationID, targetMessageID, emoji)
+	meta := msg.Portal.Metadata.(*PortalMetadata)
+	return tc.doHandleMatrixReaction(ctx, true, meta, conversationID, targetMessageID, emoji)
 }
 
 func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
@@ -518,17 +519,43 @@ func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2
 	targetMessageID := ParseMessageID(msg.TargetMessage.ID)
 
 	emoji := msg.PreHandleResp.Emoji
-	if err := tc.doHandleMatrixReaction(ctx, false, conversationID, targetMessageID, emoji); err != nil {
+	meta := msg.Portal.Metadata.(*PortalMetadata)
+	if err := tc.doHandleMatrixReaction(ctx, false, meta, conversationID, targetMessageID, emoji); err != nil {
 		return nil, err
 	}
 
 	return &database.Reaction{}, nil
 }
 
-func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, conversationID, messageID, emoji string) error {
-	// TODO unencrypted reactions?
+func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, meta *PortalMetadata, conversationID, messageID, emoji string) error {
+	if meta != nil && !meta.CanUseXChat() {
+		restConvID := ConvertConversationIDToREST(conversationID)
+		reactionPayload := &payload.ReactionActionPayload{
+			ConversationID: restConvID,
+			MessageID:      messageID,
+			ReactionTypes:  []string{"Emoji"},
+			EmojiReactions: []string{emoji},
+		}
+		reactionResponse, err := tc.client.React(ctx, reactionPayload, remove)
+		if err != nil {
+			return err
+		}
+		tc.client.Logger.Debug().
+			Any("reactionResponse", reactionResponse).
+			Any("payload", reactionPayload).
+			Msg("Reaction response")
+		if !remove && reactionResponse.Data.CreateDmReaction.Typename == "CreateDMReactionFailure" {
+			return fmt.Errorf("server rejected reaction")
+		}
+		if remove && reactionResponse.Data.DeleteDmReaction.Typename == "DeleteDMReactionFailure" {
+			return fmt.Errorf("server rejected reaction removal")
+		}
+		return nil
+	}
+
 	// XChat reactions are sent as encrypted MessageCreateEvents (reaction_add/reaction_remove).
-	resp, err := tc.client.SendEncryptedReaction(ctx, conversationID, messageID, emoji, remove)
+	xchatConvID := NormalizeConversationID(conversationID)
+	resp, err := tc.client.SendEncryptedReaction(ctx, xchatConvID, messageID, emoji, remove)
 	if err != nil {
 		return err
 	}
