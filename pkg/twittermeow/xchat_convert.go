@@ -257,7 +257,6 @@ func convertXChatReactionAdd(evt *payload.MessageEvent, reaction *payload.Messag
 		ConversationID: ptr.Val(evt.ConversationId),
 		MessageID:      targetMsgID,
 		EmojiReaction:  emoji,
-		ReactionKey:    emoji,
 		SenderID:       ptr.Val(evt.SenderId),
 	})
 }
@@ -278,7 +277,6 @@ func convertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.Mes
 		ConversationID: ptr.Val(evt.ConversationId),
 		MessageID:      targetMsgID,
 		EmojiReaction:  emoji,
-		ReactionKey:    emoji,
 		SenderID:       ptr.Val(evt.SenderId),
 	})
 }

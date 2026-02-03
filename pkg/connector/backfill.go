@@ -460,11 +460,7 @@ func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReact
 	}
 	backfillReactions := make([]*bridgev2.BackfillReaction, 0, len(reactions))
 	for _, reaction := range reactions {
-		emoji := reaction.EmojiReaction
-		if emoji == "" {
-			emoji = reaction.ReactionKey
-		}
-		emoji = variationselector.FullyQualify(emoji)
+		emoji := variationselector.FullyQualify(reaction.EmojiReaction)
 		backfillReactions = append(backfillReactions, &bridgev2.BackfillReaction{
 			Timestamp: methods.ParseSnowflake(reaction.ID),
 			Sender:    tc.MakeEventSender(reaction.SenderID),

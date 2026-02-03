@@ -40,9 +40,6 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 		senderID = tc.client.GetCurrentUserID()
 	}
 	reactionKey := data.EmojiReaction
-	if reactionKey == "" {
-		reactionKey = data.ReactionKey
-	}
 
 	reactionKey = variationselector.FullyQualify(reactionKey)
 	emojiID := networkid.EmojiID(reactionKey)
@@ -63,7 +60,6 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 				return c.
 					Str("message_id", data.MessageID).
 					Str("sender", data.SenderID).
-					Str("reaction_key", data.ReactionKey).
 					Str("emoji_reaction", data.EmojiReaction)
 			},
 			PortalKey:   portalKey,
