@@ -181,8 +181,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			opts.Text = ""
 		}
 
-		// Only upload via XChat for encrypted conversations
-		// REST path handles media upload in sendDirectMessageREST
+		// Only upload via XChat when conversation keys are available.
 		if msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
 			data, err := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
 			if err != nil {
@@ -249,7 +248,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 	}
 
-	txnID := networkid.TransactionID(messageID)
 	dbMsg := &database.Message{
 		// TODO this is wrong, txn ID != message ID
 		ID:        networkid.MessageID(messageID),
@@ -259,6 +257,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			XChatClientMsgID: messageID,
 		},
 	}
+	txnID := networkid.TransactionID(messageID)
 	// Check portal metadata for encryption capability
 	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
 		// No encryption keys - use REST API
@@ -492,7 +491,11 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 	conversationID := ParsePortalID(msg.Portal.ID)
 	targetMessageID := ParseMessageID(msg.TargetReaction.MessageID)
 
-	emoji := variationselector.FullyQualify(msg.TargetReaction.Emoji)
+	emoji := msg.TargetReaction.Emoji
+	if emoji == "" {
+		emoji = string(msg.TargetReaction.EmojiID)
+	}
+	emoji = variationselector.FullyQualify(emoji)
 	zerolog.Ctx(ctx).Info().
 		Str("conversation_id", conversationID).
 		Str("target_message_id", targetMessageID).
@@ -504,7 +507,7 @@ func (tc *TwitterClient) HandleMatrixReactionRemove(ctx context.Context, msg *br
 	return tc.doHandleMatrixReaction(ctx, true, meta, conversationID, targetMessageID, emoji)
 }
 
-func (tc *TwitterClient) PreHandleMatrixReaction(_ context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
+func (tc *TwitterClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
 	emoji := variationselector.FullyQualify(msg.Content.RelatesTo.Key)
 	return bridgev2.MatrixReactionPreResponse{
 		SenderID: MakeUserID(tc.client.GetCurrentUserID()),
@@ -527,10 +530,10 @@ func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2
 }
 
 func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, meta *PortalMetadata, conversationID, messageID, emoji string) error {
-	if meta != nil && !meta.CanUseXChat() {
-		restConvID := ConvertConversationIDToREST(conversationID)
+	emoji = variationselector.FullyQualify(emoji)
+	if meta == nil || !meta.CanUseXChat() {
 		reactionPayload := &payload.ReactionActionPayload{
-			ConversationID: restConvID,
+			ConversationID: ConvertConversationIDToREST(conversationID),
 			MessageID:      messageID,
 			ReactionTypes:  []string{"Emoji"},
 			EmojiReactions: []string{emoji},
@@ -554,12 +557,8 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 
 	// XChat reactions are sent as encrypted MessageCreateEvents (reaction_add/reaction_remove).
 	xchatConvID := NormalizeConversationID(conversationID)
-	resp, err := tc.client.SendEncryptedReaction(ctx, xchatConvID, messageID, emoji, remove)
-	if err != nil {
-		return err
-	}
-	tc.client.Logger.Debug().Any("reactionResponse", resp).Msg("Reaction response")
-	return nil
+	_, err := tc.client.SendEncryptedReaction(ctx, xchatConvID, messageID, emoji, remove)
+	return err
 }
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {

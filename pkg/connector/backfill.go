@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
+	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -459,10 +460,15 @@ func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReact
 	}
 	backfillReactions := make([]*bridgev2.BackfillReaction, 0, len(reactions))
 	for _, reaction := range reactions {
+		emoji := reaction.EmojiReaction
+		if emoji == "" {
+			emoji = reaction.ReactionKey
+		}
+		emoji = variationselector.FullyQualify(emoji)
 		backfillReactions = append(backfillReactions, &bridgev2.BackfillReaction{
 			Timestamp: methods.ParseSnowflake(reaction.ID),
 			Sender:    tc.MakeEventSender(reaction.SenderID),
-			Emoji:     reaction.EmojiReaction,
+			Emoji:     emoji,
 		})
 	}
 	return backfillReactions

@@ -403,7 +403,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	selfUser := tc.userCache[currentUserID]
 	tc.userCacheLock.RUnlock()
 	if selfUser != nil {
-		remoteProfile := tc.makeXChatRemoteProfile(selfUser)
+		remoteProfile := tc.makeXChatRemoteProfile(ctx, selfUser)
 		if tc.userLogin.RemoteName != remoteProfile.Username ||
 			tc.userLogin.RemoteProfile != *remoteProfile {
 			tc.userLogin.RemoteName = remoteProfile.Username
@@ -439,17 +439,44 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 }
 
 // makeXChatRemoteProfile creates a RemoteProfile from XChat user data.
-func (tc *TwitterClient) makeXChatRemoteProfile(user *types.User) *status.RemoteProfile {
-	var avatarMXC id.ContentURIString
-	// TODO context.Background is forbidden
-	ownGhost, err := tc.connector.br.GetGhostByID(context.Background(), MakeUserID(user.IDStr))
-	if err == nil && ownGhost != nil {
-		avatarMXC = ownGhost.AvatarMXC
-	}
+func (tc *TwitterClient) makeXChatRemoteProfile(ctx context.Context, user *types.User) *status.RemoteProfile {
+	avatarMXC := tc.syncOwnAvatarFromUser(ctx, user)
 	return &status.RemoteProfile{
 		Username: user.ScreenName,
 		Name:     user.Name,
 		Avatar:   avatarMXC,
+	}
+}
+
+func (tc *TwitterClient) syncOwnAvatarFromUser(ctx context.Context, user *types.User) id.ContentURIString {
+	if user == nil || user.IDStr == "" {
+		return ""
+	}
+	if user.IDStr != tc.client.GetCurrentUserID() {
+		return ""
+	}
+	ownGhost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(user.IDStr))
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to get own ghost by ID for avatar sync")
+		return ""
+	}
+	ownGhost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
+	if ownGhost.AvatarMXC != "" {
+		tc.updateOwnMatrixAvatar(ctx, ownGhost.AvatarMXC)
+	}
+	return ownGhost.AvatarMXC
+}
+
+func (tc *TwitterClient) updateOwnMatrixAvatar(ctx context.Context, avatarMXC id.ContentURIString) {
+	if avatarMXC == "" {
+		return
+	}
+	intent := tc.userLogin.User.DoublePuppet(ctx)
+	if intent == nil {
+		return
+	}
+	if err := intent.SetAvatarURL(ctx, avatarMXC); err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to set own Matrix avatar")
 	}
 }
 

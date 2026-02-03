@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -38,14 +39,23 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 	if senderID == "" {
 		senderID = tc.client.GetCurrentUserID()
 	}
-	reactionKey := data.ReactionKey
+	reactionKey := data.EmojiReaction
 	if reactionKey == "" {
-		reactionKey = data.EmojiReaction
+		reactionKey = data.ReactionKey
 	}
+
+	reactionKey = variationselector.FullyQualify(reactionKey)
 	emojiID := networkid.EmojiID(reactionKey)
-	if emojiID == "" {
-		emojiID = networkid.EmojiID(data.EmojiReaction)
-	}
+
+	tc.userLogin.Log.Debug().
+		Str("portal_id", string(portalKey.ID)).
+		Str("portal_receiver", string(portalKey.Receiver)).
+		Str("target_message_id", string(MakeMessageID(data.MessageID))).
+		Str("sender_id", string(MakeUserID(senderID))).
+		Str("emoji_id", string(emojiID)).
+		Str("emoji", reactionKey).
+		Msg("Wrapping reaction for remote event")
+
 	return &simplevent.Reaction{
 		EventMeta: simplevent.EventMeta{
 			Type: evtType,
@@ -62,7 +72,7 @@ func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey net
 			StreamOrder: methods.ParseSnowflakeInt(data.ID),
 		},
 		EmojiID:       emojiID,
-		Emoji:         data.EmojiReaction,
+		Emoji:         reactionKey,
 		TargetMessage: MakeMessageID(data.MessageID),
 	}
 }
@@ -611,11 +621,13 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	case *types.MessageReactionCreate:
 		reaction := (*types.MessageReaction)(e)
 		portalKey := tc.MakePortalKeyFromID(conversationID)
-		return tc.userLogin.QueueRemoteEvent(tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)).Success
+		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)
+		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.MessageReactionDelete:
 		reaction := (*types.MessageReaction)(e)
 		portalKey := tc.MakePortalKeyFromID(conversationID)
-		return tc.userLogin.QueueRemoteEvent(tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)).Success
+		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
+		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.ConversationRead:
 		lastTarget := MakeMessageID(e.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(e.Time)

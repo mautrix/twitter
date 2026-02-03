@@ -114,12 +114,12 @@ var groupCaps = &event.RoomFeatures{
 
 	Reply: event.CapLevelFullySupported,
 
-	Edit:          event.CapLevelFullySupported,
-	EditMaxCount:  10,
-	EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
-	Reaction:      event.CapLevelFullySupported,
-	Delete:      event.CapLevelFullySupported,
-	DeleteForMe: true,
+	Edit:         event.CapLevelFullySupported,
+	EditMaxCount: 10,
+	EditMaxAge:   ptr.Ptr(jsontime.S(15 * time.Minute)),
+	Reaction:     event.CapLevelFullySupported,
+	Delete:       event.CapLevelFullySupported,
+	DeleteForMe:  true,
 
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,
