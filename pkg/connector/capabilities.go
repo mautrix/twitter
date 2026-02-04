@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -48,13 +47,6 @@ func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
 
 const MaxTextLength = 10000
 
-func supportedIfFFmpeg() event.CapabilitySupportLevel {
-	if ffmpeg.Supported() {
-		return event.CapLevelPartialSupport
-	}
-	return event.CapLevelRejected
-}
-
 var groupCaps = &event.RoomFeatures{
 	ID: "fi.mau.twitter.capabilities.2026_01_08",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
@@ -80,17 +72,6 @@ var groupCaps = &event.RoomFeatures{
 			Caption:          event.CapLevelFullySupported,
 			MaxCaptionLength: MaxTextLength,
 			MaxSize:          15 * 1024 * 1024,
-		},
-		event.CapMsgVoice: {
-			MimeTypes: map[string]event.CapabilitySupportLevel{
-				"audio/aac": supportedIfFFmpeg(),
-				"audio/ogg": supportedIfFFmpeg(),
-				"video/mp4": event.CapLevelFullySupported,
-			},
-			Caption:          event.CapLevelFullySupported,
-			MaxCaptionLength: MaxTextLength,
-			MaxSize:          5 * 1024 * 1024,
-			MaxDuration:      ptr.Ptr(jsontime.S(140 * time.Second)),
 		},
 		event.CapMsgGIF: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
