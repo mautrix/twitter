@@ -309,7 +309,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 	pl := &payload.SendDirectMessagePayload{
 		ConversationID: conversationID,
 		RequestID:      messageID,
-		Text:           text,
+		Text:           opts.Text,
 		CardsPlatform:  "Web-12",
 		IncludeCards:   1,
 	}
@@ -344,8 +344,14 @@ func (tc *TwitterClient) sendDirectMessageREST(
 		switch content.MsgType {
 		case event.MsgVideo, event.MsgAudio:
 			mediaCategory = payload.MEDIA_CATEGORY_DM_VIDEO
+			if content.MsgType == event.MsgAudio {
+				pl.AudioOnlyMediaAttachment = true
+			}
 		default:
 			mediaCategory = payload.MEDIA_CATEGORY_DM_IMAGE
+			if mimeType == "image/gif" || content.Info.MauGIF {
+				mediaCategory = payload.MEDIA_CATEGORY_DM_GIF
+			}
 		}
 
 		// Upload media using non-encrypted flow for REST API
