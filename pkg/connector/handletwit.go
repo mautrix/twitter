@@ -361,6 +361,22 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return tc.userLogin.QueueRemoteEvent(portalDeleteRemoteEvent).Success
 
 	case *types.ConversationNameUpdate:
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		// XChat group titles are encrypted. Decrypt before forwarding to Matrix so
+		// we don't set the room name to ciphertext.
+		newName := evt.ConversationName
+		if decrypted := tc.decryptGroupName(ctx, evt.ConversationID, newName); decrypted != "" {
+			newName = decrypted
+		} else if isProbablyEncryptedGroupName(newName) {
+			log.Debug().
+				Str("conversation_id", evt.ConversationID).
+				Msg("Failed to decrypt XChat group title change, skipping name update")
+			return true
+		}
+
 		portalUpdateRemoteEvent := &simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
 				Type:   bridgev2.RemoteEventChatInfoChange,
@@ -368,7 +384,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.
 						Str("conversation_id", evt.ConversationID).
-						Str("new_name", evt.ConversationName).
+						Str("new_name", newName).
 						Str("changed_by_user_id", evt.ByUserID)
 				},
 				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
@@ -377,7 +393,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			},
 			ChatInfoChange: &bridgev2.ChatInfoChange{
 				ChatInfo: &bridgev2.ChatInfo{
-					Name: &evt.ConversationName,
+					Name: &newName,
 				},
 			},
 		}

@@ -352,6 +352,32 @@ func (tc *TwitterClient) decryptGroupName(ctx context.Context, conversationID, e
 	return string(plaintext)
 }
 
+// isProbablyEncryptedGroupName checks if a string looks like an XChat-encrypted group
+// name (base64(secretbox(nonce||ciphertext))). This is used to avoid setting Matrix
+// room names to ciphertext if decryption fails.
+func isProbablyEncryptedGroupName(encName string) bool {
+	if encName == "" {
+		return false
+	}
+	// Strip optional key version prefix (keyVersion:ciphertextB64).
+	if parts := strings.SplitN(encName, ":", 2); len(parts) == 2 && parts[0] != "" {
+		encName = parts[1]
+	}
+
+	var decoded []byte
+	if dec, err := base64.StdEncoding.DecodeString(encName); err == nil {
+		decoded = dec
+	} else if dec, err := base64.RawStdEncoding.DecodeString(encName); err == nil {
+		decoded = dec
+	} else {
+		return false
+	}
+
+	// crypto.SecretboxDecrypt expects nonce||ciphertext and requires at least
+	// 24-byte nonce + 16-byte Poly1305 overhead.
+	return len(decoded) >= 40
+}
+
 // syncUntrustedChannels fetches and syncs untrusted (message request) conversations via the REST API.
 func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
