@@ -24,6 +24,8 @@ const (
 	reconnectBackoffMultiplier = 2.0
 )
 
+var ErrXChatWebsocketNotConnected = errors.New("xchat websocket not connected")
+
 // decodeXChatPayload decodes binary thrift data.
 func decodeXChatPayload(data []byte) (out *payload.Message, err error) {
 	defer func() {
@@ -181,7 +183,7 @@ func (xc *xchatWebsocketClient) start(ctx context.Context, initialToken string) 
 func (xc *xchatWebsocketClient) send(ctx context.Context, msg *payload.Message) error {
 	conn := xc.conn.Load()
 	if conn == nil {
-		return errors.New("xchat websocket not connected")
+		return ErrXChatWebsocketNotConnected
 	}
 	bytes, err := encodeXChatPayload(msg)
 	if err != nil {

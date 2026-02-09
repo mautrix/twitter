@@ -278,8 +278,11 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 	// Extract sequence ID from the response
 	if resp != nil && resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent != "" {
-		if decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent); err == nil && decoded.MessageEvent != nil {
-			dbMsg.ID = MakeMessageID(*decoded.MessageEvent)
+		if decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent); err == nil && decoded.MessageEvent != nil && *decoded.MessageEvent != "" {
+			// decoded.MessageEvent is a base64-encoded thrift MessageEvent, not a sequence ID.
+			if evt, err := twittermeow.DecodeMessageEvent(*decoded.MessageEvent); err == nil && evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
+				dbMsg.ID = MakeMessageID(*evt.SequenceId)
+			}
 		}
 	}
 
@@ -569,25 +572,108 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
-	lastReadEventID := ""
-
-	if msg.ExactMessage != nil {
-		lastReadEventID = ParseMessageID(msg.ExactMessage.ID)
-	} else {
-		lastMessage, err := tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, msg.ReadUpTo)
-		if err != nil {
-			return err
-		}
-		lastReadEventID = ParseMessageID(lastMessage.ID)
-	}
-
 	readAt := msg.ReadUpTo
 	if readAt.IsZero() {
 		readAt = time.Now()
 	}
 
+	canUseXChat := msg.Portal.Metadata.(*PortalMetadata).CanUseXChat()
+	isAllDigits := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return false
+			}
+		}
+		return true
+	}
+
+	log := zerolog.Ctx(ctx)
+	log.Debug().
+		Str("conversation_id", conversationID).
+		Str("portal_id", string(msg.Portal.ID)).
+		Str("event_id", msg.EventID.String()).
+		Bool("can_use_xchat", canUseXChat).
+		Bool("implicit", msg.Implicit).
+		Time("read_at", readAt).
+		Msg("Handling Matrix read receipt")
+
+	lastReadEventID := ""
+	if msg.ExactMessage != nil {
+		candidate := ParseMessageID(msg.ExactMessage.ID)
+		// XChat read receipts require a sequence ID; local echo message IDs can be UUIDs.
+		if candidate != "" && (!canUseXChat || isAllDigits(candidate)) {
+			lastReadEventID = candidate
+		}
+	}
+	if lastReadEventID == "" && msg.EventID != "" {
+		// If ExactMessage is nil (or not usable), try resolving the target by MXID.
+		dbMsg, err := tc.userLogin.Bridge.DB.Message.GetPartByMXID(ctx, msg.EventID)
+		if err != nil {
+			return err
+		}
+		if dbMsg != nil {
+			candidate := ParseMessageID(dbMsg.ID)
+			if candidate != "" && (!canUseXChat || isAllDigits(candidate)) {
+				lastReadEventID = candidate
+			}
+		}
+	}
+	if lastReadEventID == "" {
+		var (
+			lastMessage *database.Message
+			err         error
+		)
+		if !canUseXChat {
+			lastMessage, err = tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, readAt)
+			if err != nil {
+				return err
+			}
+			if lastMessage == nil {
+				return nil
+			}
+			lastReadEventID = ParseMessageID(lastMessage.ID)
+		} else {
+			// For XChat, we must choose a numeric sequence ID. Timestamp-based queries can pick
+			// local-echo/transaction placeholder messages, so scan recent history for a sequence ID.
+			const scanN = 200
+			recent, err := tc.userLogin.Bridge.DB.Message.GetLastNInPortal(ctx, msg.Portal.PortalKey, scanN)
+			if err != nil {
+				return err
+			}
+			for _, m := range recent {
+				if m == nil || m.Timestamp.After(readAt) {
+					continue
+				}
+				candidate := ParseMessageID(m.ID)
+				if isAllDigits(candidate) {
+					lastReadEventID = candidate
+					break
+				}
+			}
+		}
+	}
+	if lastReadEventID == "" {
+		log.Debug().
+			Str("conversation_id", conversationID).
+			Bool("can_use_xchat", canUseXChat).
+			Time("read_at", readAt).
+			Msg("Not sending read receipt: no suitable target message found")
+		return nil
+	}
+
+	log.Debug().
+		Str("conversation_id", conversationID).
+		Bool("can_use_xchat", canUseXChat).
+		Str("last_read_event_id", lastReadEventID).
+		Bool("last_read_event_id_is_numeric", isAllDigits(lastReadEventID)).
+		Time("read_at", readAt).
+		Msg("Sending read receipt")
+
 	// Check portal metadata for encryption capability
-	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+	if !canUseXChat {
 		// No encryption keys - use REST API
 		params := &payload.MarkConversationReadQuery{
 			ConversationID:  ConvertConversationIDToREST(conversationID),
@@ -597,15 +683,31 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	}
 
 	// Encrypted conversation - use XChat, with REST fallback on key not found
-	if err := tc.client.SendXChatReadReceipt(ctx, conversationID, lastReadEventID, readAt); err != nil {
-		if errors.Is(err, crypto.ErrKeyNotFound) {
+	xchatErr := tc.client.SendXChatReadReceipt(ctx, conversationID, lastReadEventID, readAt)
+	if xchatErr != nil {
+		if errors.Is(xchatErr, crypto.ErrKeyNotFound) || errors.Is(xchatErr, twittermeow.ErrXChatWebsocketNotConnected) {
 			params := &payload.MarkConversationReadQuery{
 				ConversationID:  ConvertConversationIDToREST(conversationID),
 				LastReadEventID: lastReadEventID,
 			}
 			return tc.client.MarkConversationRead(ctx, params)
 		}
-		return err
+		return xchatErr
+	}
+
+	// Best-effort: also mark read via REST for explicit receipts.
+	// This helps the XChat web UI which appears to rely on the legacy DM read state.
+	if !msg.Implicit {
+		params := &payload.MarkConversationReadQuery{
+			ConversationID:  ConvertConversationIDToREST(conversationID),
+			LastReadEventID: lastReadEventID,
+		}
+		if err := tc.client.MarkConversationRead(ctx, params); err != nil {
+			log.Debug().
+				Err(err).
+				Str("conversation_id", conversationID).
+				Msg("REST mark_read failed after XChat read receipt")
+		}
 	}
 
 	return nil
