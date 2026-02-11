@@ -1200,23 +1200,21 @@ func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMe
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {
 	variables := payload.NewGetPublicKeysQueryVariables(userIDs)
 
-	formBody, err := variables.Encode()
+	query, err := variables.Encode()
 	if err != nil {
 		return nil, err
 	}
 
+	url := endpoints.GET_PUBLIC_KEYS_QUERY_URL + "?" + string(query)
 	c.Logger.Debug().
 		Str("url", endpoints.GET_PUBLIC_KEYS_QUERY_URL).
-		Str("form_body", string(formBody)).
 		Msg("GetPublicKeys payload")
 
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_PUBLIC_KEYS_QUERY_URL,
-		Method:         http.MethodPost,
+		URL:            url,
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
 	})
 	if err != nil {
 		c.Logger.Debug().
