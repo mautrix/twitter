@@ -461,23 +461,7 @@ func (tc *TwitterClient) syncOwnAvatarFromUser(ctx context.Context, user *types.
 		return ""
 	}
 	ownGhost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
-	if ownGhost.AvatarMXC != "" {
-		tc.updateOwnMatrixAvatar(ctx, ownGhost.AvatarMXC)
-	}
 	return ownGhost.AvatarMXC
-}
-
-func (tc *TwitterClient) updateOwnMatrixAvatar(ctx context.Context, avatarMXC id.ContentURIString) {
-	if avatarMXC == "" {
-		return
-	}
-	intent := tc.userLogin.User.DoublePuppet(ctx)
-	if intent == nil {
-		return
-	}
-	if err := intent.SetAvatarURL(ctx, avatarMXC); err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to set own Matrix avatar")
-	}
 }
 
 // parseSequenceID parses a sequence ID string to int64.
