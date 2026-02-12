@@ -174,6 +174,18 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		}
 	}
 
+	// Full XChat inbox sync (migration / fresh login) can take a while. Mark as connected once we
+	// know credentials are valid, and let the initial sync finish in the background.
+	if meta.PendingEncryptedSync || meta.MaxUserSequenceID == "" {
+		tc.userLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateConnected,
+			Reason:     "sync_in_progress",
+			Info: map[string]any{
+				"sync": "in_progress",
+			},
+		})
+	}
+
 	// Start REST API sync for untrusted conversations in parallel
 	go func() {
 		tc.syncUntrustedChannels(ctx)
