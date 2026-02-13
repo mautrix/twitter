@@ -701,6 +701,9 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
 	}
+	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return fmt.Errorf("missing signing key data: signed message deletion requires message_event_signature")
+	}
 
 	deleteAction := payload.DeleteMessageActionTypeForSelf
 	thriftAction := int32(payload.DeleteMessageActionDeleteForSelf)
@@ -816,6 +819,9 @@ func (c *Client) MuteConversation(ctx context.Context, conversationID string) er
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
+	}
+	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return fmt.Errorf("missing signing key data: signed conversation deletion requires message_event_signature")
 	}
 
 	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
@@ -1023,33 +1029,24 @@ func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID str
 		EncodedMessageEventDetail: encodedDetail,
 	}
 
-	if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
-		signature, err := crypto.SignConversationDeletion(
-			keyPair.SigningKey,
-			messageID,
-			senderID,
-			conversationID,
-			token,
-			createdAtMsec,
-			encodedDetail,
-		)
-		if err != nil {
-			return fmt.Errorf("sign conversation deletion event: %w", err)
-		}
+	signature, err := crypto.SignConversationDeletion(
+		keyPair.SigningKey,
+		messageID,
+		senderID,
+		conversationID,
+		token,
+		createdAtMsec,
+		encodedDetail,
+	)
+	if err != nil {
+		return fmt.Errorf("sign conversation deletion event: %w", err)
+	}
 
-		sigVersion := crypto.SignatureVersion4
-		actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
-			Signature:        signature,
-			PublicKeyVersion: keyPair.KeyVersion,
-			SignatureVersion: sigVersion,
-		}
-	} else {
-		c.Logger.Warn().
-			Str("conversation_id", conversationID).
-			Bool("has_keypair", keyPair != nil).
-			Bool("has_signing_key", keyPair != nil && keyPair.SigningKey != nil).
-			Bool("has_key_version", keyPair != nil && keyPair.KeyVersion != "").
-			Msg("Proceeding with unsigned conversation deletion")
+	sigVersion := crypto.SignatureVersion4
+	actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
+		Signature:        signature,
+		PublicKeyVersion: keyPair.KeyVersion,
+		SignatureVersion: sigVersion,
 	}
 
 	pl := payload.NewDeleteConversationMutationPayload(payload.DeleteConversationMutationVariables{
