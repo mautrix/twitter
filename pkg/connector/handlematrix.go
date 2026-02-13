@@ -63,6 +63,10 @@ var (
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
 
+// Used to generate a deterministic UUID for XChat MessageId based on the Matrix event ID.
+// This avoids accidental double-sends if the same Matrix event is reprocessed.
+var xchatMessageIDNamespace = uuid.MustParse("c2be90fe-13d0-4c77-9a27-92572c8c700b")
+
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
 		return nil
@@ -91,8 +95,17 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	messageID := string(msg.InputTransactionID)
+	if messageID != "" {
+		if _, err := uuid.Parse(messageID); err != nil {
+			messageID = ""
+		}
+	}
 	if messageID == "" {
-		messageID = uuid.NewString()
+		if msg.Event != nil {
+			messageID = uuid.NewSHA1(xchatMessageIDNamespace, []byte(msg.Event.ID.String())).String()
+		} else {
+			messageID = uuid.NewString()
+		}
 	}
 
 	opts := twittermeow.SendEncryptedMessageOpts{
@@ -249,7 +262,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	dbMsg := &database.Message{
-		// TODO this is wrong, txn ID != message ID
 		ID:        networkid.MessageID(messageID),
 		SenderID:  MakeUserID(ParseUserLoginID(tc.userLogin.ID)),
 		Timestamp: time.Now(),
@@ -264,9 +276,14 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 	}
 
-	// Encrypted conversation - use XChat protocol, with REST fallback on key/token not found
+	// Encrypted conversation: correlate remote echo (XChat RequestID) with this Matrix event.
+	// Without this, the remote echo can get bridged back into Matrix as a duplicate message.
+	msg.AddPendingToSave(dbMsg, txnID, nil)
+
+	// Use XChat protocol, with REST fallback on key/token not found.
 	resp, err := tc.client.SendEncryptedMessage(ctx, opts)
 	if err != nil {
+		msg.RemovePending(txnID)
 		if errors.Is(err, crypto.ErrKeyNotFound) {
 			zerolog.Ctx(ctx).Debug().
 				Str("conversation_id", conversationID).
@@ -276,10 +293,8 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		return nil, err
 	}
 
-	// Extract sequence ID from the response
 	if resp != nil && resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent != "" {
-		if decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent); err == nil && decoded.MessageEvent != nil && *decoded.MessageEvent != "" {
-			// decoded.MessageEvent is a base64-encoded thrift MessageEvent, not a sequence ID.
+		if decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent); err == nil && decoded != nil && decoded.MessageEvent != nil && *decoded.MessageEvent != "" {
 			if evt, err := twittermeow.DecodeMessageEvent(*decoded.MessageEvent); err == nil && evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
 				dbMsg.ID = MakeMessageID(*evt.SequenceId)
 			}
@@ -287,7 +302,8 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	return &bridgev2.MatrixMessageResponse{
-		DB: dbMsg,
+		DB:      dbMsg,
+		Pending: true,
 	}, nil
 }
 
