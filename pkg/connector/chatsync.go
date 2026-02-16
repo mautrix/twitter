@@ -462,7 +462,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		// No need to save since Trusted=false is the zero value
 	}
 
-	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
+	chatInfo := tc.conversationToChatInfo(conv, inbox)
 
 	// Create Matrix room if it doesn't exist
 	if portal.MXID == "" {
@@ -523,28 +523,36 @@ func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversat
 }
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.
-func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
-	participantIDs := make([]string, 0, len(conv.Participants))
+func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
+	memberMap := make(bridgev2.ChatMemberMap, len(conv.Participants))
 	for _, participant := range conv.Participants {
-		if participant.UserID == "" {
-			continue
+		var userInfo *bridgev2.UserInfo
+		if inbox != nil {
+			if user, ok := inbox.Users[participant.UserID]; ok {
+				userInfo = tc.connector.wrapUserInfo(tc.client, user)
+			}
 		}
-		participantIDs = append(participantIDs, participant.UserID)
-	}
-
-	// Some REST endpoints occasionally return incomplete participant lists for 1:1 DMs.
-	// Fall back to parsing the conversation ID to ensure we have both user IDs.
-	if len(participantIDs) < 2 && !strings.HasPrefix(conv.ConversationID, "g") && conv.Type != ConversationTypeGroupDM {
-		parts := strings.Split(NormalizeConversationID(conv.ConversationID), ":")
-		if len(parts) == 2 {
-			participantIDs = append(participantIDs, parts...)
+		if userInfo == nil {
+			tc.userCacheLock.RLock()
+			if user, ok := tc.userCache[participant.UserID]; ok {
+				userInfo = tc.connector.wrapUserInfo(tc.client, user)
+			}
+			tc.userCacheLock.RUnlock()
 		}
+		memberMap.Set(bridgev2.ChatMember{
+			EventSender: tc.MakeEventSender(participant.UserID),
+			UserInfo:    userInfo,
+		})
 	}
 
 	messageRequest := !conv.Trusted
 
 	info := &bridgev2.ChatInfo{
-		Members:        tc.buildChatMembersFromUserIDs(ctx, conv.ConversationID, participantIDs, inbox),
+		Members: &bridgev2.ChatMemberList{
+			IsFull:           true,
+			TotalMemberCount: len(conv.Participants),
+			MemberMap:        memberMap,
+		},
 		CanBackfill:    true,
 		MessageRequest: &messageRequest,
 	}

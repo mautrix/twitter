@@ -720,54 +720,19 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	return true
 }
 
-type pollingChatResyncStamp struct {
-	At      time.Time
-	Success bool
-}
-
-const (
-	pollingChatResyncSuccessInterval = 6 * time.Hour
-	pollingChatResyncFailureInterval = 10 * time.Minute
-)
-
-func (tc *TwitterClient) shouldAttemptPollingChatResync(conversationID string, now time.Time) bool {
-	if v, ok := tc.pollingChatResyncLast.Load(conversationID); ok {
-		if stamp, ok := v.(pollingChatResyncStamp); ok {
-			interval := pollingChatResyncFailureInterval
-			if stamp.Success {
-				interval = pollingChatResyncSuccessInterval
-			}
-			if now.Sub(stamp.At) < interval {
-				return false
-			}
-		}
-	}
-
-	tc.pollingChatResyncLast.Store(conversationID, pollingChatResyncStamp{At: now, Success: false})
-	return true
-}
-
-func (tc *TwitterClient) markPollingChatResyncSuccess(conversationID string, now time.Time) {
-	tc.pollingChatResyncLast.Store(conversationID, pollingChatResyncStamp{At: now, Success: true})
-}
-
 // handlePollingMessage handles a message event from REST API polling.
 func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *response.TwitterInboxData) bool {
 	isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
 	portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 	msgID := evt.ID
-	now := time.Now()
-	log := tc.userLogin.Log.With().
-		Str("handler", "polling").
-		Str("conversation_id", evt.ConversationID).
-		Logger()
 
 	// For polling messages, ensure the portal exists
 	ctx := context.Background()
 	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
 	if err != nil {
-		log.Warn().
+		tc.userLogin.Log.Warn().
 			Err(err).
+			Str("conversation_id", evt.ConversationID).
 			Msg("Failed to get portal for polling message")
 		return false
 	}
@@ -776,46 +741,25 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 	if portal.MXID == "" {
 		chatInfo := tc.getOrFetchChatInfoForPolling(ctx, evt.ConversationID, inbox)
 		if chatInfo == nil {
-			log.Warn().
+			tc.userLogin.Log.Warn().
+				Str("conversation_id", evt.ConversationID).
 				Msg("Failed to get chat info for polling message")
 			return false
 		}
 		if err := portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo); err != nil {
-			log.Warn().
+			tc.userLogin.Log.Warn().
 				Err(err).
+				Str("conversation_id", evt.ConversationID).
 				Msg("Failed to create Matrix room for polling message")
 			return false
 		}
 		// Register backfill task for the newly created room
 		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-			log.Warn().Err(err).
+			tc.userLogin.Log.Warn().Err(err).
+				Str("conversation_id", evt.ConversationID).
 				Msg("Failed to ensure backfill task exists for new polling room")
 		} else {
 			tc.connector.br.WakeupBackfillQueue()
-		}
-	} else if tc.shouldAttemptPollingChatResync(evt.ConversationID, now) {
-		chatInfo := tc.getOrFetchChatInfoForPolling(ctx, evt.ConversationID, inbox)
-		if chatInfo == nil || chatInfo.Members == nil || !chatInfo.Members.IsFull || chatInfo.Members.TotalMemberCount < 2 {
-			log.Debug().
-				Bool("chat_info_nil", chatInfo == nil).
-				Msg("Skipping polling ChatResync: insufficient chat info")
-		} else {
-			ok := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
-				EventMeta: simplevent.EventMeta{
-					Type:         bridgev2.RemoteEventChatResync,
-					PortalKey:    portal.PortalKey,
-					CreatePortal: true,
-					Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-					StreamOrder:  methods.ParseInt64(msgID),
-				},
-				ChatInfo: chatInfo,
-			}).Success
-			if ok {
-				log.Debug().Msg("Queued polling ChatResync")
-				tc.markPollingChatResyncSuccess(evt.ConversationID, now)
-			} else {
-				log.Debug().Msg("Failed to queue polling ChatResync")
-			}
 		}
 	}
 
