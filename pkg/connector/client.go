@@ -209,9 +209,6 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	// Fetch XChat inbox pages
 	fetchLog := log.With().Str("component", "xchat_fetch").Logger()
 	seqID := meta.MaxUserSequenceID
-	if seqID == "" {
-		seqID = "null"
-	}
 	msgPullVersion := meta.MessagePullVersion
 
 	// Errgroup for processing pages in parallel as they're fetched

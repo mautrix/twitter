@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,61 +22,38 @@ type FormEncoder interface {
 	Encode() ([]byte, error)
 }
 
-// makeXChatJSONRequest is a generic helper for XChat API JSON POST requests.
-func makeXChatJSONRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
-	jsonBody, err := variables.Encode()
+// makeXChatQueryRequest is a generic helper for XChat API GET requests that
+// pass GraphQL variables in URL query params.
+func makeXChatQueryRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
+	query, err := variables.Encode()
 	if err != nil {
 		return nil, err
+	}
+
+	requestURL := url
+	if len(query) > 0 {
+		parsedURL, err := neturl.Parse(url)
+		if err != nil {
+			return nil, fmt.Errorf("parse request url: %w", err)
+		}
+		if parsedURL.RawQuery == "" {
+			parsedURL.RawQuery = string(query)
+		} else {
+			parsedURL.RawQuery += "&" + string(query)
+		}
+		requestURL = parsedURL.String()
 	}
 
 	c.Logger.Debug().
-		Str("url", url).
-		RawJSON("json_body", jsonBody).
+		Str("url", requestURL).
+		Int("query_length", len(query)).
 		Msg(opName + " payload")
 
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodPost,
+		URL:            requestURL,
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-		Body:           jsonBody,
-	})
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg(opName + " failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg(opName + " response")
-
-	var resp T
-	return &resp, json.Unmarshal(respBody, &resp)
-}
-
-// makeXChatFormRequest is a generic helper for XChat API form-encoded POST requests.
-func makeXChatFormRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
-	formBody, err := variables.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		Str("url", url).
-		Str("form_body", string(formBody)).
-		Msg(opName + " payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
 	})
 	if err != nil {
 		c.Logger.Debug().
@@ -652,23 +630,23 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 }
 
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
-	return makeXChatJSONRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
+	return makeXChatQueryRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
-	return makeXChatFormRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
+	return makeXChatQueryRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
 }
 
 func (c *Client) GetConversationData(ctx context.Context, variables *payload.GetInboxPageConversationDataQueryVariables) (*response.GetInboxPageConversationDataResponse, error) {
-	return makeXChatFormRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
+	return makeXChatQueryRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
 }
 
 func (c *Client) GetUsersByIdsForXChat(ctx context.Context, variables *payload.GetUsersByIdsForXChatVariables) (*response.GetUsersByIdsForXChatResponse, error) {
-	return makeXChatFormRequest[response.GetUsersByIdsForXChatResponse](c, ctx, endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL, variables, "GetUsersByIdsForXChat")
+	return makeXChatQueryRequest[response.GetUsersByIdsForXChatResponse](c, ctx, endpoints.GET_USERS_BY_IDS_FOR_XCHAT_URL, variables, "GetUsersByIdsForXChat")
 }
 
 func (c *Client) GetConversationPage(ctx context.Context, variables *payload.GetConversationPageQueryVariables) (*response.GetConversationPageQueryResponse, error) {
-	return makeXChatFormRequest[response.GetConversationPageQueryResponse](c, ctx, endpoints.GET_CONVERSATION_PAGE_QUERY_URL, variables, "GetConversationPage")
+	return makeXChatQueryRequest[response.GetConversationPageQueryResponse](c, ctx, endpoints.GET_CONVERSATION_PAGE_QUERY_URL, variables, "GetConversationPage")
 }
 
 // DeleteXChatMessageOpts contains options for deleting messages via XChat.
@@ -1196,35 +1174,5 @@ func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMe
 
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {
 	variables := payload.NewGetPublicKeysQueryVariables(userIDs)
-
-	query, err := variables.Encode()
-	if err != nil {
-		return nil, err
-	}
-
-	url := endpoints.GET_PUBLIC_KEYS_QUERY_URL + "?" + string(query)
-	c.Logger.Debug().
-		Str("url", endpoints.GET_PUBLIC_KEYS_QUERY_URL).
-		Msg("GetPublicKeys payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodGet,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-	})
-	if err != nil {
-		c.Logger.Debug().
-			Str("response_body", string(respBody)).
-			Err(err).
-			Msg("GetPublicKeys failed")
-		return nil, err
-	}
-
-	c.Logger.Trace().
-		Str("response_body", string(respBody)).
-		Msg("GetPublicKeys response")
-
-	var resp response.GetPublicKeysResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return makeXChatQueryRequest[response.GetPublicKeysResponse](c, ctx, endpoints.GET_PUBLIC_KEYS_QUERY_URL, variables, "GetPublicKeys")
 }

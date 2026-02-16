@@ -9,7 +9,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
-	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -26,13 +25,6 @@ const xchatBackfillMaxInt = "9223372036854775807"
 
 func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationID := ParsePortalID(fetchParams.Portal.PortalKey.ID)
-	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
-
-	// Use REST API for conversations without encryption keys.
-	// XChat GraphQL API requires encryption keys to decrypt messages.
-	if !meta.CanUseXChat() {
-		return tc.fetchRESTMessages(ctx, conversationID, fetchParams)
-	}
 
 	if fetchParams.Forward {
 		// Forward backfill for XChat: initial messages are already processed during room creation
@@ -331,141 +323,4 @@ func sortBackfillMessages(msgs []*bridgev2.BackfillMessage) {
 			return 0
 		}
 	})
-}
-
-// fetchRESTMessages fetches messages via the REST API for unencrypted conversations.
-func (tc *TwitterClient) fetchRESTMessages(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
-	log := zerolog.Ctx(ctx)
-
-	reqQuery := payload.DMRequestQuery{}.Default()
-
-	// Use REST conversation ID format (hyphen-separated)
-	restConvID := ConvertConversationIDToREST(conversationID)
-
-	if fetchParams.Forward {
-		// Forward backfill: fetch recent messages.
-		// For initial sync, no anchor means fetch the most recent messages.
-		// With anchor, fetch messages newer than the anchor (using min_id).
-		if fetchParams.Cursor != "" {
-			reqQuery.MinID = string(fetchParams.Cursor)
-		} else if fetchParams.AnchorMessage != nil {
-			reqQuery.MinID = ParseMessageID(fetchParams.AnchorMessage.ID)
-		}
-		// No min_id means fetch the most recent messages (initial forward backfill)
-	} else {
-		// Backward backfill: fetch older messages using max_id.
-		if fetchParams.Cursor != "" {
-			reqQuery.MaxID = string(fetchParams.Cursor)
-		} else if fetchParams.AnchorMessage != nil {
-			reqQuery.MaxID = ParseMessageID(fetchParams.AnchorMessage.ID)
-		} else {
-			// No cursor or anchor for backward backfill - this shouldn't happen
-			// after forward backfill has run, but log it for debugging.
-			log.Debug().
-				Str("conversation_id", conversationID).
-				Msg("REST backward backfill: no cursor or anchor message")
-			return &bridgev2.FetchMessagesResponse{HasMore: false, Forward: false}, nil
-		}
-	}
-
-	log.Debug().
-		Str("conversation_id", restConvID).
-		Str("max_id", reqQuery.MaxID).
-		Str("min_id", reqQuery.MinID).
-		Bool("forward", fetchParams.Forward).
-		Msg("REST API backfill request")
-
-	resp, err := tc.client.FetchConversationContext(ctx, restConvID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION_HISTORY)
-	if err != nil {
-		return nil, fmt.Errorf("fetch conversation context: %w", err)
-	}
-
-	inbox := resp.ConversationTimeline
-	if inbox == nil {
-		return &bridgev2.FetchMessagesResponse{HasMore: false}, nil
-	}
-
-	// Get sorted messages for this conversation
-	messages := inbox.SortedMessages(ctx)[restConvID]
-
-	if len(messages) == 0 {
-		return &bridgev2.FetchMessagesResponse{
-			Messages: []*bridgev2.BackfillMessage{},
-			HasMore:  false,
-			Forward:  fetchParams.Forward,
-		}, nil
-	}
-
-	// Convert messages to BackfillMessage format
-	backfillMessages := make([]*bridgev2.BackfillMessage, 0, len(messages))
-	for _, msg := range messages {
-		ts := methods.ParseSnowflake(msg.ID)
-		streamOrder := methods.ParseInt64(msg.ID)
-
-		converted := tc.convertToMatrix(ctx, fetchParams.Portal, tc.connector.br.Bot, &msg.MessageData)
-		if converted == nil || len(converted.Parts) == 0 {
-			log.Warn().Str("message_id", msg.ID).Msg("Failed to convert message for backfill")
-			continue
-		}
-
-		backfillMessages = append(backfillMessages, &bridgev2.BackfillMessage{
-			ConvertedMessage: converted,
-			Sender:           tc.MakeEventSender(msg.MessageData.SenderID),
-			ID:               MakeMessageID(msg.ID),
-			TxnID:            networkid.TransactionID(msg.ID),
-			Timestamp:        ts,
-			StreamOrder:      streamOrder,
-			Reactions:        tc.convertBackfillReactions(msg.MessageReactions),
-		})
-	}
-
-	sortBackfillMessages(backfillMessages)
-
-	hasMore := inbox.Status == types.PaginationStatusHasMore
-
-	result := &bridgev2.FetchMessagesResponse{
-		Messages: backfillMessages,
-		HasMore:  hasMore,
-		Forward:  fetchParams.Forward,
-	}
-
-	// Set cursor for next backfill request
-	if fetchParams.Forward {
-		// Forward backfill: use MaxEntryID to get newer messages next time
-		if hasMore && inbox.MaxEntryID != "" {
-			result.Cursor = networkid.PaginationCursor(inbox.MaxEntryID)
-		}
-	} else {
-		// Backward backfill: use MinEntryID to get older messages next time
-		if hasMore && inbox.MinEntryID != "" {
-			result.Cursor = networkid.PaginationCursor(inbox.MinEntryID)
-		}
-	}
-
-	log.Debug().
-		Int("message_count", len(backfillMessages)).
-		Bool("has_more", hasMore).
-		Str("min_entry_id", inbox.MinEntryID).
-		Str("max_entry_id", inbox.MaxEntryID).
-		Str("cursor", string(result.Cursor)).
-		Bool("forward", fetchParams.Forward).
-		Msg("REST API backfill response")
-
-	return result, nil
-}
-
-func (tc *TwitterClient) convertBackfillReactions(reactions []types.MessageReaction) []*bridgev2.BackfillReaction {
-	if len(reactions) == 0 {
-		return nil
-	}
-	backfillReactions := make([]*bridgev2.BackfillReaction, 0, len(reactions))
-	for _, reaction := range reactions {
-		emoji := variationselector.FullyQualify(reaction.EmojiReaction)
-		backfillReactions = append(backfillReactions, &bridgev2.BackfillReaction{
-			Timestamp: methods.ParseSnowflake(reaction.ID),
-			Sender:    tc.MakeEventSender(reaction.SenderID),
-			Emoji:     emoji,
-		})
-	}
-	return backfillReactions
 }
