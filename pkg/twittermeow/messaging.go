@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	neturl "net/url"
@@ -712,6 +713,14 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 			MessageID:                 messageID,
 			EncodedMessageEventDetail: encodedDetail,
 		}
+		actionSig.SignaturePayload = crypto.SignaturePayloadMessageDeleteEvent(
+			messageID,
+			senderID,
+			opts.ConversationID,
+			token,
+			createdAtMsec,
+			encodedDetail,
+		)
 
 		if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
 			signature, err := crypto.SignMessageDeleteEvent(
@@ -818,6 +827,14 @@ func (c *Client) MuteConversation(ctx context.Context, conversationID string) er
 		MessageID:                 messageID,
 		EncodedMessageEventDetail: encodedDetail,
 	}
+	actionSig.SignaturePayload = crypto.SignaturePayloadMuteConversation(
+		messageID,
+		senderID,
+		conversationID,
+		token,
+		createdAtMsec,
+		encodedDetail,
+	)
 
 	if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
 		signature, err := crypto.SignMuteConversation(
@@ -911,6 +928,14 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 		MessageID:                 messageID,
 		EncodedMessageEventDetail: encodedDetail,
 	}
+	actionSig.SignaturePayload = crypto.SignaturePayloadUnmuteConversation(
+		messageID,
+		senderID,
+		conversationID,
+		token,
+		createdAtMsec,
+		encodedDetail,
+	)
 
 	if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
 		signature, err := crypto.SignUnmuteConversation(
@@ -980,7 +1005,14 @@ func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID str
 
 	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
 	if err != nil {
-		return fmt.Errorf("get conversation token: %w", err)
+		if errors.Is(err, crypto.ErrKeyNotFound) {
+			c.Logger.Debug().
+				Str("conversation_id", conversationID).
+				Msg("DeleteXChatConversation: conversation token missing, continuing with empty token")
+			token = ""
+		} else {
+			return fmt.Errorf("get conversation token: %w", err)
+		}
 	}
 
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
@@ -1006,6 +1038,7 @@ func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID str
 		MessageID:                 messageID,
 		EncodedMessageEventDetail: encodedDetail,
 	}
+	actionSig.SignaturePayload = crypto.SignaturePayloadConversationDeletion(messageID, senderID, conversationID)
 
 	signature, err := crypto.SignConversationDeletion(
 		keyPair.SigningKey,

@@ -790,10 +790,12 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 		return errors.New("delete for everyone is not supported")
 	}
 	conversationID := ParsePortalID(chat.Portal.ID)
-	meta := chat.Portal.Metadata.(*PortalMetadata)
-	if meta.CanUseXChat() {
-		return tc.client.DeleteXChatConversation(ctx, conversationID)
+
+	xchatErr := tc.client.DeleteXChatConversation(ctx, conversationID)
+	if xchatErr == nil {
+		return nil
 	}
+
 	reqQuery := payload.DMRequestQuery{}.Default()
 	return tc.client.DeleteConversation(ctx, ConvertConversationIDToREST(conversationID), &reqQuery)
 }
@@ -809,7 +811,14 @@ func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bri
 		return errors.New("message sequence ID not found")
 	}
 
-	// TODO unencrypted chats?
+	// Unencrypted conversations only support delete-for-self through the legacy API.
+	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+		_, err := tc.client.DeleteMessageForMe(ctx, &payload.DMMessageDeleteMutationVariables{
+			MessageID: sequenceID,
+		})
+		return err
+	}
+
 	return tc.client.DeleteXChatMessage(ctx, twittermeow.DeleteXChatMessageOpts{
 		ConversationID: conversationID,
 		SequenceIDs:    []string{sequenceID},

@@ -43,9 +43,14 @@ func SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversatio
 // SignaturePreimageMessageDeleteEvent builds the preimage for signature version 4 for delete events.
 // Format: "MessageDeleteEvent,{message_id},{sender_id},{conversation_id},{conversation_token},{created_at_msec},{encoded_message_event_detail}"
 func SignaturePreimageMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
-	preimage := fmt.Sprintf("MessageDeleteEvent,%s,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	preimage := SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 	return []byte(preimage)
+}
+
+// SignaturePayloadMessageDeleteEvent builds the canonical signature payload for MessageDeleteEvent.
+func SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) string {
+	return fmt.Sprintf("MessageDeleteEvent,%s,%s,%s,%s,%s,%s",
+		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 }
 
 // Sign creates an ECDSA P-256 signature over the given preimage.
@@ -93,9 +98,14 @@ func SignMessageDeleteEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, c
 
 // SignaturePreimageMuteConversation builds the preimage for signature version 4 for mute events.
 func SignaturePreimageMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
-	preimage := fmt.Sprintf("MuteConversation,%s,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	preimage := SignaturePayloadMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 	return []byte(preimage)
+}
+
+// SignaturePayloadMuteConversation builds the canonical signature payload for MuteConversation.
+func SignaturePayloadMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) string {
+	return fmt.Sprintf("MuteConversation,%s,%s,%s,%s,%s,%s",
+		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 }
 
 // SignMuteConversation creates a signature for a MuteConversation event.
@@ -106,15 +116,26 @@ func SignMuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, con
 
 // SignaturePreimageUnmuteConversation builds the preimage for signature version 4 for unmute events.
 func SignaturePreimageUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
-	preimage := fmt.Sprintf("UnmuteConversation,%s,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	preimage := SignaturePayloadUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 	return []byte(preimage)
+}
+
+// SignaturePayloadUnmuteConversation builds the canonical signature payload for UnmuteConversation.
+func SignaturePayloadUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) string {
+	return fmt.Sprintf("UnmuteConversation,%s,%s,%s,%s,%s,%s",
+		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 }
 
 // SignUnmuteConversation creates a signature for an UnmuteConversation event.
 func SignUnmuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
 	preimage := SignaturePreimageUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
 	return Sign(privateKey, preimage)
+}
+
+// SignaturePayloadConversationDeletion builds the canonical signature payload for ConversationDeleteEvent.
+func SignaturePayloadConversationDeletion(messageID, senderID, conversationID string) string {
+	return fmt.Sprintf("ConversationDeleteEvent,%s,%s,%s",
+		messageID, senderID, conversationID)
 }
 
 // SignaturePreimageConversationDeletion builds the preimage for signature version 4 for conversation deletion events.
@@ -124,8 +145,7 @@ func SignaturePreimageConversationDeletion(messageID, senderID, conversationID, 
 	_ = createdAtMsec
 	_ = encodedMessageEventDetail
 
-	preimage := fmt.Sprintf("ConversationDeleteEvent,%s,%s,%s",
-		messageID, senderID, conversationID)
+	preimage := SignaturePayloadConversationDeletion(messageID, senderID, conversationID)
 	return []byte(preimage)
 }
 
