@@ -63,10 +63,6 @@ var (
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
 
-// Used to generate a deterministic UUID for XChat MessageId based on the Matrix event ID.
-// This avoids accidental double-sends if the same Matrix event is reprocessed.
-var xchatMessageIDNamespace = uuid.MustParse("c2be90fe-13d0-4c77-9a27-92572c8c700b")
-
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
 		return nil
@@ -101,11 +97,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 	}
 	if messageID == "" {
-		if msg.Event != nil {
-			messageID = uuid.NewSHA1(xchatMessageIDNamespace, []byte(msg.Event.ID.String())).String()
-		} else {
-			messageID = uuid.NewString()
-		}
+		messageID = uuid.NewString()
 	}
 
 	opts := twittermeow.SendEncryptedMessageOpts{
@@ -292,9 +284,25 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		}
 		return nil, err
 	}
+	zerolog.Ctx(ctx).Debug().
+		Str("conversation_id", conversationID).
+		Str("message_id", messageID).
+		Any("response", resp).
+		Msg("XChat send message response")
 
 	if resp != nil && resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent != "" {
-		if decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent); err == nil && decoded != nil && decoded.MessageEvent != nil && *decoded.MessageEvent != "" {
+		decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
+		if err != nil {
+			zerolog.Ctx(ctx).Debug().
+				Err(err).
+				Str("conversation_id", conversationID).
+				Str("message_id", messageID).
+				Msg("Failed to decode XChat send message response")
+		} else if decoded != nil && decoded.MessageEvent != nil && *decoded.MessageEvent != "" {
+			zerolog.Ctx(ctx).Debug().
+				Str("conversation_id", conversationID).
+				Str("message_id", messageID).
+				Msg("Decoded XChat send message event")
 			if evt, err := twittermeow.DecodeMessageEvent(*decoded.MessageEvent); err == nil && evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
 				dbMsg.ID = MakeMessageID(*evt.SequenceId)
 			}
