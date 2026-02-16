@@ -62,7 +62,8 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		return
 	}
 
-	// XChat conversations are always trusted - set this first, never downgrade
+	// XChat conversations are socially trusted (not message requests).
+	// Note: Independent of whether encryption keys are available yet.
 	meta := portal.Metadata.(*PortalMetadata)
 	if !meta.Trusted {
 		meta.Trusted = true
@@ -98,9 +99,23 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 				Msg("Failed to create Matrix room")
 			return
 		}
+		// Register backfill task for the newly created room
+		if chatInfo.CanBackfill {
+			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
+				log.Warn().Err(err).
+					Str("conversation_id", conv.ConversationID).
+					Msg("Failed to ensure backfill task exists for new room")
+			} else {
+				tc.connector.br.WakeupBackfillQueue()
+			}
+		}
 	} else {
 		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
-		if (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil {
+		needsUpdate := (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil
+		if !needsUpdate && chatInfo.Type != nil && portal.RoomType != *chatInfo.Type {
+			needsUpdate = true
+		}
+		if needsUpdate {
 			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 				EventMeta: simplevent.EventMeta{
 					Type:      bridgev2.RemoteEventChatInfoChange,
@@ -130,8 +145,9 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 		Muted:          detail.IsMuted,
 	}
 
-	// Determine conversation type based on participants
-	if len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil {
+	// Determine conversation type based on conversation ID and metadata.
+	if strings.HasPrefix(detail.ConversationID, "g") || detail.GroupMetadata != nil ||
+		len(detail.GroupMembersResults) > 0 || len(detail.GroupAdminsResults) > 0 {
 		conv.Type = ConversationTypeGroupDM
 	} else {
 		conv.Type = ConversationTypeOneToOne
@@ -158,34 +174,77 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 
 // xchatItemToChatInfo converts an XChatInboxItem to bridgev2 chat info.
 func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User, conv *types.Conversation) *bridgev2.ChatInfo {
+	log := zerolog.Ctx(ctx)
 	detail := item.ConversationDetail
 
-	isGroup := len(detail.ParticipantsResults) > 2 || detail.GroupMetadata != nil
+	log.Debug().
+		Str("conversation_id", detail.ConversationID).
+		Int("participants_count", len(detail.ParticipantsResults)).
+		Int("group_members_count", len(detail.GroupMembersResults)).
+		Int("users_map_count", len(users)).
+		Msg("xchatItemToChatInfo building member list")
 
-	memberMap := make(bridgev2.ChatMemberMap, len(detail.ParticipantsResults))
-	for _, p := range detail.ParticipantsResults {
+	isGroup := strings.HasPrefix(detail.ConversationID, "g") || detail.GroupMetadata != nil ||
+		len(detail.GroupMembersResults) > 0 || len(detail.GroupAdminsResults) > 0
+
+	memberResults := make([]response.XChatUserResult, 0, len(detail.ParticipantsResults)+len(detail.GroupMembersResults)+len(detail.GroupAdminsResults))
+	memberResults = append(memberResults, detail.ParticipantsResults...)
+	memberResults = append(memberResults, detail.GroupMembersResults...)
+	memberResults = append(memberResults, detail.GroupAdminsResults...)
+
+	memberByID := make(map[string]response.XChatUserResult, len(memberResults))
+	memberOrder := make([]string, 0, len(memberResults))
+	for _, r := range memberResults {
+		if r.RestID == "" {
+			continue
+		}
+		if existing, ok := memberByID[r.RestID]; ok {
+			if existing.Result == nil && r.Result != nil {
+				memberByID[r.RestID] = r
+			}
+			continue
+		}
+		memberByID[r.RestID] = r
+		memberOrder = append(memberOrder, r.RestID)
+	}
+
+	memberMap := make(bridgev2.ChatMemberMap, len(memberByID))
+	for _, restID := range memberOrder {
+		p := memberByID[restID]
 		var userInfo *bridgev2.UserInfo
-		// First try inline Result from participants_results, then fall back to users map or cache
+		// First try inline Result from participants_results
 		if p.Result != nil {
 			user := twittermeow.ConvertXChatUserToUser(p.Result)
 			userInfo = tc.connector.wrapUserInfo(tc.client, user)
-		} else if users != nil {
+		}
+		// Then try users map if provided
+		if userInfo == nil && users != nil {
 			if user, ok := users[p.RestID]; ok {
 				userInfo = tc.connector.wrapUserInfo(tc.client, user)
 			}
-		} else {
-			// Fall back to user cache when users map is nil
+		}
+		// Finally fall back to user cache
+		if userInfo == nil {
 			tc.userCacheLock.RLock()
 			if user, ok := tc.userCache[p.RestID]; ok {
 				userInfo = tc.connector.wrapUserInfo(tc.client, user)
 			}
 			tc.userCacheLock.RUnlock()
 		}
+		log.Debug().
+			Str("rest_id", p.RestID).
+			Bool("has_result", p.Result != nil).
+			Bool("has_user_info", userInfo != nil).
+			Msg("xchatItemToChatInfo adding participant")
 		memberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
 			UserInfo:    userInfo,
 		})
 	}
+
+	log.Debug().
+		Int("final_member_count", len(memberMap)).
+		Msg("xchatItemToChatInfo finished building members")
 
 	// MessageRequest is true for untrusted conversations (message requests)
 	var messageRequest *bool
@@ -196,7 +255,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	info := &bridgev2.ChatInfo{
 		Members: &bridgev2.ChatMemberList{
 			IsFull:           true,
-			TotalMemberCount: len(detail.ParticipantsResults),
+			TotalMemberCount: len(memberMap),
 			MemberMap:        memberMap,
 		},
 		CanBackfill:    true,
@@ -204,8 +263,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	}
 
 	if isGroup {
-		// TODO this is wrong, should be default
-		info.Type = ptr.Ptr(database.RoomTypeGroupDM)
+		info.Type = ptr.Ptr(database.RoomTypeDefault)
 		if conv != nil && conv.AvatarImageHttps != "" {
 			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, conv.AvatarImageHttps, "")
 		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
@@ -294,6 +352,32 @@ func (tc *TwitterClient) decryptGroupName(ctx context.Context, conversationID, e
 	return string(plaintext)
 }
 
+// isProbablyEncryptedGroupName checks if a string looks like an XChat-encrypted group
+// name (base64(secretbox(nonce||ciphertext))). This is used to avoid setting Matrix
+// room names to ciphertext if decryption fails.
+func isProbablyEncryptedGroupName(encName string) bool {
+	if encName == "" {
+		return false
+	}
+	// Strip optional key version prefix (keyVersion:ciphertextB64).
+	if parts := strings.SplitN(encName, ":", 2); len(parts) == 2 && parts[0] != "" {
+		encName = parts[1]
+	}
+
+	var decoded []byte
+	if dec, err := base64.StdEncoding.DecodeString(encName); err == nil {
+		decoded = dec
+	} else if dec, err := base64.RawStdEncoding.DecodeString(encName); err == nil {
+		decoded = dec
+	} else {
+		return false
+	}
+
+	// crypto.SecretboxDecrypt expects nonce||ciphertext and requires at least
+	// 24-byte nonce + 16-byte Poly1305 overhead.
+	return len(decoded) >= 40
+}
+
 // syncUntrustedChannels fetches and syncs untrusted (message request) conversations via the REST API.
 func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
@@ -378,7 +462,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		// No need to save since Trusted=false is the zero value
 	}
 
-	chatInfo := tc.conversationToChatInfo(conv, inbox)
+	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
 
 	// Create Matrix room if it doesn't exist
 	if portal.MXID == "" {
@@ -389,6 +473,18 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 				Msg("Failed to create Matrix room for untrusted conversation")
 			return
 		}
+	} else {
+		// Room already exists - update MessageRequest status via ChatInfoChange
+		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventChatInfoChange,
+				PortalKey: portal.PortalKey,
+				Timestamp: time.Now(),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: chatInfo,
+			},
+		})
 	}
 
 	// Process messages for this conversation from inbox entries
@@ -427,36 +523,28 @@ func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversat
 }
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.
-func (tc *TwitterClient) conversationToChatInfo(conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
-	memberMap := make(bridgev2.ChatMemberMap, len(conv.Participants))
+func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) *bridgev2.ChatInfo {
+	participantIDs := make([]string, 0, len(conv.Participants))
 	for _, participant := range conv.Participants {
-		var userInfo *bridgev2.UserInfo
-		if inbox != nil {
-			if user, ok := inbox.Users[participant.UserID]; ok {
-				userInfo = tc.connector.wrapUserInfo(tc.client, user)
-			}
+		if participant.UserID == "" {
+			continue
 		}
-		if userInfo == nil {
-			tc.userCacheLock.RLock()
-			if user, ok := tc.userCache[participant.UserID]; ok {
-				userInfo = tc.connector.wrapUserInfo(tc.client, user)
-			}
-			tc.userCacheLock.RUnlock()
+		participantIDs = append(participantIDs, participant.UserID)
+	}
+
+	// Some REST endpoints occasionally return incomplete participant lists for 1:1 DMs.
+	// Fall back to parsing the conversation ID to ensure we have both user IDs.
+	if len(participantIDs) < 2 && !strings.HasPrefix(conv.ConversationID, "g") && conv.Type != ConversationTypeGroupDM {
+		parts := strings.Split(NormalizeConversationID(conv.ConversationID), ":")
+		if len(parts) == 2 {
+			participantIDs = append(participantIDs, parts...)
 		}
-		memberMap.Set(bridgev2.ChatMember{
-			EventSender: tc.MakeEventSender(participant.UserID),
-			UserInfo:    userInfo,
-		})
 	}
 
 	messageRequest := !conv.Trusted
 
 	info := &bridgev2.ChatInfo{
-		Members: &bridgev2.ChatMemberList{
-			IsFull:           true,
-			TotalMemberCount: len(conv.Participants),
-			MemberMap:        memberMap,
-		},
+		Members:        tc.buildChatMembersFromUserIDs(ctx, conv.ConversationID, participantIDs, inbox),
 		CanBackfill:    true,
 		MessageRequest: &messageRequest,
 	}

@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -48,13 +47,6 @@ func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
 
 const MaxTextLength = 10000
 
-func supportedIfFFmpeg() event.CapabilitySupportLevel {
-	if ffmpeg.Supported() {
-		return event.CapLevelPartialSupport
-	}
-	return event.CapLevelRejected
-}
-
 var groupCaps = &event.RoomFeatures{
 	ID: "fi.mau.twitter.capabilities.2026_01_08",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
@@ -81,17 +73,6 @@ var groupCaps = &event.RoomFeatures{
 			MaxCaptionLength: MaxTextLength,
 			MaxSize:          15 * 1024 * 1024,
 		},
-		event.CapMsgVoice: {
-			MimeTypes: map[string]event.CapabilitySupportLevel{
-				"audio/aac": supportedIfFFmpeg(),
-				"audio/ogg": supportedIfFFmpeg(),
-				"video/mp4": event.CapLevelFullySupported,
-			},
-			Caption:          event.CapLevelFullySupported,
-			MaxCaptionLength: MaxTextLength,
-			MaxSize:          5 * 1024 * 1024,
-			MaxDuration:      ptr.Ptr(jsontime.S(140 * time.Second)),
-		},
 		event.CapMsgGIF: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
 				"image/gif": event.CapLevelFullySupported,
@@ -114,14 +95,12 @@ var groupCaps = &event.RoomFeatures{
 
 	Reply: event.CapLevelFullySupported,
 
-	Edit:          event.CapLevelFullySupported,
-	EditMaxCount:  10,
-	EditMaxAge:    ptr.Ptr(jsontime.S(15 * time.Minute)),
-	Reaction:      event.CapLevelFullySupported,
-	ReactionCount: 1,
-
-	Delete:      event.CapLevelFullySupported,
-	DeleteForMe: true,
+	Edit:         event.CapLevelFullySupported,
+	EditMaxCount: 10,
+	EditMaxAge:   ptr.Ptr(jsontime.S(15 * time.Minute)),
+	Reaction:     event.CapLevelFullySupported,
+	Delete:       event.CapLevelFullySupported,
+	DeleteForMe:  true,
 
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,
@@ -140,8 +119,18 @@ func init() {
 }
 
 func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	baseCaps := groupCaps
 	if portal.RoomType == database.RoomTypeDM {
-		return dmCaps
+		baseCaps = dmCaps
 	}
-	return groupCaps
+
+	// Disable editing for conversations without encryption keys
+	if meta, ok := portal.Metadata.(*PortalMetadata); ok && !meta.CanUseXChat() {
+		caps := ptr.Clone(baseCaps)
+		caps.Edit = event.CapLevelRejected
+		caps.ID += "+no-edit"
+		return caps
+	}
+
+	return baseCaps
 }

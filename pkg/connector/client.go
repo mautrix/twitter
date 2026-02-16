@@ -53,6 +53,8 @@ type TwitterClient struct {
 	matrixParser *format.HTMLParser
 
 	ensurePortalLocks sync.Map
+
+	pollingChatResyncLast sync.Map
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -67,6 +69,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 	}
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
 	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
+	client.SetConversationDataCallback(tc.HandleConversationDataRefresh)
 	// Ensure current user ID is available even if cookies omit twid
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
 	tc.matrixParser = &format.HTMLParser{
@@ -123,11 +126,11 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	if meta.Cookies != "" && meta.SecretKey == "" && meta.SigningKey == "" {
 		log.Info().
 			Str("user_id", ParseUserLoginID(tc.userLogin.ID)).
-			Msg("Migration detected: user has cookies but missing encryption keys, triggering PIN-only reauth")
+			Msg("Migration detected: user has cookies but missing encryption keys, triggering passcode-only reauth")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateBadCredentials,
 			Error:      "twitter-migration-reauth",
-			Message:    "Please re-authenticate to enable encrypted messaging. You only need to enter your PIN.",
+			Message:    "Please re-authenticate to enable X Chat. You only need to enter your passcode.",
 		})
 		return
 	}
@@ -171,6 +174,18 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			}
 			return
 		}
+	}
+
+	// Full XChat inbox sync (migration / fresh login) can take a while. Mark as connected once we
+	// know credentials are valid, and let the initial sync finish in the background.
+	if meta.PendingEncryptedSync || meta.MaxUserSequenceID == "" {
+		tc.userLogin.BridgeState.Send(status.BridgeState{
+			StateEvent: status.StateConnected,
+			Reason:     "sync_in_progress",
+			Info: map[string]any{
+				"sync": "in_progress",
+			},
+		})
 	}
 
 	// Start REST API sync for untrusted conversations in parallel
@@ -402,7 +417,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	selfUser := tc.userCache[currentUserID]
 	tc.userCacheLock.RUnlock()
 	if selfUser != nil {
-		remoteProfile := tc.makeXChatRemoteProfile(selfUser)
+		remoteProfile := tc.makeXChatRemoteProfile(ctx, selfUser)
 		if tc.userLogin.RemoteName != remoteProfile.Username ||
 			tc.userLogin.RemoteProfile != *remoteProfile {
 			tc.userLogin.RemoteName = remoteProfile.Username
@@ -438,18 +453,29 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 }
 
 // makeXChatRemoteProfile creates a RemoteProfile from XChat user data.
-func (tc *TwitterClient) makeXChatRemoteProfile(user *types.User) *status.RemoteProfile {
-	var avatarMXC id.ContentURIString
-	// TODO context.Background is forbidden
-	ownGhost, err := tc.connector.br.GetGhostByID(context.Background(), MakeUserID(user.IDStr))
-	if err == nil && ownGhost != nil {
-		avatarMXC = ownGhost.AvatarMXC
-	}
+func (tc *TwitterClient) makeXChatRemoteProfile(ctx context.Context, user *types.User) *status.RemoteProfile {
+	avatarMXC := tc.syncOwnAvatarFromUser(ctx, user)
 	return &status.RemoteProfile{
 		Username: user.ScreenName,
 		Name:     user.Name,
 		Avatar:   avatarMXC,
 	}
+}
+
+func (tc *TwitterClient) syncOwnAvatarFromUser(ctx context.Context, user *types.User) id.ContentURIString {
+	if user == nil || user.IDStr == "" {
+		return ""
+	}
+	if user.IDStr != tc.client.GetCurrentUserID() {
+		return ""
+	}
+	ownGhost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(user.IDStr))
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to get own ghost by ID for avatar sync")
+		return ""
+	}
+	ownGhost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
+	return ownGhost.AvatarMXC
 }
 
 // parseSequenceID parses a sequence ID string to int64.
@@ -528,4 +554,80 @@ func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) []str
 	missingIDs = append(missingIDs, tc.collectAndCacheUserResults(item.ConversationDetail.GroupMembersResults)...)
 	missingIDs = append(missingIDs, tc.collectAndCacheUserResults(item.ConversationDetail.GroupAdminsResults)...)
 	return missingIDs
+}
+
+// HandleConversationDataRefresh is called when conversation data is fetched on-demand.
+// It syncs the room data (members, name, avatar, etc.) from the fetched conversation data.
+func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conversationID string, item *response.XChatInboxItem) {
+	if item == nil {
+		return
+	}
+
+	log := zerolog.Ctx(ctx).With().
+		Str("conversation_id", conversationID).
+		Logger()
+
+	// Build users map from item and collect missing IDs
+	users := make(map[string]*types.User)
+	var missingIDs []string
+
+	collect := func(results []response.XChatUserResult) {
+		for _, r := range results {
+			if r.Result != nil {
+				users[r.RestID] = twittermeow.ConvertXChatUserToUser(r.Result)
+			} else if r.RestID != "" {
+				missingIDs = append(missingIDs, r.RestID)
+			}
+		}
+	}
+	collect(item.ConversationDetail.ParticipantsResults)
+	collect(item.ConversationDetail.GroupMembersResults)
+	collect(item.ConversationDetail.GroupAdminsResults)
+
+	// Fallback for 1:1 DMs: if no participants in response, parse from conversation ID
+	if len(item.ConversationDetail.ParticipantsResults) == 0 && !strings.HasPrefix(conversationID, "g") {
+		parts := strings.Split(conversationID, ":")
+		if len(parts) == 2 {
+			for _, userID := range parts {
+				if userID != "" && users[userID] == nil {
+					missingIDs = append(missingIDs, userID)
+				}
+			}
+			// Populate ParticipantsResults so syncXChatChannel can build member list
+			for _, userID := range parts {
+				if userID != "" {
+					item.ConversationDetail.ParticipantsResults = append(
+						item.ConversationDetail.ParticipantsResults,
+						response.XChatUserResult{RestID: userID},
+					)
+				}
+			}
+			log.Debug().
+				Strs("parsed_user_ids", parts).
+				Msg("Parsed user IDs from conversation ID (no participants in response)")
+		}
+	}
+
+	// Fetch missing users via API
+	if err := tc.ensureUsersInCacheByID(ctx, missingIDs); err != nil {
+		log.Warn().Err(err).Msg("Failed to fetch missing users for conversation data refresh")
+	}
+
+	// Pull missing users from cache
+	tc.userCacheLock.RLock()
+	for _, id := range missingIDs {
+		if users[id] == nil {
+			if u := tc.userCache[id]; u != nil {
+				users[id] = u
+			}
+		}
+	}
+	tc.userCacheLock.RUnlock()
+
+	log.Debug().
+		Int("users_count", len(users)).
+		Int("missing_fetched", len(missingIDs)).
+		Msg("Syncing conversation data from refresh callback")
+
+	tc.syncXChatChannel(ctx, item, users)
 }

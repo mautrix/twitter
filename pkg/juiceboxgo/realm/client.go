@@ -103,11 +103,14 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 	}
 
 	reqURL := buildRequestURL(c.realm.Address)
-	c.logger.Debug().
+	logEvt := c.logger.Debug().
 		Str("url", reqURL).
 		Str("request_cbor_hex", hex.EncodeToString(body)).
-		Int("request_len", len(body)).
-		Msg("Sending software realm request")
+		Int("request_len", len(body))
+	if c.logger.GetLevel() == zerolog.TraceLevel {
+		logEvt.Str("request_cbor_hex", hex.EncodeToString(body))
+	}
+	logEvt.Msg("Sending software realm request")
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
@@ -132,11 +135,13 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 		return nil, types.ErrTransient
 	}
 
-	c.logger.Debug().
+	logEvt = c.logger.Debug().
 		Int("status_code", resp.StatusCode).
-		Str("response_cbor_hex", hex.EncodeToString(respBody)).
-		Int("response_len", len(respBody)).
-		Msg("Received software realm response")
+		Int("response_len", len(respBody))
+	if c.logger.GetLevel() == zerolog.TraceLevel {
+		logEvt.Str("response_cbor_hex", hex.EncodeToString(respBody))
+	}
+	logEvt.Msg("Received software realm response")
 
 	if err := checkStatusCode(resp.StatusCode); err != nil {
 		return nil, err
@@ -333,12 +338,14 @@ func (c *Client) sendClientRequest(ctx context.Context, req *requests.ClientRequ
 	}
 
 	reqURL := buildRequestURL(c.realm.Address)
-	c.logger.Debug().
+	logEvt := c.logger.Debug().
 		Str("url", reqURL).
 		Str("kind", string(req.Kind)).
-		Str("request_cbor_hex", hex.EncodeToString(body)).
-		Int("request_len", len(body)).
-		Msg("Sending hardware realm request")
+		Int("request_len", len(body))
+	if c.logger.GetLevel() == zerolog.TraceLevel {
+		logEvt.Str("request_cbor_hex", hex.EncodeToString(body))
+	}
+	logEvt.Msg("Sending hardware realm request")
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
@@ -362,11 +369,13 @@ func (c *Client) sendClientRequest(ctx context.Context, req *requests.ClientRequ
 		return nil, types.ErrTransient
 	}
 
-	c.logger.Debug().
+	logEvt = c.logger.Debug().
 		Int("status_code", resp.StatusCode).
-		Str("response_cbor_hex", hex.EncodeToString(respBody)).
-		Int("response_len", len(respBody)).
-		Msg("Received hardware realm response")
+		Int("response_len", len(respBody))
+	if c.logger.GetLevel() == zerolog.TraceLevel {
+		logEvt.Str("response_cbor_hex", hex.EncodeToString(respBody))
+	}
+	logEvt.Msg("Received hardware realm response")
 
 	if err := checkStatusCode(resp.StatusCode); err != nil {
 		return nil, err

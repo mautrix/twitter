@@ -701,6 +701,9 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
 	}
+	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return fmt.Errorf("missing signing key data: signed message deletion requires message_event_signature")
+	}
 
 	deleteAction := payload.DeleteMessageActionTypeForSelf
 	thriftAction := int32(payload.DeleteMessageActionDeleteForSelf)
@@ -752,6 +755,11 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 				PublicKeyVersion: keyPair.KeyVersion,
 				SignatureVersion: sigVersion,
 			}
+		} else {
+			c.Logger.Warn().
+				Str("conversation_id", opts.ConversationID).
+				Str("sequence_id", seqID).
+				Msg("Proceeding with unsigned message deletion")
 		}
 
 		actionSignatures = append(actionSignatures, actionSig)
@@ -811,6 +819,9 @@ func (c *Client) MuteConversation(ctx context.Context, conversationID string) er
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
+	}
+	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return fmt.Errorf("missing signing key data: signed conversation deletion requires message_event_signature")
 	}
 
 	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
@@ -978,6 +989,99 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 	return nil
 }
 
+// DeleteXChatConversation deletes a conversation via the XChat ConversationDeletion GraphQL endpoint.
+func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID string) error {
+	if conversationID == "" {
+		return fmt.Errorf("conversation ID is required")
+	}
+
+	senderID := c.GetCurrentUserID()
+	if senderID == "" {
+		return fmt.Errorf("sender ID is required")
+	}
+
+	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("get conversation token: %w", err)
+	}
+
+	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
+	}
+
+	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
+	messageID := uuid.NewString()
+
+	detail := &payload.MessageEventDetail{
+		ConversationDeleteEvent: &payload.ConversationDeleteEvent{
+			ConversationId: &conversationID,
+		},
+	}
+
+	encodedDetail, err := crypto.EncodeMessageEventDetail(detail)
+	if err != nil {
+		return fmt.Errorf("encode conversation delete event: %w", err)
+	}
+
+	actionSig := payload.DeleteMessageActionSignature{
+		MessageID:                 messageID,
+		EncodedMessageEventDetail: encodedDetail,
+	}
+
+	signature, err := crypto.SignConversationDeletion(
+		keyPair.SigningKey,
+		messageID,
+		senderID,
+		conversationID,
+		token,
+		createdAtMsec,
+		encodedDetail,
+	)
+	if err != nil {
+		return fmt.Errorf("sign conversation deletion event: %w", err)
+	}
+
+	sigVersion := crypto.SignatureVersion4
+	actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
+		Signature:        signature,
+		PublicKeyVersion: keyPair.KeyVersion,
+		SignatureVersion: sigVersion,
+	}
+
+	pl := payload.NewDeleteConversationMutationPayload(payload.DeleteConversationMutationVariables{
+		ConversationID:   conversationID,
+		ActionSignatures: []payload.DeleteMessageActionSignature{actionSig},
+	})
+
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("DeleteXChatConversation payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.DELETE_CONVERSATION_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Debug().
+		RawJSON("response", respBody).
+		Msg("DeleteXChatConversation response")
+
+	return nil
+}
+
 func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxInitialStateResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
@@ -1015,6 +1119,29 @@ func (c *Client) GetDMUserUpdates(ctx context.Context, params *payload.DMRequest
 	}
 
 	data := response.GetDMUserUpdatesResponse{}
+	return &data, json.Unmarshal(respBody, &data)
+}
+
+// FetchConversationContext fetches messages for a conversation via the REST API.
+// Used for backfill in unencrypted/untrusted conversations.
+func (c *Client) FetchConversationContext(ctx context.Context, conversationID string, params *payload.DMRequestQuery, context payload.ContextInfo) (*response.ConversationDMResponse, error) {
+	params.Context = context
+	encodedQuery, err := params.Encode()
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s?%s", fmt.Sprintf(endpoints.CONVERSATION_FETCH_MESSAGES_URL, conversationID), string(encodedQuery))
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodGet,
+		WithClientUUID: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	data := response.ConversationDMResponse{}
 	return &data, json.Unmarshal(respBody, &data)
 }
 
@@ -1070,23 +1197,21 @@ func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMe
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {
 	variables := payload.NewGetPublicKeysQueryVariables(userIDs)
 
-	formBody, err := variables.Encode()
+	query, err := variables.Encode()
 	if err != nil {
 		return nil, err
 	}
 
+	url := endpoints.GET_PUBLIC_KEYS_QUERY_URL + "?" + string(query)
 	c.Logger.Debug().
 		Str("url", endpoints.GET_PUBLIC_KEYS_QUERY_URL).
-		Str("form_body", string(formBody)).
 		Msg("GetPublicKeys payload")
 
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.GET_PUBLIC_KEYS_QUERY_URL,
-		Method:         http.MethodPost,
+		URL:            url,
+		Method:         http.MethodGet,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeForm,
-		Body:           formBody,
 	})
 	if err != nil {
 		c.Logger.Debug().

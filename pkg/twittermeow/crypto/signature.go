@@ -117,6 +117,24 @@ func SignUnmuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, c
 	return Sign(privateKey, preimage)
 }
 
+// SignaturePreimageConversationDeletion builds the preimage for signature version 4 for conversation deletion events.
+func SignaturePreimageConversationDeletion(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
+	// current XChat format for ConversationDeleteEvent signatures uses only message ID, sender ID and conversation ID.
+	_ = conversationToken
+	_ = createdAtMsec
+	_ = encodedMessageEventDetail
+
+	preimage := fmt.Sprintf("ConversationDeleteEvent,%s,%s,%s",
+		messageID, senderID, conversationID)
+	return []byte(preimage)
+}
+
+// SignConversationDeletion creates a signature for a ConversationDeletion event.
+func SignConversationDeletion(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
+	preimage := SignaturePreimageConversationDeletion(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+	return Sign(privateKey, preimage)
+}
+
 // Verify verifies an ECDSA P-256 signature.
 // signatureB64 is the raw 64-byte signature, base64-encoded.
 func Verify(publicKey *ecdsa.PublicKey, preimage []byte, signatureB64 string) error {

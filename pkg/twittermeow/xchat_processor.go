@@ -1,17 +1,16 @@
 package twittermeow
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
-	thrifter "github.com/thrift-iterator/go"
 	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -213,6 +212,17 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	if evt.MessageEventSignature != nil && evt.MessageEventSignature.Signature != nil {
 		// Encrypted message - decrypt using conversation key
 		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+		if errors.Is(err, crypto.ErrKeyNotFound) {
+			// Try to fetch missing keys
+			if refreshErr := p.client.RefreshConversationKeys(ctx, conversationID); refreshErr != nil {
+				p.log.Warn().Err(refreshErr).
+					Str("conversation_id", conversationID).
+					Msg("Failed to refresh conversation keys")
+			} else {
+				// Retry after refresh
+				convKey, err = p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+			}
+		}
 		if err != nil {
 			p.log.Warn().
 				Err(err).
@@ -274,12 +284,19 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
 	}
 
+	// Empty MessageCreateEvent - this often happens when a message request is accepted.
+	// Emit a ConversationCreate event so the connector can create the room and backfill.
 	p.log.Debug().
 		Str("sequence_id", ptr.Val(evt.SequenceId)).
 		Str("conversation_id", conversationID).
-		Msg("MessageCreateEvent parsed but no message text, attachments, or reactions")
+		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
 
-	return nil
+	return p.emitEvent(ctx, &types.ConversationCreate{
+		ID:             ptr.Val(evt.SequenceId),
+		Time:           ptr.Val(evt.CreatedAtMsec),
+		ConversationID: conversationID,
+		RequestID:      ptr.Val(evt.MessageId),
+	})
 }
 
 // processGroupChangeEvent handles group-related changes.
@@ -539,9 +556,8 @@ func DecodeMessageEvent(encoded string) (*payload.MessageEvent, error) {
 		return nil, fmt.Errorf("base64 decode: %w", err)
 	}
 
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
 	var evt payload.MessageEvent
-	if err := decoder.Decode(&evt); err != nil {
+	if err := payload.Decode(data, &evt); err != nil {
 		return nil, fmt.Errorf("thrift decode: %w", err)
 	}
 	return &evt, nil
@@ -554,9 +570,8 @@ func DecodeSendMessageEventResponse(encoded string) (*payload.SendMessageEventRe
 		return nil, fmt.Errorf("base64 decode: %w", err)
 	}
 
-	decoder := thrifter.NewDecoder(bytes.NewReader(data), nil)
 	var resp payload.SendMessageEventResponse
-	if err := decoder.Decode(&resp); err != nil {
+	if err := payload.Decode(data, &resp); err != nil {
 		return nil, fmt.Errorf("thrift decode: %w", err)
 	}
 	return &resp, nil

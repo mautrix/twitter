@@ -70,7 +70,6 @@ func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens 
 
 	logger.Debug().
 		Int("secret_len", len(secret)).
-		Str("secret_hex_preview", fmt.Sprintf("%x", secret[:min(32, len(secret))])).
 		Msg("Juicebox secret recovered")
 
 	// Try JSON first (some implementations store JSON)

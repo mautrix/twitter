@@ -2,6 +2,7 @@ package twittermeow
 
 import (
 	"strconv"
+	"strings"
 
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
@@ -149,9 +150,13 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 
 		if att.Media != nil {
 			media := att.Media
+			legacyURL := ptr.Val(media.LegacyMediaUrlHttps)
+			if legacyURL == "" {
+				legacyURL = ptr.Val(media.LegacyMediaPreviewUrl)
+			}
 			info := types.AttachmentInfo{
 				IDStr:         ptr.Val(media.AttachmentId),
-				MediaURLHTTPS: ptr.Val(media.LegacyMediaUrlHttps),
+				MediaURLHTTPS: legacyURL,
 				MediaHashKey:  ptr.Val(media.MediaHashKey),
 				Filename:      ptr.Val(media.Filename),
 				FilesizeBytes: ptr.Val(media.FilesizeBytes),
@@ -253,7 +258,6 @@ func convertXChatReactionAdd(evt *payload.MessageEvent, reaction *payload.Messag
 		ConversationID: ptr.Val(evt.ConversationId),
 		MessageID:      targetMsgID,
 		EmojiReaction:  emoji,
-		ReactionKey:    emoji,
 		SenderID:       ptr.Val(evt.SenderId),
 	})
 }
@@ -274,7 +278,6 @@ func convertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.Mes
 		ConversationID: ptr.Val(evt.ConversationId),
 		MessageID:      targetMsgID,
 		EmojiReaction:  emoji,
-		ReactionKey:    emoji,
 		SenderID:       ptr.Val(evt.SenderId),
 	})
 }
@@ -353,11 +356,17 @@ func convertXChatGroupMemberRemove(evt *payload.MessageEvent, remove *payload.Gr
 
 // convertXChatGroupTitleChange converts XChat GroupTitleChange to types.ConversationNameUpdate
 func convertXChatGroupTitleChange(evt *payload.MessageEvent, title *payload.GroupTitleChange) *types.ConversationNameUpdate {
+	customTitle := ptr.Val(title.CustomTitle)
+	// Group names are encrypted with the conversation secretbox key. Prefix the key
+	// version so the connector can decrypt even if it doesn't have the latest key.
+	if keyVersion := ptr.Val(title.ConversationKeyVersion); keyVersion != "" && customTitle != "" && !strings.Contains(customTitle, ":") {
+		customTitle = keyVersion + ":" + customTitle
+	}
 	return &types.ConversationNameUpdate{
 		ID:               ptr.Val(evt.SequenceId),
 		Time:             ptr.Val(evt.CreatedAtMsec),
 		ConversationID:   ptr.Val(evt.ConversationId),
-		ConversationName: ptr.Val(title.CustomTitle),
+		ConversationName: customTitle,
 		ByUserID:         ptr.Val(evt.SenderId),
 	}
 }
