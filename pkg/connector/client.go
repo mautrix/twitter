@@ -53,6 +53,8 @@ type TwitterClient struct {
 	matrixParser *format.HTMLParser
 
 	ensurePortalLocks sync.Map
+
+	pollingChatResyncLast sync.Map
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)

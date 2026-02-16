@@ -180,6 +180,95 @@ func (tc *TwitterClient) ensureUsersInCacheByID(ctx context.Context, ids []strin
 	return nil
 }
 
+func (tc *TwitterClient) buildChatMembersFromUserIDs(ctx context.Context, conversationID string, userIDs []string, inbox *response.TwitterInboxData) *bridgev2.ChatMemberList {
+	log := zerolog.Ctx(ctx).With().
+		Str("conversation_id", conversationID).
+		Logger()
+
+	uniq := make(map[string]struct{}, len(userIDs))
+	ids := make([]string, 0, len(userIDs))
+	for _, id := range userIDs {
+		if id == "" {
+			continue
+		}
+		if _, seen := uniq[id]; seen {
+			continue
+		}
+		uniq[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	memberMap := make(bridgev2.ChatMemberMap, len(ids))
+	if len(ids) == 0 {
+		return &bridgev2.ChatMemberList{
+			IsFull:           true,
+			TotalMemberCount: 0,
+			MemberMap:        memberMap,
+		}
+	}
+
+	// Find which participant user IDs we can't resolve from the inbox or cache, then fetch those.
+	missing := make([]string, 0, len(ids))
+	tc.userCacheLock.RLock()
+	for _, id := range ids {
+		if inbox != nil && inbox.Users != nil {
+			if u := inbox.Users[id]; u != nil {
+				continue
+			}
+		}
+		if tc.userCache[id] != nil {
+			continue
+		}
+		missing = append(missing, id)
+	}
+	tc.userCacheLock.RUnlock()
+
+	if len(missing) > 0 {
+		if err := tc.ensureUsersInCacheByID(ctx, missing); err != nil {
+			log.Warn().
+				Err(err).
+				Int("missing_users", len(missing)).
+				Msg("Failed to fetch missing users for chat member list")
+		}
+	}
+
+	missingAfter := 0
+	tc.userCacheLock.RLock()
+	for _, id := range ids {
+		var userInfo *bridgev2.UserInfo
+		if inbox != nil && inbox.Users != nil {
+			if u := inbox.Users[id]; u != nil {
+				userInfo = tc.connector.wrapUserInfo(tc.client, u)
+			}
+		}
+		if userInfo == nil {
+			if u := tc.userCache[id]; u != nil {
+				userInfo = tc.connector.wrapUserInfo(tc.client, u)
+			}
+		}
+		if userInfo == nil {
+			missingAfter++
+		}
+		memberMap.Set(bridgev2.ChatMember{
+			EventSender: tc.MakeEventSender(id),
+			UserInfo:    userInfo,
+		})
+	}
+	tc.userCacheLock.RUnlock()
+
+	log.Debug().
+		Int("participants", len(ids)).
+		Int("missing_before", len(missing)).
+		Int("missing_after", missingAfter).
+		Msg("Built chat member list")
+
+	return &bridgev2.ChatMemberList{
+		IsFull:           true,
+		TotalMemberCount: len(ids),
+		MemberMap:        memberMap,
+	}
+}
+
 func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.User) *bridgev2.UserInfo {
 	avatarURL := user.ProfileImageURL
 	if avatarURL == "" {
@@ -285,41 +374,13 @@ func (tc *TwitterClient) buildChatInfoFromConversationID(ctx context.Context, co
 		}
 	}
 
-	// Try to ensure we have both users in the cache
-	if err := tc.ensureUsersInCacheByID(ctx, parts); err != nil {
-		log.Warn().
-			Err(err).
-			Str("conversation_id", conversationID).
-			Msg("Failed to fetch users for trust event")
-	}
-
-	// Build member map from parsed user IDs
-	memberMap := make(bridgev2.ChatMemberMap, len(parts))
-	for _, userID := range parts {
-		var userInfo *bridgev2.UserInfo
-		tc.userCacheLock.RLock()
-		if user, ok := tc.userCache[userID]; ok {
-			userInfo = tc.connector.wrapUserInfo(tc.client, user)
-		}
-		tc.userCacheLock.RUnlock()
-
-		memberMap.Set(bridgev2.ChatMember{
-			EventSender: tc.MakeEventSender(userID),
-			UserInfo:    userInfo,
-		})
-	}
-
 	log.Debug().
 		Str("conversation_id", conversationID).
 		Int("member_count", len(parts)).
 		Msg("Built ChatInfo from conversation ID for trust event")
 
 	return &bridgev2.ChatInfo{
-		Members: &bridgev2.ChatMemberList{
-			IsFull:           true,
-			TotalMemberCount: len(parts),
-			MemberMap:        memberMap,
-		},
+		Members:        tc.buildChatMembersFromUserIDs(ctx, conversationID, parts, nil),
 		MessageRequest: &messageRequest,
 	}
 }
@@ -392,7 +453,7 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 	if inbox != nil {
 		if conv := inbox.GetConversationByID(conversationID); conv != nil {
 			log.Debug().Msg("Found conversation in polling inbox")
-			return tc.conversationToChatInfo(conv, inbox)
+			return tc.conversationToChatInfo(ctx, conv, inbox)
 		}
 	}
 
@@ -416,7 +477,7 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 		// Try to get conversation from fetched data
 		if conv := resp.ConversationTimeline.GetConversationByID(restConvID); conv != nil {
 			log.Debug().Msg("Got conversation from REST API fetch")
-			return tc.conversationToChatInfo(conv, resp.ConversationTimeline)
+			return tc.conversationToChatInfo(ctx, conv, resp.ConversationTimeline)
 		}
 		log.Warn().Msg("REST API returned data but conversation not found in response")
 	}
