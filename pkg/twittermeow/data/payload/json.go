@@ -55,6 +55,7 @@ const (
 type DeleteMessageActionSignature struct {
 	MessageID                 string                           `json:"message_id"`
 	EncodedMessageEventDetail string                           `json:"encoded_message_event_detail"`
+	SignaturePayload          string                           `json:"signature_payload,omitempty"`
 	MessageEventSignature     *DeleteMessageEventSignatureJSON `json:"message_event_signature,omitempty"`
 }
 

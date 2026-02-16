@@ -334,7 +334,13 @@ func NewInitialXChatPageQueryVariables(
 }
 
 func (p *GetInitialXChatPageQueryVariables) Encode() ([]byte, error) {
-	return json.Marshal(p)
+	jsonVars, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("variables", string(jsonVars))
+	return []byte(values.Encode()), nil
 }
 
 type GetInboxPageRequestQueryVariables struct {

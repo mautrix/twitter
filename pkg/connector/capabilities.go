@@ -124,11 +124,13 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		baseCaps = dmCaps
 	}
 
-	// Disable editing for conversations without encryption keys
+	// Disable editing and delete-for-everyone for conversations without encryption keys.
+	// Delete-for-me remains supported via the legacy REST deletion API.
 	if meta, ok := portal.Metadata.(*PortalMetadata); ok && !meta.CanUseXChat() {
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
-		caps.ID += "+no-edit"
+		caps.Delete = event.CapLevelRejected
+		caps.ID += "+no-edit+no-delete"
 		return caps
 	}
 
