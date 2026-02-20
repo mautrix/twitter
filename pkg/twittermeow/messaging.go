@@ -1205,6 +1205,32 @@ func (c *Client) SendDirectMessage(ctx context.Context, pl *payload.SendDirectMe
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+func (c *Client) AddXChatPublicKey(ctx context.Context, vars *payload.AddXChatPublicKeyMutationVariables) (*response.AddXChatPublicKeyResponse, error) {
+	if vars == nil {
+		return nil, fmt.Errorf("variables are required")
+	}
+
+	jsonBody, err := json.Marshal(payload.NewAddXChatPublicKeyMutationPayload(*vars))
+	if err != nil {
+		return nil, err
+	}
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.ADD_XCHAT_PUBLIC_KEY_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &response.AddXChatPublicKeyResponse{}
+	return resp, json.Unmarshal(respBody, resp)
+}
+
 func (c *Client) GetPublicKeys(ctx context.Context, userIDs []string) (*response.GetPublicKeysResponse, error) {
 	variables := payload.NewGetPublicKeysQueryVariables(userIDs)
 	return makeXChatQueryRequest[response.GetPublicKeysResponse](c, ctx, endpoints.GET_PUBLIC_KEYS_QUERY_URL, variables, "GetPublicKeys")

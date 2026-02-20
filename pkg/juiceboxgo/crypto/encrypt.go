@@ -34,6 +34,7 @@ import (
 
 // ErrDecryptionFailed is returned when secret decryption fails.
 var ErrDecryptionFailed = errors.New("decryption failed")
+var ErrSecretTooLong = errors.New("secret exceeds maximum length")
 
 // MaxUserSecretLength is the maximum length of user secrets.
 const MaxUserSecretLength = 128
@@ -105,6 +106,33 @@ func DecryptSecret(encryptedSecret []byte, encryptionKey [32]byte) ([]byte, erro
 	}
 
 	return padded[1 : 1+length], nil
+}
+
+// EncryptSecret encrypts the user secret using ChaCha20-Poly1305.
+// The plaintext format is: len || secret || zero-padding to 129 bytes.
+func EncryptSecret(secret []byte, encryptionKey [32]byte) ([145]byte, error) {
+	var encryptedFixed [145]byte
+
+	if len(secret) > MaxUserSecretLength {
+		return encryptedFixed, ErrSecretTooLong
+	}
+
+	cipher, err := chacha20poly1305.New(encryptionKey[:])
+	if err != nil {
+		return encryptedFixed, err
+	}
+
+	padded := make([]byte, MaxUserSecretLength+1)
+	padded[0] = byte(len(secret))
+	copy(padded[1:], secret)
+
+	// Fixed nonce: all zeros (safe because key is unique per encryption)
+	nonce := make([]byte, chacha20poly1305.NonceSize)
+	encrypted := cipher.Seal(encryptedFixed[:0], nonce, padded, nil)
+	if len(encrypted) != len(encryptedFixed) {
+		return encryptedFixed, ErrDecryptionFailed
+	}
+	return encryptedFixed, nil
 }
 
 // DeriveEncryptedUserSecretCommitment derives the commitment for verification.

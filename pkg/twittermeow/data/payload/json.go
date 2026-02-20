@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 )
 
 type GraphQLPayload struct {
@@ -159,6 +161,49 @@ func NewDeleteConversationMutationPayload(vars DeleteConversationMutationVariabl
 	ext.PersistedQuery.Sha256Hash = "9nsAnKrQvpifR3UmdtIdOg"
 	return &DeleteConversationMutationPayload{
 		OperationName: "ConversationDeletion",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
+// AddXChatPublicKeyMutationVariables contains the variables for the AddXChatPublicKey mutation.
+type AddXChatPublicKeyMutationVariables struct {
+	Version         string                 `json:"version"`
+	GenerateVersion bool                   `json:"generate_version"`
+	PublicKey       AddXChatPublicKeyInput `json:"public_key"`
+}
+
+type AddXChatPublicKeyRegistrationMethod string
+
+const (
+	AddXChatPublicKeyRegistrationMethodCustomPin AddXChatPublicKeyRegistrationMethod = "CustomPin"
+)
+
+// AddXChatPublicKeyInput contains the key material and registration method.
+type AddXChatPublicKeyInput struct {
+	PublicKey                  string                              `json:"public_key"`
+	SigningPublicKey           string                              `json:"signing_public_key"`
+	IdentityPublicKeySignature string                              `json:"identity_public_key_signature"`
+	RegistrationMethod         AddXChatPublicKeyRegistrationMethod `json:"registration_method"`
+}
+
+// AddXChatPublicKeyMutationPayload is the full payload for the AddXChatPublicKey GraphQL request.
+type AddXChatPublicKeyMutationPayload struct {
+	OperationName string                             `json:"operationName"`
+	Variables     AddXChatPublicKeyMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                   `json:"extensions"`
+}
+
+const (
+	addXChatPublicKeyMutationOperationName = "AddXChatPublicKey"
+)
+
+// NewAddXChatPublicKeyMutationPayload creates a new AddXChatPublicKeyMutationPayload with default extensions.
+func NewAddXChatPublicKeyMutationPayload(vars AddXChatPublicKeyMutationVariables) *AddXChatPublicKeyMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = endpoints.ADD_XCHAT_PUBLIC_KEY_MUTATION_HASH
+	return &AddXChatPublicKeyMutationPayload{
+		OperationName: addXChatPublicKeyMutationOperationName,
 		Variables:     vars,
 		Extensions:    ext,
 	}

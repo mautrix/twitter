@@ -224,6 +224,20 @@ type GetPublicKeysResponse struct {
 	} `json:"data"`
 }
 
+// AddXChatPublicKeyResponse models the GraphQL response for registering an XChat public key.
+type AddXChatPublicKeyResponse struct {
+	Data struct {
+		UserAddPublicKey struct {
+			Typename string           `json:"__typename,omitempty"`
+			TokenMap KeyStoreTokenMap `json:"token_map"`
+			Version  string           `json:"version,omitempty"`
+		} `json:"user_add_public_key"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message,omitempty"`
+	} `json:"errors,omitempty"`
+}
+
 type UserResultsWithPublicKeys struct {
 	Typename string `json:"__typename,omitempty"`
 	RestID   string `json:"rest_id,omitempty"`

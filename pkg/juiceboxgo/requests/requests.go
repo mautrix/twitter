@@ -18,6 +18,7 @@
 package requests
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -102,36 +103,68 @@ type NoiseTransportResponse struct {
 
 // SecretsRequest is the inner request for secret operations.
 // It uses custom CBOR marshaling to match the expected format:
-// - Recover1: serializes as string "Recover1"
-// - Recover2/3: serialize as {"Recover2": {...}} or {"Recover3": {...}}
+// - Register1/Recover1: serialize as string "Register1"/"Recover1"
+// - Register2/Recover2/Recover3: serialize as {"Register2": {...}}, etc.
 type SecretsRequest struct {
-	Recover1 bool             `cbor:"-"`
-	Recover2 *Recover2Request `cbor:"-"`
-	Recover3 *Recover3Request `cbor:"-"`
+	Register1 bool              `cbor:"-"`
+	Register2 *Register2Request `cbor:"-"`
+	Recover1  bool              `cbor:"-"`
+	Recover2  *Recover2Request  `cbor:"-"`
+	Recover3  *Recover3Request  `cbor:"-"`
+}
+
+// NeedsForwardSecrecy reports whether this request must be sent via a Noise
+// transport message (not piggybacked on handshake payload).
+func (s *SecretsRequest) NeedsForwardSecrecy() bool {
+	if s == nil {
+		return false
+	}
+	return s.Register2 != nil || s.Recover2 != nil || s.Recover3 != nil
+}
+
+func marshalNamedSecretsRequest[T any](name string, req *T) ([]byte, error) {
+	return cbor.Marshal(map[string]*T{name: req})
 }
 
 // MarshalCBOR implements custom CBOR serialization for SecretsRequest.
 // The Juicebox realm expects:
-// - Empty structs (Recover1) as a string: "Recover1"
-// - Structs with fields (Recover2/3) as a map: {"Recover2": {...}}
+// - Empty structs (Register1/Recover1) as a string: "Register1"/"Recover1"
+// - Structs with fields as a map: {"Register2": {...}}, {"Recover2": {...}}, etc.
 func (s *SecretsRequest) MarshalCBOR() ([]byte, error) {
+	if s.Register1 {
+		return cbor.Marshal("Register1")
+	}
+	if s.Register2 != nil {
+		return marshalNamedSecretsRequest("Register2", s.Register2)
+	}
 	if s.Recover1 {
-		// Recover1 is an empty struct, serialize as string "Recover1"
 		return cbor.Marshal("Recover1")
 	}
 	if s.Recover2 != nil {
-		// Serialize as {"Recover2": {...}}
-		return cbor.Marshal(map[string]*Recover2Request{
-			"Recover2": s.Recover2,
-		})
+		return marshalNamedSecretsRequest("Recover2", s.Recover2)
 	}
 	if s.Recover3 != nil {
-		// Serialize as {"Recover3": {...}}
-		return cbor.Marshal(map[string]*Recover3Request{
-			"Recover3": s.Recover3,
-		})
+		return marshalNamedSecretsRequest("Recover3", s.Recover3)
 	}
 	return nil, nil
+}
+
+// Register2Request is the request for phase 2 of registration.
+type Register2Request struct {
+	Version                   types.RegistrationVersion           `cbor:"version"`
+	OprfPrivateKey            []byte                              `cbor:"oprf_private_key"`
+	OprfSignedPublicKey       OprfSignedPublicKey                 `cbor:"oprf_signed_public_key"`
+	UnlockKeyCommitment       types.UnlockKeyCommitment           `cbor:"unlock_key_commitment"`
+	UnlockKeyTag              types.UnlockKeyTag                  `cbor:"unlock_key_tag"`
+	EncryptionKeyScalarShare  []byte                              `cbor:"encryption_key_scalar_share"`
+	EncryptedSecret           types.EncryptedUserSecret           `cbor:"encrypted_secret"`
+	EncryptedSecretCommitment types.EncryptedUserSecretCommitment `cbor:"encrypted_secret_commitment"`
+	Policy                    Policy                              `cbor:"policy"`
+}
+
+// Policy defines restrictions on how a secret may be accessed.
+type Policy struct {
+	NumGuesses uint16 `cbor:"num_guesses"`
 }
 
 // Recover2Request is the request for phase 2 of recovery.
@@ -148,9 +181,58 @@ type Recover3Request struct {
 
 // SecretsResponse is the response for secret operations.
 type SecretsResponse struct {
-	Recover1 *Recover1Response `cbor:"Recover1,omitempty"`
-	Recover2 *Recover2Response `cbor:"Recover2,omitempty"`
-	Recover3 *Recover3Response `cbor:"Recover3,omitempty"`
+	Register1 *Register1Response `cbor:"Register1,omitempty"`
+	Register2 *Register2Response `cbor:"Register2,omitempty"`
+	Recover1  *Recover1Response  `cbor:"Recover1,omitempty"`
+	Recover2  *Recover2Response  `cbor:"Recover2,omitempty"`
+	Recover3  *Recover3Response  `cbor:"Recover3,omitempty"`
+}
+
+// Register1Response is the response for phase 1 of registration.
+type Register1Response struct {
+	Ok bool `cbor:"Ok,omitempty"`
+}
+
+func parseOKUnitVariant(data []byte, responseName string) error {
+	var variant string
+	if err := cbor.Unmarshal(data, &variant); err == nil {
+		if variant == "Ok" {
+			return nil
+		}
+		return fmt.Errorf("unknown %s variant: %s", responseName, variant)
+	}
+
+	var parsed map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	if _, ok := parsed["Ok"]; !ok {
+		return fmt.Errorf("unknown %s payload", responseName)
+	}
+	return nil
+}
+
+// UnmarshalCBOR supports both string unit variants (e.g. "Ok") and map-encoded variants.
+func (r *Register1Response) UnmarshalCBOR(data []byte) error {
+	if err := parseOKUnitVariant(data, "Register1Response"); err != nil {
+		return err
+	}
+	r.Ok = true
+	return nil
+}
+
+// Register2Response is the response for phase 2 of registration.
+type Register2Response struct {
+	Ok bool `cbor:"Ok,omitempty"`
+}
+
+// UnmarshalCBOR supports both string unit variants (e.g. "Ok") and map-encoded variants.
+func (r *Register2Response) UnmarshalCBOR(data []byte) error {
+	if err := parseOKUnitVariant(data, "Register2Response"); err != nil {
+		return err
+	}
+	r.Ok = true
+	return nil
 }
 
 // Recover1Response is the response for phase 1 of recovery.

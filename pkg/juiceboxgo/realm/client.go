@@ -158,7 +158,7 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 
 // makeHardwareRealmRequest sends a Noise-encrypted request to a hardware realm.
 func (c *Client) makeHardwareRealmRequest(ctx context.Context, req *requests.SecretsRequest) (*requests.SecretsResponse, error) {
-	needsForwardSecrecy := req.Recover2 != nil || req.Recover3 != nil
+	needsForwardSecrecy := req.NeedsForwardSecrecy()
 	reqBytes, err := requests.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)

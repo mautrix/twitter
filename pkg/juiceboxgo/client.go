@@ -19,6 +19,8 @@ package juiceboxgo
 import (
 	"context"
 	"crypto/ed25519"
+	crand "crypto/rand"
+	"crypto/sha512"
 	"crypto/subtle"
 	"encoding/binary"
 	"net/http"
@@ -73,6 +75,201 @@ func NewClient(config *Configuration, authTokens map[string]AuthToken, httpClien
 // Close releases resources.
 func (c *Client) Close() {
 	// No persistent resources to clean up in pure Go implementation
+}
+
+// Register stores a PIN-protected secret in Juicebox realms.
+func (c *Client) Register(ctx context.Context, pinBytes Pin, secret Secret, userInfo UserInfo, numGuesses uint16) error {
+	threshold := int(c.config.RegisterThreshold)
+	if threshold <= 0 || threshold > len(c.config.Realms) {
+		return ErrAssertion
+	}
+	if len(c.config.Realms) == 0 {
+		return ErrAssertion
+	}
+
+	c.logger.Debug().Msg("Starting registration phase 1")
+	if err := c.registerPhase1(ctx, threshold); err != nil {
+		return err
+	}
+	c.logger.Debug().Msg("Registration phase 1 complete")
+
+	var version RegistrationVersion
+	if _, err := crand.Read(version[:]); err != nil {
+		return ErrAssertion
+	}
+
+	hashResult := pin.HashPIN(pinBytes, pin.HashingMode(c.config.PinHashingMode), [16]byte(version), userInfo)
+
+	oprfPrivateKey, err := randomScalar()
+	if err != nil {
+		return ErrAssertion
+	}
+	oprfPrivateKeyShares, err := createScalarShares(oprfPrivateKey, c.config.RecoverThreshold, uint32(len(c.config.Realms)))
+	if err != nil {
+		return ErrAssertion
+	}
+
+	encryptionKeyScalar, err := randomScalar()
+	if err != nil {
+		return ErrAssertion
+	}
+	encryptionKeyScalarShares, err := createScalarShares(encryptionKeyScalar, c.config.RecoverThreshold, uint32(len(c.config.Realms)))
+	if err != nil {
+		return ErrAssertion
+	}
+
+	oprfOutput := unobliviousEvaluate(oprfPrivateKey, hashResult.AccessKey[:])
+	unlockKey, unlockKeyCommitment := crypto.DeriveUnlockKeyAndCommitment(oprfOutput)
+
+	encryptionKey := crypto.DeriveEncryptionKey(hashResult.EncryptionKeySeed, &encryptionKeyScalar)
+	encryptedSecret, err := crypto.EncryptSecret(secret, encryptionKey)
+	if err != nil {
+		return err
+	}
+
+	verifyingKey, signingKey, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		return ErrAssertion
+	}
+
+	c.logger.Debug().Msg("Starting registration phase 2")
+	if err := c.registerPhase2(
+		ctx,
+		threshold,
+		version,
+		oprfPrivateKeyShares,
+		encryptionKeyScalarShares,
+		unlockKey,
+		unlockKeyCommitment,
+		EncryptedUserSecret(encryptedSecret),
+		numGuesses,
+		verifyingKey,
+		signingKey,
+	); err != nil {
+		return err
+	}
+	c.logger.Debug().Msg("Registration phase 2 complete")
+
+	return nil
+}
+
+func (c *Client) registerPhase1(ctx context.Context, threshold int) error {
+	return c.runParallelRegisterRequestsWithThreshold(threshold, func(_ int, r Realm) error {
+		client := c.realmClients[r.ID]
+		resp, err := client.MakeRequest(ctx, &requests.SecretsRequest{Register1: true})
+		if err != nil {
+			return err
+		}
+		if resp.Register1 == nil || !resp.Register1.Ok {
+			return ErrAssertion
+		}
+		return nil
+	})
+}
+
+func (c *Client) runParallelRegisterRequestsWithThreshold(threshold int, run func(i int, r Realm) error) error {
+	results := make(chan error, len(c.config.Realms))
+	var wg sync.WaitGroup
+
+	for i, r := range c.config.Realms {
+		wg.Add(1)
+		go func(i int, r Realm) {
+			defer wg.Done()
+			results <- run(i, r)
+		}(i, r)
+	}
+
+	wg.Wait()
+	close(results)
+
+	return waitForThresholdSuccess(results, threshold)
+}
+
+func (c *Client) registerPhase2(
+	ctx context.Context,
+	threshold int,
+	version RegistrationVersion,
+	oprfPrivateKeyShares []ristretto.Scalar,
+	encryptionKeyScalarShares []ristretto.Scalar,
+	unlockKey [32]byte,
+	unlockKeyCommitment UnlockKeyCommitment,
+	encryptedSecret EncryptedUserSecret,
+	numGuesses uint16,
+	verifyingKey ed25519.PublicKey,
+	signingKey ed25519.PrivateKey,
+) error {
+	if len(oprfPrivateKeyShares) != len(c.config.Realms) || len(encryptionKeyScalarShares) != len(c.config.Realms) {
+		return ErrAssertion
+	}
+	if len(verifyingKey) != ed25519.PublicKeySize {
+		return ErrAssertion
+	}
+
+	var verifyingKeyFixed [32]byte
+	copy(verifyingKeyFixed[:], verifyingKey)
+
+	return c.runParallelRegisterRequestsWithThreshold(threshold, func(i int, r Realm) error {
+		var oprfPublicKey ristretto.Point
+		oprfPublicKey.ScalarMultBase(&oprfPrivateKeyShares[i])
+		oprfPublicKeyBytes := oprfPublicKey.Bytes()
+
+		sigMsg := buildOprfSignatureMessage(r.ID[:], oprfPublicKeyBytes)
+		signature := ed25519.Sign(signingKey, sigMsg)
+		if len(signature) != ed25519.SignatureSize {
+			return ErrAssertion
+		}
+
+		var signatureFixed [64]byte
+		copy(signatureFixed[:], signature)
+
+		unlockKeyTag := crypto.DeriveUnlockKeyTag(unlockKey, [16]byte(r.ID))
+		encryptedSecretCommitment := crypto.DeriveEncryptedUserSecretCommitment(
+			unlockKey, [16]byte(r.ID), &encryptionKeyScalarShares[i], encryptedSecret[:],
+		)
+
+		req := &requests.SecretsRequest{
+			Register2: &requests.Register2Request{
+				Version:                   version,
+				OprfPrivateKey:            append([]byte(nil), oprfPrivateKeyShares[i].Bytes()...),
+				OprfSignedPublicKey:       requests.OprfSignedPublicKey{PublicKey: append([]byte(nil), oprfPublicKeyBytes...), VerifyingKey: verifyingKeyFixed, Signature: signatureFixed},
+				UnlockKeyCommitment:       unlockKeyCommitment,
+				UnlockKeyTag:              unlockKeyTag,
+				EncryptionKeyScalarShare:  append([]byte(nil), encryptionKeyScalarShares[i].Bytes()...),
+				EncryptedSecret:           encryptedSecret,
+				EncryptedSecretCommitment: encryptedSecretCommitment,
+				Policy:                    requests.Policy{NumGuesses: numGuesses},
+			},
+		}
+
+		client := c.realmClients[r.ID]
+		resp, err := client.MakeRequest(ctx, req)
+		if err != nil {
+			return err
+		}
+		if resp.Register2 == nil || !resp.Register2.Ok {
+			return ErrAssertion
+		}
+		return nil
+	})
+}
+
+func waitForThresholdSuccess(results <-chan error, threshold int) error {
+	successCount := 0
+	var lastErr error
+	for err := range results {
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		successCount++
+	}
+	if successCount >= threshold {
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return ErrAssertion
 }
 
 // Recover retrieves a PIN-protected secret from the realms.
@@ -570,6 +767,74 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 	}
 
 	return secret, nil
+}
+
+func randomScalar() (ristretto.Scalar, error) {
+	var scalar ristretto.Scalar
+	var randomBytes [64]byte
+	if _, err := crand.Read(randomBytes[:]); err != nil {
+		return scalar, err
+	}
+	scalar.SetReduced(&randomBytes)
+	return scalar, nil
+}
+
+func createScalarShares(secret ristretto.Scalar, threshold, count uint32) ([]ristretto.Scalar, error) {
+	if threshold == 0 || count == 0 || threshold > count {
+		return nil, ErrAssertion
+	}
+
+	coefficients := make([]ristretto.Scalar, threshold-1)
+	for i := range coefficients {
+		coeff, err := randomScalar()
+		if err != nil {
+			return nil, err
+		}
+		coefficients[i] = coeff
+	}
+
+	shares := make([]ristretto.Scalar, count)
+	for i := uint32(1); i <= count; i++ {
+		x := scalarFromUint32(i)
+
+		var share ristretto.Scalar
+		share.SetZero()
+
+		for j := range coefficients {
+			share.Add(&share, &coefficients[j])
+			share.Mul(&share, &x)
+		}
+		share.Add(&share, &secret)
+
+		shares[i-1] = share
+	}
+
+	return shares, nil
+}
+
+func scalarFromUint32(value uint32) ristretto.Scalar {
+	var scalar ristretto.Scalar
+	var bytes [32]byte
+	binary.LittleEndian.PutUint32(bytes[:4], value)
+	scalar.SetBytes(&bytes)
+	return scalar
+}
+
+func unobliviousEvaluate(privateKey ristretto.Scalar, input []byte) oprf.Output {
+	var inputPoint ristretto.Point
+	inputPoint.DeriveDalek(input)
+
+	var result ristretto.Point
+	result.ScalarMult(&inputPoint, &privateKey)
+
+	h := sha512.New()
+	h.Write([]byte("Juicebox_OPRF_2023_1;"))
+	h.Write(input)
+	h.Write(result.Bytes())
+
+	var output oprf.Output
+	copy(output[:], h.Sum(nil))
+	return output
 }
 
 // buildOprfSignatureMessage constructs the message for Ed25519 signature verification.
