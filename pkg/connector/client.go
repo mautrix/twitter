@@ -402,12 +402,18 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 
 	// Update remote profile from cached user data
-	currentUserID := tc.client.GetCurrentUserID()
+	currentUserID := tc.currentUserID()
 	if MakeUserLoginID(currentUserID) != tc.userLogin.ID {
 		log.Warn().
 			Str("user_login_id", ParseUserLoginID(tc.userLogin.ID)).
 			Str("current_user_id", currentUserID).
 			Msg("User login ID mismatch")
+	}
+	if err := tc.forceRefreshUserInCacheByID(ctx, currentUserID); err != nil {
+		log.Warn().
+			Err(err).
+			Str("current_user_id", currentUserID).
+			Msg("Failed to refresh current user profile")
 	}
 
 	tc.userCacheLock.RLock()

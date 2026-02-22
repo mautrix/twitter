@@ -124,6 +124,14 @@ func (tc *TwitterClient) getCachedUserInfo(userID string) *bridgev2.UserInfo {
 	return userinfo
 }
 
+func (tc *TwitterClient) currentUserID() string {
+	currentUserID := strings.TrimSpace(tc.client.GetCurrentUserID())
+	if currentUserID == "" {
+		currentUserID = ParseUserLoginID(tc.userLogin.ID)
+	}
+	return currentUserID
+}
+
 func (tc *TwitterClient) ensureUsersInCacheByID(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -151,10 +159,25 @@ func (tc *TwitterClient) ensureUsersInCacheByID(ctx context.Context, ids []strin
 		return nil
 	}
 
+	return tc.fetchUsersByIDAndCache(ctx, missing)
+}
+
+func (tc *TwitterClient) forceRefreshUserInCacheByID(ctx context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	return tc.fetchUsersByIDAndCache(ctx, []string{userID})
+}
+
+func (tc *TwitterClient) fetchUsersByIDAndCache(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
 	// Keep request sizes reasonable (GraphQL variables can get large quickly).
 	const batchSize = 100
-	for i := 0; i < len(missing); i += batchSize {
-		batch := missing[i:min(i+batchSize, len(missing))]
+	for i := 0; i < len(ids); i += batchSize {
+		batch := ids[i:min(i+batchSize, len(ids))]
 		resp, err := tc.client.GetUsersByIdsForXChat(ctx, payload.NewGetUsersByIdsForXChatVariables(batch))
 		if err != nil {
 			return err
@@ -178,6 +201,91 @@ func (tc *TwitterClient) ensureUsersInCacheByID(ctx context.Context, ids []strin
 	}
 
 	return nil
+}
+
+func parseDMParticipantIDs(conversationID string) (string, []string, bool) {
+	normalizedConversationID := NormalizeConversationID(conversationID)
+	if strings.HasPrefix(normalizedConversationID, "g") {
+		return normalizedConversationID, nil, false
+	}
+
+	parts := strings.Split(normalizedConversationID, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return normalizedConversationID, nil, false
+	}
+	return normalizedConversationID, parts, true
+}
+
+func isSelfConversationID(conversationID, selfUserID string) bool {
+	if selfUserID == "" {
+		return false
+	}
+	_, parts, ok := parseDMParticipantIDs(conversationID)
+	return ok && parts[0] == selfUserID && parts[1] == selfUserID
+}
+
+func (tc *TwitterClient) cacheUserForID(userID string, user *types.User) *types.User {
+	if userID == "" || user == nil {
+		return nil
+	}
+	tc.userCacheLock.Lock()
+	tc.userCache[userID] = user
+	tc.userCacheLock.Unlock()
+	return user
+}
+
+func (tc *TwitterClient) resolveSelfDMUser(ctx context.Context, selfUserID string, users map[string]*types.User, inbox *response.TwitterInboxData) *types.User {
+	if selfUserID == "" {
+		return nil
+	}
+
+	if users != nil {
+		if user := tc.cacheUserForID(selfUserID, users[selfUserID]); user != nil {
+			return user
+		}
+	}
+
+	if inbox != nil && inbox.Users != nil {
+		if user := tc.cacheUserForID(selfUserID, inbox.Users[selfUserID]); user != nil {
+			return user
+		}
+	}
+
+	if err := tc.forceRefreshUserInCacheByID(ctx, selfUserID); err != nil {
+		zerolog.Ctx(ctx).Warn().
+			Err(err).
+			Str("user_id", selfUserID).
+			Msg("Failed to refresh current user profile for self DM metadata")
+	}
+
+	tc.userCacheLock.RLock()
+	user := tc.userCache[selfUserID]
+	tc.userCacheLock.RUnlock()
+	return user
+}
+
+func (tc *TwitterClient) applySelfDMNameAndAvatar(ctx context.Context, conversationID string, info *bridgev2.ChatInfo, users map[string]*types.User, inbox *response.TwitterInboxData) {
+	if info == nil {
+		return
+	}
+
+	selfUserID := tc.currentUserID()
+	if !isSelfConversationID(conversationID, selfUserID) {
+		return
+	}
+
+	user := tc.resolveSelfDMUser(ctx, selfUserID, users, inbox)
+	if user == nil {
+		zerolog.Ctx(ctx).Warn().
+			Str("conversation_id", conversationID).
+			Str("user_id", selfUserID).
+			Msg("Could not resolve current user profile for self DM metadata")
+		return
+	}
+
+	userInfo := tc.connector.wrapUserInfo(tc.client, user)
+	info.Name = userInfo.Name
+	info.Avatar = userInfo.Avatar
 }
 
 func (tc *TwitterClient) buildChatMembersFromUserIDs(ctx context.Context, conversationID string, userIDs []string, inbox *response.TwitterInboxData) *bridgev2.ChatMemberList {
@@ -347,42 +455,35 @@ func (tc *TwitterClient) buildChatInfoFromConversationID(ctx context.Context, co
 	log := zerolog.Ctx(ctx)
 	messageRequest := false
 
-	// Normalize to colon format for parsing 1:1 DM conversation IDs
-	conversationID = NormalizeConversationID(conversationID)
-
-	// Parse user IDs from conversation ID
-	// 1:1 DMs use format "userID1:userID2" (lower ID first)
-	// Group chats use format "g[snowflake]"
-	if strings.HasPrefix(conversationID, "g") {
-		// Group chat - we can't easily determine members from the conversation ID
-		log.Debug().
-			Str("conversation_id", conversationID).
-			Msg("Group chat trust event - returning minimal ChatInfo")
-		return &bridgev2.ChatInfo{
-			MessageRequest: &messageRequest,
+	normalizedConversationID, parts, ok := parseDMParticipantIDs(conversationID)
+	if !ok {
+		// Group chats use format "g[snowflake]".
+		if strings.HasPrefix(normalizedConversationID, "g") {
+			// Group chat - we can't easily determine members from the conversation ID.
+			log.Debug().
+				Str("conversation_id", normalizedConversationID).
+				Msg("Group chat trust event - returning minimal ChatInfo")
+		} else {
+			log.Warn().
+				Str("conversation_id", normalizedConversationID).
+				Msg("Could not parse 1:1 conversation ID - returning minimal ChatInfo")
 		}
-	}
-
-	// Parse 1:1 DM conversation ID
-	parts := strings.Split(conversationID, ":")
-	if len(parts) != 2 {
-		log.Warn().
-			Str("conversation_id", conversationID).
-			Msg("Could not parse 1:1 conversation ID - returning minimal ChatInfo")
 		return &bridgev2.ChatInfo{
 			MessageRequest: &messageRequest,
 		}
 	}
 
 	log.Debug().
-		Str("conversation_id", conversationID).
+		Str("conversation_id", normalizedConversationID).
 		Int("member_count", len(parts)).
 		Msg("Built ChatInfo from conversation ID for trust event")
 
-	return &bridgev2.ChatInfo{
-		Members:        tc.buildChatMembersFromUserIDs(ctx, conversationID, parts, nil),
+	info := &bridgev2.ChatInfo{
+		Members:        tc.buildChatMembersFromUserIDs(ctx, normalizedConversationID, parts, nil),
 		MessageRequest: &messageRequest,
 	}
+	tc.applySelfDMNameAndAvatar(ctx, normalizedConversationID, info, nil, nil)
+	return info
 }
 
 // makeGroupAvatar downloads and attempts to decrypt a group avatar using the conversation key.

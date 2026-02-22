@@ -41,6 +41,25 @@ const (
 	ConversationTypeGroupDM  = "GROUP_DM"
 )
 
+func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType database.RoomType) bool {
+	if chatInfo == nil {
+		return false
+	}
+
+	// DM room title/avatar are member-derived, so always emit ChatInfoChange
+	// for existing DM rooms to refresh stale member profile info.
+	if chatInfo.Type != nil && *chatInfo.Type == database.RoomTypeDM {
+		return true
+	}
+	if chatInfo.Name != nil && *chatInfo.Name != "" {
+		return true
+	}
+	if chatInfo.Avatar != nil {
+		return true
+	}
+	return chatInfo.Type != nil && portalRoomType != *chatInfo.Type
+}
+
 // syncXChatChannel syncs a single conversation from XChat inbox data.
 // Creates the portal synchronously if it doesn't exist.
 func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) {
@@ -61,6 +80,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			Msg("Failed to get/create portal")
 		return
 	}
+	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
 
 	// XChat conversations are socially trusted (not message requests).
 	// Note: Independent of whether encryption keys are available yet.
@@ -77,7 +97,6 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
 	// Beeper scrollback relies on the backfill task existing for the portal.
 	if portal.MXID != "" {
-		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
 		if chatInfo.CanBackfill {
 			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
 				log.Warn().Err(err).
@@ -91,7 +110,6 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 
 	// Create Matrix room if it doesn't exist
 	if portal.MXID == "" {
-		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
 		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
 		if err != nil {
 			log.Warn().Err(err).
@@ -110,12 +128,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			}
 		}
 	} else {
-		chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
-		needsUpdate := (chatInfo.Name != nil && *chatInfo.Name != "") || chatInfo.Avatar != nil
-		if !needsUpdate && chatInfo.Type != nil && portal.RoomType != *chatInfo.Type {
-			needsUpdate = true
-		}
-		if needsUpdate {
+		if shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
 			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 				EventMeta: simplevent.EventMeta{
 					Type:      bridgev2.RemoteEventChatInfoChange,
@@ -176,15 +189,19 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User, conv *types.Conversation) *bridgev2.ChatInfo {
 	log := zerolog.Ctx(ctx)
 	detail := item.ConversationDetail
+	conversationID := detail.ConversationID
+	if conversationID == "" && conv != nil {
+		conversationID = conv.ConversationID
+	}
 
 	log.Debug().
-		Str("conversation_id", detail.ConversationID).
+		Str("conversation_id", conversationID).
 		Int("participants_count", len(detail.ParticipantsResults)).
 		Int("group_members_count", len(detail.GroupMembersResults)).
 		Int("users_map_count", len(users)).
 		Msg("xchatItemToChatInfo building member list")
 
-	isGroup := strings.HasPrefix(detail.ConversationID, "g") || detail.GroupMetadata != nil ||
+	isGroup := strings.HasPrefix(conversationID, "g") || detail.GroupMetadata != nil ||
 		len(detail.GroupMembersResults) > 0 || len(detail.GroupAdminsResults) > 0
 
 	memberResults := make([]response.XChatUserResult, 0, len(detail.ParticipantsResults)+len(detail.GroupMembersResults)+len(detail.GroupAdminsResults))
@@ -246,6 +263,40 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		Int("final_member_count", len(memberMap)).
 		Msg("xchatItemToChatInfo finished building members")
 
+	// Some 1:1 XChat conversation-data responses can contain empty/partial participants_results
+	// during initial bootstrap. Fall back to parsing participant IDs from the conversation ID
+	// and fetch user info so DM room names are correct on first room creation.
+	if !isGroup && len(memberMap) < 2 {
+		reason := "partial_participants_results"
+		if len(memberMap) == 0 {
+			reason = "empty_participants_results"
+		}
+		normalizedConversationID, parts, ok := parseDMParticipantIDs(conversationID)
+		if ok {
+			beforeCount := len(memberMap)
+			fallbackMembers := tc.buildChatMembersFromUserIDs(ctx, normalizedConversationID, parts, nil)
+			for _, member := range fallbackMembers.MemberMap {
+				// Preserve already resolved participant metadata when fallback lookup misses.
+				if _, exists := memberMap[member.Sender]; exists && member.UserInfo == nil {
+					continue
+				}
+				memberMap.Set(member)
+			}
+			log.Info().
+				Str("conversation_id", normalizedConversationID).
+				Str("reason", reason).
+				Int("parsed_member_count", len(parts)).
+				Int("member_count_before", beforeCount).
+				Int("member_count_after", len(memberMap)).
+				Msg("Applied DM participant fallback for XChat chat info")
+		} else {
+			log.Debug().
+				Str("conversation_id", normalizedConversationID).
+				Int("parts", len(parts)).
+				Msg("Skipping DM participant fallback: could not parse 1:1 conversation ID")
+		}
+	}
+
 	// MessageRequest is true for untrusted conversations (message requests)
 	var messageRequest *bool
 	if conv != nil {
@@ -265,19 +316,20 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	if isGroup {
 		info.Type = ptr.Ptr(database.RoomTypeDefault)
 		if conv != nil && conv.AvatarImageHttps != "" {
-			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, conv.AvatarImageHttps, "")
+			info.Avatar = tc.makeGroupAvatar(conversationID, conv.AvatarImageHttps, "")
 		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
-			info.Avatar = tc.makeGroupAvatar(conv.ConversationID, detail.GroupMetadata.GroupAvatarURL, "")
+			info.Avatar = tc.makeGroupAvatar(conversationID, detail.GroupMetadata.GroupAvatarURL, "")
 		}
 		if conv != nil && conv.Name != "" {
 			info.Name = &conv.Name
 		} else if detail.GroupMetadata != nil {
-			if name := tc.decryptGroupName(ctx, detail.ConversationID, detail.GroupMetadata.GroupName); name != "" {
+			if name := tc.decryptGroupName(ctx, conversationID, detail.GroupMetadata.GroupName); name != "" {
 				info.Name = &name
 			}
 		}
 	} else {
 		info.Type = ptr.Ptr(database.RoomTypeDM)
+		tc.applySelfDMNameAndAvatar(ctx, conversationID, info, users, nil)
 	}
 
 	return info
@@ -534,9 +586,9 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 
 	// Some REST endpoints occasionally return incomplete participant lists for 1:1 DMs.
 	// Fall back to parsing the conversation ID to ensure we have both user IDs.
-	if len(participantIDs) < 2 && !strings.HasPrefix(conv.ConversationID, "g") && conv.Type != ConversationTypeGroupDM {
-		parts := strings.Split(NormalizeConversationID(conv.ConversationID), ":")
-		if len(parts) == 2 {
+	if len(participantIDs) < 2 && conv.Type != ConversationTypeGroupDM {
+		_, parts, ok := parseDMParticipantIDs(conv.ConversationID)
+		if ok {
 			participantIDs = append(participantIDs, parts...)
 		}
 	}
@@ -560,6 +612,7 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 		}
 	} else {
 		info.Type = ptr.Ptr(database.RoomTypeDM)
+		tc.applySelfDMNameAndAvatar(ctx, conv.ConversationID, info, nil, inbox)
 	}
 
 	return info
