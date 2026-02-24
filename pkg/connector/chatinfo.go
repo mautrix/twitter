@@ -27,6 +27,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -122,6 +123,41 @@ func (tc *TwitterClient) getCachedUserInfo(userID string) *bridgev2.UserInfo {
 		userinfo = tc.connector.wrapUserInfo(tc.client, userCacheEntry)
 	}
 	return userinfo
+}
+
+func (tc *TwitterClient) getDMChatInfoCompleteness(info *bridgev2.ChatInfo) (isDM bool, complete bool, memberCount int, missingUserInfo int) {
+	if info == nil {
+		return false, false, 0, 0
+	}
+	if info.Type == nil || *info.Type != database.RoomTypeDM {
+		// Non-DM conversations don't use member-derived room naming.
+		return false, true, 0, 0
+	}
+	if info.Members == nil || !info.Members.IsFull {
+		return true, false, 0, 0
+	}
+
+	memberCount = info.Members.TotalMemberCount
+	if memberCount == 0 && len(info.Members.MemberMap) > 0 {
+		memberCount = len(info.Members.MemberMap)
+	}
+	for _, member := range info.Members.MemberMap {
+		if member.UserInfo == nil {
+			missingUserInfo++
+			continue
+		}
+		if member.UserInfo.Name == nil || strings.TrimSpace(*member.UserInfo.Name) == "" {
+			missingUserInfo++
+		}
+	}
+
+	complete = memberCount >= 2 && missingUserInfo == 0
+	return true, complete, memberCount, missingUserInfo
+}
+
+func (tc *TwitterClient) isDMChatInfoComplete(info *bridgev2.ChatInfo) bool {
+	_, complete, _, _ := tc.getDMChatInfoCompleteness(info)
+	return complete
 }
 
 func (tc *TwitterClient) currentUserID() string {
@@ -554,12 +590,21 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 	if inbox != nil {
 		if conv := inbox.GetConversationByID(conversationID); conv != nil {
 			log.Debug().Msg("Found conversation in polling inbox")
-			return tc.conversationToChatInfo(ctx, conv, inbox)
+			chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
+			isDM, complete, memberCount, missingUserInfo := tc.getDMChatInfoCompleteness(chatInfo)
+			if complete {
+				return chatInfo
+			}
+			log.Info().
+				Bool("is_dm", isDM).
+				Int("member_count", memberCount).
+				Int("missing_userinfo", missingUserInfo).
+				Msg("Polling inbox chat info incomplete, falling back to REST fetch")
 		}
 	}
 
 	// Try 2: Fetch via REST API
-	log.Debug().Msg("Conversation not in inbox, fetching via REST API")
+	log.Debug().Msg("Fetching conversation via REST API")
 	restConvID := ConvertConversationIDToREST(conversationID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	resp, err := tc.client.FetchConversationContext(ctx, restConvID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
@@ -578,7 +623,16 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 		// Try to get conversation from fetched data
 		if conv := resp.ConversationTimeline.GetConversationByID(restConvID); conv != nil {
 			log.Debug().Msg("Got conversation from REST API fetch")
-			return tc.conversationToChatInfo(ctx, conv, resp.ConversationTimeline)
+			chatInfo := tc.conversationToChatInfo(ctx, conv, resp.ConversationTimeline)
+			isDM, complete, memberCount, missingUserInfo := tc.getDMChatInfoCompleteness(chatInfo)
+			if complete {
+				return chatInfo
+			}
+			log.Warn().
+				Bool("is_dm", isDM).
+				Int("member_count", memberCount).
+				Int("missing_userinfo", missingUserInfo).
+				Msg("REST chat info incomplete, falling back to minimal conversation-ID chat info")
 		}
 		log.Warn().Msg("REST API returned data but conversation not found in response")
 	}

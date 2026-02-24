@@ -795,10 +795,14 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 		}
 	} else if tc.shouldAttemptPollingChatResync(evt.ConversationID, now) {
 		chatInfo := tc.getOrFetchChatInfoForPolling(ctx, evt.ConversationID, inbox)
-		if chatInfo == nil || chatInfo.Members == nil || !chatInfo.Members.IsFull || chatInfo.Members.TotalMemberCount < 2 {
+		if !tc.isDMChatInfoComplete(chatInfo) {
+			isDM, _, memberCount, missingUserInfo := tc.getDMChatInfoCompleteness(chatInfo)
 			log.Debug().
 				Bool("chat_info_nil", chatInfo == nil).
-				Msg("Skipping polling ChatResync: insufficient chat info")
+				Bool("is_dm", isDM).
+				Int("member_count", memberCount).
+				Int("missing_userinfo", missingUserInfo).
+				Msg("Skipping polling ChatResync: incomplete chat info")
 		} else {
 			ok := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 				EventMeta: simplevent.EventMeta{
