@@ -37,6 +37,13 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 		}
 	}
 
+	// unescapeAndEscape first decodes Twitter's HTML entities, then re-encodes
+	// them properly for use in HTML output. This avoids double-encoding issues
+	// (e.g. Twitter sends "&amp;" which would otherwise appear as "&amp;" in HTML).
+	unescapeAndEscape := func(s string) string {
+		return html.EscapeString(html.UnescapeString(s))
+	}
+
 	for _, union := range sortedEntites {
 		switch entity := union.(type) {
 		case types.URLs:
@@ -65,7 +72,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			}
 			if cursor < start {
 				body.WriteString(string(charArr[cursor:start]))
-				bodyHTML.WriteString(string(charArr[cursor:start]))
+				bodyHTML.WriteString(unescapeAndEscape(string(charArr[cursor:start])))
 			}
 			expandedURL := url.ExpandedURL
 			displayURL := url.DisplayURL
@@ -77,12 +84,12 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			}
 			body.WriteString(expandedURL)
 			if expandedURL == "" {
-				bodyHTML.WriteString(rawURL)
+				bodyHTML.WriteString(unescapeAndEscape(rawURL))
 			} else {
 				_, _ = fmt.Fprintf(&bodyHTML,
 					`<a href="%s">%s</a>`,
-					expandedURL,
-					displayURL,
+					html.UnescapeString(expandedURL),
+					unescapeAndEscape(displayURL),
 				)
 			}
 			cursor = end
@@ -110,19 +117,19 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 				body.WriteString(string(charArr[cursor:end]))
 			}
 			if cursor < start {
-				bodyHTML.WriteString(string(charArr[cursor:start]))
+				bodyHTML.WriteString(unescapeAndEscape(string(charArr[cursor:start])))
 			}
 
 			uid := mention.IDStr
 			if uid == "" || portal == nil || portal.Bridge == nil {
-				bodyHTML.WriteString(string(charArr[start:end]))
+				bodyHTML.WriteString(unescapeAndEscape(string(charArr[start:end])))
 				cursor = end
 				continue
 			}
 			ghost, err := portal.Bridge.GetGhostByID(ctx, networkid.UserID(uid)) // TODO use MakeUserID
 			if err != nil || ghost == nil {
 				zerolog.Ctx(ctx).Err(err).Msg("Failed to get ghost")
-				bodyHTML.WriteString(string(charArr[start:end]))
+				bodyHTML.WriteString(unescapeAndEscape(string(charArr[start:end])))
 				cursor = end
 				continue
 			}
@@ -134,7 +141,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			_, _ = fmt.Fprintf(&bodyHTML,
 				`<a href="%s">%s</a>`,
 				targetMXID.URI().MatrixToURL(),
-				string(charArr[start:end]),
+				unescapeAndEscape(string(charArr[start:end])),
 			)
 			mentions.Add(targetMXID)
 			cursor = end
@@ -149,7 +156,7 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 	}
 
 	if msg.Entities != nil {
-		bodyHTML.WriteString(string(charArr[cursor:]))
+		bodyHTML.WriteString(unescapeAndEscape(string(charArr[cursor:])))
 		content.Format = event.FormatHTML
 		content.FormattedBody = strings.ReplaceAll(bodyHTML.String(), "\n", "<br>")
 	}
