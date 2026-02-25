@@ -288,13 +288,19 @@ type SendMessageMutationVariables struct {
 }
 
 type SendMessageMutationPayload struct {
-	Variables SendMessageMutationVariables `json:"variables"`
-	QueryId   string                       `json:"queryId,omitempty"`
+	OperationName string                       `json:"operationName"`
+	Variables     SendMessageMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions             `json:"extensions"`
+	QueryId       string                       `json:"queryId,omitempty"`
 }
 
 func NewSendMessageMutationPayload(vars SendMessageMutationVariables) *SendMessageMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "LkAIEchf8AGj-WgeLoTVcw"
 	return &SendMessageMutationPayload{
-		Variables: vars,
+		OperationName: "SendMessageMutation",
+		Variables:     vars,
+		Extensions:    ext,
 	}
 }
 
