@@ -539,6 +539,17 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		})
 	}
 
+	// Ensure untrusted conversations also have a queue backfill task once a room exists.
+	if portal.MXID != "" && chatInfo.CanBackfill {
+		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", conv.ConversationID).
+				Msg("Failed to ensure backfill task exists for untrusted conversation")
+		} else {
+			tc.connector.br.WakeupBackfillQueue()
+		}
+	}
+
 	// Process messages for this conversation from inbox entries
 	if inbox != nil {
 		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox)
