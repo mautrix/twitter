@@ -64,7 +64,7 @@ var _ bridgev2.LoginProcessWithOverride = (*TwitterLogin)(nil)
 
 const (
 	pinRegex            = "^[0-9]{4}$"
-	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below."
+	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat."
 	passcodeBodySetup   = "No PIN code is registered yet. Register by creating your PIN code below."
 )
 
