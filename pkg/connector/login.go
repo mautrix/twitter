@@ -53,7 +53,6 @@ type TwitterLogin struct {
 
 var (
 	LoginStepIDCookies   = "fi.mau.twitter.login.enter_cookies"
-	LoginStepSecretKey   = "fi.mau.twitter.login.secret_key"
 	LoginStepJuiceboxPIN = "fi.mau.twitter.login.juicebox_pin"
 	LoginStepIDComplete  = "fi.mau.twitter.login.complete"
 )
@@ -65,7 +64,7 @@ var _ bridgev2.LoginProcessWithOverride = (*TwitterLogin)(nil)
 const (
 	pinRegex            = "^[0-9]{4}$"
 	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat."
-	passcodeBodySetup   = "No PIN code is registered yet. Register by creating your PIN code below."
+	passcodeBodySetup   = "No PIN code is registered yet. Register by creating your PIN code below or using the X app."
 )
 
 var (

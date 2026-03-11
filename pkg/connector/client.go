@@ -170,6 +170,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 				tc.userLogin.BridgeState.Send(status.BridgeState{
 					StateEvent: status.StateUnknownError,
 					Error:      "twitter-load-error",
+					Info: map[string]any{
+						"go_error": err.Error(),
+					},
 				})
 			}
 			return
@@ -290,7 +293,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateUnknownError,
 			Error:      "twitter-xchat-fetch-error",
-			Message:    err.Error(),
+			Info: map[string]any{
+				"go_error": err.Error(),
+			},
 		})
 		return
 	}
@@ -336,7 +341,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			tc.userLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateUnknownError,
 				Error:      "twitter-xchat-fetch-error",
-				Message:    err.Error(),
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
 			})
 			break
 		}

@@ -20,10 +20,10 @@ import "maunium.net/go/mautrix/bridgev2/status"
 
 func init() {
 	status.BridgeStateHumanErrors.Update(status.BridgeStateErrorMap{
-		status.BridgeStateErrorCode("twitter-not-logged-in"):       "You're not logged into X. Please log in again.",
-		status.BridgeStateErrorCode("twitter-migration-reauth"):    "X Chat needs a passcode update. Please log in and enter your passcode.",
-		status.BridgeStateErrorCode("twitter-invalid-credentials"): "Your X session has expired. Please log in again.",
-		status.BridgeStateErrorCode("twitter-load-error"):          "Couldn't connect to X. Please try again.",
-		status.BridgeStateErrorCode("twitter-xchat-fetch-error"):   "Couldn't sync X Chat. Please try again.",
+		"twitter-not-logged-in":       "You're not logged into X. Please log in again.",
+		"twitter-migration-reauth":    "X Chat needs a passcode update. Please log in and enter your passcode.",
+		"twitter-invalid-credentials": "Your X session has expired. Please log in again.",
+		"twitter-load-error":          "Couldn't connect to X.",
+		"twitter-xchat-fetch-error":   "Couldn't sync X Chat.",
 	})
 }

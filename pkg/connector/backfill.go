@@ -112,6 +112,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	if fetchParams.Forward {
 		// Forward backfill for XChat: initial messages are already processed during room creation
 		// via ProcessMessageAndReadEvents(). No additional forward fetch needed.
+		// FIXME the above is likely false and will fail to fill gaps correctly
 		return &bridgev2.FetchMessagesResponse{
 			Forward: true,
 			HasMore: false,
