@@ -1,3 +1,8 @@
+# v26.03
+
+* Bumped minimum Go version to 1.26.
+* Added support for encrypted XChat chats.
+
 # v25.11
 
 * Added support for group chat avatar changes.
