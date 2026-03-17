@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 )
 
@@ -83,22 +84,7 @@ func ConfigurationFromJSON(jsonData string) (*Configuration, error) {
 		config.Realms[i] = realm
 	}
 
-	// Sort realms by ID to ensure consistent share indices.
-	// This matches the Rust SDK behavior which sorts realms before assigning share indices.
-	sort.Slice(config.Realms, func(i, j int) bool {
-		return bytes.Compare(config.Realms[i].ID[:], config.Realms[j].ID[:]) < 0
-	})
-
-	// Validate threshold
-	if config.RecoverThreshold == 0 {
-		return nil, fmt.Errorf("recover_threshold must be > 0")
-	}
-	if int(config.RecoverThreshold) > len(config.Realms) {
-		return nil, fmt.Errorf("recover_threshold (%d) exceeds number of realms (%d)",
-			config.RecoverThreshold, len(config.Realms))
-	}
-
-	return config, nil
+	return NormalizeConfiguration(config)
 }
 
 // ShareIndex returns the share index for a realm (1-based).
@@ -109,4 +95,77 @@ func (c *Configuration) ShareIndex(realmID RealmID) (uint32, bool) {
 		}
 	}
 	return 0, false
+}
+
+// NormalizeConfiguration validates and returns a normalized copy of the configuration.
+func NormalizeConfiguration(config *Configuration) (*Configuration, error) {
+	if config == nil {
+		return nil, fmt.Errorf("configuration is required")
+	}
+
+	normalized := &Configuration{
+		RegisterThreshold: config.RegisterThreshold,
+		RecoverThreshold:  config.RecoverThreshold,
+		PinHashingMode:    config.PinHashingMode,
+		Realms:            append([]Realm(nil), config.Realms...),
+	}
+
+	if len(normalized.Realms) == 0 {
+		return nil, fmt.Errorf("configuration must contain at least one realm")
+	}
+	if err := validatePinHashingMode(normalized.PinHashingMode); err != nil {
+		return nil, err
+	}
+
+	seenRealmIDs := make(map[RealmID]struct{}, len(normalized.Realms))
+	for i, realm := range normalized.Realms {
+		if _, ok := seenRealmIDs[realm.ID]; ok {
+			return nil, fmt.Errorf("duplicate realm ID at index %d", i)
+		}
+		seenRealmIDs[realm.ID] = struct{}{}
+
+		parsedURL, err := url.Parse(realm.Address)
+		if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+			return nil, fmt.Errorf("invalid realm address at index %d", i)
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return nil, fmt.Errorf("realm address at index %d must use http or https", i)
+		}
+
+		if realm.PublicKey != nil && len(realm.PublicKey) != 32 {
+			return nil, fmt.Errorf("realm public key at index %d must be 32 bytes", i)
+		}
+	}
+
+	sort.Slice(normalized.Realms, func(i, j int) bool {
+		return bytes.Compare(normalized.Realms[i].ID[:], normalized.Realms[j].ID[:]) < 0
+	})
+
+	realmCount := uint32(len(normalized.Realms))
+	if normalized.RecoverThreshold == 0 {
+		return nil, fmt.Errorf("recover_threshold must be at least 1")
+	}
+	if normalized.RecoverThreshold > realmCount {
+		return nil, fmt.Errorf("recover_threshold (%d) exceeds number of realms (%d)", normalized.RecoverThreshold, realmCount)
+	}
+	if normalized.RecoverThreshold <= realmCount/2 {
+		return nil, fmt.Errorf("recover_threshold must contain a strict majority of realms")
+	}
+	if normalized.RegisterThreshold < normalized.RecoverThreshold {
+		return nil, fmt.Errorf("register_threshold must be at least recover_threshold")
+	}
+	if normalized.RegisterThreshold > realmCount {
+		return nil, fmt.Errorf("register_threshold (%d) exceeds number of realms (%d)", normalized.RegisterThreshold, realmCount)
+	}
+
+	return normalized, nil
+}
+
+func validatePinHashingMode(mode PinHashingMode) error {
+	switch mode {
+	case PinHashingModeStandard2019, PinHashingModeFastInsecure:
+		return nil
+	default:
+		return fmt.Errorf("invalid pin_hashing_mode %q", mode)
+	}
 }
