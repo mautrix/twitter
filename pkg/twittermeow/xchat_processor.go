@@ -17,6 +17,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 // XChatEventHandler processes XChat events.
@@ -419,12 +420,17 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 		return err
 	}
 
+	keyCreatedAt := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+	if keyCreatedAt.IsZero() {
+		return fmt.Errorf("missing valid XChat key timestamp for conversation %s key %s", conversationID, newKeyVersion)
+	}
+
 	// Store the new key
 	if err := p.client.keyManager.PutConversationKey(ctx, &crypto.ConversationKey{
 		ConversationID: conversationID,
 		KeyVersion:     newKeyVersion,
 		Key:            convKeyBytes,
-		CreatedAt:      time.Now(),
+		CreatedAt:      keyCreatedAt,
 	}); err != nil {
 		p.log.Err(err).
 			Str("conversation_id", conversationID).

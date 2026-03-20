@@ -216,6 +216,7 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (*response.AccountSetting
 		IncludeNSFWAdminFlag:        true,
 		IncludeRankedTimeline:       true,
 		IncludeAltTextCompose:       true,
+		IncludeExtDMAVCallSettings:  true,
 		Ext:                         "ssoConnections",
 		IncludeCountryCode:          true,
 		IncludeExtDMNSFWMediaFilter: true,

@@ -33,6 +33,7 @@ type AccountSettingsQuery struct {
 	IncludeNSFWAdminFlag                                   bool   `url:"include_nsfw_admin_flag"`
 	IncludeRankedTimeline                                  bool   `url:"include_ranked_timeline"`
 	IncludeAltTextCompose                                  bool   `url:"include_alt_text_compose"`
+	IncludeExtDMAVCallSettings                             bool   `url:"include_ext_dm_av_call_settings"`
 	Ext                                                    string `url:"ext"`
 	IncludeCountryCode                                     bool   `url:"include_country_code"`
 	IncludeExtDMNSFWMediaFilter                            bool   `url:"include_ext_dm_nsfw_media_filter"`

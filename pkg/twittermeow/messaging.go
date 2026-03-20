@@ -414,10 +414,65 @@ type SendEncryptedEditOpts struct {
 	Entities                []*payload.RichTextEntity
 }
 
+func (c *Client) sendMessageMutationOnce(ctx context.Context, pl *payload.SendMessageMutationPayload) (*response.SendMessageMutationResponse, error) {
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debug().
+		RawJSON("payload", jsonBody).
+		Msg("SendMessageMutation payload")
+
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp response.SendMessageMutationResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp.Errors) > 0 {
+		return nil, fmt.Errorf("send message mutation error: %s", resp.Errors[0].Message)
+	}
+	if resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent == "" {
+		return nil, fmt.Errorf("send message mutation returned no encoded message event")
+	}
+	return &resp, nil
+}
+
+func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessageMutationPayload) (*response.SendMessageMutationResponse, error) {
+	resp, err := c.sendMessageMutationOnce(ctx, pl)
+	if err == nil {
+		return resp, nil
+	}
+
+	if err := c.refreshConversationToken(ctx, pl.Variables.ConversationID); err != nil {
+		return nil, err
+	}
+
+	nextToken, tokenErr := c.keyManager.GetConversationToken(ctx, pl.Variables.ConversationID)
+	if tokenErr != nil || nextToken == pl.Variables.ConversationToken {
+		return nil, err
+	}
+
+	retryPayload := *pl
+	retryPayload.Variables.ConversationToken = nextToken
+	return c.sendMessageMutationOnce(ctx, &retryPayload)
+}
+
 // SendEncryptedReaction sends a reaction add/remove via the XChat protocol.
 // targetMessageSequenceID must be the XChat message sequence ID of the message being reacted to.
 func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove bool) (*response.SendMessageMutationResponse, error) {
-	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
+	token, err := c.ensureConversationToken(ctx, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation token: %w", err)
 	}
@@ -452,29 +507,7 @@ func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targ
 		EncodedMessageEventSignature: sigPtr,
 	})
 
-	jsonBody, err := json.Marshal(pl)
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		RawJSON("payload", jsonBody).
-		Msg("SendMessageMutation reaction payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-		Body:           jsonBody,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var resp response.SendMessageMutationResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return c.sendMessageMutation(ctx, pl)
 }
 
 // SendEncryptedEdit sends a message edit via the XChat protocol.
@@ -487,7 +520,7 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 		return nil, fmt.Errorf("target message sequence ID is required")
 	}
 
-	token, err := c.keyManager.GetConversationToken(ctx, opts.ConversationID)
+	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation token: %w", err)
 	}
@@ -520,35 +553,13 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 		EncodedMessageEventSignature: sigPtr,
 	})
 
-	jsonBody, err := json.Marshal(pl)
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		RawJSON("payload", jsonBody).
-		Msg("SendMessageMutation edit payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-		Body:           jsonBody,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var resp response.SendMessageMutationResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return c.sendMessageMutation(ctx, pl)
 }
 
 // SendEncryptedMessage sends an encrypted message via the XChat protocol.
 func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMessageOpts) (*response.SendMessageMutationResponse, error) {
 	// Get the server-provided conversation token for this conversation
-	token, err := c.keyManager.GetConversationToken(ctx, opts.ConversationID)
+	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation token: %w", err)
 	}
@@ -605,29 +616,7 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 		EncodedMessageEventSignature: sigPtr,
 	})
 
-	jsonBody, err := json.Marshal(pl)
-	if err != nil {
-		return nil, err
-	}
-
-	c.Logger.Debug().
-		RawJSON("payload", jsonBody).
-		Msg("SendMessageMutation payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-		Body:           jsonBody,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var resp response.SendMessageMutationResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	return c.sendMessageMutation(ctx, pl)
 }
 
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
@@ -671,7 +660,7 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 		return fmt.Errorf("sender ID is required")
 	}
 
-	token, err := c.keyManager.GetConversationToken(ctx, opts.ConversationID)
+	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
 	if err != nil {
 		return fmt.Errorf("get conversation token: %w", err)
 	}
@@ -798,7 +787,7 @@ func (c *Client) MuteConversation(ctx context.Context, conversationID string) er
 		return fmt.Errorf("sender ID is required")
 	}
 
-	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
+	token, err := c.ensureConversationToken(ctx, conversationID)
 	if err != nil {
 		return fmt.Errorf("get conversation token: %w", err)
 	}
@@ -902,7 +891,7 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 		return fmt.Errorf("sender ID is required")
 	}
 
-	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
+	token, err := c.ensureConversationToken(ctx, conversationID)
 	if err != nil {
 		return fmt.Errorf("get conversation token: %w", err)
 	}

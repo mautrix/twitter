@@ -10,6 +10,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 // userLoginKeyStore stores cryptographic keys.
@@ -43,6 +44,8 @@ func (ks *userLoginKeyStore) getPortalMetadata(ctx context.Context, conversation
 
 func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
 
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
@@ -94,6 +97,9 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 		return fmt.Errorf("conversation key cannot be nil")
 	}
 
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
 	meta, portal, err := ks.getPortalMetadata(ctx, key.ConversationID)
 	if err != nil {
 		log.Err(err).
@@ -139,6 +145,9 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 }
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
 	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
 		return err
@@ -152,6 +161,8 @@ func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversa
 
 func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conversationID string) (*crypto.ConversationKey, error) {
 	log := zerolog.Ctx(ctx)
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
 
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
@@ -168,10 +179,9 @@ func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conve
 		return nil, crypto.ErrKeyNotFound
 	}
 
-	// Find key with latest CreatedAt
 	var latest *ConversationKeyData
 	for _, data := range meta.ConversationKeys {
-		if latest == nil || data.CreatedAt.After(latest.CreatedAt) {
+		if latest == nil || methods.CompareSnowflake(data.KeyVersion, latest.KeyVersion) > 0 {
 			latest = data
 		}
 	}
@@ -250,6 +260,9 @@ func (ks *userLoginKeyStore) PutPublicKey(_ context.Context, _ *crypto.PublicKey
 }
 
 func (ks *userLoginKeyStore) GetConversationToken(ctx context.Context, conversationID string) (string, error) {
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+
 	meta, _, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {
 		return "", err
@@ -263,6 +276,8 @@ func (ks *userLoginKeyStore) GetConversationToken(ctx context.Context, conversat
 
 func (ks *userLoginKeyStore) PutConversationToken(ctx context.Context, conversationID, token string) error {
 	log := zerolog.Ctx(ctx)
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
 
 	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
 	if err != nil {

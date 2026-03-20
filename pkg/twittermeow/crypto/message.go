@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/rs/zerolog"
@@ -482,13 +481,9 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	} else if b.km != nil {
 		key, err := b.km.GetLatestConversationKey(ctx, b.conversationID)
 		if err != nil {
-			if errors.Is(err, ErrKeyNotFound) {
-				unencrypted = true
-			} else {
-				return nil, fmt.Errorf("get conversation key: %w", err)
-			}
+			return nil, fmt.Errorf("get conversation key: %w", err)
 		} else if key == nil || len(key.Key) == 0 {
-			unencrypted = true
+			return nil, ErrKeyNotFound
 		} else {
 			convKey = key.Key
 			keyVersion = key.KeyVersion
