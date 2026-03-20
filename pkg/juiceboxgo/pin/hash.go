@@ -59,10 +59,7 @@ func HashPIN(pinBytes []byte, mode HashingMode, version [16]byte, userInfo []byt
 		time = 1    // Minimum
 		threads = 1 // Minimum
 	default:
-		// Default to standard
-		memory = 16 * 1024
-		time = 32
-		threads = 1
+		panic("invalid Juicebox pin hashing mode")
 	}
 
 	// Construct salt: BE4(len(version)) || version || BE4(len(userInfo)) || userInfo

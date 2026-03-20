@@ -111,6 +111,7 @@ type SecretsRequest struct {
 	Recover1  bool              `cbor:"-"`
 	Recover2  *Recover2Request  `cbor:"-"`
 	Recover3  *Recover3Request  `cbor:"-"`
+	Delete    bool              `cbor:"-"`
 }
 
 // NeedsForwardSecrecy reports whether this request must be sent via a Noise
@@ -145,6 +146,9 @@ func (s *SecretsRequest) MarshalCBOR() ([]byte, error) {
 	}
 	if s.Recover3 != nil {
 		return marshalNamedSecretsRequest("Recover3", s.Recover3)
+	}
+	if s.Delete {
+		return cbor.Marshal("Delete")
 	}
 	return nil, nil
 }
@@ -186,6 +190,7 @@ type SecretsResponse struct {
 	Recover1  *Recover1Response  `cbor:"Recover1,omitempty"`
 	Recover2  *Recover2Response  `cbor:"Recover2,omitempty"`
 	Recover3  *Recover3Response  `cbor:"Recover3,omitempty"`
+	Delete    *DeleteResponse    `cbor:"Delete,omitempty"`
 }
 
 // Register1Response is the response for phase 1 of registration.
@@ -235,6 +240,20 @@ func (r *Register2Response) UnmarshalCBOR(data []byte) error {
 	return nil
 }
 
+// DeleteResponse is the response for deleting stored secrets.
+type DeleteResponse struct {
+	Ok bool `cbor:"Ok,omitempty"`
+}
+
+// UnmarshalCBOR supports both string unit variants (e.g. "Ok") and map-encoded variants.
+func (r *DeleteResponse) UnmarshalCBOR(data []byte) error {
+	if err := parseOKUnitVariant(data, "DeleteResponse"); err != nil {
+		return err
+	}
+	r.Ok = true
+	return nil
+}
+
 // Recover1Response is the response for phase 1 of recovery.
 type Recover1Response struct {
 	Ok            *Recover1ResponseOk `cbor:"Ok,omitempty"`
@@ -245,6 +264,47 @@ type Recover1Response struct {
 // Recover1ResponseOk contains the version from phase 1.
 type Recover1ResponseOk struct {
 	Version types.RegistrationVersion `cbor:"version"`
+}
+
+// UnmarshalCBOR supports serde enum encodings for unit and struct variants.
+func (r *Recover1Response) UnmarshalCBOR(data []byte) error {
+	*r = Recover1Response{}
+
+	var variant string
+	if err := cbor.Unmarshal(data, &variant); err == nil {
+		switch variant {
+		case "NotRegistered":
+			r.NotRegistered = true
+			return nil
+		case "NoGuesses":
+			r.NoGuesses = true
+			return nil
+		default:
+			return fmt.Errorf("unknown Recover1Response variant: %s", variant)
+		}
+	}
+
+	var parsed map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	if okData, ok := parsed["Ok"]; ok {
+		var okResp Recover1ResponseOk
+		if err := cbor.Unmarshal(okData, &okResp); err != nil {
+			return err
+		}
+		r.Ok = &okResp
+		return nil
+	}
+	if _, ok := parsed["NotRegistered"]; ok {
+		r.NotRegistered = true
+		return nil
+	}
+	if _, ok := parsed["NoGuesses"]; ok {
+		r.NoGuesses = true
+		return nil
+	}
+	return fmt.Errorf("unknown Recover1Response payload")
 }
 
 // Recover2Response is the response for phase 2 of recovery.
@@ -263,6 +323,54 @@ type Recover2ResponseOk struct {
 	UnlockKeyCommitment types.UnlockKeyCommitment `cbor:"unlock_key_commitment"`
 	NumGuesses          uint16                    `cbor:"num_guesses"`
 	GuessCount          uint16                    `cbor:"guess_count"`
+}
+
+// UnmarshalCBOR supports serde enum encodings for unit and struct variants.
+func (r *Recover2Response) UnmarshalCBOR(data []byte) error {
+	*r = Recover2Response{}
+
+	var variant string
+	if err := cbor.Unmarshal(data, &variant); err == nil {
+		switch variant {
+		case "VersionMismatch":
+			r.VersionMismatch = true
+			return nil
+		case "NotRegistered":
+			r.NotRegistered = true
+			return nil
+		case "NoGuesses":
+			r.NoGuesses = true
+			return nil
+		default:
+			return fmt.Errorf("unknown Recover2Response variant: %s", variant)
+		}
+	}
+
+	var parsed map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	if okData, ok := parsed["Ok"]; ok {
+		var okResp Recover2ResponseOk
+		if err := cbor.Unmarshal(okData, &okResp); err != nil {
+			return err
+		}
+		r.Ok = &okResp
+		return nil
+	}
+	if _, ok := parsed["VersionMismatch"]; ok {
+		r.VersionMismatch = true
+		return nil
+	}
+	if _, ok := parsed["NotRegistered"]; ok {
+		r.NotRegistered = true
+		return nil
+	}
+	if _, ok := parsed["NoGuesses"]; ok {
+		r.NoGuesses = true
+		return nil
+	}
+	return fmt.Errorf("unknown Recover2Response payload")
 }
 
 // OprfSignedPublicKey is the server's signed OPRF public key.
@@ -299,6 +407,62 @@ type BadUnlockKeyTag struct {
 	GuessesRemaining uint16 `cbor:"guesses_remaining"`
 }
 
+// UnmarshalCBOR supports serde enum encodings for unit and struct variants.
+func (r *Recover3Response) UnmarshalCBOR(data []byte) error {
+	*r = Recover3Response{}
+
+	var variant string
+	if err := cbor.Unmarshal(data, &variant); err == nil {
+		switch variant {
+		case "VersionMismatch":
+			r.VersionMismatch = true
+			return nil
+		case "NotRegistered":
+			r.NotRegistered = true
+			return nil
+		case "NoGuesses":
+			r.NoGuesses = true
+			return nil
+		default:
+			return fmt.Errorf("unknown Recover3Response variant: %s", variant)
+		}
+	}
+
+	var parsed map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	if okData, ok := parsed["Ok"]; ok {
+		var okResp Recover3ResponseOk
+		if err := cbor.Unmarshal(okData, &okResp); err != nil {
+			return err
+		}
+		r.Ok = &okResp
+		return nil
+	}
+	if _, ok := parsed["VersionMismatch"]; ok {
+		r.VersionMismatch = true
+		return nil
+	}
+	if _, ok := parsed["NotRegistered"]; ok {
+		r.NotRegistered = true
+		return nil
+	}
+	if _, ok := parsed["NoGuesses"]; ok {
+		r.NoGuesses = true
+		return nil
+	}
+	if badData, ok := parsed["BadUnlockKeyTag"]; ok {
+		var badUnlockKeyTag BadUnlockKeyTag
+		if err := cbor.Unmarshal(badData, &badUnlockKeyTag); err != nil {
+			return err
+		}
+		r.BadUnlockKeyTag = &badUnlockKeyTag
+		return nil
+	}
+	return fmt.Errorf("unknown Recover3Response payload")
+}
+
 // PaddedSecretsResponse is used for constant-size responses (hardware realms).
 type PaddedSecretsResponse struct {
 	UnpaddedLength uint16    `cbor:"unpadded_length"`
@@ -320,4 +484,74 @@ func UnmarshalSecretsResponse(padded *PaddedSecretsResponse) (*SecretsResponse, 
 	var resp SecretsResponse
 	err := cbor.Unmarshal(padded.PaddedBytes[:padded.UnpaddedLength], &resp)
 	return &resp, err
+}
+
+// UnmarshalCBOR supports serde enum encodings for unit and struct variants.
+func (r *ClientResponse) UnmarshalCBOR(data []byte) error {
+	*r = ClientResponse{}
+
+	var variant string
+	if err := cbor.Unmarshal(data, &variant); err == nil {
+		switch variant {
+		case "Unavailable":
+			r.Unavailable = true
+		case "InvalidAuth":
+			r.InvalidAuth = true
+		case "MissingSession":
+			r.MissingSession = true
+		case "SessionError":
+			r.SessionError = true
+		case "DecodingError":
+			r.DecodingError = true
+		case "PayloadTooLarge":
+			r.PayloadTooLarge = true
+		case "RateLimitExceeded":
+			r.RateLimitExceeded = true
+		default:
+			return fmt.Errorf("unknown ClientResponse variant: %s", variant)
+		}
+		return nil
+	}
+
+	var parsed map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	if okData, ok := parsed["Ok"]; ok {
+		var okResp NoiseResponse
+		if err := cbor.Unmarshal(okData, &okResp); err != nil {
+			return err
+		}
+		r.Ok = &okResp
+		return nil
+	}
+	if _, ok := parsed["Unavailable"]; ok {
+		r.Unavailable = true
+		return nil
+	}
+	if _, ok := parsed["InvalidAuth"]; ok {
+		r.InvalidAuth = true
+		return nil
+	}
+	if _, ok := parsed["MissingSession"]; ok {
+		r.MissingSession = true
+		return nil
+	}
+	if _, ok := parsed["SessionError"]; ok {
+		r.SessionError = true
+		return nil
+	}
+	if _, ok := parsed["DecodingError"]; ok {
+		r.DecodingError = true
+		return nil
+	}
+	if _, ok := parsed["PayloadTooLarge"]; ok {
+		r.PayloadTooLarge = true
+		return nil
+	}
+	if _, ok := parsed["RateLimitExceeded"]; ok {
+		r.RateLimitExceeded = true
+		return nil
+	}
+	return fmt.Errorf("unknown ClientResponse payload")
 }

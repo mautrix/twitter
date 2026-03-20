@@ -23,6 +23,7 @@ import (
 	"crypto/sha512"
 	"crypto/subtle"
 	"encoding/binary"
+	"errors"
 	"net/http"
 	"sync"
 
@@ -53,18 +54,23 @@ func NewClient(config *Configuration, authTokens map[string]AuthToken, httpClien
 		httpClient = http.DefaultClient
 	}
 
+	normalizedConfig, err := NormalizeConfiguration(config)
+	if err != nil {
+		return nil, err
+	}
+
 	authProvider := func(realmID RealmID) (AuthToken, bool) {
 		token, ok := authTokens[realmID.String()]
 		return token, ok
 	}
 
 	realmClients := make(map[RealmID]*realm.Client)
-	for _, r := range config.Realms {
+	for _, r := range normalizedConfig.Realms {
 		realmClients[r.ID] = realm.NewClient(r, httpClient, authProvider, logger)
 	}
 
 	return &Client{
-		config:       config,
+		config:       normalizedConfig,
 		authTokens:   authTokens,
 		httpClient:   httpClient,
 		logger:       logger,
@@ -255,10 +261,10 @@ func (c *Client) registerPhase2(
 
 func waitForThresholdSuccess(results <-chan error, threshold int) error {
 	successCount := 0
-	var lastErr error
+	var errs []error
 	for err := range results {
 		if err != nil {
-			lastErr = err
+			errs = append(errs, err)
 			continue
 		}
 		successCount++
@@ -266,24 +272,97 @@ func waitForThresholdSuccess(results <-chan error, threshold int) error {
 	if successCount >= threshold {
 		return nil
 	}
-	if lastErr != nil {
-		return lastErr
+	if len(errs) > 0 {
+		return bestError(errs, rankRegisterError)
 	}
 	return ErrAssertion
 }
 
+func bestError(errs []error, rank func(error) int) error {
+	best := errs[0]
+	bestRank := rank(best)
+	for _, err := range errs[1:] {
+		errRank := rank(err)
+		if errRank < bestRank {
+			best = err
+			bestRank = errRank
+		}
+	}
+	return best
+}
+
+func rankRegisterError(err error) int {
+	switch {
+	case errors.Is(err, ErrInvalidAuth):
+		return 0
+	case errors.Is(err, ErrUpgradeRequired):
+		return 1
+	case errors.Is(err, ErrRateLimitExceeded):
+		return 2
+	case errors.Is(err, ErrAssertion):
+		return 3
+	case errors.Is(err, ErrTransient):
+		return 4
+	default:
+		return 5
+	}
+}
+
+func rankRecoverError(err error) int {
+	var recoverErr *RecoverError
+	switch {
+	case errors.As(err, &recoverErr):
+		return 0
+	case errors.Is(err, ErrNotRegistered):
+		return 1
+	case errors.Is(err, ErrInvalidAuth):
+		return 2
+	case errors.Is(err, ErrUpgradeRequired):
+		return 3
+	case errors.Is(err, ErrRateLimitExceeded):
+		return 4
+	case errors.Is(err, ErrAssertion):
+		return 5
+	case errors.Is(err, ErrTransient):
+		return 6
+	default:
+		return 7
+	}
+}
+
+func rankDeleteError(err error) int {
+	switch {
+	case errors.Is(err, ErrInvalidAuth):
+		return 0
+	case errors.Is(err, ErrUpgradeRequired):
+		return 1
+	case errors.Is(err, ErrRateLimitExceeded):
+		return 2
+	case errors.Is(err, ErrAssertion):
+		return 3
+	case errors.Is(err, ErrTransient):
+		return 4
+	default:
+		return 5
+	}
+}
+
 // Recover retrieves a PIN-protected secret from the realms.
 func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (Secret, error) {
+	return c.recoverWithConfiguration(ctx, pinBytes, userInfo, c.config, c.realmClients)
+}
+
+func (c *Client) recoverWithConfiguration(ctx context.Context, pinBytes Pin, userInfo UserInfo, config *Configuration, realmClients map[RealmID]*realm.Client) (Secret, error) {
 	// Phase 1: Query version from realms
 	c.logger.Debug().Msg("Starting recovery phase 1")
-	version, realms, err := c.recoverPhase1(ctx)
+	version, realms, err := c.recoverPhase1(ctx, config, realmClients)
 	if err != nil {
 		return nil, err
 	}
 	c.logger.Debug().Str("version", string(version[:])).Int("realms", len(realms)).Msg("Phase 1 complete")
 
 	// Hash PIN with Argon2
-	hashResult := pin.HashPIN(pinBytes, pin.HashingMode(c.config.PinHashingMode), [16]byte(version), userInfo)
+	hashResult := pin.HashPIN(pinBytes, pin.HashingMode(config.PinHashingMode), [16]byte(version), userInfo)
 
 	// DEBUG: Log PIN hash results for comparison with Rust
 	c.logger.Trace().
@@ -293,7 +372,7 @@ func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (
 
 	// Phase 2: OPRF evaluation
 	c.logger.Debug().Msg("Starting recovery phase 2")
-	unlockKey, err := c.recoverPhase2(ctx, version, realms, hashResult.AccessKey)
+	unlockKey, err := c.recoverPhase2(ctx, config, realmClients, version, realms, hashResult.AccessKey)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +380,7 @@ func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (
 
 	// Phase 3: Retrieve encrypted secret
 	c.logger.Debug().Msg("Starting recovery phase 3")
-	secret, err := c.recoverPhase3(ctx, version, realms, unlockKey, hashResult.EncryptionKeySeed)
+	secret, err := c.recoverPhase3(ctx, config, realmClients, version, realms, unlockKey, hashResult.EncryptionKeySeed)
 	if err != nil {
 		return nil, err
 	}
@@ -310,15 +389,9 @@ func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (
 	return secret, nil
 }
 
-// recoverPhase1 queries realms for the registration version.
-func (c *Client) recoverPhase1(ctx context.Context) (RegistrationVersion, []Realm, error) {
-	type phase1Result struct {
-		version RegistrationVersion
-		realm   Realm
-		err     error
-	}
-
-	results := make(chan phase1Result, len(c.config.Realms))
+// Delete removes any secret stored on the currently configured realms.
+func (c *Client) Delete(ctx context.Context) error {
+	results := make(chan error, len(c.config.Realms))
 	var wg sync.WaitGroup
 
 	for _, r := range c.config.Realms {
@@ -326,6 +399,50 @@ func (c *Client) recoverPhase1(ctx context.Context) (RegistrationVersion, []Real
 		go func(r Realm) {
 			defer wg.Done()
 			client := c.realmClients[r.ID]
+			resp, err := client.MakeRequest(ctx, &requests.SecretsRequest{Delete: true})
+			if err != nil {
+				results <- err
+				return
+			}
+			if resp.Delete == nil || !resp.Delete.Ok {
+				results <- ErrAssertion
+				return
+			}
+			results <- nil
+		}(r)
+	}
+
+	wg.Wait()
+	close(results)
+
+	var errs []error
+	for err := range results {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return bestError(errs, rankDeleteError)
+	}
+	return nil
+}
+
+// recoverPhase1 queries realms for the registration version.
+func (c *Client) recoverPhase1(ctx context.Context, config *Configuration, realmClients map[RealmID]*realm.Client) (RegistrationVersion, []Realm, error) {
+	type phase1Result struct {
+		version RegistrationVersion
+		realm   Realm
+		err     error
+	}
+
+	results := make(chan phase1Result, len(config.Realms))
+	var wg sync.WaitGroup
+
+	for _, r := range config.Realms {
+		wg.Add(1)
+		go func(r Realm) {
+			defer wg.Done()
+			client := realmClients[r.ID]
 			resp, err := client.MakeRequest(ctx, &requests.SecretsRequest{Recover1: true})
 			if err != nil {
 				results <- phase1Result{err: err, realm: r}
@@ -356,35 +473,34 @@ func (c *Client) recoverPhase1(ctx context.Context) (RegistrationVersion, []Real
 
 	// Collect successful results
 	versionCounts := make(map[RegistrationVersion][]Realm)
-	var lastErr error
-	errorCount := 0
+	var errs []error
+	successCount := 0
 
 	for result := range results {
 		if result.err != nil {
-			lastErr = result.err
-			errorCount++
+			errs = append(errs, result.err)
 			continue
 		}
+		successCount++
 		versionCounts[result.version] = append(versionCounts[result.version], result.realm)
 	}
 
 	// Find version with threshold agreement
-	threshold := int(c.config.RecoverThreshold)
+	threshold := int(config.RecoverThreshold)
+	if successCount < threshold {
+		return RegistrationVersion{}, nil, bestError(errs, rankRecoverError)
+	}
 	for version, realms := range versionCounts {
 		if len(realms) >= threshold {
 			return version, realms, nil
 		}
 	}
 
-	// Not enough realms agree on a version
-	if lastErr != nil {
-		return RegistrationVersion{}, nil, lastErr
-	}
 	return RegistrationVersion{}, nil, ErrNotRegistered
 }
 
 // recoverPhase2 performs OPRF evaluation across realms.
-func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion, realms []Realm, accessKey [32]byte) (UnlockKey, error) {
+func (c *Client) recoverPhase2(ctx context.Context, config *Configuration, realmClients map[RealmID]*realm.Client, version RegistrationVersion, realms []Realm, accessKey [32]byte) (UnlockKey, error) {
 	// Start OPRF
 	blindingFactor, blindedInput, err := oprf.Start(accessKey[:])
 	if err != nil {
@@ -413,7 +529,7 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 		wg.Add(1)
 		go func(r Realm) {
 			defer wg.Done()
-			client := c.realmClients[r.ID]
+			client := realmClients[r.ID]
 
 			req := &requests.SecretsRequest{
 				Recover2: &requests.Recover2Request{
@@ -500,7 +616,7 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 			}
 
 			// Get share index
-			index, found := c.config.ShareIndex(r.ID)
+			index, found := config.ShareIndex(r.ID)
 			if !found {
 				results <- phase2Result{err: ErrAssertion, realm: r}
 				return
@@ -536,21 +652,24 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 		verifyingKey [32]byte
 	}
 	grouped := make(map[resultKey][]phase2Result)
-	var allGuessesRemaining []uint16
-	var lastErr error
+	var errs []error
+	successCount := 0
 
 	for result := range results {
 		if result.err != nil {
-			lastErr = result.err
+			errs = append(errs, result.err)
 			continue
 		}
+		successCount++
 		key := resultKey{commitment: result.commitment, verifyingKey: result.verifyingKey}
 		grouped[key] = append(grouped[key], result)
-		allGuessesRemaining = append(allGuessesRemaining, result.guessesRemaining)
 	}
 
 	// Find group with threshold agreement
-	threshold := int(c.config.RecoverThreshold)
+	threshold := int(config.RecoverThreshold)
+	if successCount < threshold {
+		return UnlockKey{}, bestError(errs, rankRecoverError)
+	}
 	var selectedResults []phase2Result
 	var unlockKeyCommitment UnlockKeyCommitment
 
@@ -563,9 +682,6 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 	}
 
 	if len(selectedResults) < threshold {
-		if lastErr != nil {
-			return UnlockKey{}, lastErr
-		}
 		return UnlockKey{}, ErrAssertion
 	}
 
@@ -601,9 +717,9 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 	if subtle.ConstantTimeCompare(unlockKeyCommitment[:], ourCommitment[:]) != 1 {
 		// Wrong PIN
 		minGuesses := uint16(0xFFFF)
-		for _, g := range allGuessesRemaining {
-			if g < minGuesses {
-				minGuesses = g
+		for _, result := range selectedResults {
+			if result.guessesRemaining < minGuesses {
+				minGuesses = result.guessesRemaining
 			}
 		}
 		return UnlockKey{}, ErrInvalidPin(minGuesses)
@@ -613,12 +729,13 @@ func (c *Client) recoverPhase2(ctx context.Context, version RegistrationVersion,
 }
 
 // recoverPhase3 retrieves the encrypted secret from realms.
-func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion, realms []Realm, unlockKey UnlockKey, encryptionKeySeed [32]byte) (Secret, error) {
+func (c *Client) recoverPhase3(ctx context.Context, config *Configuration, realmClients map[RealmID]*realm.Client, version RegistrationVersion, realms []Realm, unlockKey UnlockKey, encryptionKeySeed [32]byte) (Secret, error) {
 	type phase3Result struct {
 		realm           Realm
 		scalarShare     secretsharing.ScalarShare
 		encryptedSecret EncryptedUserSecret
 		commitment      EncryptedUserSecretCommitment
+		skipped         bool
 		err             error
 	}
 
@@ -629,7 +746,7 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 		wg.Add(1)
 		go func(r Realm) {
 			defer wg.Done()
-			client := c.realmClients[r.ID]
+			client := realmClients[r.ID]
 
 			unlockKeyTag := crypto.DeriveUnlockKeyTag([32]byte(unlockKey), [16]byte(r.ID))
 
@@ -683,7 +800,7 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 			scalar.SetBytes(&scalarBytes)
 
 			// Get share index
-			index, found := c.config.ShareIndex(r.ID)
+			index, found := config.ShareIndex(r.ID)
 			if !found {
 				results <- phase3Result{err: ErrAssertion, realm: r}
 				return
@@ -695,7 +812,7 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 			)
 			if subtle.ConstantTimeCompare(ourCommitment[:], ok.EncryptedSecretCommitment[:]) != 1 {
 				// Skip this share - commitment doesn't match
-				results <- phase3Result{err: ErrAssertion, realm: r}
+				results <- phase3Result{skipped: true, realm: r}
 				return
 			}
 
@@ -716,18 +833,29 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 
 	// Collect results grouped by encrypted secret
 	grouped := make(map[EncryptedUserSecret][]phase3Result)
-	var lastErr error
+	var errs []error
+	successCount := 0
 
 	for result := range results {
 		if result.err != nil {
-			lastErr = result.err
+			errs = append(errs, result.err)
 			continue
 		}
+		if result.skipped {
+			continue
+		}
+		successCount++
 		grouped[result.encryptedSecret] = append(grouped[result.encryptedSecret], result)
 	}
 
 	// Find group with threshold agreement
-	threshold := int(c.config.RecoverThreshold)
+	threshold := int(config.RecoverThreshold)
+	if successCount < threshold {
+		if len(errs) > 0 {
+			return nil, bestError(errs, rankRecoverError)
+		}
+		return nil, ErrAssertion
+	}
 	var selectedResults []phase3Result
 	var encryptedSecret EncryptedUserSecret
 
@@ -740,9 +868,6 @@ func (c *Client) recoverPhase3(ctx context.Context, version RegistrationVersion,
 	}
 
 	if len(selectedResults) < threshold {
-		if lastErr != nil {
-			return nil, lastErr
-		}
 		return nil, ErrAssertion
 	}
 
