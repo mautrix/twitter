@@ -414,8 +414,16 @@ type SendEncryptedEditOpts struct {
 	Entities                []*payload.RichTextEntity
 }
 
-func (c *Client) sendMessageMutationOnce(ctx context.Context, pl *payload.SendMessageMutationPayload) (*response.SendMessageMutationResponse, error) {
-	jsonBody, err := json.Marshal(pl)
+func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessageMutationPayload) (*response.SendMessageMutationResponse, error) {
+	token, err := c.ensureConversationToken(ctx, pl.Variables.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation token: %w", err)
+	}
+
+	requestPayload := *pl
+	requestPayload.Variables.ConversationToken = token
+
+	jsonBody, err := json.Marshal(&requestPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -447,26 +455,6 @@ func (c *Client) sendMessageMutationOnce(ctx context.Context, pl *payload.SendMe
 		return nil, fmt.Errorf("send message mutation returned no encoded message event")
 	}
 	return &resp, nil
-}
-
-func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessageMutationPayload) (*response.SendMessageMutationResponse, error) {
-	resp, err := c.sendMessageMutationOnce(ctx, pl)
-	if err == nil {
-		return resp, nil
-	}
-
-	if err := c.refreshConversationToken(ctx, pl.Variables.ConversationID); err != nil {
-		return nil, err
-	}
-
-	nextToken, tokenErr := c.keyManager.GetConversationToken(ctx, pl.Variables.ConversationID)
-	if tokenErr != nil || nextToken == pl.Variables.ConversationToken {
-		return nil, err
-	}
-
-	retryPayload := *pl
-	retryPayload.Variables.ConversationToken = nextToken
-	return c.sendMessageMutationOnce(ctx, &retryPayload)
 }
 
 // SendEncryptedReaction sends a reaction add/remove via the XChat protocol.
