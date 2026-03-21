@@ -98,6 +98,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 	// Beeper scrollback relies on the backfill task existing for the portal.
 	if portal.MXID != "" {
 		if chatInfo.CanBackfill {
+			// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
 			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
 				log.Warn().Err(err).
 					Str("conversation_id", conv.ConversationID).
@@ -110,6 +111,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 
 	// Create Matrix room if it doesn't exist
 	if portal.MXID == "" {
+		// FIXME this is wrong, CreateMatrixRoom should not be called manually
 		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
 		if err != nil {
 			log.Warn().Err(err).
@@ -119,6 +121,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		}
 		// Register backfill task for the newly created room
 		if chatInfo.CanBackfill {
+			// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
 			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
 				log.Warn().Err(err).
 					Str("conversation_id", conv.ConversationID).
@@ -518,6 +521,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 
 	// Create Matrix room if it doesn't exist
 	if portal.MXID == "" {
+		// FIXME this is wrong, CreateMatrixRoom should not be called manually
 		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
 		if err != nil {
 			log.Warn().Err(err).
@@ -541,6 +545,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 
 	// Ensure untrusted conversations also have a queue backfill task once a room exists.
 	if portal.MXID != "" && chatInfo.CanBackfill {
+		// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
 		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
 			log.Warn().Err(err).
 				Str("conversation_id", conv.ConversationID).

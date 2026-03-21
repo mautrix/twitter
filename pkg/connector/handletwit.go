@@ -362,7 +362,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 
 	case *types.ConversationNameUpdate:
 		if ctx == nil {
-			ctx = context.Background()
+			ctx = context.TODO()
 		}
 
 		// XChat group titles are encrypted. Decrypt before forwarding to Matrix so
@@ -560,7 +560,7 @@ var _ = payload.FailureType(0)
 func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
 	// Always cache users from inbox when available - needed for portal creation
 	if inbox != nil {
-		tc.updateTwitterUserInfo(context.Background(), inbox)
+		tc.updateTwitterUserInfo(context.TODO(), inbox)
 		tc.userCacheLock.Lock()
 		for userID, user := range inbox.Users {
 			tc.userCache[userID] = user
@@ -615,7 +615,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 
 	// Skip if conversation can use XChat (has encryption keys) - XChat WebSocket handles those
 	portalKey := tc.MakePortalKeyFromID(conversationID)
-	ctx := context.Background()
+	ctx := context.TODO()
 	if portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey); err == nil && portal != nil {
 		meta := portal.Metadata.(*PortalMetadata)
 		if meta.CanUseXChat() {
@@ -681,7 +681,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			Msg("Conversation became trusted via polling")
 
 		// Update portal metadata to mark as trusted (same as XChat path)
-		ctx := context.Background()
+		ctx := context.TODO()
 		portalKey := tc.MakePortalKeyFromID(conversationID)
 		portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
 		if err != nil {
@@ -763,7 +763,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 		Logger()
 
 	// For polling messages, ensure the portal exists
-	ctx := context.Background()
+	ctx := context.TODO()
 	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
 	if err != nil {
 		log.Warn().
@@ -780,6 +780,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 				Msg("Failed to get chat info for polling message")
 			return false
 		}
+		// FIXME this is wrong, CreateMatrixRoom should not be called manually
 		if err := portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo); err != nil {
 			log.Warn().
 				Err(err).
@@ -787,6 +788,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 			return false
 		}
 		// Register backfill task for the newly created room
+		// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
 		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
 			log.Warn().Err(err).
 				Msg("Failed to ensure backfill task exists for new polling room")
