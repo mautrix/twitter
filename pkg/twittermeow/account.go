@@ -30,25 +30,6 @@ func (c *Client) Login(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) GetAccountSettings(ctx context.Context, params payload.AccountSettingsQuery) (*response.AccountSettingsResponse, error) {
-	encodedQuery, err := params.Encode()
-	if err != nil {
-		return nil, err
-	}
-	url := fmt.Sprintf("%s?%s", endpoints.ACCOUNT_SETTINGS_URL, string(encodedQuery))
-	apiRequestOpts := apiRequestOpts{
-		URL:    url,
-		Method: http.MethodGet,
-	}
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	data := response.AccountSettingsResponse{}
-	return &data, json.Unmarshal(respBody, &data)
-}
-
 func (c *Client) GetCurrentUserProfile(ctx context.Context) (CurrentUserProfile, error) {
 	currentUserID := strings.TrimSpace(c.GetCurrentUserID())
 	if currentUserID == "" {

@@ -26,27 +26,6 @@ func (p *JotClientEventPayload) Encode() ([]byte, error) {
 	return []byte(values.Encode()), nil
 }
 
-type AccountSettingsQuery struct {
-	IncludeExtSharingAudiospacesListeningDataWithFollowers bool   `url:"include_ext_sharing_audiospaces_listening_data_with_followers"`
-	IncludeMentionFilter                                   bool   `url:"include_mention_filter"`
-	IncludeNSFWUserFlag                                    bool   `url:"include_nsfw_user_flag"`
-	IncludeNSFWAdminFlag                                   bool   `url:"include_nsfw_admin_flag"`
-	IncludeRankedTimeline                                  bool   `url:"include_ranked_timeline"`
-	IncludeAltTextCompose                                  bool   `url:"include_alt_text_compose"`
-	IncludeExtDMAVCallSettings                             bool   `url:"include_ext_dm_av_call_settings"`
-	Ext                                                    string `url:"ext"`
-	IncludeCountryCode                                     bool   `url:"include_country_code"`
-	IncludeExtDMNSFWMediaFilter                            bool   `url:"include_ext_dm_nsfw_media_filter"`
-}
-
-func (p *AccountSettingsQuery) Encode() ([]byte, error) {
-	values, err := query.Values(p)
-	if err != nil {
-		return nil, err
-	}
-	return []byte(values.Encode()), nil
-}
-
 type ContextInfo string
 
 const (
