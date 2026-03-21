@@ -35,6 +35,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 type TwitterLogin struct {
@@ -47,8 +48,8 @@ type TwitterLogin struct {
 	isMigration       bool // True if upgrading from main branch (had cookies but no encryption keys)
 	needsPINSetup     bool
 
-	client   *twittermeow.Client
-	settings *response.AccountSettingsResponse
+	client  *twittermeow.Client
+	profile twittermeow.CurrentUserProfile
 }
 
 var (
@@ -209,12 +210,12 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 
-	settings, err := client.LoadMessagesPage(ctx)
+	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
 	}
 	t.client = client
-	t.settings = settings
+	t.profile = profile
 	t.persistClientCookiesAndUserID()
 
 	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state, using recovery prompt")
@@ -244,11 +245,11 @@ func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) error {
 	}
 	cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 	t.client = twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
-	settings, err := t.client.LoadMessagesPage(ctx)
+	profile, err := t.client.LoadMessagesPage(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load messages page: %w", err)
 	}
-	t.settings = settings
+	t.profile = profile
 	return nil
 }
 
@@ -528,12 +529,14 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		t.User.Log.Info().Msg("Migration: flagged for full encrypted room backfill")
 	}
 
-	remoteProfile := &status.RemoteProfile{
-		Username: t.settings.ScreenName,
-	}
 	currentUserID := strings.TrimSpace(t.client.GetCurrentUserID())
 	if currentUserID == "" {
 		return nil, ErrMissingUserID
+	}
+
+	remoteProfile := &status.RemoteProfile{
+		Username: strings.TrimSpace(t.profile.ScreenName),
+		Name:     strings.TrimSpace(t.profile.Name),
 	}
 	id := MakeUserLoginID(currentUserID)
 	ul, err := t.User.NewLogin(
@@ -559,6 +562,22 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if profile := t.profile; profile.AvatarURL != "" {
+		updatedProfile := ul.Client.(*TwitterClient).makeXChatRemoteProfile(ctx, &types.User{
+			IDStr:                currentUserID,
+			ScreenName:           profile.ScreenName,
+			Name:                 profile.Name,
+			ProfileImageURLHTTPS: profile.AvatarURL,
+		})
+		if ul.UserLogin.RemoteName != updatedProfile.Username || ul.UserLogin.RemoteProfile != *updatedProfile {
+			ul.UserLogin.RemoteName = updatedProfile.Username
+			ul.UserLogin.RemoteProfile = *updatedProfile
+			if err := ul.Save(ctx); err != nil {
+				t.User.Log.Warn().Err(err).Msg("Failed to save login profile after syncing avatar")
+			}
+		}
 	}
 
 	go func(ctx context.Context, client *TwitterClient) {

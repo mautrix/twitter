@@ -203,40 +203,31 @@ func (c *Client) Logout(ctx context.Context) error {
 	return c.loadPage(ctx, endpoints.BASE_LOGOUT_URL)
 }
 
-func (c *Client) LoadMessagesPage(ctx context.Context) (*response.AccountSettingsResponse, error) {
+func (c *Client) LoadMessagesPage(ctx context.Context) (CurrentUserProfile, error) {
 	err := c.loadPage(ctx, endpoints.BASE_MESSAGES_URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load messages page: %w", err)
+		return CurrentUserProfile{}, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
-	data, err := c.GetAccountSettings(ctx, payload.AccountSettingsQuery{
-		IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
-		IncludeMentionFilter:        true,
-		IncludeNSFWUserFlag:         true,
-		IncludeNSFWAdminFlag:        true,
-		IncludeRankedTimeline:       true,
-		IncludeAltTextCompose:       true,
-		IncludeExtDMAVCallSettings:  true,
-		Ext:                         "ssoConnections",
-		IncludeCountryCode:          true,
-		IncludeExtDMNSFWMediaFilter: true,
-	})
+	profile, err := c.GetCurrentUserProfile(ctx)
 	if err != nil {
 		if IsAuthError(err) {
-			return nil, err
+			return CurrentUserProfile{}, err
 		}
-		c.Logger.Warn().Err(err).Msg("Failed to get account settings")
-		data = &response.AccountSettingsResponse{}
+		c.Logger.Warn().Err(err).Msg("Failed to fetch current user profile after loading messages page")
+		profile = CurrentUserProfile{ID: c.GetCurrentUserID()}
 	}
 
 	c.session.InitializedAt = time.Now()
 	c.session.CacheVersion = CurrentCacheVersion
 
-	c.Logger.Info().
-		Str("screen_name", data.ScreenName).
-		Msg("Successfully loaded and authenticated as user")
+	logEvt := c.Logger.Info().Str("user_id", profile.ID)
+	if profile.ScreenName != "" {
+		logEvt = logEvt.Str("screen_name", profile.ScreenName)
+	}
+	logEvt.Msg("Successfully loaded and authenticated as user")
 
-	return data, nil
+	return profile, nil
 }
 
 func (c *Client) GetCurrentUserID() string {

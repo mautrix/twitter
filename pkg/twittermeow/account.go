@@ -15,6 +15,13 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
+type CurrentUserProfile struct {
+	ID         string
+	ScreenName string
+	Name       string
+	AvatarURL  string
+}
+
 func (c *Client) Login(ctx context.Context) error {
 	err := c.loadPage(ctx, endpoints.BASE_LOGIN_URL)
 	if err != nil {
@@ -40,6 +47,51 @@ func (c *Client) GetAccountSettings(ctx context.Context, params payload.AccountS
 
 	data := response.AccountSettingsResponse{}
 	return &data, json.Unmarshal(respBody, &data)
+}
+
+func (c *Client) GetCurrentUserProfile(ctx context.Context) (CurrentUserProfile, error) {
+	currentUserID := strings.TrimSpace(c.GetCurrentUserID())
+	if currentUserID == "" {
+		return CurrentUserProfile{}, fmt.Errorf("current user ID is empty")
+	}
+
+	resp, err := c.GetUsersByIdsForXChat(ctx, payload.NewGetUsersByIdsForXChatVariables([]string{currentUserID}))
+	if err != nil {
+		return CurrentUserProfile{}, err
+	}
+	if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
+		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat error: %s", resp.Errors[0].Message)
+	}
+	if len(resp.Data.GetMemberResults.Results) != 1 {
+		return CurrentUserProfile{}, fmt.Errorf("expected 1 user result for %s, got %d", currentUserID, len(resp.Data.GetMemberResults.Results))
+	}
+
+	result := resp.Data.GetMemberResults.Results[0]
+	if result.MemberResults == nil || result.MemberResults.Result == nil || result.MemberResults.Result.Core == nil {
+		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat returned no user for %s", currentUserID)
+	}
+
+	resultUserID := result.MemberResults.RestID
+	if resultUserID == "" {
+		resultUserID = result.MemberResults.Result.RestID
+	}
+	if resultUserID != "" && resultUserID != currentUserID {
+		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat returned user %s for %s", resultUserID, currentUserID)
+	}
+
+	profile := CurrentUserProfile{
+		ID:         currentUserID,
+		ScreenName: strings.TrimSpace(result.MemberResults.Result.Core.ScreenName),
+		Name:       strings.TrimSpace(result.MemberResults.Result.Core.Name),
+	}
+	if resultUserID != "" {
+		profile.ID = resultUserID
+	}
+	if result.MemberResults.Result.Avatar != nil {
+		profile.AvatarURL = strings.TrimSpace(result.MemberResults.Result.Avatar.ImageURL)
+	}
+
+	return profile, nil
 }
 
 func (c *Client) GetDMPermissions(ctx context.Context, params payload.GetDMPermissionsQuery) (*response.GetDMPermissionsResponse, error) {
