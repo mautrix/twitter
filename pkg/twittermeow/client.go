@@ -277,11 +277,11 @@ func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
 	return scriptRespBody, err
 }
 
-func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) {
+func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) string {
 	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
 		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch main script")
-		return
+		return ""
 	}
 	authTokenBytes := methods.ParseBearerToken(scriptRespBody)
 	authTokens := exslices.CastFunc(authTokenBytes, func(from []byte) string {
@@ -299,6 +299,7 @@ func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) 
 			Msg("Hardcoded token doesn't match fetched one")
 		c.session.bearerToken = authTokens[0]
 	}
+	return methods.ParseOndemandSURLFromScript(scriptRespBody)
 }
 
 func (c *Client) fetchAndParseSScript(ctx context.Context, scriptURL string) (*[4]int, error) {
@@ -395,16 +396,16 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	}
 
 	mainScriptURL := methods.ParseMainScriptURL(mainPageHTML)
+	ondemandSURL := methods.ParseOndemandSURLFromScript([]byte(mainPageHTML))
 	if mainScriptURL == "" {
 		zerolog.Ctx(ctx).Warn().Int("status_code", mainPageResp.StatusCode).Msg("Main script URL not found in main page HTML")
-	} else {
-		c.fetchAndParseMainScript(ctx, mainScriptURL)
+	} else if ondemandSURL == "" {
+		ondemandSURL = c.fetchAndParseMainScript(ctx, mainScriptURL)
 	}
 
-	ondemandS := methods.ParseOndemandS(mainPageHTML)
-	if ondemandS == "" {
-		c.Logger.Warn().Msg("ondemand.s not found in main page HTML")
-	} else if indexes, err := c.fetchAndParseSScript(ctx, fmt.Sprintf("https://abs.twimg.com/responsive-web/client-web/ondemand.s.%sa.js", ondemandS)); err != nil {
+	if ondemandSURL == "" {
+		c.Logger.Warn().Msg("ondemand.s URL not found in bootstrap sources")
+	} else if indexes, err := c.fetchAndParseSScript(ctx, ondemandSURL); err != nil {
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.variableIndexes = indexes

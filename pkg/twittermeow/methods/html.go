@@ -14,7 +14,7 @@ var (
 	guestTokenRegex        = regexp.MustCompile(`gt=([0-9]+)`)
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
-	ondemandSRegex         = regexp.MustCompile(`"ondemand.s":"([a-f0-9]+)"`)
+	ondemandSChunkIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.s"`)
 	variableIndexesRegex   = regexp.MustCompile(`\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
 )
 
@@ -75,10 +75,20 @@ func ParseCountry(html string) string {
 	return match[1]
 }
 
-func ParseOndemandS(html string) string {
-	match := ondemandSRegex.FindStringSubmatch(html)
-	if len(match) < 2 {
+func ParseOndemandSURLFromScript(js []byte) string {
+	chunkIDMatch := ondemandSChunkIDRegex.FindSubmatchIndex(js)
+	if len(chunkIDMatch) < 4 {
 		return ""
 	}
-	return match[1]
+
+	chunkID := string(js[chunkIDMatch[2]:chunkIDMatch[3]])
+	hashRegex := regexp.MustCompile(`(?:^|[,{])` + regexp.QuoteMeta(chunkID) + `:"([0-9a-f]+)"`)
+	jsAfterNameMap := js[chunkIDMatch[1]:]
+	hashMatch := hashRegex.FindSubmatchIndex(jsAfterNameMap)
+	if len(hashMatch) < 4 {
+		return ""
+	}
+
+	hash := string(jsAfterNameMap[hashMatch[2]:hashMatch[3]])
+	return "https://abs.twimg.com/responsive-web/client-web/ondemand.s." + hash + "a.js"
 }
