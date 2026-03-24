@@ -3,10 +3,8 @@ package twittermeow
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -14,10 +12,9 @@ import (
 	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 func (c *Client) SendXChatReadReceipt(ctx context.Context, conversationID, lastReadEventID string, readAt time.Time) error {
@@ -87,7 +84,7 @@ func (c *Client) SendXChatReadReceipt(ctx context.Context, conversationID, lastR
 
 func (c *Client) ensureConversationToken(ctx context.Context, conversationID string) (string, error) {
 	token, err := c.keyManager.GetConversationToken(ctx, conversationID)
-	if err == nil && token != "" {
+	if err == nil {
 		return token, nil
 	}
 	if err != nil && !errors.Is(err, crypto.ErrKeyNotFound) {
@@ -99,13 +96,9 @@ func (c *Client) ensureConversationToken(ctx context.Context, conversationID str
 	}
 
 	token, err = c.keyManager.GetConversationToken(ctx, conversationID)
-	if err != nil || token == "" {
-		if err == nil {
-			err = crypto.ErrKeyNotFound
-		}
+	if err != nil {
 		return "", fmt.Errorf("get conversation token: %w", err)
 	}
-
 	return token, nil
 }
 
@@ -117,21 +110,6 @@ func (c *Client) refreshConversationToken(ctx context.Context, conversationID st
 	}
 
 	item := resp.Data.GetInboxPageConversationData.Data
-	if err := c.storeConversationTokenFromInboxItem(ctx, conversationID, &item); err != nil {
-		if errors.Is(err, crypto.ErrKeyNotFound) {
-			return err
-		}
-		return fmt.Errorf("store conversation token: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Client) storeConversationTokenFromInboxItem(ctx context.Context, conversationID string, item *response.XChatInboxItem) error {
-	if item == nil {
-		return crypto.ErrKeyNotFound
-	}
-
 	encoded := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents)+len(item.LatestConversationKeyChangeEvents)+2)
 	encoded = append(encoded, item.LatestMessageEvents...)
 	encoded = append(encoded, item.EncodedMessageEvents...)
@@ -142,51 +120,38 @@ func (c *Client) storeConversationTokenFromInboxItem(ctx context.Context, conver
 	if item.ConversationDetail.LatestGroupTitleChangeMessageEvent != "" {
 		encoded = append(encoded, item.ConversationDetail.LatestGroupTitleChangeMessageEvent)
 	}
-
-	for _, encodedEvt := range encoded {
-		ok, err := c.storeConversationTokenFromEncodedEvent(ctx, conversationID, encodedEvt)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return nil
-		}
+	for _, readEvt := range item.LatestReadEventsPerParticipant {
+		encoded = append(encoded, readEvt.LatestMarkConversationReadEvent)
 	}
 
-	for _, readEvt := range item.LatestReadEventsPerParticipant {
-		ok, err := c.storeConversationTokenFromEncodedEvent(ctx, conversationID, readEvt.LatestMarkConversationReadEvent)
-		if err != nil {
-			return err
-		}
-		if ok {
+	for _, encodedEvt := range encoded {
+		err := c.putConversationTokenFromEncodedEvent(ctx, conversationID, encodedEvt)
+		if err == nil {
 			return nil
+		}
+		if !errors.Is(err, crypto.ErrKeyNotFound) {
+			return err
 		}
 	}
 
 	return crypto.ErrKeyNotFound
 }
 
-func (c *Client) storeConversationTokenFromEncodedEvent(ctx context.Context, fallbackConversationID, encoded string) (bool, error) {
+func (c *Client) putConversationTokenFromEncodedEvent(ctx context.Context, conversationID, encoded string) error {
 	if encoded == "" {
-		return false, nil
+		return crypto.ErrKeyNotFound
 	}
 	evt, err := DecodeMessageEvent(encoded)
 	if err != nil {
-		return false, nil
+		return crypto.ErrKeyNotFound
 	}
 	if evt == nil || evt.ConversationToken == nil || *evt.ConversationToken == "" {
-		return false, nil
+		return crypto.ErrKeyNotFound
 	}
-
-	conversationID := fallbackConversationID
 	if evt.ConversationId != nil && *evt.ConversationId != "" {
 		conversationID = *evt.ConversationId
 	}
-
-	if err := c.keyManager.PutConversationToken(ctx, conversationID, *evt.ConversationToken); err != nil {
-		return false, err
-	}
-	return true, nil
+	return c.keyManager.PutConversationToken(ctx, conversationID, *evt.ConversationToken)
 }
 
 // getSelfConversationID returns the user's self-conversation ID (user_id:user_id format).
@@ -233,7 +198,8 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 		EncodedMessageEventSignature: sigPtr,
 	})
 
-	return c.sendMessageMutation(ctx, pl)
+	_, err = c.sendMessageMutation(ctx, pl)
+	return err
 }
 
 // SendXChatUnpinConversation unpins a conversation via XChat.
@@ -274,28 +240,7 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 		EncodedMessageEventSignature: sigPtr,
 	})
 
-	return c.sendMessageMutation(ctx, pl)
-}
-
-// sendMessageMutation sends a SendMessageMutation request.
-func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessageMutationPayload) error {
-	jsonBody, err := json.Marshal(pl)
-	if err != nil {
-		return err
-	}
-
-	c.Logger.Debug().
-		RawJSON("payload", jsonBody).
-		Msg("SendMessageMutation payload")
-
-	_, _, err = c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.SEND_MESSAGE_MUTATION_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-		Body:           jsonBody,
-	})
+	_, err = c.sendMessageMutation(ctx, pl)
 	return err
 }
 
@@ -402,12 +347,25 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 		if err != nil {
 			continue
 		}
-		c.keyManager.PutConversationKey(ctx, &crypto.ConversationKey{
+		keyCreatedAt := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+		if keyCreatedAt.IsZero() {
+			c.Logger.Warn().
+				Str("conversation_id", conversationID).
+				Str("key_version", ptr.Val(ckce.ConversationKeyVersion)).
+				Str("created_at_msec", ptr.Val(evt.CreatedAtMsec)).
+				Msg("Skipping conversation key update without valid XChat timestamp")
+			continue
+		}
+
+		err = c.keyManager.PutConversationKey(ctx, &crypto.ConversationKey{
 			ConversationID: conversationID,
 			KeyVersion:     ptr.Val(ckce.ConversationKeyVersion),
 			Key:            convKeyBytes,
-			CreatedAt:      time.Now(),
+			CreatedAt:      keyCreatedAt,
 		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

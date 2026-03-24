@@ -305,7 +305,7 @@ func NewSendMessageMutationPayload(vars SendMessageMutationVariables) *SendMessa
 }
 
 type GenerateXChatTokenMutationPayload struct {
-	Variables  map[string]any `json:"variables"`
+	Variables  string         `json:"variables"`
 	Features   map[string]any `json:"features,omitempty"`
 	Extensions struct {
 		PersistedQuery struct {
@@ -316,7 +316,7 @@ type GenerateXChatTokenMutationPayload struct {
 }
 
 func (p *GenerateXChatTokenMutationPayload) Default() *GenerateXChatTokenMutationPayload {
-	p.Variables = map[string]any{}
+	p.Variables = "{}"
 	p.Extensions.PersistedQuery.Version = 1
 	return p
 }

@@ -16,7 +16,6 @@ const (
 	API_BASE_HOST = "api.x.com"
 	API_BASE_URL  = "https://" + API_BASE_HOST
 
-	ACCOUNT_SETTINGS_URL               = API_BASE_URL + "/1.1/account/settings.json"
 	INBOX_INITIAL_STATE_URL            = BASE_URL + "/i/api/1.1/dm/inbox_initial_state.json"
 	DM_USER_UPDATES_URL                = BASE_URL + "/i/api/1.1/dm/user_updates.json"
 	TRUSTED_INBOX_TIMELINE_URL         = BASE_URL + "/i/api/1.1/dm/inbox_timeline/trusted.json"

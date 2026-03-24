@@ -203,39 +203,31 @@ func (c *Client) Logout(ctx context.Context) error {
 	return c.loadPage(ctx, endpoints.BASE_LOGOUT_URL)
 }
 
-func (c *Client) LoadMessagesPage(ctx context.Context) (*response.AccountSettingsResponse, error) {
+func (c *Client) LoadMessagesPage(ctx context.Context) (CurrentUserProfile, error) {
 	err := c.loadPage(ctx, endpoints.BASE_MESSAGES_URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load messages page: %w", err)
+		return CurrentUserProfile{}, fmt.Errorf("failed to load messages page: %w", err)
 	}
 
-	data, err := c.GetAccountSettings(ctx, payload.AccountSettingsQuery{
-		IncludeExtSharingAudiospacesListeningDataWithFollowers: true,
-		IncludeMentionFilter:        true,
-		IncludeNSFWUserFlag:         true,
-		IncludeNSFWAdminFlag:        true,
-		IncludeRankedTimeline:       true,
-		IncludeAltTextCompose:       true,
-		Ext:                         "ssoConnections",
-		IncludeCountryCode:          true,
-		IncludeExtDMNSFWMediaFilter: true,
-	})
+	profile, err := c.GetCurrentUserProfile(ctx)
 	if err != nil {
 		if IsAuthError(err) {
-			return nil, err
+			return CurrentUserProfile{}, err
 		}
-		c.Logger.Warn().Err(err).Msg("Failed to get account settings")
-		data = &response.AccountSettingsResponse{}
+		c.Logger.Warn().Err(err).Msg("Failed to fetch current user profile after loading messages page")
+		profile = CurrentUserProfile{ID: c.GetCurrentUserID()}
 	}
 
 	c.session.InitializedAt = time.Now()
 	c.session.CacheVersion = CurrentCacheVersion
 
-	c.Logger.Info().
-		Str("screen_name", data.ScreenName).
-		Msg("Successfully loaded and authenticated as user")
+	logEvt := c.Logger.Info().Str("user_id", profile.ID)
+	if profile.ScreenName != "" {
+		logEvt = logEvt.Str("screen_name", profile.ScreenName)
+	}
+	logEvt.Msg("Successfully loaded and authenticated as user")
 
-	return data, nil
+	return profile, nil
 }
 
 func (c *Client) GetCurrentUserID() string {
@@ -285,11 +277,11 @@ func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
 	return scriptRespBody, err
 }
 
-func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) {
+func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) string {
 	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
 		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch main script")
-		return
+		return ""
 	}
 	authTokenBytes := methods.ParseBearerToken(scriptRespBody)
 	authTokens := exslices.CastFunc(authTokenBytes, func(from []byte) string {
@@ -307,6 +299,7 @@ func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) 
 			Msg("Hardcoded token doesn't match fetched one")
 		c.session.bearerToken = authTokens[0]
 	}
+	return methods.ParseOndemandSURLFromScript(scriptRespBody)
 }
 
 func (c *Client) fetchAndParseSScript(ctx context.Context, scriptURL string) (*[4]int, error) {
@@ -403,16 +396,16 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	}
 
 	mainScriptURL := methods.ParseMainScriptURL(mainPageHTML)
+	ondemandSURL := methods.ParseOndemandSURLFromScript([]byte(mainPageHTML))
 	if mainScriptURL == "" {
 		zerolog.Ctx(ctx).Warn().Int("status_code", mainPageResp.StatusCode).Msg("Main script URL not found in main page HTML")
-	} else {
-		c.fetchAndParseMainScript(ctx, mainScriptURL)
+	} else if ondemandSURL == "" {
+		ondemandSURL = c.fetchAndParseMainScript(ctx, mainScriptURL)
 	}
 
-	ondemandS := methods.ParseOndemandS(mainPageHTML)
-	if ondemandS == "" {
-		c.Logger.Warn().Msg("ondemand.s not found in main page HTML")
-	} else if indexes, err := c.fetchAndParseSScript(ctx, fmt.Sprintf("https://abs.twimg.com/responsive-web/client-web/ondemand.s.%sa.js", ondemandS)); err != nil {
+	if ondemandSURL == "" {
+		c.Logger.Warn().Msg("ondemand.s URL not found in bootstrap sources")
+	} else if indexes, err := c.fetchAndParseSScript(ctx, ondemandSURL); err != nil {
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.variableIndexes = indexes

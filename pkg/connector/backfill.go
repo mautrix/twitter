@@ -388,11 +388,16 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 		return err
 	}
 
+	keyCreatedAt := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+	if keyCreatedAt.IsZero() {
+		return fmt.Errorf("missing valid XChat key timestamp for conversation %s key %s", conversationID, newKeyVersion)
+	}
+
 	return tc.client.GetKeyManager().PutConversationKey(ctx, &crypto.ConversationKey{
 		ConversationID: conversationID,
 		KeyVersion:     newKeyVersion,
 		Key:            convKeyBytes,
-		CreatedAt:      time.Now(),
+		CreatedAt:      keyCreatedAt,
 	})
 }
 
