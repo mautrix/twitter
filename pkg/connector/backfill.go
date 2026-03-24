@@ -226,7 +226,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		}
 
 		if streamOrder == 0 && msgID != "" {
-			streamOrder = methods.ParseInt64(msgID)
+			streamOrder = methods.ParseSnowflakeInt(msgID)
 		}
 
 		msgs = append(msgs, &bridgev2.BackfillMessage{
@@ -354,7 +354,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	}
 
 	ts := methods.ParseMsecTimestamp(msg.Time)
-	streamOrder := methods.ParseInt64(msgID)
+	streamOrder := methods.ParseSnowflakeInt(msgID)
 	return msg, ts, streamOrder
 }
 
@@ -592,9 +592,9 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 			timestamp = methods.ParseSnowflake(messageIDForBridge)
 		}
 
-		streamOrder := methods.ParseInt64(messageIDForBridge)
+		streamOrder := methods.ParseSnowflakeInt(messageIDForBridge)
 		if streamOrder == 0 && msg.ID != "" {
-			streamOrder = methods.ParseInt64(msg.ID)
+			streamOrder = methods.ParseSnowflakeInt(msg.ID)
 		}
 
 		backfillMessages = append(backfillMessages, &bridgev2.BackfillMessage{
