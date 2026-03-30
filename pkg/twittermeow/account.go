@@ -41,7 +41,11 @@ func (c *Client) GetCurrentUserProfile(ctx context.Context) (CurrentUserProfile,
 		return CurrentUserProfile{}, err
 	}
 	if len(resp.Errors) > 0 {
-		return CurrentUserProfile{}, fmt.Errorf("get user profile: %s", resp.Errors[0].Message)
+		msg := strings.TrimSpace(resp.Errors[0].Message)
+		if msg == "" {
+			msg = "unknown error"
+		}
+		return CurrentUserProfile{}, fmt.Errorf("get user profile: %s", msg)
 	}
 	if len(resp.Data.GetMemberResults.Results) != 1 {
 		return CurrentUserProfile{}, fmt.Errorf("expected 1 user result for %s, got %d", currentUserID, len(resp.Data.GetMemberResults.Results))

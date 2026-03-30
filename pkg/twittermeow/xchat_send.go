@@ -96,7 +96,11 @@ func (c *Client) ensureConversationToken(ctx context.Context, conversationID str
 		return "", err
 	}
 
-	return c.keyManager.GetConversationToken(ctx, conversationID)
+	token, err = c.keyManager.GetConversationToken(ctx, conversationID)
+	if err != nil {
+		return "", fmt.Errorf("get conversation token: %w", err)
+	}
+	return token, nil
 }
 
 func (c *Client) refreshConversationToken(ctx context.Context, conversationID string) error {

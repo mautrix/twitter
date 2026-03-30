@@ -211,7 +211,11 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (CurrentUserProfile, erro
 
 	profile, err := c.GetCurrentUserProfile(ctx)
 	if err != nil {
-		return CurrentUserProfile{}, fmt.Errorf("failed to fetch current user profile after loading messages page: %w", err)
+		if IsAuthError(err) {
+			return CurrentUserProfile{}, err
+		}
+		c.Logger.Warn().Err(err).Msg("Failed to fetch current user profile after loading messages page")
+		profile = CurrentUserProfile{ID: c.GetCurrentUserID()}
 	}
 
 	c.session.InitializedAt = time.Now()
