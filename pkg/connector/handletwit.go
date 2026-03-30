@@ -170,9 +170,6 @@ func (tc *TwitterClient) buildMemberChangeEvent(
 
 // HandleXChatEvent handles events from the XChat websocket processor.
 func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.TwitterEvent) bool {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
 	if rawEvt == nil {
 		return true
 	}
@@ -595,10 +592,6 @@ var _ = payload.FailureType(0)
 // receive real-time updates via XChat WebSocket.
 // Returns true to continue polling, false to stop.
 func (tc *TwitterClient) HandlePollingEvent(ctx context.Context, evt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-
 	// Always cache users from inbox when available - needed for portal creation
 	if inbox != nil {
 		tc.updateTwitterUserInfo(ctx, inbox)
@@ -789,10 +782,6 @@ func (tc *TwitterClient) markPollingChatResyncSuccess(conversationID string, now
 
 // handlePollingMessage handles a message event from REST API polling.
 func (tc *TwitterClient) handlePollingMessage(ctx context.Context, evt *types.Message, inbox *response.TwitterInboxData) bool {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-
 	isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
 	portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 	msgID := evt.ID
