@@ -20,13 +20,11 @@ import (
 	"context"
 	"encoding/base64"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/simplevent"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -61,7 +59,7 @@ func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType databa
 }
 
 // syncXChatChannel syncs a single conversation from XChat inbox data.
-// Creates the portal synchronously if it doesn't exist.
+// It queues a portal resync and lets bridgev2 create the room if needed.
 func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) {
 	log := zerolog.Ctx(ctx)
 
@@ -94,51 +92,23 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		}
 	}
 
-	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
-	// Beeper scrollback relies on the backfill task existing for the portal.
-	if portal.MXID != "" {
-		if chatInfo.CanBackfill {
-			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-				log.Warn().Err(err).
-					Str("conversation_id", conv.ConversationID).
-					Msg("Failed to ensure backfill task exists")
-			} else {
-				tc.connector.br.WakeupBackfillQueue()
-			}
-		}
-	}
-
-	// Create Matrix room if it doesn't exist
+	// Queue a ChatResync so bridgev2 owns room creation and backfill task registration.
 	if portal.MXID == "" {
-		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
-		if err != nil {
-			log.Warn().Err(err).
+		resync := tc.queueChatResyncNow(chatResyncCreate, portal.PortalKey, chatInfo)
+		if !resync.Success {
+			log.Warn().
 				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to create Matrix room")
+				Err(resync.Error).
+				Msg("Failed to queue ChatResync for XChat conversation")
 			return
 		}
-		// Register backfill task for the newly created room
-		if chatInfo.CanBackfill {
-			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-				log.Warn().Err(err).
-					Str("conversation_id", conv.ConversationID).
-					Msg("Failed to ensure backfill task exists for new room")
-			} else {
-				tc.connector.br.WakeupBackfillQueue()
-			}
-		}
-	} else {
-		if shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
-			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-				EventMeta: simplevent.EventMeta{
-					Type:      bridgev2.RemoteEventChatInfoChange,
-					PortalKey: portal.PortalKey,
-					Timestamp: time.Now(),
-				},
-				ChatInfoChange: &bridgev2.ChatInfoChange{
-					ChatInfo: chatInfo,
-				},
-			})
+	} else if chatInfo.CanBackfill || shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
+		resync := tc.queueChatResyncNow(chatResyncUpdate, portal.PortalKey, chatInfo)
+		if !resync.Success {
+			log.Warn().
+				Str("conversation_id", conv.ConversationID).
+				Err(resync.Error).
+				Msg("Failed to queue ChatResync for existing XChat conversation")
 		}
 	}
 
@@ -516,37 +486,23 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 
 	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
 
-	// Create Matrix room if it doesn't exist
+	// Queue a ChatResync so bridgev2 owns room creation and backfill task registration.
 	if portal.MXID == "" {
-		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
-		if err != nil {
-			log.Warn().Err(err).
+		resync := tc.queueChatResyncNow(chatResyncCreate, portal.PortalKey, chatInfo)
+		if !resync.Success {
+			log.Warn().
 				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to create Matrix room for untrusted conversation")
+				Err(resync.Error).
+				Msg("Failed to queue ChatResync for untrusted conversation")
 			return
 		}
 	} else {
-		// Room already exists - update MessageRequest status via ChatInfoChange
-		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventChatInfoChange,
-				PortalKey: portal.PortalKey,
-				Timestamp: time.Now(),
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				ChatInfo: chatInfo,
-			},
-		})
-	}
-
-	// Ensure untrusted conversations also have a queue backfill task once a room exists.
-	if portal.MXID != "" && chatInfo.CanBackfill {
-		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-			log.Warn().Err(err).
+		resync := tc.queueChatResyncNow(chatResyncUpdate, portal.PortalKey, chatInfo)
+		if !resync.Success {
+			log.Warn().
 				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to ensure backfill task exists for untrusted conversation")
-		} else {
-			tc.connector.br.WakeupBackfillQueue()
+				Err(resync.Error).
+				Msg("Failed to queue ChatResync for existing untrusted conversation")
 		}
 	}
 
@@ -581,7 +537,7 @@ func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversat
 		}
 
 		// Queue the message event
-		tc.HandlePollingEvent(msg, inbox)
+		tc.HandlePollingEvent(ctx, msg, inbox)
 	}
 }
 

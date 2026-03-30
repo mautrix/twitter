@@ -414,6 +414,13 @@ type SendEncryptedEditOpts struct {
 	Entities                []*payload.RichTextEntity
 }
 
+type SendEncryptedReactionAction uint8
+
+const (
+	SendEncryptedReactionAdd SendEncryptedReactionAction = iota
+	SendEncryptedReactionRemove
+)
+
 func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessageMutationPayload) (*response.SendMessageMutationResponse, error) {
 	token, err := c.ensureConversationToken(ctx, pl.Variables.ConversationID)
 	if err != nil {
@@ -459,22 +466,20 @@ func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessag
 
 // SendEncryptedReaction sends a reaction add/remove via the XChat protocol.
 // targetMessageSequenceID must be the XChat message sequence ID of the message being reacted to.
-func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove bool) (*response.SendMessageMutationResponse, error) {
-	token, err := c.ensureConversationToken(ctx, conversationID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation token: %w", err)
-	}
-
+func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, action SendEncryptedReactionAction) (*response.SendMessageMutationResponse, error) {
 	messageID := uuid.NewString()
 
 	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
 		SetMessageID(messageID).
 		SetConversationID(conversationID)
 
-	if remove {
-		builder.SetReactionRemove(targetMessageSequenceID, emoji)
-	} else {
+	switch action {
+	case SendEncryptedReactionAdd:
 		builder.SetReactionAdd(targetMessageSequenceID, emoji)
+	case SendEncryptedReactionRemove:
+		builder.SetReactionRemove(targetMessageSequenceID, emoji)
+	default:
+		panic("unknown encrypted reaction action")
 	}
 
 	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
@@ -490,7 +495,6 @@ func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targ
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               conversationID,
 		MessageID:                    messageID,
-		ConversationToken:            token,
 		EncodedMessageCreateEvent:    encodedMCE,
 		EncodedMessageEventSignature: sigPtr,
 	})
@@ -506,11 +510,6 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 	}
 	if opts.TargetMessageSequenceID == "" {
 		return nil, fmt.Errorf("target message sequence ID is required")
-	}
-
-	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation token: %w", err)
 	}
 
 	messageID := opts.MessageID
@@ -536,7 +535,6 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               opts.ConversationID,
 		MessageID:                    messageID,
-		ConversationToken:            token,
 		EncodedMessageCreateEvent:    encodedMCE,
 		EncodedMessageEventSignature: sigPtr,
 	})
@@ -546,12 +544,6 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 
 // SendEncryptedMessage sends an encrypted message via the XChat protocol.
 func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMessageOpts) (*response.SendMessageMutationResponse, error) {
-	// Get the server-provided conversation token for this conversation
-	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation token: %w", err)
-	}
-
 	messageID := opts.MessageID
 	if messageID == "" {
 		messageID = uuid.NewString()
@@ -599,7 +591,6 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               opts.ConversationID,
 		MessageID:                    messageID,
-		ConversationToken:            token,
 		EncodedMessageCreateEvent:    encodedMCE,
 		EncodedMessageEventSignature: sigPtr,
 	})

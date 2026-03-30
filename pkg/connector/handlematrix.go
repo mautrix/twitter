@@ -590,7 +590,11 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 
 	// XChat reactions are sent as encrypted MessageCreateEvents (reaction_add/reaction_remove).
 	xchatConvID := NormalizeConversationID(conversationID)
-	_, err := tc.client.SendEncryptedReaction(ctx, xchatConvID, messageID, emoji, remove)
+	action := twittermeow.SendEncryptedReactionAdd
+	if remove {
+		action = twittermeow.SendEncryptedReactionRemove
+	}
+	_, err := tc.client.SendEncryptedReaction(ctx, xchatConvID, messageID, emoji, action)
 	return err
 }
 
@@ -781,7 +785,7 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 	if chat.Portal != nil {
 		conversationID = ParsePortalID(chat.Portal.ID)
 	}
-	tc.client.SetActiveConversation(ConvertConversationIDToREST(conversationID))
+	tc.client.SetActiveConversation(context.WithoutCancel(ctx), ConvertConversationIDToREST(conversationID))
 	return nil
 }
 

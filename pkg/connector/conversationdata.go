@@ -112,7 +112,7 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 		log.Warn().Err(err).Msg("Failed to process key change events for fetched conversation data")
 	}
 
-	// Sync channel (creates portal if needed)
+	// Sync channel and queue a resync if the portal still needs a room.
 	tc.syncXChatChannel(ctx, item, users)
 
 	// Process messages/read events to backfill and register any keys embedded there
