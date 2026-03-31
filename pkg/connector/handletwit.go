@@ -88,6 +88,51 @@ func (tc *TwitterClient) HandleStreamEvent(evt response.StreamEvent) {
 	}
 }
 
+type chatResyncMode uint8
+
+const (
+	chatResyncUpdate chatResyncMode = iota
+	chatResyncCreate
+	chatResyncCreateWithBackfill
+)
+
+func (tc *TwitterClient) queueChatResync(
+	mode chatResyncMode,
+	portalKey networkid.PortalKey,
+	chatInfo *bridgev2.ChatInfo,
+	timestamp time.Time,
+	streamOrder int64,
+) bridgev2.EventHandlingResult {
+	evt := &simplevent.ChatResync{
+		EventMeta: simplevent.EventMeta{
+			Type:        bridgev2.RemoteEventChatResync,
+			PortalKey:   portalKey,
+			Timestamp:   timestamp,
+			StreamOrder: streamOrder,
+		},
+		ChatInfo: chatInfo,
+	}
+
+	switch mode {
+	case chatResyncUpdate:
+	case chatResyncCreate:
+		evt.CreatePortal = true
+	case chatResyncCreateWithBackfill:
+		evt.CreatePortal = true
+		evt.CheckNeedsBackfillFunc = func(context.Context, *database.Message) (bool, error) {
+			return true, nil
+		}
+	default:
+		panic("unknown chat resync mode")
+	}
+
+	return tc.userLogin.QueueRemoteEvent(evt)
+}
+
+func (tc *TwitterClient) queueChatResyncNow(mode chatResyncMode, portalKey networkid.PortalKey, chatInfo *bridgev2.ChatInfo) bridgev2.EventHandlingResult {
+	return tc.queueChatResync(mode, portalKey, chatInfo, time.Now(), 0)
+}
+
 // buildMemberChangeEvent creates a ChatInfoChange event for participant joins/leaves.
 func (tc *TwitterClient) buildMemberChangeEvent(
 	conversationID, eventID, eventTime string,
@@ -152,7 +197,8 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			targetMessageID = eventID
 		}
 
-		if ctx == nil || ctx.Value(ensurePortalContextKey{}) == nil {
+		bootstrapCreatePortal := ctx.Value(ensurePortalContextKey{}) != nil
+		if !bootstrapCreatePortal {
 			if _, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, requiredKeyVersion); err != nil {
 				log.Warn().
 					Err(err).
@@ -178,7 +224,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    portalKey,
-				CreatePortal: false,
+				CreatePortal: bootstrapCreatePortal,
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
 				StreamOrder:  streamOrder,
 				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
@@ -206,7 +252,8 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			streamOrder = methods.ParseInt64(evt.Time)
 		}
 
-		if ctx == nil || ctx.Value(ensurePortalContextKey{}) == nil {
+		bootstrapCreatePortal := ctx.Value(ensurePortalContextKey{}) != nil
+		if !bootstrapCreatePortal {
 			if _, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, requiredKeyVersion); err != nil {
 				log.Warn().
 					Err(err).
@@ -233,7 +280,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 						Bool("is_from_me", isFromMe)
 				},
 				PortalKey:    portalKey,
-				CreatePortal: false, // Portal should already exist from initial sync
+				CreatePortal: bootstrapCreatePortal,
 				Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
 				StreamOrder:  streamOrder,
 				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
@@ -361,10 +408,6 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return tc.userLogin.QueueRemoteEvent(portalDeleteRemoteEvent).Success
 
 	case *types.ConversationNameUpdate:
-		if ctx == nil {
-			ctx = context.TODO()
-		}
-
 		// XChat group titles are encrypted. Decrypt before forwarding to Matrix so
 		// we don't set the room name to ciphertext.
 		newName := evt.ConversationName
@@ -479,19 +522,13 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				return false
 			}
 
-			return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
-				EventMeta: simplevent.EventMeta{
-					Type:         bridgev2.RemoteEventChatResync,
-					PortalKey:    portalKey,
-					CreatePortal: true,
-					Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-					StreamOrder:  methods.ParseInt64(evt.ID),
-				},
-				ChatInfo: chatInfo,
-				CheckNeedsBackfillFunc: func(ctx context.Context, latestMessage *database.Message) (bool, error) {
-					return true, nil
-				},
-			}).Success
+			return tc.queueChatResync(
+				chatResyncCreateWithBackfill,
+				portalKey,
+				chatInfo,
+				methods.ParseMsecTimestamp(evt.Time),
+				methods.ParseInt64(evt.ID),
+			).Success
 		}
 		return true
 
@@ -530,16 +567,13 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			return false
 		}
 
-		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
-			EventMeta: simplevent.EventMeta{
-				Type:         bridgev2.RemoteEventChatResync,
-				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
-				CreatePortal: true,
-				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-				StreamOrder:  methods.ParseInt64(evt.ID),
-			},
-			ChatInfo: chatInfo,
-		}).Success
+		return tc.queueChatResync(
+			chatResyncCreate,
+			tc.MakePortalKeyFromID(evt.ConversationID),
+			chatInfo,
+			methods.ParseMsecTimestamp(evt.Time),
+			methods.ParseInt64(evt.ID),
+		).Success
 
 	default:
 		log.Debug().
@@ -557,10 +591,10 @@ var _ = payload.FailureType(0)
 // This is used for untrusted (message request) conversations that don't
 // receive real-time updates via XChat WebSocket.
 // Returns true to continue polling, false to stop.
-func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
+func (tc *TwitterClient) HandlePollingEvent(ctx context.Context, evt types.TwitterEvent, inbox *response.TwitterInboxData) bool {
 	// Always cache users from inbox when available - needed for portal creation
 	if inbox != nil {
-		tc.updateTwitterUserInfo(context.TODO(), inbox)
+		tc.updateTwitterUserInfo(ctx, inbox)
 		tc.userCacheLock.Lock()
 		for userID, user := range inbox.Users {
 			tc.userCache[userID] = user
@@ -615,7 +649,6 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 
 	// Skip if conversation can use XChat (has encryption keys) - XChat WebSocket handles those
 	portalKey := tc.MakePortalKeyFromID(conversationID)
-	ctx := context.TODO()
 	if portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey); err == nil && portal != nil {
 		meta := portal.Metadata.(*PortalMetadata)
 		if meta.CanUseXChat() {
@@ -629,7 +662,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	// Dispatch to the appropriate handler based on event type
 	switch e := evt.(type) {
 	case *types.Message:
-		return tc.handlePollingMessage(e, inbox)
+		return tc.handlePollingMessage(ctx, e, inbox)
 	case *types.MessageReactionCreate:
 		reaction := (*types.MessageReaction)(e)
 		portalKey := tc.MakePortalKeyFromID(conversationID)
@@ -681,7 +714,6 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			Msg("Conversation became trusted via polling")
 
 		// Update portal metadata to mark as trusted (same as XChat path)
-		ctx := context.TODO()
 		portalKey := tc.MakePortalKeyFromID(conversationID)
 		portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
 		if err != nil {
@@ -705,16 +737,13 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			return false
 		}
 
-		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
-			EventMeta: simplevent.EventMeta{
-				Type:         bridgev2.RemoteEventChatResync,
-				PortalKey:    tc.MakePortalKeyFromID(conversationID),
-				CreatePortal: true,
-				Timestamp:    methods.ParseMsecTimestamp(e.Time),
-				StreamOrder:  methods.ParseInt64(e.ID),
-			},
-			ChatInfo: chatInfo,
-		}).Success
+		return tc.queueChatResync(
+			chatResyncCreate,
+			tc.MakePortalKeyFromID(conversationID),
+			chatInfo,
+			methods.ParseMsecTimestamp(e.Time),
+			methods.ParseInt64(e.ID),
+		).Success
 	}
 
 	return true
@@ -752,7 +781,7 @@ func (tc *TwitterClient) markPollingChatResyncSuccess(conversationID string, now
 }
 
 // handlePollingMessage handles a message event from REST API polling.
-func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *response.TwitterInboxData) bool {
+func (tc *TwitterClient) handlePollingMessage(ctx context.Context, evt *types.Message, inbox *response.TwitterInboxData) bool {
 	isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
 	portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 	msgID := evt.ID
@@ -763,7 +792,6 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 		Logger()
 
 	// For polling messages, ensure the portal exists
-	ctx := context.TODO()
 	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
 	if err != nil {
 		log.Warn().
@@ -772,7 +800,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 		return false
 	}
 
-	// Create portal if it doesn't exist
+	// Queue a portal resync if the room doesn't exist yet.
 	if portal.MXID == "" {
 		chatInfo := tc.getOrFetchChatInfoForPolling(ctx, evt.ConversationID, inbox)
 		if chatInfo == nil {
@@ -780,20 +808,18 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 				Msg("Failed to get chat info for polling message")
 			return false
 		}
-		// FIXME this is wrong, CreateMatrixRoom should not be called manually
-		if err := portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo); err != nil {
+		resync := tc.queueChatResync(
+			chatResyncCreate,
+			portal.PortalKey,
+			chatInfo,
+			methods.ParseMsecTimestamp(evt.Time),
+			methods.ParseInt64(msgID),
+		)
+		if !resync.Success {
 			log.Warn().
-				Err(err).
-				Msg("Failed to create Matrix room for polling message")
+				Err(resync.Error).
+				Msg("Failed to queue ChatResync for polling message")
 			return false
-		}
-		// Register backfill task for the newly created room
-		// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
-		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-			log.Warn().Err(err).
-				Msg("Failed to ensure backfill task exists for new polling room")
-		} else {
-			tc.connector.br.WakeupBackfillQueue()
 		}
 	} else if tc.shouldAttemptPollingChatResync(evt.ConversationID, now) {
 		chatInfo := tc.getOrFetchChatInfoForPolling(ctx, evt.ConversationID, inbox)
@@ -806,21 +832,18 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 				Int("missing_userinfo", missingUserInfo).
 				Msg("Skipping polling ChatResync: incomplete chat info")
 		} else {
-			ok := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
-				EventMeta: simplevent.EventMeta{
-					Type:         bridgev2.RemoteEventChatResync,
-					PortalKey:    portal.PortalKey,
-					CreatePortal: true,
-					Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-					StreamOrder:  methods.ParseInt64(msgID),
-				},
-				ChatInfo: chatInfo,
-			}).Success
-			if ok {
+			resync := tc.queueChatResync(
+				chatResyncUpdate,
+				portal.PortalKey,
+				chatInfo,
+				methods.ParseMsecTimestamp(evt.Time),
+				methods.ParseInt64(msgID),
+			)
+			if resync.Success {
 				log.Debug().Msg("Queued polling ChatResync")
 				tc.markPollingChatResyncSuccess(evt.ConversationID, now)
 			} else {
-				log.Debug().Msg("Failed to queue polling ChatResync")
+				log.Debug().Err(resync.Error).Msg("Failed to queue polling ChatResync")
 			}
 		}
 	}

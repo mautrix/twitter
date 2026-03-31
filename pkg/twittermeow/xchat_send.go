@@ -87,11 +87,12 @@ func (c *Client) ensureConversationToken(ctx context.Context, conversationID str
 	if err == nil {
 		return token, nil
 	}
-	if err != nil && !errors.Is(err, crypto.ErrKeyNotFound) {
+	if !errors.Is(err, crypto.ErrKeyNotFound) {
 		return "", fmt.Errorf("get conversation token: %w", err)
 	}
 
-	if err := c.refreshConversationToken(ctx, conversationID); err != nil && !errors.Is(err, crypto.ErrKeyNotFound) {
+	err = c.refreshConversationToken(ctx, conversationID)
+	if err != nil {
 		return "", err
 	}
 
@@ -125,33 +126,32 @@ func (c *Client) refreshConversationToken(ctx context.Context, conversationID st
 	}
 
 	for _, encodedEvt := range encoded {
-		err := c.putConversationTokenFromEncodedEvent(ctx, conversationID, encodedEvt)
-		if err == nil {
-			return nil
+		tokenConversationID, token := conversationTokenFromEncodedEvent(conversationID, encodedEvt)
+		if token == "" {
+			continue
 		}
-		if !errors.Is(err, crypto.ErrKeyNotFound) {
-			return err
-		}
+		return c.keyManager.PutConversationToken(ctx, tokenConversationID, token)
 	}
 
 	return crypto.ErrKeyNotFound
 }
 
-func (c *Client) putConversationTokenFromEncodedEvent(ctx context.Context, conversationID, encoded string) error {
+func conversationTokenFromEncodedEvent(fallbackConversationID, encoded string) (conversationID, token string) {
 	if encoded == "" {
-		return crypto.ErrKeyNotFound
+		return "", ""
 	}
 	evt, err := DecodeMessageEvent(encoded)
 	if err != nil {
-		return crypto.ErrKeyNotFound
+		return "", ""
 	}
 	if evt == nil || evt.ConversationToken == nil || *evt.ConversationToken == "" {
-		return crypto.ErrKeyNotFound
+		return "", ""
 	}
+	conversationID = fallbackConversationID
 	if evt.ConversationId != nil && *evt.ConversationId != "" {
 		conversationID = *evt.ConversationId
 	}
-	return c.keyManager.PutConversationToken(ctx, conversationID, *evt.ConversationToken)
+	return conversationID, *evt.ConversationToken
 }
 
 // getSelfConversationID returns the user's self-conversation ID (user_id:user_id format).
@@ -167,11 +167,6 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 	}
 
 	selfConvID := c.getSelfConversationID()
-
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return fmt.Errorf("get self conversation token: %w", err)
-	}
 
 	messageID := uuid.NewString()
 
@@ -193,7 +188,6 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               selfConvID,
 		MessageID:                    messageID,
-		ConversationToken:            token,
 		EncodedMessageCreateEvent:    encodedMCE,
 		EncodedMessageEventSignature: sigPtr,
 	})
@@ -209,11 +203,6 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 	}
 
 	selfConvID := c.getSelfConversationID()
-
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return fmt.Errorf("get self conversation token: %w", err)
-	}
 
 	messageID := uuid.NewString()
 
@@ -235,7 +224,6 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
 		ConversationID:               selfConvID,
 		MessageID:                    messageID,
-		ConversationToken:            token,
 		EncodedMessageCreateEvent:    encodedMCE,
 		EncodedMessageEventSignature: sigPtr,
 	})

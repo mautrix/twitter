@@ -76,7 +76,7 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 		} else if err != nil {
 			log.Err(err).Msg("Failed to poll for updates")
 			authError := IsAuthError(err)
-			pc.client.eventHandler(&types.PollingError{Error: err, IsAuth: authError}, nil)
+			pc.client.eventHandler(ctx, &types.PollingError{Error: err, IsAuth: authError}, nil)
 			if authError {
 				return
 			}
@@ -88,7 +88,7 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 			tick.Reset(backoffInterval)
 		} else if failing {
 			failing = false
-			pc.client.eventHandler(&types.PollingError{}, nil)
+			pc.client.eventHandler(ctx, &types.PollingError{}, nil)
 			backoffInterval = defaultPollingInterval / 2
 			tick.Reset(defaultPollingInterval)
 		}
@@ -119,7 +119,7 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 		return nil
 	}
 
-	if !pc.client.eventHandler(nil, userUpdatesResponse.UserEvents) {
+	if !pc.client.eventHandler(ctx, nil, userUpdatesResponse.UserEvents) {
 		return errEventHandlerFailed
 	}
 	for _, entry := range userUpdatesResponse.UserEvents.Entries {
@@ -128,7 +128,7 @@ func (pc *PollingClient) poll(ctx context.Context) error {
 		}
 		parsed := entry.ParseWithErrorLog(&pc.client.Logger)
 		if parsed != nil {
-			if !pc.client.eventHandler(parsed, userUpdatesResponse.UserEvents) {
+			if !pc.client.eventHandler(ctx, parsed, userUpdatesResponse.UserEvents) {
 				return errEventHandlerFailed
 			}
 		}

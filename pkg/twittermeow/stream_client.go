@@ -42,8 +42,8 @@ func (c *Client) newStreamClient() *StreamClient {
 	return sc
 }
 
-func (sc *StreamClient) startOrUpdateEventStream(conversationID string) {
-	ctx := sc.client.Logger.With().Str("action", "event stream").Logger().WithContext(context.TODO())
+func (sc *StreamClient) startOrUpdateEventStream(ctx context.Context, conversationID string) {
+	ctx = sc.client.Logger.With().Str("action", "event stream").Logger().WithContext(ctx)
 	if sc.conversationID == "" {
 		sc.conversationID = conversationID
 		go sc.start(ctx)

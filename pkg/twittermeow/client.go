@@ -27,7 +27,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-type EventHandler func(evt types.TwitterEvent, inbox *response.TwitterInboxData) bool
+type EventHandler func(ctx context.Context, evt types.TwitterEvent, inbox *response.TwitterInboxData) bool
 type StreamEventHandler func(evt response.StreamEvent)
 
 // ConversationDataCallback is called when conversation data is refreshed (e.g., during key refresh).
@@ -480,8 +480,8 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 	return c.MakeRequest(ctx, apiRequestOpts.URL, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
 }
 
-func (c *Client) SetActiveConversation(conversationID string) {
-	c.stream.startOrUpdateEventStream(conversationID)
+func (c *Client) SetActiveConversation(ctx context.Context, conversationID string) {
+	c.stream.startOrUpdateEventStream(ctx, conversationID)
 }
 
 // FetchRaw performs an authenticated request to the given URL and returns the response and body.

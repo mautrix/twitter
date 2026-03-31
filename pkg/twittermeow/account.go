@@ -40,36 +40,41 @@ func (c *Client) GetCurrentUserProfile(ctx context.Context) (CurrentUserProfile,
 	if err != nil {
 		return CurrentUserProfile{}, err
 	}
-	if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
-		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat error: %s", resp.Errors[0].Message)
+	if len(resp.Errors) > 0 {
+		msg := strings.TrimSpace(resp.Errors[0].Message)
+		if msg == "" {
+			msg = "unknown error"
+		}
+		return CurrentUserProfile{}, fmt.Errorf("get user profile: %s", msg)
 	}
 	if len(resp.Data.GetMemberResults.Results) != 1 {
 		return CurrentUserProfile{}, fmt.Errorf("expected 1 user result for %s, got %d", currentUserID, len(resp.Data.GetMemberResults.Results))
 	}
 
 	result := resp.Data.GetMemberResults.Results[0]
-	if result.MemberResults == nil || result.MemberResults.Result == nil || result.MemberResults.Result.Core == nil {
+	member := result.MemberResults
+	if member == nil || member.Result == nil || member.Result.Core == nil {
 		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat returned no user for %s", currentUserID)
 	}
 
-	resultUserID := result.MemberResults.RestID
+	resultUserID := member.RestID
 	if resultUserID == "" {
-		resultUserID = result.MemberResults.Result.RestID
+		resultUserID = member.Result.RestID
 	}
-	if resultUserID != "" && resultUserID != currentUserID {
+	if resultUserID == "" {
+		resultUserID = currentUserID
+	}
+	if resultUserID != currentUserID {
 		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat returned user %s for %s", resultUserID, currentUserID)
 	}
 
 	profile := CurrentUserProfile{
-		ID:         currentUserID,
-		ScreenName: strings.TrimSpace(result.MemberResults.Result.Core.ScreenName),
-		Name:       strings.TrimSpace(result.MemberResults.Result.Core.Name),
+		ID:         resultUserID,
+		ScreenName: strings.TrimSpace(member.Result.Core.ScreenName),
+		Name:       strings.TrimSpace(member.Result.Core.Name),
 	}
-	if resultUserID != "" {
-		profile.ID = resultUserID
-	}
-	if result.MemberResults.Result.Avatar != nil {
-		profile.AvatarURL = strings.TrimSpace(result.MemberResults.Result.Avatar.ImageURL)
+	if member.Result.Avatar != nil {
+		profile.AvatarURL = strings.TrimSpace(member.Result.Avatar.ImageURL)
 	}
 
 	return profile, nil

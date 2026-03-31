@@ -81,7 +81,10 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 			if !ok {
 				return displayname
 			}
-			ghost, err := tc.connector.br.GetGhostByID(context.TODO(), userID)
+			if ctx.Ctx == nil {
+				return displayname
+			}
+			ghost, err := tc.connector.br.GetGhostByID(ctx.Ctx, userID)
 			if err != nil || len(ghost.Identifiers) < 1 {
 				return displayname
 			}
