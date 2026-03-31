@@ -1,6 +1,6 @@
 # v26.03
 
-* Bumped minimum Go version to 1.26.
+* Bumped minimum Go version to 1.25.
 * Added support for encrypted XChat chats.
 
 # v25.11
