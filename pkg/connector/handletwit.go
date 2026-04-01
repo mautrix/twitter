@@ -114,7 +114,7 @@ func (tc *TwitterClient) buildMemberChangeEvent(
 			},
 			PortalKey:    tc.MakePortalKeyFromID(conversationID),
 			CreatePortal: false,
-			StreamOrder:  methods.ParseInt64(eventID),
+			StreamOrder:  methods.ParseSnowflakeInt(eventID),
 			Timestamp:    methods.ParseMsecTimestamp(eventTime),
 		},
 		ChatInfoChange: &bridgev2.ChatInfoChange{
@@ -143,7 +143,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		if eventID == "" {
 			eventID = evt.ID
 		}
-		streamOrder := methods.ParseInt64(eventID)
+		streamOrder := methods.ParseSnowflakeInt(eventID)
 		if streamOrder == 0 {
 			streamOrder = methods.ParseInt64(evt.Time)
 		}
@@ -201,7 +201,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		if msgID == "" {
 			msgID = evt.ID
 		}
-		streamOrder := methods.ParseInt64(msgID)
+		streamOrder := methods.ParseSnowflakeInt(msgID)
 		if streamOrder == 0 {
 			streamOrder = methods.ParseInt64(evt.Time)
 		}
@@ -297,9 +297,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 	case *types.ConversationRead:
 		lastTarget := MakeMessageID(evt.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(evt.Time)
-		readUpToStreamOrder := methods.ParseInt64(evt.LastReadEventID)
+		readUpToStreamOrder := methods.ParseSnowflakeInt(evt.LastReadEventID)
 		if readUpToStreamOrder == 0 {
-			readUpToStreamOrder = methods.ParseInt64(evt.ID)
+			readUpToStreamOrder = methods.ParseSnowflakeInt(evt.ID)
 		}
 		var targets []networkid.MessageID
 		if lastTarget != "" {
@@ -336,7 +336,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 							Str("message_create_event_id", deletedMsg.MessageCreateEventID)
 					},
 					Timestamp:   methods.ParseMsecTimestamp(evt.Time),
-					StreamOrder: methods.ParseInt64(evt.ID),
+					StreamOrder: methods.ParseSnowflakeInt(evt.ID),
 				},
 				TargetMessage: MakeMessageID(deletedMsg.MessageID),
 			}
@@ -352,7 +352,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.Str("conversation_id", evt.ConversationID)
 				},
-				StreamOrder: methods.ParseInt64(evt.ID),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
 				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
 			},
 			OnlyForMe: true,
@@ -389,7 +389,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				},
 				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
 				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
-				StreamOrder: methods.ParseInt64(evt.ID),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
 			},
 			ChatInfoChange: &bridgev2.ChatInfoChange{
 				ChatInfo: &bridgev2.ChatInfo{
@@ -408,7 +408,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Type:        bridgev2.RemoteEventChatInfoChange,
 				Sender:      tc.MakeEventSender(evt.ByUserID),
 				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
-				StreamOrder: methods.ParseInt64(evt.ID),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
 				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
 			},
 			ChatInfoChange: &bridgev2.ChatInfoChange{
@@ -485,7 +485,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 					PortalKey:    portalKey,
 					CreatePortal: true,
 					Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-					StreamOrder:  methods.ParseInt64(evt.ID),
+					StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
 				},
 				ChatInfo: chatInfo,
 				CheckNeedsBackfillFunc: func(ctx context.Context, latestMessage *database.Message) (bool, error) {
@@ -536,7 +536,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
 				CreatePortal: true,
 				Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-				StreamOrder:  methods.ParseInt64(evt.ID),
+				StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
 			},
 			ChatInfo: chatInfo,
 		}).Success
@@ -643,9 +643,9 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	case *types.ConversationRead:
 		lastTarget := MakeMessageID(e.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(e.Time)
-		readUpToStreamOrder := methods.ParseInt64(e.LastReadEventID)
+		readUpToStreamOrder := methods.ParseSnowflakeInt(e.LastReadEventID)
 		if readUpToStreamOrder == 0 {
-			readUpToStreamOrder = methods.ParseInt64(e.ID)
+			readUpToStreamOrder = methods.ParseSnowflakeInt(e.ID)
 		}
 		var targets []networkid.MessageID
 		if lastTarget != "" {
@@ -668,7 +668,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			EventMeta: simplevent.EventMeta{
 				Type:        bridgev2.RemoteEventChatDelete,
 				PortalKey:   tc.MakePortalKeyFromID(conversationID),
-				StreamOrder: methods.ParseInt64(e.ID),
+				StreamOrder: methods.ParseSnowflakeInt(e.ID),
 				Timestamp:   methods.ParseMsecTimestamp(e.Time),
 			},
 			OnlyForMe: true,
@@ -711,7 +711,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 				PortalKey:    tc.MakePortalKeyFromID(conversationID),
 				CreatePortal: true,
 				Timestamp:    methods.ParseMsecTimestamp(e.Time),
-				StreamOrder:  methods.ParseInt64(e.ID),
+				StreamOrder:  methods.ParseSnowflakeInt(e.ID),
 			},
 			ChatInfo: chatInfo,
 		}).Success
@@ -812,7 +812,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 					PortalKey:    portal.PortalKey,
 					CreatePortal: true,
 					Timestamp:    methods.ParseMsecTimestamp(evt.Time),
-					StreamOrder:  methods.ParseInt64(msgID),
+					StreamOrder:  methods.ParseSnowflakeInt(msgID),
 				},
 				ChatInfo: chatInfo,
 			}).Success
@@ -838,7 +838,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 			PortalKey:    portalKey,
 			CreatePortal: true,
 			Sender:       tc.MakeEventSender(evt.MessageData.SenderID),
-			StreamOrder:  methods.ParseInt64(msgID),
+			StreamOrder:  methods.ParseSnowflakeInt(msgID),
 			Timestamp:    methods.ParseMsecTimestamp(evt.Time),
 		},
 		ID:            MakeMessageID(msgID),
