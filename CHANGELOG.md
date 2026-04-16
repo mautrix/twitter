@@ -1,3 +1,7 @@
+# v26.04
+
+* Fixed encryption using non-latest key in some cases.
+
 # v26.03
 
 * Bumped minimum Go version to 1.25.
