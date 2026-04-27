@@ -19,11 +19,11 @@ require (
 	github.com/rs/zerolog v1.35.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0
-	go.mau.fi/util v0.9.8
+	go.mau.fi/util v0.9.9-0.20260424160448-fd0d9737ad38
 	golang.org/x/crypto v0.50.0
 	golang.org/x/sync v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.27.0
+	maunium.net/go/mautrix v0.27.1-0.20260427165325-7724eaafca8b
 )
 
 require (
