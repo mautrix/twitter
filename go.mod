@@ -23,7 +23,7 @@ require (
 	golang.org/x/crypto v0.50.0
 	golang.org/x/sync v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.27.1-0.20260427165325-7724eaafca8b
+	maunium.net/go/mautrix v0.27.1-0.20260429060852-d7aad0e862c7
 )
 
 require (
