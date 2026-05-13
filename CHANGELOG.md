@@ -1,3 +1,7 @@
+# v26.05
+
+* Fixed accepting message requests on X failing with HTTP 404 (X error code 279) after the conversation had already been accepted on x.com or another client.
+
 # v26.04
 
 * Fixed encryption using non-latest key in some cases.

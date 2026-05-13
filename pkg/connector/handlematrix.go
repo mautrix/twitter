@@ -923,5 +923,24 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 }
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
-	return tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
+	conversationID := ParsePortalID(msg.Portal.ID)
+	err := tc.client.AcceptConversation(ctx, conversationID)
+	if err != nil && !errors.Is(err, (twittermeow.TwitterError{Code: 279})) {
+		return err
+	}
+	// Treat success and "conversation doesn't exist" (X code 279) the same way.
+	// 279 fires when the request has already been moved out of the requests bucket
+	// upstream, typically because the user accepted on x.com or another client.
+	// The portal still needs to be promoted locally so the chat leaves Requests
+	// and the Accept button stops re-firing the same upstream 404.
+	meta := msg.Portal.Metadata.(*PortalMetadata)
+	if !meta.Trusted {
+		meta.Trusted = true
+		if saveErr := msg.Portal.Save(ctx); saveErr != nil {
+			zerolog.Ctx(ctx).Warn().Err(saveErr).
+				Str("conversation_id", conversationID).
+				Msg("Failed to save portal metadata with Trusted=true after accepting message request")
+		}
+	}
+	return nil
 }
