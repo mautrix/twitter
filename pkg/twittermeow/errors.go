@@ -25,6 +25,7 @@ var (
 	ErrUserSuspended            error = TwitterError{Code: 63}
 	ErrAccountSuspended         error = TwitterError{Code: 63}
 	ErrNotActive                error = TwitterError{Code: 141}
+	ErrConversationDoesntExist  error = TwitterError{Code: 279}
 	ErrAccountTemporarilyLocked error = TwitterError{Code: 326}
 	ErrCSRFMismatch             error = TwitterError{Code: 353}
 )
