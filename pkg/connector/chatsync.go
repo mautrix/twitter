@@ -82,18 +82,6 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 	}
 	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
 
-	// XChat conversations are socially trusted (not message requests).
-	// Note: Independent of whether encryption keys are available yet.
-	meta := portal.Metadata.(*PortalMetadata)
-	if !meta.Trusted {
-		meta.Trusted = true
-		if err := portal.Save(ctx); err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to save portal metadata with Trusted=true")
-		}
-	}
-
 	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
 	// Beeper scrollback relies on the backfill task existing for the portal.
 	if portal.MXID != "" {
@@ -508,13 +496,6 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 			Str("conversation_id", conv.ConversationID).
 			Msg("Failed to get/create portal for untrusted conversation")
 		return
-	}
-
-	// Don't downgrade trust status - only set false if not already trusted
-	meta := portal.Metadata.(*PortalMetadata)
-	if !meta.Trusted {
-		// Keep as untrusted (Trusted stays false)
-		// No need to save since Trusted=false is the zero value
 	}
 
 	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)

@@ -502,25 +502,6 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Str("reason", evt.Reason).
 			Msg("Conversation became trusted (message request accepted)")
 
-		// Update portal metadata to mark as trusted
-		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
-		portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", evt.ConversationID).
-				Msg("Failed to get portal for TrustConversation event")
-		} else {
-			meta := portal.Metadata.(*PortalMetadata)
-			if !meta.Trusted {
-				meta.Trusted = true
-				if err := portal.Save(ctx); err != nil {
-					log.Warn().Err(err).
-						Str("conversation_id", evt.ConversationID).
-						Msg("Failed to save portal metadata with Trusted=true")
-				}
-			}
-		}
-
 		// Fetch updated conversation data and create ChatInfo with MessageRequest: false
 		chatInfo := tc.getTrustedChatInfo(ctx, evt.ConversationID)
 		if chatInfo == nil {
@@ -682,23 +663,6 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 
 		// Update portal metadata to mark as trusted (same as XChat path)
 		ctx := context.TODO()
-		portalKey := tc.MakePortalKeyFromID(conversationID)
-		portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conversationID).
-				Msg("Failed to get portal for TrustConversation event")
-		} else {
-			meta := portal.Metadata.(*PortalMetadata)
-			if !meta.Trusted {
-				meta.Trusted = true
-				if err := portal.Save(ctx); err != nil {
-					log.Warn().Err(err).
-						Str("conversation_id", conversationID).
-						Msg("Failed to save portal metadata with Trusted=true")
-				}
-			}
-		}
 
 		chatInfo := tc.getTrustedChatInfo(ctx, conversationID)
 		if chatInfo == nil {

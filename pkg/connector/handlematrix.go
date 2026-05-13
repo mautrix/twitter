@@ -413,21 +413,6 @@ func (tc *TwitterClient) sendDirectMessageREST(
 		}
 	}
 
-	// Successfully sent - mark conversation as trusted (message request accepted)
-	meta := msg.Portal.Metadata.(*PortalMetadata)
-	if !meta.Trusted {
-		meta.Trusted = true
-		if err := msg.Portal.Save(ctx); err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conversationID).
-				Msg("Failed to save portal metadata with Trusted=true after REST send")
-		} else {
-			log.Debug().
-				Str("conversation_id", conversationID).
-				Msg("Marked conversation as trusted after REST message send")
-		}
-	}
-
 	return &bridgev2.MatrixMessageResponse{
 		DB: dbMsg,
 	}, nil
