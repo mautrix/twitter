@@ -8,7 +8,7 @@ tool go.mau.fi/util/cmd/maubuild
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
-	github.com/apache/thrift v0.23.0
+	github.com/apache/thrift v0.23.1-0.20260429145742-d2acd3c49e58
 	github.com/bwesterb/go-ristretto v1.2.3
 	github.com/coder/websocket v1.8.14
 	github.com/fxamacker/cbor/v2 v2.9.2
