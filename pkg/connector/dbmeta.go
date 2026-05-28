@@ -69,10 +69,16 @@ type UserLoginMetadata struct {
 	Session            *twittermeow.CachedSession `json:"session,omitempty"`
 	MaxUserSequenceID  string                     `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
 	MessagePullVersion *int                       `json:"message_pull_version,omitempty"`
+	XChatInboxCursor   *XChatInboxCursorData      `json:"xchat_inbox_cursor,omitempty"` // Next inbox page to import when a full sync is in progress
 
 	// Migration tracking fields
 	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration
 	PendingEncryptedSync bool       `json:"pending_encrypted_sync,omitempty"` // True if encrypted rooms need full backfill after migration
+}
+
+type XChatInboxCursorData struct {
+	CursorID        string `json:"cursor_id,omitempty"`
+	GraphSnapshotID string `json:"graph_snapshot_id,omitempty"`
 }
 
 // ConversationKeyData stores a conversation encryption key.
