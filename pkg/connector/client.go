@@ -206,23 +206,6 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	var maxSeqID string
 	var maxSeqIDLock sync.Mutex
 
-	processor.SetSequenceIDCallback(func(seqID string) {
-		maxSeqIDLock.Lock()
-		defer maxSeqIDLock.Unlock()
-		if parseSequenceID(seqID) > parseSequenceID(maxSeqID) {
-			maxSeqID = seqID
-		}
-	})
-
-	// Fetch XChat inbox pages
-	fetchLog := log.With().Str("component", "xchat_fetch").Logger()
-	seqID := meta.MaxUserSequenceID
-	msgPullVersion := meta.MessagePullVersion
-
-	var totalItems atomic.Int32
-	var missingUserIDs []string
-	inboxSyncComplete := false
-
 	setMaxSeqID := func(seqID string) {
 		if seqID == "" {
 			return
@@ -233,11 +216,23 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			maxSeqID = seqID
 		}
 	}
+
 	getMaxSeqID := func() string {
 		maxSeqIDLock.Lock()
 		defer maxSeqIDLock.Unlock()
 		return maxSeqID
 	}
+
+	processor.SetSequenceIDCallback(setMaxSeqID)
+
+	// Fetch XChat inbox pages
+	fetchLog := log.With().Str("component", "xchat_fetch").Logger()
+	seqID := meta.MaxUserSequenceID
+	msgPullVersion := meta.MessagePullVersion
+
+	var totalItems atomic.Int32
+	var missingUserIDs []string
+	inboxSyncComplete := false
 
 	// processPage imports one fetched inbox page. The caller checkpoints the
 	// cursor only after this returns, so restarts resume at a page boundary.
@@ -290,6 +285,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 				return nil
 			})
 		}
+
 		if err := g.Wait(); err != nil {
 			log.Warn().Err(err).Msg("Failed to process XChat inbox page")
 		}
