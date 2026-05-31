@@ -583,6 +583,27 @@ func DecodeSendMessageEventResponse(encoded string) (*payload.SendMessageEventRe
 	return &resp, nil
 }
 
+// DecodeSendMessageMutationMessageEvent decodes SendMessageMutation responses.
+// The endpoint has returned both direct MessageEvent payloads and wrapper payloads.
+func DecodeSendMessageMutationMessageEvent(encoded string) (*payload.MessageEvent, error) {
+	evt, err := DecodeMessageEvent(encoded)
+	if err == nil && evt != nil && evt.Detail != nil {
+		return evt, nil
+	}
+
+	resp, wrapperErr := DecodeSendMessageEventResponse(encoded)
+	if wrapperErr != nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, wrapperErr
+	}
+	if resp == nil || resp.MessageEvent == nil || *resp.MessageEvent == "" {
+		return nil, fmt.Errorf("send message response did not contain a message event")
+	}
+	return DecodeMessageEvent(*resp.MessageEvent)
+}
+
 type decodedInboxMessageEvent struct {
 	seq int64
 	evt *payload.MessageEvent

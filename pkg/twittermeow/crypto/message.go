@@ -584,7 +584,7 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 			return nil, fmt.Errorf("sign message: %w", err)
 		}
 
-		sigVersion := SignatureVersion3
+		sigVersion := SignatureVersion7
 
 		event.MessageEventSignature = &payload.MessageEventSignature{
 			Signature:        &signature,

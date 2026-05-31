@@ -268,9 +268,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 	}
 
-	// Encrypted conversation: correlate remote echo (XChat RequestID) with this Matrix event.
-	// Without this, the remote echo can get bridged back into Matrix as a duplicate message.
-	msg.AddPendingToSave(dbMsg, txnID, nil)
+	// Encrypted conversation: the mutation response includes the real XChat sequence ID,
+	// so ignore the later remote echo instead of leaving the send pending.
+	msg.AddPendingToIgnore(txnID)
 
 	// Use XChat protocol, with REST fallback on key/token not found.
 	resp, err := tc.client.SendEncryptedMessage(ctx, opts)
@@ -282,7 +282,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 				Msg("Falling back to REST API for message send (key/token not found)")
 			return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 		}
-		return nil, err
+		return nil, bridgev2.WrapErrorInStatus(err).WithSendNotice(true)
 	}
 	zerolog.Ctx(ctx).Debug().
 		Str("conversation_id", conversationID).
@@ -290,29 +290,54 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		Any("response", resp).
 		Msg("XChat send message response")
 
-	if resp != nil && resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent != "" {
-		decoded, err := twittermeow.DecodeSendMessageEventResponse(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
-		if err != nil {
-			zerolog.Ctx(ctx).Debug().
-				Err(err).
-				Str("conversation_id", conversationID).
-				Str("message_id", messageID).
-				Msg("Failed to decode XChat send message response")
-		} else if decoded != nil && decoded.MessageEvent != nil && *decoded.MessageEvent != "" {
-			zerolog.Ctx(ctx).Debug().
-				Str("conversation_id", conversationID).
-				Str("message_id", messageID).
-				Msg("Decoded XChat send message event")
-			if evt, err := twittermeow.DecodeMessageEvent(*decoded.MessageEvent); err == nil && evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
-				dbMsg.ID = MakeMessageID(*evt.SequenceId)
-			}
-		}
+	if resp == nil || resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent == "" {
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(errors.New("XChat send message response did not include an encoded message event")).WithSendNotice(true).WithErrorAsMessage()
+	}
+	evt, err := twittermeow.DecodeSendMessageMutationMessageEvent(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
+	if err != nil {
+		zerolog.Ctx(ctx).Debug().
+			Err(err).
+			Str("conversation_id", conversationID).
+			Str("message_id", messageID).
+			Msg("Failed to decode XChat send message response")
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(fmt.Errorf("failed to decode XChat send message response: %w", err)).WithSendNotice(true).WithErrorAsMessage()
+	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
+			WithStatus(event.MessageStatusFail).
+			WithIsCertain(true).
+			WithSendNotice(true).
+			WithErrorAsMessage()
+	} else if evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
+		zerolog.Ctx(ctx).Debug().
+			Str("conversation_id", conversationID).
+			Str("message_id", messageID).
+			Msg("Decoded XChat send message event")
+		dbMsg.ID = MakeMessageID(*evt.SequenceId)
+	} else {
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(errors.New("XChat send message response did not include a message ID")).WithSendNotice(true).WithErrorAsMessage()
 	}
 
 	return &bridgev2.MatrixMessageResponse{
-		DB:      dbMsg,
-		Pending: true,
+		DB:            dbMsg,
+		RemovePending: txnID,
 	}, nil
+}
+
+func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
+	switch payload.FailureType(ptr.Val(failure.FailureType)) {
+	case payload.FailureTypeInvalidSenderSignature:
+		return "X rejected this message: invalid sender signature"
+	case payload.FailureTypeContentsTooLarge:
+		return "X rejected this message: contents too large"
+	case payload.FailureTypeRecipientHasNotTrustedConversation:
+		return "X rejected this message: recipient has not trusted this conversation"
+	default:
+		return fmt.Sprintf("X rejected this message: failure type %d", ptr.Val(failure.FailureType))
+	}
 }
 
 // sendDirectMessageREST sends a message via the REST API for untrusted conversations
