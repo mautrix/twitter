@@ -542,11 +542,6 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	// Always cache users from inbox when available - needed for portal creation
 	if inbox != nil {
 		tc.updateTwitterUserInfo(context.TODO(), inbox)
-		tc.userCacheLock.Lock()
-		for userID, user := range inbox.Users {
-			tc.userCache[userID] = user
-		}
-		tc.userCacheLock.Unlock()
 	}
 
 	if evt == nil {
@@ -816,25 +811,32 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 	}).Success
 }
 
-// updateTwitterUserInfo updates ghost info when user data changes.
-// This ensures profile pictures are visible for users in message request conversations.
+// updateTwitterUserInfo caches inbox users and updates ghost info when user data changes.
+// The cache lock must not be held while doing ghost/avatar I/O.
 func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *response.TwitterInboxData) {
 	if inbox == nil || inbox.Users == nil {
 		return
 	}
 	log := zerolog.Ctx(ctx)
-	tc.userCacheLock.RLock()
-	defer tc.userCacheLock.RUnlock()
 
+	updates := make(map[string]*types.User)
+
+	tc.userCacheLock.Lock()
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
 		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
-			ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
-			if err != nil {
-				log.Debug().Err(err).Str("user_id", userID).Msg("Failed to get ghost by ID for user info update")
-				continue
-			}
-			ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, user))
+			updates[userID] = user
 		}
+		tc.userCache[userID] = user
+	}
+	tc.userCacheLock.Unlock()
+
+	for userID, update := range updates {
+		ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
+		if err != nil {
+			log.Debug().Err(err).Str("user_id", userID).Msg("Failed to get ghost by ID for user info update")
+			continue
+		}
+		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update))
 	}
 }

@@ -449,15 +449,8 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 		}
 	}
 
-	// Update ghost info for users (ensures profile pictures are visible)
+	// Cache users and update ghost info when needed.
 	tc.updateTwitterUserInfo(ctx, inbox)
-
-	// Cache users from inbox
-	tc.userCacheLock.Lock()
-	for userID, user := range inbox.Users {
-		tc.userCache[userID] = user
-	}
-	tc.userCacheLock.Unlock()
 
 	// Process only untrusted conversations (message requests)
 	untrustedCount := 0
