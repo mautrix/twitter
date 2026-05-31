@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -384,11 +385,21 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		processPage(page)
 
 		nextCursor := nextXChatInboxCursor(page)
-		if nextCursor != nil && nextCursor.CursorId == cursor.CursorId && nextCursor.GraphSnapshotId == cursor.GraphSnapshotId {
-			fetchLog.Debug().
-				Str("cursor_id", page.InboxCursor.CursorID).
-				Msg("Cursor did not advance, stopping inbox pagination")
-			nextCursor = nil
+		if nextCursor != nil && nextCursor.CursorId == cursor.CursorId {
+			err := errors.New("xchat inbox cursor did not advance")
+			fetchLog.Err(err).
+				Str("cursor_id", nextCursor.CursorId).
+				Str("request_graph_snapshot_id", cursor.GraphSnapshotId).
+				Str("response_graph_snapshot_id", nextCursor.GraphSnapshotId).
+				Msg("Failed to fetch XChat inbox page")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateUnknownError,
+				Error:      "twitter-xchat-fetch-error",
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
+			})
+			return
 		}
 
 		cursor = nextCursor
