@@ -819,28 +819,24 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 	}
 	log := zerolog.Ctx(ctx)
 
-	type userInfoUpdate struct {
-		userID string
-		user   *types.User
-	}
-	var updates []userInfoUpdate
+	updates := make(map[string]*types.User)
 
 	tc.userCacheLock.Lock()
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
 		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
-			updates = append(updates, userInfoUpdate{userID: userID, user: user})
+			updates[userID] = user
 		}
 		tc.userCache[userID] = user
 	}
 	tc.userCacheLock.Unlock()
 
-	for _, update := range updates {
-		ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(update.userID))
+	for userID, update := range updates {
+		ghost, err := tc.connector.br.GetGhostByID(ctx, MakeUserID(userID))
 		if err != nil {
-			log.Debug().Err(err).Str("user_id", update.userID).Msg("Failed to get ghost by ID for user info update")
+			log.Debug().Err(err).Str("user_id", userID).Msg("Failed to get ghost by ID for user info update")
 			continue
 		}
-		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update.user))
+		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update))
 	}
 }
