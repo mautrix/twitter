@@ -290,27 +290,35 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		Any("response", resp).
 		Msg("XChat send message response")
 
-	if resp != nil && resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent != "" {
-		evt, err := twittermeow.DecodeSendMessageMutationMessageEvent(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
-		if err != nil {
-			zerolog.Ctx(ctx).Debug().
-				Err(err).
-				Str("conversation_id", conversationID).
-				Str("message_id", messageID).
-				Msg("Failed to decode XChat send message response")
-		} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
-			msg.RemovePending(txnID)
-			return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
-				WithStatus(event.MessageStatusFail).
-				WithIsCertain(true).
-				WithSendNotice(true)
-		} else if evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
-			zerolog.Ctx(ctx).Debug().
-				Str("conversation_id", conversationID).
-				Str("message_id", messageID).
-				Msg("Decoded XChat send message event")
-			dbMsg.ID = MakeMessageID(*evt.SequenceId)
-		}
+	if resp == nil || resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent == "" {
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(errors.New("XChat send message response did not include an encoded message event")).WithSendNotice(true).WithErrorAsMessage()
+	}
+	evt, err := twittermeow.DecodeSendMessageMutationMessageEvent(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
+	if err != nil {
+		zerolog.Ctx(ctx).Debug().
+			Err(err).
+			Str("conversation_id", conversationID).
+			Str("message_id", messageID).
+			Msg("Failed to decode XChat send message response")
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(fmt.Errorf("failed to decode XChat send message response: %w", err)).WithSendNotice(true).WithErrorAsMessage()
+	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
+			WithStatus(event.MessageStatusFail).
+			WithIsCertain(true).
+			WithSendNotice(true).
+			WithErrorAsMessage()
+	} else if evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
+		zerolog.Ctx(ctx).Debug().
+			Str("conversation_id", conversationID).
+			Str("message_id", messageID).
+			Msg("Decoded XChat send message event")
+		dbMsg.ID = MakeMessageID(*evt.SequenceId)
+	} else {
+		msg.RemovePending(txnID)
+		return nil, bridgev2.WrapErrorInStatus(errors.New("XChat send message response did not include a message ID")).WithSendNotice(true).WithErrorAsMessage()
 	}
 
 	return &bridgev2.MatrixMessageResponse{
