@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	// SignatureVersion3 is the current signature version for MessageCreateEvent.
+	// SignatureVersion3 is the legacy signature version for MessageCreateEvent verification.
 	SignatureVersion3 = "3"
+	// SignatureVersion7 is the current send signature version for MessageCreateEvent.
+	SignatureVersion7 = "7"
 	// SignatureVersion4 is the current signature version for MarkConversationReadEvent.
 	SignatureVersion4 = "4"
 
