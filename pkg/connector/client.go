@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,12 +136,15 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		return
 	}
 
-	// If pending encrypted sync after migration, force full resync
-	if meta.PendingEncryptedSync {
+	// If pending encrypted sync after migration, force full resync. Once a
+	// resumable inbox cursor exists, keep it so reconnects can continue where
+	// the previous import stopped.
+	if meta.PendingEncryptedSync && meta.XChatInboxCursor == nil {
 		log.Info().Msg("Post-migration: forcing full resync for encrypted rooms")
 		meta.Session = nil          // Clear cached session
 		meta.MaxUserSequenceID = "" // Reset sequence to fetch all messages
 	}
+	fullInboxSyncInProgress := meta.PendingEncryptedSync || meta.MaxUserSequenceID == "" || meta.XChatInboxCursor != nil
 
 	// Check for cached session
 	useCachedSession := tc.connector.Config.CacheSession &&
@@ -181,7 +185,7 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 	// Full XChat inbox sync (migration / fresh login) can take a while. Mark as connected once we
 	// know credentials are valid, and let the initial sync finish in the background.
-	if meta.PendingEncryptedSync || meta.MaxUserSequenceID == "" {
+	if fullInboxSyncInProgress {
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateConnected,
 			Reason:     "sync_in_progress",
@@ -203,28 +207,36 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	var maxSeqID string
 	var maxSeqIDLock sync.Mutex
 
-	processor.SetSequenceIDCallback(func(seqID string) {
+	setMaxSeqID := func(seqID string) {
+		if seqID == "" {
+			return
+		}
 		maxSeqIDLock.Lock()
 		defer maxSeqIDLock.Unlock()
 		if parseSequenceID(seqID) > parseSequenceID(maxSeqID) {
 			maxSeqID = seqID
 		}
-	})
+	}
+
+	getMaxSeqID := func() string {
+		maxSeqIDLock.Lock()
+		defer maxSeqIDLock.Unlock()
+		return maxSeqID
+	}
+
+	processor.SetSequenceIDCallback(setMaxSeqID)
 
 	// Fetch XChat inbox pages
 	fetchLog := log.With().Str("component", "xchat_fetch").Logger()
 	seqID := meta.MaxUserSequenceID
 	msgPullVersion := meta.MessagePullVersion
 
-	// Errgroup for processing pages in parallel as they're fetched
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(10)
-
 	var totalItems atomic.Int32
 	var missingUserIDs []string
-	var missingUserIDsMu sync.Mutex
+	inboxSyncComplete := false
 
-	// processPage spawns goroutines to process each item in a page immediately
+	// processPage imports one fetched inbox page. The caller checkpoints the
+	// cursor only after this returns, so restarts resume at a page boundary.
 	processPage := func(page response.XChatInboxPage) {
 		var pageMissing []string
 
@@ -238,23 +250,24 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		}
 
 		if len(pageMissing) > 0 {
-			if err := tc.ensureUsersInCacheByID(gCtx, pageMissing); err != nil {
+			if err := tc.ensureUsersInCacheByID(ctx, pageMissing); err != nil {
 				log.Warn().
 					Err(err).
 					Int("missing_users", len(pageMissing)).
 					Msg("Failed to prefetch missing users for inbox page")
 			}
-			missingUserIDsMu.Lock()
 			missingUserIDs = append(missingUserIDs, pageMissing...)
-			missingUserIDsMu.Unlock()
 		}
+
+		g, pageCtx := errgroup.WithContext(ctx)
+		g.SetLimit(10)
 
 		for i := range page.Items {
 			item := &page.Items[i]
 
 			g.Go(func() error {
 				// Process key changes first (needed for decryption)
-				if err := processor.ProcessKeyChangeEvents(gCtx, item); err != nil {
+				if err := processor.ProcessKeyChangeEvents(pageCtx, item); err != nil {
 					log.Warn().
 						Err(err).
 						Str("conversation_id", item.ConversationDetail.ConversationID).
@@ -262,9 +275,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 				}
 
 				// Sync channel and process messages
-				tc.syncXChatChannel(gCtx, item, nil)
+				tc.syncXChatChannel(pageCtx, item, nil)
 
-				if err := processor.ProcessMessageAndReadEvents(gCtx, item); err != nil {
+				if err := processor.ProcessMessageAndReadEvents(pageCtx, item); err != nil {
 					log.Warn().
 						Err(err).
 						Str("conversation_id", item.ConversationDetail.ConversationID).
@@ -273,57 +286,69 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 				return nil
 			})
 		}
-	}
 
-	// Initial page fetch
-	vars := payload.NewInitialXChatPageQueryVariables(seqID)
-	if msgPullVersion != nil {
-		vars.MessagePullVersion = msgPullVersion
-	}
-
-	fetchLog.Info().
-		Str("request_cursor_id", "").
-		Str("request_graph_snapshot_id", "").
-		Msg("Fetching initial XChat inbox page")
-
-	initialResp, err := tc.client.GetInitialXChatPage(ctx, vars)
-	if err != nil {
-		fetchLog.Err(err).
-			Msg("Failed to fetch initial XChat inbox page")
-		tc.userLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateUnknownError,
-			Error:      "twitter-xchat-fetch-error",
-			Info: map[string]any{
-				"go_error": err.Error(),
-			},
-		})
-		return
-	}
-
-	page := initialResp.Data.GetInboxPage
-	fetchLog.Info().
-		Str("response_cursor_id", page.InboxCursor.CursorID).
-		Str("response_graph_snapshot_id", page.InboxCursor.GraphSnapshotID).
-		Bool("pull_finished", page.InboxCursor.PullFinished).
-		Int("items", len(page.Items)).
-		Msg("Received XChat inbox page")
-
-	if page.MaxUserSequenceID != nil && parseSequenceID(*page.MaxUserSequenceID) > parseSequenceID(maxSeqID) {
-		maxSeqID = *page.MaxUserSequenceID
-	}
-	if page.MessagePullVersion != nil {
-		msgPullVersion = page.MessagePullVersion
-	}
-
-	// Process initial page immediately
-	processPage(page)
-
-	var cursor *payload.XChatCursor
-	if !page.InboxCursor.PullFinished && page.InboxCursor.CursorID != "" && page.InboxCursor.GraphSnapshotID != "" {
-		cursor = &payload.XChatCursor{
-			CursorId:        page.InboxCursor.CursorID,
-			GraphSnapshotId: page.InboxCursor.GraphSnapshotID,
+		if err := g.Wait(); err != nil {
+			log.Warn().Err(err).Msg("Failed to process XChat inbox page")
 		}
+	}
+
+	updatePageState := func(page response.XChatInboxPage) {
+		if page.MaxUserSequenceID != nil {
+			setMaxSeqID(*page.MaxUserSequenceID)
+		}
+		if page.MessagePullVersion != nil {
+			msgPullVersion = page.MessagePullVersion
+		}
+	}
+
+	cursor := xchatInboxCursorFromMetadata(meta.XChatInboxCursor)
+	if cursor == nil {
+		// Initial page fetch
+		vars := payload.NewInitialXChatPageQueryVariables(seqID)
+		if msgPullVersion != nil {
+			vars.MessagePullVersion = msgPullVersion
+		}
+
+		fetchLog.Info().
+			Str("request_cursor_id", "").
+			Str("request_graph_snapshot_id", "").
+			Msg("Fetching initial XChat inbox page")
+
+		initialResp, err := tc.client.GetInitialXChatPage(ctx, vars)
+		if err != nil {
+			fetchLog.Err(err).
+				Msg("Failed to fetch initial XChat inbox page")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateUnknownError,
+				Error:      "twitter-xchat-fetch-error",
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
+			})
+			return
+		}
+
+		page := initialResp.Data.GetInboxPage
+		fetchLog.Info().
+			Str("response_cursor_id", page.InboxCursor.CursorID).
+			Str("response_graph_snapshot_id", page.InboxCursor.GraphSnapshotID).
+			Bool("pull_finished", page.InboxCursor.PullFinished).
+			Int("items", len(page.Items)).
+			Msg("Received XChat inbox page")
+
+		updatePageState(page)
+		processPage(page)
+
+		cursor = nextXChatInboxCursor(page)
+		tc.saveXChatInboxCheckpoint(ctx, cursor, getMaxSeqID(), msgPullVersion)
+		if cursor == nil {
+			inboxSyncComplete = true
+		}
+	} else {
+		fetchLog.Info().
+			Str("cursor_id", cursor.CursorId).
+			Str("graph_snapshot_id", cursor.GraphSnapshotId).
+			Msg("Resuming XChat inbox import from saved cursor")
 	}
 
 	// Subsequent pages via GetInboxPageRequest - process each page as it's fetched
@@ -356,36 +381,33 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			Int("items", len(page.Items)).
 			Msg("Received XChat inbox page")
 
-		if page.MaxUserSequenceID != nil && parseSequenceID(*page.MaxUserSequenceID) > parseSequenceID(maxSeqID) {
-			maxSeqID = *page.MaxUserSequenceID
-		}
-		if page.MessagePullVersion != nil {
-			msgPullVersion = page.MessagePullVersion
-		}
-
-		// Process this page immediately while fetching continues
+		updatePageState(page)
 		processPage(page)
 
-		if page.InboxCursor.PullFinished || page.InboxCursor.CursorID == "" || page.InboxCursor.GraphSnapshotID == "" {
-			cursor = nil
-			break
-		}
-		if page.InboxCursor.CursorID == cursor.CursorId && page.InboxCursor.GraphSnapshotID == cursor.GraphSnapshotId {
-			fetchLog.Debug().
-				Str("cursor_id", page.InboxCursor.CursorID).
-				Msg("Cursor did not advance, stopping inbox pagination")
-			cursor = nil
-			break
+		nextCursor := nextXChatInboxCursor(page)
+		if nextCursor != nil && nextCursor.CursorId == cursor.CursorId {
+			err := errors.New("xchat inbox cursor did not advance")
+			fetchLog.Err(err).
+				Str("cursor_id", nextCursor.CursorId).
+				Str("request_graph_snapshot_id", cursor.GraphSnapshotId).
+				Str("response_graph_snapshot_id", nextCursor.GraphSnapshotId).
+				Msg("Failed to fetch XChat inbox page")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateUnknownError,
+				Error:      "twitter-xchat-fetch-error",
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
+			})
+			return
 		}
 
-		cursor = &payload.XChatCursor{
-			CursorId:        page.InboxCursor.CursorID,
-			GraphSnapshotId: page.InboxCursor.GraphSnapshotID,
+		cursor = nextCursor
+		tc.saveXChatInboxCheckpoint(ctx, cursor, getMaxSeqID(), msgPullVersion)
+		if cursor == nil {
+			inboxSyncComplete = true
 		}
 	}
-
-	// Wait for all page processing to complete
-	_ = g.Wait()
 
 	// Batch fetch any users that only had RestID without inline data
 	if len(missingUserIDs) > 0 {
@@ -439,12 +461,13 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 	}
 
 	// Save max sequence ID if updated
-	if maxSeqID != "" && parseSequenceID(maxSeqID) > parseSequenceID(meta.MaxUserSequenceID) {
+	finalMaxSeqID := getMaxSeqID()
+	if finalMaxSeqID != "" && parseSequenceID(finalMaxSeqID) > parseSequenceID(meta.MaxUserSequenceID) {
 		log.Debug().
 			Str("old_max_seq", meta.MaxUserSequenceID).
-			Str("new_max_seq", maxSeqID).
+			Str("new_max_seq", finalMaxSeqID).
 			Msg("Updating max sequence ID")
-		meta.MaxUserSequenceID = maxSeqID
+		meta.MaxUserSequenceID = finalMaxSeqID
 	}
 
 	// Persist message pull version if received
@@ -452,10 +475,16 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		meta.MessagePullVersion = msgPullVersion
 	}
 
+	if inboxSyncComplete {
+		meta.XChatInboxCursor = nil
+	}
+
 	// Clear pending encrypted sync flag after successful sync
-	if meta.PendingEncryptedSync {
+	if meta.PendingEncryptedSync && inboxSyncComplete {
 		meta.PendingEncryptedSync = false
 		log.Info().Msg("Post-migration: encrypted room sync completed")
+	} else if meta.PendingEncryptedSync {
+		log.Warn().Msg("Post-migration encrypted room sync paused; will resume from saved inbox cursor")
 	}
 
 	// Save session state
@@ -494,21 +523,83 @@ func parseSequenceID(s string) int64 {
 	return n
 }
 
+func xchatInboxCursorFromMetadata(cursor *XChatInboxCursorData) *payload.XChatCursor {
+	if cursor == nil || cursor.CursorID == "" || cursor.GraphSnapshotID == "" {
+		return nil
+	}
+	return &payload.XChatCursor{
+		CursorId:        cursor.CursorID,
+		GraphSnapshotId: cursor.GraphSnapshotID,
+	}
+}
+
+func nextXChatInboxCursor(page response.XChatInboxPage) *payload.XChatCursor {
+	if page.InboxCursor.PullFinished || page.InboxCursor.CursorID == "" || page.InboxCursor.GraphSnapshotID == "" {
+		return nil
+	}
+	return &payload.XChatCursor{
+		CursorId:        page.InboxCursor.CursorID,
+		GraphSnapshotId: page.InboxCursor.GraphSnapshotID,
+	}
+}
+
+func (tc *TwitterClient) saveXChatInboxCheckpoint(ctx context.Context, cursor *payload.XChatCursor, maxSeqID string, msgPullVersion *int) {
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	if cursor == nil {
+		meta.XChatInboxCursor = nil
+	} else {
+		meta.XChatInboxCursor = &XChatInboxCursorData{
+			CursorID:        cursor.CursorId,
+			GraphSnapshotID: cursor.GraphSnapshotId,
+		}
+	}
+	if maxSeqID != "" && parseSequenceID(maxSeqID) > parseSequenceID(meta.MaxUserSequenceID) {
+		meta.MaxUserSequenceID = maxSeqID
+	}
+	if msgPullVersion != nil {
+		meta.MessagePullVersion = msgPullVersion
+	}
+	if err := tc.saveUserLoginState(ctx); err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to save XChat inbox import checkpoint")
+		return
+	}
+
+	evt := zerolog.Ctx(ctx).Info().
+		Bool("complete", cursor == nil).
+		Str("max_user_sequence_id", meta.MaxUserSequenceID)
+	if msgPullVersion != nil {
+		evt.Int("message_pull_version", *msgPullVersion)
+	}
+	if cursor == nil {
+		evt.Msg("Cleared XChat inbox import checkpoint")
+	} else {
+		evt.
+			Str("cursor_id", cursor.CursorId).
+			Str("graph_snapshot_id", cursor.GraphSnapshotId).
+			Msg("Saved XChat inbox import checkpoint")
+	}
+}
+
 func (tc *TwitterClient) DoConnect(ctx context.Context) {
 	tc.Connect(ctx)
 }
 
 func (tc *TwitterClient) HandleCursorChange(ctx context.Context) {
-	if !tc.connector.Config.CacheSession {
-		return
-	}
-	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
-	meta.Session = tc.client.GetSession()
-	meta.Session.LastSaved = time.Now()
-	err := tc.userLogin.Save(ctx)
+	err := tc.saveUserLoginState(ctx)
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to save user login after cursor change")
 	}
+}
+
+func (tc *TwitterClient) saveUserLoginState(ctx context.Context) error {
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	if tc.connector.Config.CacheSession {
+		meta.Session = tc.client.GetSession()
+		if meta.Session != nil {
+			meta.Session.LastSaved = time.Now()
+		}
+	}
+	return tc.userLogin.Save(ctx)
 }
 
 func (tc *TwitterClient) Disconnect() {
