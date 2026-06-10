@@ -110,13 +110,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	}
 
 	if fetchParams.Forward {
-		// Forward backfill for XChat: initial messages are already processed during room creation
-		// via ProcessMessageAndReadEvents(). No additional forward fetch needed.
-		// FIXME the above is likely false and will fail to fill gaps correctly
-		return &bridgev2.FetchMessagesResponse{
-			Forward: true,
-			HasMore: false,
-		}, nil
+		return tc.fetchXChatForwardCatchup(ctx, conversationID, fetchParams)
 	}
 
 	// Priority: Cursor > AnchorMessage > xchatBackfillMaxInt
@@ -154,140 +148,19 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		count = 50
 	}
 
-	settings := payload.DefaultGetConversationPageQuerySettings()
-	if count < settings.ConversationEventLimit {
-		settings.ConversationEventLimit = count
-	}
-
-	minKeyVersion := xchatBackfillMaxInt
-	if km := tc.client.GetKeyManager(); km != nil {
-		if ck, err := km.GetLatestConversationKey(ctx, conversationID); err == nil && ck != nil && ck.KeyVersion != "" {
-			minKeyVersion = ck.KeyVersion
-		}
-	}
-
-	vars := payload.NewGetConversationPageQueryVariables(conversationID, minSeqID, minKeyVersion, settings)
-	resp, err := tc.client.GetConversationPage(ctx, vars)
+	parsed, err := tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, minSeqID, count)
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
-		return nil, fmt.Errorf("GetConversationPageQuery error: %s", resp.Errors[0].Message)
-	}
+	msgs := parsed.messages
+	nextCursor := parsed.nextCursor
 
-	page := resp.Data.GetConversationPage
-
-	// Process missing key change events first to maximize decryption success.
-	missingKeyStoreFailedCount := 0
-	for _, enc := range page.MissingConversationKeyChangeEvents {
-		evt, err := twittermeow.DecodeMessageEvent(enc)
-		if err != nil || evt == nil || evt.Detail == nil || evt.Detail.ConversationKeyChangeEvent == nil {
-			missingKeyStoreFailedCount++
-			continue
-		}
-		if err := tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent); err != nil {
-			missingKeyStoreFailedCount++
-		}
-	}
-
-	msgs := make([]*bridgev2.BackfillMessage, 0, len(page.EncodedMessageEvents))
-	nextCursor := ""
-	// The cursor must advance past every event on the page, not just the ones that
-	// convert into bridged messages, so that pages of key changes, read events or
-	// undecryptable messages don't terminate pagination while older history remains.
-	advanceCursor := func(seq string) {
-		if seq != "" && (nextCursor == "" || compareIntStrings(seq, nextCursor) < 0) {
-			nextCursor = seq
-		}
-	}
-
-	var decodeFailedCount, keyChangeEventCount, nonMessageEventCount, convertFailedCount int
-	skipReasonCounts := make(map[string]int)
-
-	for _, enc := range page.EncodedMessageEvents {
-		evt, err := twittermeow.DecodeMessageEvent(enc)
-		if err != nil || evt == nil || evt.Detail == nil {
-			decodeFailedCount++
-			continue
-		}
-		advanceCursor(ptr.Val(evt.SequenceId))
-
-		if evt.Detail.ConversationKeyChangeEvent != nil {
-			keyChangeEventCount++
-			_ = tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent)
-			continue
-		}
-		if evt.Detail.MessageCreateEvent == nil {
-			nonMessageEventCount++
-			continue
-		}
-
-		msg, ts, streamOrder, skipReason := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
-		if msg == nil {
-			skipReasonCounts[skipReason]++
-			continue
-		}
-
-		converted := tc.convertToMatrix(ctx, fetchParams.Portal, tc.connector.br.Bot, &msg.MessageData)
-		if converted == nil || len(converted.Parts) == 0 {
-			convertFailedCount++
-			continue
-		}
-
-		msgID := msg.SequenceID
-		if msgID == "" {
-			msgID = msg.ID
-		}
-
-		if ts.IsZero() && msg.Time != "" {
-			ts = methods.ParseMsecTimestamp(msg.Time)
-		}
-		if ts.IsZero() && msgID != "" {
-			ts = methods.ParseSnowflake(msgID)
-		}
-
-		if streamOrder == 0 && msgID != "" {
-			streamOrder = methods.ParseSnowflakeInt(msgID)
-		}
-
-		msgs = append(msgs, &bridgev2.BackfillMessage{
-			ConvertedMessage: converted,
-			Sender:           tc.MakeEventSender(msg.MessageData.SenderID),
-			ID:               MakeMessageID(msgID),
-			TxnID:            networkid.TransactionID(msgID),
-			Timestamp:        ts,
-			StreamOrder:      streamOrder,
-		})
-
-		if ptr.Val(evt.SequenceId) == "" {
-			advanceCursor(msgID)
-		}
-	}
-
-	sortBackfillMessages(msgs)
-
-	hasMore := page.HasMore
+	hasMore := parsed.pageHasMore
 	if nextCursor == "" || nextCursor == string(fetchParams.Cursor) {
 		// Nothing decodable on the page or the server returned the same page
 		// again; there is no cursor to paginate further with.
 		hasMore = false
 	}
-
-	zerolog.Ctx(ctx).Debug().
-		Str("conversation_id", conversationID).
-		Int("encoded_event_count", len(page.EncodedMessageEvents)).
-		Int("missing_key_change_event_count", len(page.MissingConversationKeyChangeEvents)).
-		Int("missing_key_store_failed_count", missingKeyStoreFailedCount).
-		Bool("page_has_more", page.HasMore).
-		Int("decode_failed_count", decodeFailedCount).
-		Int("key_change_event_count", keyChangeEventCount).
-		Int("non_message_event_count", nonMessageEventCount).
-		Interface("message_skip_reason_counts", skipReasonCounts).
-		Int("convert_failed_count", convertFailedCount).
-		Int("converted_message_count", len(msgs)).
-		Str("next_cursor", nextCursor).
-		Bool("has_more", hasMore).
-		Msg("XChat backfill page parsed")
 
 	xchatResp := &bridgev2.FetchMessagesResponse{
 		Messages: msgs,
@@ -316,14 +189,271 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		Str("conversation_id", conversationID).
 		Str("cursor", string(fetchParams.Cursor)).
 		Bool("had_xchat_messages", len(msgs) > 0).
-		Bool("page_has_more", page.HasMore).
-		Int("encoded_event_count", len(page.EncodedMessageEvents)).
+		Bool("page_has_more", parsed.pageHasMore).
+		Int("encoded_event_count", parsed.encodedEventCount).
 		Msg("XChat backfill exhausted, attempting REST fallback")
 	restResp, err := tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, restBackfillCursorModeFallback, true)
 	if err != nil {
 		return nil, err
 	}
 	return restResp, nil
+}
+
+// xchatForwardCatchupMaxPages bounds how many conversation pages a single forward
+// catchup may fetch while walking back towards the anchor message.
+const xchatForwardCatchupMaxPages = 10
+
+// fetchXChatForwardCatchup fills gaps of messages newer than the anchor, e.g. ones
+// missed while the bridge was disconnected. GetConversationPage only paginates from
+// newest to oldest, so this walks pages backwards from the top until it passes the
+// anchor's timestamp and returns everything newer than it.
+//
+// Timestamps are used instead of IDs to find the anchor because the anchor may be a
+// REST-era snowflake message ID, which is not comparable to XChat sequence IDs.
+func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	emptyResp := &bridgev2.FetchMessagesResponse{
+		Forward: true,
+		HasMore: false,
+	}
+	if fetchParams.AnchorMessage == nil {
+		// Without an anchor there is no gap to fill: initial messages are processed
+		// during room creation via ProcessMessageAndReadEvents().
+		return emptyResp, nil
+	}
+	anchorTS := fetchParams.AnchorMessage.Timestamp
+	if anchorTS.IsZero() {
+		zerolog.Ctx(ctx).Warn().
+			Str("conversation_id", conversationID).
+			Str("anchor_message_id", string(fetchParams.AnchorMessage.ID)).
+			Msg("XChat forward catchup skipped: anchor message has no timestamp")
+		return emptyResp, nil
+	}
+
+	count := fetchParams.Count
+	if count <= 0 {
+		count = 50
+	}
+
+	var collected []*bridgev2.BackfillMessage
+	// The server may re-return events at page boundaries, and unlike backward
+	// backfill there is no bridgev2 cutoff between pages collected here, so
+	// deduplicate by message ID across the whole walk.
+	seenIDs := make(map[networkid.MessageID]struct{})
+	duplicateCount := 0
+	cursor := xchatBackfillMaxInt
+	reachedAnchor := false
+	pagesFetched := 0
+
+	for pagesFetched < xchatForwardCatchupMaxPages {
+		parsed, err := tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, count)
+		if err != nil {
+			return nil, err
+		}
+		pagesFetched++
+
+		for _, msg := range parsed.messages {
+			if !msg.Timestamp.After(anchorTS) {
+				continue
+			}
+			if _, seen := seenIDs[msg.ID]; seen {
+				duplicateCount++
+				continue
+			}
+			seenIDs[msg.ID] = struct{}{}
+			collected = append(collected, msg)
+		}
+
+		if !parsed.oldestEventTS.IsZero() && !parsed.oldestEventTS.After(anchorTS) {
+			reachedAnchor = true
+			break
+		}
+		if !parsed.pageHasMore || parsed.nextCursor == "" || parsed.nextCursor == cursor {
+			break
+		}
+		if len(collected) >= count {
+			break
+		}
+		cursor = parsed.nextCursor
+	}
+
+	sortBackfillMessages(collected)
+	droppedOverLimit := 0
+	if len(collected) > count {
+		// Keep the newest messages, matching the catchup limit semantics. This leaves
+		// a hole just above the anchor, which cannot be filled later — log it.
+		droppedOverLimit = len(collected) - count
+		collected = collected[droppedOverLimit:]
+	}
+
+	zerolog.Ctx(ctx).Info().
+		Str("conversation_id", conversationID).
+		Time("anchor_ts", anchorTS).
+		Bool("reached_anchor", reachedAnchor).
+		Int("pages_fetched", pagesFetched).
+		Int("message_count", len(collected)).
+		Int("duplicate_count", duplicateCount).
+		Int("dropped_over_limit", droppedOverLimit).
+		Msg("XChat forward catchup finished")
+
+	return &bridgev2.FetchMessagesResponse{
+		Forward:  true,
+		Messages: collected,
+		HasMore:  false,
+	}, nil
+}
+
+// parsedXChatPage is the result of fetching and parsing one GetConversationPage response.
+type parsedXChatPage struct {
+	// messages contains the converted messages, sorted oldest first.
+	messages []*bridgev2.BackfillMessage
+	// nextCursor is the minimum sequence ID across all decoded events on the page,
+	// not just the ones that converted into bridged messages, so that pages of key
+	// changes, read events or undecryptable messages don't terminate pagination
+	// while older history remains.
+	nextCursor string
+	// oldestEventTS is the oldest created_at timestamp across all decoded events
+	// on the page (zero if no event carried a usable timestamp).
+	oldestEventTS time.Time
+	pageHasMore   bool
+
+	encodedEventCount int
+}
+
+func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Portal, conversationID, minSeqID string, count int) (*parsedXChatPage, error) {
+	settings := payload.DefaultGetConversationPageQuerySettings()
+	if count < settings.ConversationEventLimit {
+		settings.ConversationEventLimit = count
+	}
+
+	minKeyVersion := xchatBackfillMaxInt
+	if km := tc.client.GetKeyManager(); km != nil {
+		if ck, err := km.GetLatestConversationKey(ctx, conversationID); err == nil && ck != nil && ck.KeyVersion != "" {
+			minKeyVersion = ck.KeyVersion
+		}
+	}
+
+	vars := payload.NewGetConversationPageQueryVariables(conversationID, minSeqID, minKeyVersion, settings)
+	resp, err := tc.client.GetConversationPage(ctx, vars)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
+		return nil, fmt.Errorf("GetConversationPageQuery error: %s", resp.Errors[0].Message)
+	}
+
+	page := resp.Data.GetConversationPage
+	result := &parsedXChatPage{
+		messages:          make([]*bridgev2.BackfillMessage, 0, len(page.EncodedMessageEvents)),
+		pageHasMore:       page.HasMore,
+		encodedEventCount: len(page.EncodedMessageEvents),
+	}
+
+	// Process missing key change events first to maximize decryption success.
+	missingKeyStoreFailedCount := 0
+	for _, enc := range page.MissingConversationKeyChangeEvents {
+		evt, err := twittermeow.DecodeMessageEvent(enc)
+		if err != nil || evt == nil || evt.Detail == nil || evt.Detail.ConversationKeyChangeEvent == nil {
+			missingKeyStoreFailedCount++
+			continue
+		}
+		if err := tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent); err != nil {
+			missingKeyStoreFailedCount++
+		}
+	}
+
+	advanceCursor := func(seq string) {
+		if seq != "" && (result.nextCursor == "" || compareIntStrings(seq, result.nextCursor) < 0) {
+			result.nextCursor = seq
+		}
+	}
+
+	var decodeFailedCount, keyChangeEventCount, nonMessageEventCount, convertFailedCount int
+	skipReasonCounts := make(map[string]int)
+
+	for _, enc := range page.EncodedMessageEvents {
+		evt, err := twittermeow.DecodeMessageEvent(enc)
+		if err != nil || evt == nil || evt.Detail == nil {
+			decodeFailedCount++
+			continue
+		}
+		advanceCursor(ptr.Val(evt.SequenceId))
+		if evtTS := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)); !evtTS.IsZero() &&
+			(result.oldestEventTS.IsZero() || evtTS.Before(result.oldestEventTS)) {
+			result.oldestEventTS = evtTS
+		}
+
+		if evt.Detail.ConversationKeyChangeEvent != nil {
+			keyChangeEventCount++
+			_ = tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent)
+			continue
+		}
+		if evt.Detail.MessageCreateEvent == nil {
+			nonMessageEventCount++
+			continue
+		}
+
+		msg, ts, streamOrder, skipReason := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
+		if msg == nil {
+			skipReasonCounts[skipReason]++
+			continue
+		}
+
+		converted := tc.convertToMatrix(ctx, portal, tc.connector.br.Bot, &msg.MessageData)
+		if converted == nil || len(converted.Parts) == 0 {
+			convertFailedCount++
+			continue
+		}
+
+		msgID := msg.SequenceID
+		if msgID == "" {
+			msgID = msg.ID
+		}
+
+		if ts.IsZero() && msg.Time != "" {
+			ts = methods.ParseMsecTimestamp(msg.Time)
+		}
+		if ts.IsZero() && msgID != "" {
+			ts = methods.ParseSnowflake(msgID)
+		}
+
+		if streamOrder == 0 && msgID != "" {
+			streamOrder = methods.ParseSnowflakeInt(msgID)
+		}
+
+		result.messages = append(result.messages, &bridgev2.BackfillMessage{
+			ConvertedMessage: converted,
+			Sender:           tc.MakeEventSender(msg.MessageData.SenderID),
+			ID:               MakeMessageID(msgID),
+			TxnID:            networkid.TransactionID(msgID),
+			Timestamp:        ts,
+			StreamOrder:      streamOrder,
+		})
+
+		if ptr.Val(evt.SequenceId) == "" {
+			advanceCursor(msgID)
+		}
+	}
+
+	sortBackfillMessages(result.messages)
+
+	zerolog.Ctx(ctx).Debug().
+		Str("conversation_id", conversationID).
+		Str("min_seq_id", minSeqID).
+		Int("encoded_event_count", result.encodedEventCount).
+		Int("missing_key_change_event_count", len(page.MissingConversationKeyChangeEvents)).
+		Int("missing_key_store_failed_count", missingKeyStoreFailedCount).
+		Bool("page_has_more", page.HasMore).
+		Int("decode_failed_count", decodeFailedCount).
+		Int("key_change_event_count", keyChangeEventCount).
+		Int("non_message_event_count", nonMessageEventCount).
+		Interface("message_skip_reason_counts", skipReasonCounts).
+		Int("convert_failed_count", convertFailedCount).
+		Int("converted_message_count", len(result.messages)).
+		Str("next_cursor", result.nextCursor).
+		Time("oldest_event_ts", result.oldestEventTS).
+		Msg("XChat backfill page parsed")
+
+	return result, nil
 }
 
 func ensureRESTFallbackCursor(resp *bridgev2.FetchMessagesResponse) *bridgev2.FetchMessagesResponse {
