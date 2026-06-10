@@ -178,38 +178,59 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	page := resp.Data.GetConversationPage
 
 	// Process missing key change events first to maximize decryption success.
+	missingKeyStoreFailedCount := 0
 	for _, enc := range page.MissingConversationKeyChangeEvents {
 		evt, err := twittermeow.DecodeMessageEvent(enc)
 		if err != nil || evt == nil || evt.Detail == nil || evt.Detail.ConversationKeyChangeEvent == nil {
+			missingKeyStoreFailedCount++
 			continue
 		}
-		_ = tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent)
+		if err := tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent); err != nil {
+			missingKeyStoreFailedCount++
+		}
 	}
 
 	msgs := make([]*bridgev2.BackfillMessage, 0, len(page.EncodedMessageEvents))
 	nextCursor := ""
+	// The cursor must advance past every event on the page, not just the ones that
+	// convert into bridged messages, so that pages of key changes, read events or
+	// undecryptable messages don't terminate pagination while older history remains.
+	advanceCursor := func(seq string) {
+		if seq != "" && (nextCursor == "" || compareIntStrings(seq, nextCursor) < 0) {
+			nextCursor = seq
+		}
+	}
+
+	var decodeFailedCount, keyChangeEventCount, nonMessageEventCount, convertFailedCount int
+	skipReasonCounts := make(map[string]int)
 
 	for _, enc := range page.EncodedMessageEvents {
 		evt, err := twittermeow.DecodeMessageEvent(enc)
 		if err != nil || evt == nil || evt.Detail == nil {
+			decodeFailedCount++
 			continue
 		}
+		advanceCursor(ptr.Val(evt.SequenceId))
 
 		if evt.Detail.ConversationKeyChangeEvent != nil {
+			keyChangeEventCount++
 			_ = tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent)
 			continue
 		}
 		if evt.Detail.MessageCreateEvent == nil {
+			nonMessageEventCount++
 			continue
 		}
 
-		msg, ts, streamOrder := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
+		msg, ts, streamOrder, skipReason := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
 		if msg == nil {
+			skipReasonCounts[skipReason]++
 			continue
 		}
 
 		converted := tc.convertToMatrix(ctx, fetchParams.Portal, tc.connector.br.Bot, &msg.MessageData)
 		if converted == nil || len(converted.Parts) == 0 {
+			convertFailedCount++
 			continue
 		}
 
@@ -238,23 +259,35 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 			StreamOrder:      streamOrder,
 		})
 
-		if seq := ptr.Val(evt.SequenceId); seq != "" {
-			if nextCursor == "" || compareIntStrings(seq, nextCursor) < 0 {
-				nextCursor = seq
-			}
-		} else if msgID != "" {
-			if nextCursor == "" || compareIntStrings(msgID, nextCursor) < 0 {
-				nextCursor = msgID
-			}
+		if ptr.Val(evt.SequenceId) == "" {
+			advanceCursor(msgID)
 		}
 	}
 
 	sortBackfillMessages(msgs)
 
 	hasMore := page.HasMore
-	if nextCursor == "" {
+	if nextCursor == "" || nextCursor == string(fetchParams.Cursor) {
+		// Nothing decodable on the page or the server returned the same page
+		// again; there is no cursor to paginate further with.
 		hasMore = false
 	}
+
+	zerolog.Ctx(ctx).Debug().
+		Str("conversation_id", conversationID).
+		Int("encoded_event_count", len(page.EncodedMessageEvents)).
+		Int("missing_key_change_event_count", len(page.MissingConversationKeyChangeEvents)).
+		Int("missing_key_store_failed_count", missingKeyStoreFailedCount).
+		Bool("page_has_more", page.HasMore).
+		Int("decode_failed_count", decodeFailedCount).
+		Int("key_change_event_count", keyChangeEventCount).
+		Int("non_message_event_count", nonMessageEventCount).
+		Interface("message_skip_reason_counts", skipReasonCounts).
+		Int("convert_failed_count", convertFailedCount).
+		Int("converted_message_count", len(msgs)).
+		Str("next_cursor", nextCursor).
+		Bool("has_more", hasMore).
+		Msg("XChat backfill page parsed")
 
 	xchatResp := &bridgev2.FetchMessagesResponse{
 		Messages: msgs,
@@ -283,6 +316,8 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		Str("conversation_id", conversationID).
 		Str("cursor", string(fetchParams.Cursor)).
 		Bool("had_xchat_messages", len(msgs) > 0).
+		Bool("page_has_more", page.HasMore).
+		Int("encoded_event_count", len(page.EncodedMessageEvents)).
 		Msg("XChat backfill exhausted, attempting REST fallback")
 	restResp, err := tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, restBackfillCursorModeFallback, true)
 	if err != nil {
@@ -299,13 +334,23 @@ func ensureRESTFallbackCursor(resp *bridgev2.FetchMessagesResponse) *bridgev2.Fe
 	return resp
 }
 
-func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context, conversationID string, evt *payload.MessageEvent) (*types.Message, time.Time, int64) {
+const (
+	xchatSkipReasonEmptyContents = "empty_contents"
+	xchatSkipReasonKeyMissing    = "key_missing"
+	xchatSkipReasonDecryptFailed = "decrypt_failed"
+	xchatSkipReasonParseFailed   = "parse_failed"
+	xchatSkipReasonEmptyEntry    = "empty_entry"
+	xchatSkipReasonNoContent     = "no_content"
+	xchatSkipReasonConvertFailed = "convert_failed"
+)
+
+func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context, conversationID string, evt *payload.MessageEvent) (*types.Message, time.Time, int64, string) {
 	mce := evt.Detail.MessageCreateEvent
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	contentsBytes := mce.Contents
 
 	if len(contentsBytes) == 0 {
-		return nil, time.Time{}, 0
+		return nil, time.Time{}, 0, xchatSkipReasonEmptyContents
 	}
 
 	var entry *payload.MessageEntryContents
@@ -314,7 +359,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 		km := tc.client.GetKeyManager()
 		convKey, err := km.GetConversationKey(ctx, conversationID, keyVersion)
 		if err != nil || convKey == nil || len(convKey.Key) == 0 {
-			return nil, time.Time{}, 0
+			return nil, time.Time{}, 0, xchatSkipReasonKeyMissing
 		}
 
 		debugLog := zerolog.Ctx(ctx).With().
@@ -325,27 +370,27 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 
 		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
 		if err != nil {
-			return nil, time.Time{}, 0
+			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
 		}
 		entry = decrypted
 	} else {
 		parsed, err := crypto.ParseMessageEntryContentsBytes(contentsBytes)
 		if err != nil {
-			return nil, time.Time{}, 0
+			return nil, time.Time{}, 0, xchatSkipReasonParseFailed
 		}
 		entry = parsed
 	}
 	if entry == nil || entry.Message == nil {
-		return nil, time.Time{}, 0
+		return nil, time.Time{}, 0, xchatSkipReasonEmptyEntry
 	}
 
 	if entry.Message.MessageText == nil && len(entry.Message.Attachments) == 0 {
-		return nil, time.Time{}, 0
+		return nil, time.Time{}, 0, xchatSkipReasonNoContent
 	}
 
 	msg := twittermeow.ConvertXChatMessageContentsToMessage(evt, entry.Message, keyVersion)
 	if msg == nil {
-		return nil, time.Time{}, 0
+		return nil, time.Time{}, 0, xchatSkipReasonConvertFailed
 	}
 
 	msgID := msg.SequenceID
@@ -355,7 +400,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 
 	ts := methods.ParseMsecTimestamp(msg.Time)
 	streamOrder := methods.ParseSnowflakeInt(msgID)
-	return msg, ts, streamOrder
+	return msg, ts, streamOrder, ""
 }
 
 func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context, evt *payload.MessageEvent, ckce *payload.ConversationKeyChangeEvent) error {
