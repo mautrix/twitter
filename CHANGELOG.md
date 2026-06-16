@@ -1,3 +1,8 @@
+# v26.06
+
+* Added forward backfilling to fill gaps in encrypted chat history.
+* Added support for resuming initial conversation sync after restart.
+
 # v26.04
 
 * Fixed encryption using non-latest key in some cases.
