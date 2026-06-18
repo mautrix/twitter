@@ -352,6 +352,14 @@ func (c *Client) Recover(ctx context.Context, pinBytes Pin, userInfo UserInfo) (
 	return c.recoverWithConfiguration(ctx, pinBytes, userInfo, c.config, c.realmClients)
 }
 
+// CheckRegistration reports whether a secret is registered with the realms without needing the PIN.
+// It runs only recovery phase 1 (the Recover1 query), which never uses the PIN.
+func (c *Client) CheckRegistration(ctx context.Context) error {
+	c.logger.Debug().Msg("Checking Juicebox registration state")
+	_, _, err := c.recoverPhase1(ctx, c.config, c.realmClients)
+	return err
+}
+
 func (c *Client) recoverWithConfiguration(ctx context.Context, pinBytes Pin, userInfo UserInfo, config *Configuration, realmClients map[RealmID]*realm.Client) (Secret, error) {
 	// Phase 1: Query version from realms
 	c.logger.Debug().Msg("Starting recovery phase 1")

@@ -250,3 +250,14 @@ func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens 
 
 	return parseRecoveredKeyBackupData(secret, logger)
 }
+
+// CheckJuiceboxRegistration reports whether a passcode/secret is actually registered.
+func CheckJuiceboxRegistration(ctx context.Context, configJSON string, authTokens map[string]string, logger zerolog.Logger) error {
+	client, err := newJuiceboxClient(configJSON, authTokens, logger)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	return client.CheckRegistration(ctx)
+}

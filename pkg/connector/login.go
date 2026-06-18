@@ -198,10 +198,8 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 	t.persistClientCookiesAndUserID()
 	t.isMigration = true
 
-	t.refreshPINSetupState(ctx, "Migration: failed to determine PIN setup state, using recovery prompt")
-
 	t.User.Log.Info().Msg("Migration: cookies validated, skipping to passcode step")
-	return makePINStep("", t.needsPINSetup), nil
+	return t.resolvePINSetupStep(ctx, "Migration: failed to determine PIN setup state, using recovery prompt")
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
@@ -218,9 +216,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	t.profile = profile
 	t.persistClientCookiesAndUserID()
 
-	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state, using recovery prompt")
-
-	return makePINStep("", t.needsPINSetup), nil
+	return t.resolvePINSetupStep(ctx, "Failed to determine PIN setup state, using recovery prompt")
 }
 
 func parsePINInput(input map[string]string) (string, error) {
@@ -259,31 +255,84 @@ func (t *TwitterLogin) persistClientCookiesAndUserID() {
 	t.client.SetCurrentUserID(t.client.GetCurrentUserID())
 }
 
-func (t *TwitterLogin) refreshPINSetupState(ctx context.Context, warnMsg string) {
-	needsPINSetup, err := t.detectPINSetupNeeded(ctx)
-	if err != nil {
-		t.User.Log.Warn().Err(err).Msg(warnMsg)
-		return
-	}
-	t.needsPINSetup = needsPINSetup
-}
+// pinSetupState describes whether and how the user must provide a passcode.
+type pinSetupState int
 
-func (t *TwitterLogin) detectPINSetupNeeded(ctx context.Context) (bool, error) {
+const (
+	// pinStateRegistered: a secret is registered with the realms -> prompt to
+	// enter the existing passcode (recover).
+	pinStateRegistered pinSetupState = iota
+	// pinStateNeedsSetup: no juicebox tokens at all -> in-app "create your PIN"
+	// setup (bootstrap).
+	pinStateNeedsSetup
+	// pinStateNotRegistered: juicebox tokens exist but no secret is registered
+	// -> the user has no passcode; asking for one can never succeed.
+	pinStateNotRegistered
+)
+
+// detectPINSetupState determines the passcode state right after cookies are
+// submitted. Token presence alone does NOT prove a passcode is registered, so
+// when tokens exist we probe actual registration (PIN-free) via Juicebox.
+func (t *TwitterLogin) detectPINSetupState(ctx context.Context) (pinSetupState, error) {
 	currentUserID := strings.TrimSpace(t.client.GetCurrentUserID())
 	if currentUserID == "" {
-		return false, ErrMissingUserID
+		return pinStateRegistered, ErrMissingUserID
 	}
 	publicKeysResp, err := t.client.GetPublicKeys(ctx, []string{currentUserID})
 	if err != nil {
-		return false, err
+		return pinStateRegistered, err
 	}
-	_, hasJuiceboxTokens := firstPublicKeyWithJuiceboxTokens(publicKeysResp)
-	needsSetup := !hasJuiceboxTokens
-	t.User.Log.Debug().
-		Bool("has_juicebox_tokens", hasJuiceboxTokens).
-		Bool("needs_pin_setup", needsSetup).
-		Msg("Determined PIN setup state from GetPublicKeys")
-	return needsSetup, nil
+	keyData, hasJuiceboxTokens := firstPublicKeyWithJuiceboxTokens(publicKeysResp)
+	if !hasJuiceboxTokens {
+		t.User.Log.Debug().
+			Str("pin_setup_state", "needs_setup").
+			Msg("Determined PIN setup state from GetPublicKeys")
+		return pinStateNeedsSetup, nil
+	}
+
+	juiceboxConfigJSON, authTokens := resolveJuiceboxConfigAndTokens(keyData.TokenMap)
+	juiceboxLogger := t.User.Log.With().Str("component", "juicebox").Logger()
+	err = CheckJuiceboxRegistration(ctx, juiceboxConfigJSON, authTokens, juiceboxLogger)
+	switch {
+	case err == nil:
+		t.User.Log.Debug().
+			Str("pin_setup_state", "registered").
+			Msg("Determined PIN setup state from GetPublicKeys")
+		return pinStateRegistered, nil
+	case errors.Is(err, juiceboxgo.ErrNotRegistered):
+		t.User.Log.Debug().
+			Str("pin_setup_state", "not_registered").
+			Msg("Determined PIN setup state: juicebox tokens present but no secret registered")
+		return pinStateNotRegistered, nil
+	default:
+		// Transient/network/auth probe failure: do not block a possibly-valid
+		// login. Fall back to the recover step (previous behavior).
+		t.User.Log.Warn().Err(err).Msg("Juicebox registration probe failed, assuming registered")
+		return pinStateRegistered, nil
+	}
+}
+
+// resolvePINSetupStep runs detection and returns the login step to present, or
+// a terminal error when the user has no passcode registered. On detection
+// failure it falls back to the recover prompt to avoid regressing valid logins.
+func (t *TwitterLogin) resolvePINSetupStep(ctx context.Context, warnMsg string) (*bridgev2.LoginStep, error) {
+	state, err := t.detectPINSetupState(ctx)
+	if err != nil {
+		t.User.Log.Warn().Err(err).Msg(warnMsg)
+		state = pinStateRegistered
+	}
+	switch state {
+	case pinStateNotRegistered:
+		// Stop right after the cookies stage: don't show a passcode field the
+		// user can never satisfy. Tell them to set up a passcode first.
+		return nil, ErrJuiceboxNotRegistered
+	case pinStateNeedsSetup:
+		t.needsPINSetup = true
+		return makePINStep("", true), nil
+	default:
+		t.needsPINSetup = false
+		return makePINStep("", false), nil
+	}
 }
 
 func firstPublicKeyWithJuiceboxTokens(data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool) {
