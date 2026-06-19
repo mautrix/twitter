@@ -112,7 +112,12 @@ func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 
 	plaintext, err := gcm.Open(nil, iv, cipherAndTag, nil)
 	if err != nil {
-		return nil, fmt.Errorf("aes-gcm decrypt: %w", err)
+		// An authentication failure here means the ciphertext was wrapped to a
+		// different public key than the one our private scalar corresponds to,
+		// i.e. our locally held keypair is stale relative to the user's current
+		// X Chat key. Tag it so callers can trigger a passcode re-auth instead
+		// of treating it as a transient/decode error.
+		return nil, fmt.Errorf("aes-gcm decrypt: %w: %w", err, ErrStaleSigningKey)
 	}
 	if len(plaintext) != 32 {
 		return nil, fmt.Errorf("unexpected conversation key length: %d", len(plaintext))

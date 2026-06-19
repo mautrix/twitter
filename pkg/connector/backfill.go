@@ -548,9 +548,11 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 	}
 
 	var ourEncryptedKey string
+	var wrappedPublicKeyVersion string
 	for _, pk := range ckce.ConversationParticipantKeys {
 		if ptr.Val(pk.UserId) == ownUserID {
 			ourEncryptedKey = ptr.Val(pk.EncryptedConversationKey)
+			wrappedPublicKeyVersion = ptr.Val(pk.PublicKeyVersion)
 			break
 		}
 	}
@@ -558,8 +560,30 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 		return nil
 	}
 
+	// If the key was wrapped to a public key version we no longer hold, our
+	// signing keypair is stale; surface a passcode re-auth instead of failing
+	// backfill with an opaque crypto error.
+	if wrappedPublicKeyVersion != "" && signingKey.KeyVersion != "" && wrappedPublicKeyVersion != signingKey.KeyVersion {
+		zerolog.Ctx(ctx).Warn().
+			Str("conversation_id", conversationID).
+			Str("own_key_version", signingKey.KeyVersion).
+			Str("wrapped_public_key_version", wrappedPublicKeyVersion).
+			Msg("Conversation key wrapped to a public key version we don't hold; local signing key is stale")
+		tc.HandleStaleSigningKey(ctx, conversationID, wrappedPublicKeyVersion)
+		return crypto.ErrStaleSigningKey
+	}
+
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 	if err != nil {
+		if errors.Is(err, crypto.ErrStaleSigningKey) {
+			zerolog.Ctx(ctx).Warn().Err(err).
+				Str("conversation_id", conversationID).
+				Str("key_version", newKeyVersion).
+				Str("own_key_version", signingKey.KeyVersion).
+				Str("wrapped_public_key_version", wrappedPublicKeyVersion).
+				Msg("Failed to unwrap conversation key during backfill: local signing key is stale, passcode re-auth required")
+			tc.HandleStaleSigningKey(ctx, conversationID, wrappedPublicKeyVersion)
+		}
 		return err
 	}
 

@@ -264,6 +264,20 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	txnID := networkid.TransactionID(messageID)
 	// Check portal metadata for encryption capability
 	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+		// XChat group conversations are always encrypted; the legacy
+		// recipient-based REST DM endpoint can't address them and returns
+		// "279: conversation doesn't exist". Don't paper over a missing
+		// conversation key with a doomed REST send — fail with an actionable
+		// message instead. The usual cause is a stale local signing key (key
+		// rotated on x.com), which the inbound key path surfaces as a passcode
+		// re-auth.
+		if IsGroupConversationID(conversationID) {
+			return nil, bridgev2.WrapErrorInStatus(errors.New("can't send: this X Chat conversation's encryption key is unavailable — re-authenticate (enter your passcode) to refresh your X Chat keys")).
+				WithStatus(event.MessageStatusFail).
+				WithIsCertain(true).
+				WithSendNotice(true).
+				WithErrorAsMessage()
+		}
 		// No encryption keys - use REST API
 		return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 	}
@@ -277,6 +291,15 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	if err != nil {
 		msg.RemovePending(txnID)
 		if errors.Is(err, crypto.ErrKeyNotFound) {
+			// For group conversations the REST DM endpoint can't be used (see
+			// above), so a missing key is a hard, actionable failure.
+			if IsGroupConversationID(conversationID) {
+				return nil, bridgev2.WrapErrorInStatus(errors.New("can't send: this X Chat conversation's encryption key is unavailable — re-authenticate (enter your passcode) to refresh your X Chat keys")).
+					WithStatus(event.MessageStatusFail).
+					WithIsCertain(true).
+					WithSendNotice(true).
+					WithErrorAsMessage()
+			}
 			zerolog.Ctx(ctx).Debug().
 				Str("conversation_id", conversationID).
 				Msg("Falling back to REST API for message send (key/token not found)")

@@ -333,9 +333,11 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 		}
 
 		var ourEncryptedKey string
+		var wrappedPublicKeyVersion string
 		for _, pk := range ckce.ConversationParticipantKeys {
 			if ptr.Val(pk.UserId) == ownUserID {
 				ourEncryptedKey = ptr.Val(pk.EncryptedConversationKey)
+				wrappedPublicKeyVersion = ptr.Val(pk.PublicKeyVersion)
 				break
 			}
 		}
@@ -343,8 +345,31 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 			continue
 		}
 
+		// The key was wrapped to a public key version we no longer hold: our
+		// signing keypair is stale and the unwrap can never succeed. Surface a
+		// passcode re-auth instead of silently retrying forever.
+		if wrappedPublicKeyVersion != "" && signingKey.KeyVersion != "" && wrappedPublicKeyVersion != signingKey.KeyVersion {
+			c.Logger.Warn().
+				Str("conversation_id", conversationID).
+				Str("own_key_version", signingKey.KeyVersion).
+				Str("wrapped_public_key_version", wrappedPublicKeyVersion).
+				Msg("Conversation key wrapped to a public key version we don't hold; local signing key is stale")
+			c.notifyStaleSigningKey(ctx, conversationID, wrappedPublicKeyVersion)
+			return crypto.ErrStaleSigningKey
+		}
+
 		convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 		if err != nil {
+			if errors.Is(err, crypto.ErrStaleSigningKey) {
+				c.Logger.Warn().Err(err).
+					Str("conversation_id", conversationID).
+					Str("key_version", ptr.Val(ckce.ConversationKeyVersion)).
+					Str("own_key_version", signingKey.KeyVersion).
+					Str("wrapped_public_key_version", wrappedPublicKeyVersion).
+					Msg("Failed to unwrap conversation key: local signing key is stale, passcode re-auth required")
+				c.notifyStaleSigningKey(ctx, conversationID, wrappedPublicKeyVersion)
+				return err
+			}
 			continue
 		}
 		keyCreatedAt := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))

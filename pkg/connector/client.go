@@ -56,6 +56,11 @@ type TwitterClient struct {
 	ensurePortalLocks sync.Map
 
 	pollingChatResyncLast sync.Map
+
+	// staleKeyReauthSent debounces the passcode re-auth bridge state so a stale
+	// signing key doesn't spam BadCredentials on every skipped message. Reset
+	// when keys are refreshed via re-login.
+	staleKeyReauthSent atomic.Bool
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -71,6 +76,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
 	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
 	client.SetConversationDataCallback(tc.HandleConversationDataRefresh)
+	client.SetStaleSigningKeyCallback(tc.HandleStaleSigningKey)
 	// Ensure current user ID is available even if cookies omit twid
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
 	tc.matrixParser = &format.HTMLParser{
@@ -655,6 +661,28 @@ func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) []str
 	missingIDs = append(missingIDs, tc.collectAndCacheUserResults(item.ConversationDetail.GroupMembersResults)...)
 	missingIDs = append(missingIDs, tc.collectAndCacheUserResults(item.ConversationDetail.GroupAdminsResults)...)
 	return missingIDs
+}
+
+// HandleStaleSigningKey is invoked when a conversation key cannot be unwrapped
+// because the locally held signing keypair is stale relative to the user's
+// current X Chat key (it was rotated/re-registered on x.com). The bridge cannot
+// recover this without the user's passcode, so surface a passcode-only re-auth.
+// Debounced so a stale key affecting many messages only prompts once.
+func (tc *TwitterClient) HandleStaleSigningKey(ctx context.Context, conversationID, wrappedKeyVersion string) {
+	if !tc.staleKeyReauthSent.CompareAndSwap(false, true) {
+		return
+	}
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	zerolog.Ctx(ctx).Warn().
+		Str("conversation_id", conversationID).
+		Str("own_key_version", meta.SigningKeyVersion).
+		Str("wrapped_public_key_version", wrappedKeyVersion).
+		Msg("Local X Chat signing key is stale; requesting passcode re-auth")
+	tc.userLogin.BridgeState.Send(status.BridgeState{
+		StateEvent: status.StateBadCredentials,
+		Error:      "twitter-xchat-key-stale",
+		Message:    "Your X Chat keys are out of date. Please re-authenticate — you only need to enter your passcode.",
+	})
 }
 
 // HandleConversationDataRefresh is called when conversation data is fetched on-demand.

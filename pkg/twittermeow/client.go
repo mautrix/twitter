@@ -34,6 +34,14 @@ type StreamEventHandler func(evt response.StreamEvent)
 // The callback receives the conversation ID and the inbox item containing the latest conversation data.
 type ConversationDataCallback func(ctx context.Context, conversationID string, item *response.XChatInboxItem)
 
+// StaleSigningKeyCallback is called when a conversation key cannot be unwrapped
+// because the locally held signing/decrypt keypair is stale relative to the
+// user's current X Chat key (it was rotated/re-registered). The bridge cannot
+// recover this without the user's passcode, so the callback should surface a
+// re-auth requirement. wrappedKeyVersion is the public key version the key was
+// wrapped to (may be empty if unknown).
+type StaleSigningKeyCallback func(ctx context.Context, conversationID, wrappedKeyVersion string)
+
 // XChatTokenTTL is how long an XChat token is considered valid.
 const XChatTokenTTL = 5 * time.Minute
 
@@ -53,6 +61,7 @@ type Client struct {
 	xchatEventHandler         XChatEventHandler
 	onCursorChanged           func(ctx context.Context)
 	onConversationDataRefresh ConversationDataCallback
+	onStaleSigningKey         StaleSigningKeyCallback
 
 	currentUserID  string
 	jot            *JotClient
@@ -263,6 +272,20 @@ func (c *Client) SetXChatEventHandler(handler XChatEventHandler) {
 // This is called when conversation data is fetched on-demand (e.g., during key refresh).
 func (c *Client) SetConversationDataCallback(callback ConversationDataCallback) {
 	c.onConversationDataRefresh = callback
+}
+
+// SetStaleSigningKeyCallback sets the callback invoked when a conversation key
+// cannot be unwrapped because the local signing keypair is stale.
+func (c *Client) SetStaleSigningKeyCallback(callback StaleSigningKeyCallback) {
+	c.onStaleSigningKey = callback
+}
+
+// notifyStaleSigningKey reports that the local signing keypair appears stale for
+// the given conversation, so the connector can surface a passcode re-auth.
+func (c *Client) notifyStaleSigningKey(ctx context.Context, conversationID, wrappedKeyVersion string) {
+	if c.onStaleSigningKey != nil {
+		c.onStaleSigningKey(ctx, conversationID, wrappedKeyVersion)
+	}
 }
 
 func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {

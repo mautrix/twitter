@@ -394,10 +394,12 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 	}
 
 	var ourEncryptedKey string
+	var wrappedPublicKeyVersion string
 
 	for _, pk := range ckce.ConversationParticipantKeys {
 		if ptr.Val(pk.UserId) == ownUserID {
 			ourEncryptedKey = ptr.Val(pk.EncryptedConversationKey)
+			wrappedPublicKeyVersion = ptr.Val(pk.PublicKeyVersion)
 			p.log.Info().Msg("Found encrypted key for current user")
 			break
 		}
@@ -411,8 +413,31 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 		return nil
 	}
 
+	// If the key was wrapped to a public key version we no longer hold, the
+	// unwrap below is guaranteed to fail authentication. Detect it up front so
+	// we surface a passcode re-auth instead of silently degrading.
+	if wrappedPublicKeyVersion != "" && signingKey.KeyVersion != "" && wrappedPublicKeyVersion != signingKey.KeyVersion {
+		p.log.Warn().
+			Str("conversation_id", conversationID).
+			Str("own_key_version", signingKey.KeyVersion).
+			Str("wrapped_public_key_version", wrappedPublicKeyVersion).
+			Msg("Conversation key wrapped to a public key version we don't hold; local signing key is stale")
+		p.client.notifyStaleSigningKey(ctx, conversationID, wrappedPublicKeyVersion)
+		return crypto.ErrStaleSigningKey
+	}
+
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 	if err != nil {
+		if errors.Is(err, crypto.ErrStaleSigningKey) {
+			p.log.Warn().Err(err).
+				Str("conversation_id", conversationID).
+				Str("key_version", newKeyVersion).
+				Str("own_key_version", signingKey.KeyVersion).
+				Str("wrapped_public_key_version", wrappedPublicKeyVersion).
+				Msg("Failed to unwrap conversation key: local signing key is stale, passcode re-auth required")
+			p.client.notifyStaleSigningKey(ctx, conversationID, wrappedPublicKeyVersion)
+			return err
+		}
 		p.log.Err(err).
 			Str("conversation_id", conversationID).
 			Str("key_version", newKeyVersion).
@@ -512,10 +537,26 @@ func (p *XChatEventProcessor) processInstruction(ctx context.Context, inst *payl
 		return nil
 
 	case inst.DisplayTemporaryPasscodeInstruction != nil:
+		latestPublicKeyVersion := ptr.Val(inst.DisplayTemporaryPasscodeInstruction.LatestPublicKeyVersion)
 		p.log.Debug().
 			Str("token", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.Token)).
-			Str("public_key_version", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.LatestPublicKeyVersion)).
+			Str("public_key_version", latestPublicKeyVersion).
 			Msg("Received DisplayTemporaryPasscodeInstruction")
+		// X advertises the latest public key version here. If it differs from
+		// the keypair we hold, our keys were rotated and conversation keys can
+		// no longer be unwrapped — surface a passcode re-auth proactively
+		// instead of waiting for the next decrypt failure.
+		if latestPublicKeyVersion != "" {
+			if signingKey, err := p.client.keyManager.GetOwnSigningKey(ctx); err == nil &&
+				signingKey != nil && signingKey.KeyVersion != "" &&
+				signingKey.KeyVersion != latestPublicKeyVersion {
+				p.log.Warn().
+					Str("own_key_version", signingKey.KeyVersion).
+					Str("latest_public_key_version", latestPublicKeyVersion).
+					Msg("X advertises a newer public key version than we hold; local signing key is stale")
+				p.client.notifyStaleSigningKey(ctx, "", latestPublicKeyVersion)
+			}
+		}
 		return nil
 
 	default:

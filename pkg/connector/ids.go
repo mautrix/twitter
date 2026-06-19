@@ -30,6 +30,13 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
+// IsGroupConversationID reports whether the conversation is an XChat group
+// chat. Group conversations are always XChat-encrypted, so the legacy
+// recipient-based REST DM endpoint cannot be used for them.
+func IsGroupConversationID(conversationID string) bool {
+	return strings.HasPrefix(conversationID, "g")
+}
+
 func ConvertConversationIDToREST(conversationID string) string {
 	if strings.HasPrefix(conversationID, "g") {
 		return conversationID

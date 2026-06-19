@@ -16,6 +16,12 @@ var (
 	ErrInvalidKeyFormat = errors.New("invalid key format")
 	ErrKeyExpired       = errors.New("key has expired")
 	ErrSignatureInvalid = errors.New("signature verification failed")
+	// ErrStaleSigningKey indicates that a conversation key could not be
+	// unwrapped because it was wrapped to a public key the locally held
+	// signing/decrypt keypair no longer matches (the user's X Chat key was
+	// rotated/re-registered). Recovery requires the user to re-authenticate
+	// with their passcode; the bridge cannot self-heal silently.
+	ErrStaleSigningKey = errors.New("local signing key is stale; passcode re-auth required")
 )
 
 // ConversationKey represents a decrypted conversation key for XChat.
