@@ -21,6 +21,8 @@ const (
 	XLang              XCookieName = "lang"
 	XAtt               XCookieName = "att"
 	XPersonalizationID XCookieName = "personalization_id"
+	XDtabLocal         XCookieName = "dtab_local"
+	XGuestIDAds        XCookieName = "guest_id_ads"
 	XGuestIDMarketing  XCookieName = "guest_id_marketing"
 )
 
@@ -88,7 +90,7 @@ func (c *Cookies) UpdateFromResponse(r *http.Response) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	for _, cookie := range r.Cookies() {
-		if cookie.MaxAge == 0 || cookie.Expires.Before(time.Now()) {
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
 			delete(c.store, cookie.Name)
 		} else {
 			//log.Println(fmt.Sprintf("updated cookie %s to value %s", cookie.Name, cookie.Value))

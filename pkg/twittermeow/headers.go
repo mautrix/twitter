@@ -8,10 +8,10 @@ import (
 )
 
 const BrowserName = "Chrome"
-const ChromeVersion = "141"
-const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + ChromeVersion + ".0.0.0 Safari/537.36"
-const SecCHUserAgent = `"Chromium";v="` + ChromeVersion + `", "Google Chrome";v="` + ChromeVersion + `", "Not-A.Brand";v="99"`
-const OSName = "Linux"
+const ChromeVersion = "149"
+const UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + ChromeVersion + ".0.0.0 Safari/537.36"
+const SecCHUserAgent = `"Google Chrome";v="` + ChromeVersion + `", "Chromium";v="` + ChromeVersion + `", "Not)A;Brand";v="24"`
+const OSName = "Windows"
 const SecCHPlatform = `"` + OSName + `"`
 const SecCHMobile = "?0"
 
@@ -19,7 +19,7 @@ const UDID = OSName + "/" + BrowserName
 
 var BaseHeaders = http.Header{
 	"Accept":             []string{"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"},
-	"Accept-Language":    []string{"en-US,en;q=0.9"},
+	"Accept-Language":    []string{"en"},
 	"User-Agent":         []string{UserAgent},
 	"Sec-Ch-Ua":          []string{SecCHUserAgent},
 	"Sec-Ch-Ua-Platform": []string{SecCHPlatform},

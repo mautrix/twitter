@@ -9,9 +9,12 @@ const (
 	BASE_HOST                      = "x.com"
 	BASE_URL                       = "https://" + BASE_HOST
 	BASE_LOGIN_URL                 = BASE_URL + "/login"
+	BASE_FLOW_LOGIN_URL            = BASE_URL + "/i/flow/login"
 	BASE_MESSAGES_URL              = BASE_URL + "/messages"
 	BASE_LOGOUT_URL                = BASE_URL + "/logout"
 	BASE_NOTIFICATION_SETTINGS_URL = BASE_URL + "/settings/push_notifications"
+	JETFUEL_BASE_URL               = BASE_URL + "/i/jfapi"
+	JETFUEL_LOGIN_REFERER_URL      = BASE_URL + "/i/jf/onboarding/web?mode=login"
 
 	API_BASE_HOST = "api.x.com"
 	API_BASE_URL  = "https://" + API_BASE_HOST
@@ -59,6 +62,16 @@ const (
 
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"
+	VIEWER_CONTEXT_URL   = API_BASE_URL + "/1.1/graphql/viewer_context.json"
+
+	GUEST_ACTIVATE_URL                 = API_BASE_URL + "/1.1/guest/activate.json"
+	ONBOARDING_TASK_URL                = API_BASE_URL + "/1.1/onboarding/task.json"
+	ONBOARDING_LOGIN_TASK_URL          = ONBOARDING_TASK_URL + "?flow_name=login"
+	JETFUEL_LANDING_PATH               = "/onboarding/web/landing"
+	JETFUEL_LOGIN_PATH                 = "/onboarding/web?mode=login"
+	JETFUEL_BEGIN_LOGIN_PATH           = "/onboarding/web/actions/begin_login"
+	JETFUEL_LOGIN_ENTER_PASSWORD_PATH  = "/onboarding/web/actions/login_enter_password"
+	JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH = "/onboarding/web/actions/begin_two_factor_auth"
 
 	PIPELINE_EVENTS_URL = API_BASE_URL + "/live_pipeline/events"
 	PIPELINE_UPDATE_URL = API_BASE_URL + "/1.1/live_pipeline/update_subscriptions"

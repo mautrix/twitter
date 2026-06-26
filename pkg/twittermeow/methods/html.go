@@ -1,7 +1,9 @@
 package methods
 
 import (
+	"net/http"
 	"regexp"
+	"strconv"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
@@ -11,6 +13,8 @@ var (
 	migrateFormDataRegex   = regexp.MustCompile(`<form[^>]* action="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="tok" value="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="data" value="([^"]+)"[^>]*>`)
 	mainScriptURLRegex     = regexp.MustCompile(`https:\/\/(?:[A-Za-z0-9.-]+)\/responsive-web\/client-web\/main\.[0-9A-Za-z]+\.js`)
 	bearerTokenRegex       = regexp.MustCompile(`Bearer\s[A-Za-z0-9%]{16,}`)
+	documentCookieRegex    = regexp.MustCompile(`document\.cookie\s*=\s*("(?:\\.|[^"\\])*")`)
+	cloudflareJSDRegex     = regexp.MustCompile(`<script[^>]+src=["']([^"']*/cdn-cgi/challenge-platform/[^"']*api\.js[^"']*)["']`)
 	guestTokenRegex        = regexp.MustCompile(`gt=([0-9]+)`)
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
@@ -54,6 +58,38 @@ func ParseVariableIndexes(js []byte) [][]byte {
 func ParseGuestToken(html string) string {
 	match := guestTokenRegex.FindStringSubmatch(html)
 	if len(match) < 1 {
+		return ""
+	}
+	return match[1]
+}
+
+func ParseDocumentCookieAssignments(html string) map[string]string {
+	matches := documentCookieRegex.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	header := http.Header{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		cookie, err := strconv.Unquote(match[1])
+		if err != nil || cookie == "" {
+			continue
+		}
+		header.Add("Set-Cookie", cookie)
+	}
+	resp := &http.Response{Header: header}
+	out := make(map[string]string)
+	for _, cookie := range resp.Cookies() {
+		out[cookie.Name] = cookie.Value
+	}
+	return out
+}
+
+func ParseCloudflareJSDURL(html string) string {
+	match := cloudflareJSDRegex.FindStringSubmatch(html)
+	if len(match) < 2 {
 		return ""
 	}
 	return match[1]

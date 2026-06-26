@@ -8,3 +8,10 @@ logs/
 !.pre-commit-config.yaml
 /start
 /pkg/mautrix
+
+/*.dll.a
+/*.dll
+/mautrix-twitter.exe
+/data
+actions*.txt
+grind*.md
