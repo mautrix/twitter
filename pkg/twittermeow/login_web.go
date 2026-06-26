@@ -24,8 +24,8 @@ const (
 
 var (
 	ErrWebLoginUnexpectedSubtask = errors.New("unexpected X login subtask")
-	ErrWebLoginMissingFlowToken  = errors.New("X login response did not include a flow token")
-	ErrWebLoginMissingGuestToken = errors.New("X guest activation response did not include a guest token")
+	ErrWebLoginMissingFlowToken  = errors.New("x login response did not include a flow token")
+	ErrWebLoginMissingGuestToken = errors.New("x guest activation response did not include a guest token")
 )
 
 type WebLoginStatus string
@@ -112,7 +112,7 @@ func (wls *WebLoginSession) Start(ctx context.Context) (*WebLoginResult, error) 
 func (wls *WebLoginSession) startOCF(ctx context.Context) (*WebLoginResult, error) {
 	wls.backend = webLoginBackendOCF
 	if err := wls.client.loadPage(ctx, endpoints.BASE_FLOW_LOGIN_URL); err != nil {
-		return nil, fmt.Errorf("failed to load X login page: %w", err)
+		return nil, fmt.Errorf("failed to load x login page: %w", err)
 	}
 	if err := wls.client.activateGuest(ctx); err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (wls *WebLoginSession) SubmitIdentifier(ctx context.Context, identifier str
 	}
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
-		return nil, fmt.Errorf("X username, email, or phone is required")
+		return nil, fmt.Errorf("x username, email, or phone is required")
 	}
 	st := wls.currentSubtask()
 	if st == nil || st.SettingsList == nil {
@@ -199,7 +199,7 @@ func (wls *WebLoginSession) SubmitPassword(ctx context.Context, password string)
 		return wls.submitJetfuelPassword(ctx, password)
 	}
 	if password == "" {
-		return nil, fmt.Errorf("X password is required")
+		return nil, fmt.Errorf("x password is required")
 	}
 	st := wls.currentSubtask()
 	if st == nil || st.EnterPassword == nil {
@@ -232,7 +232,7 @@ func (wls *WebLoginSession) SubmitText(ctx context.Context, text string) (*WebLo
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, fmt.Errorf("X verification code is required")
+		return nil, fmt.Errorf("x verification code is required")
 	}
 	st := wls.currentSubtask()
 	if st == nil || st.EnterText == nil {
@@ -289,7 +289,7 @@ func (wls *WebLoginSession) advanceJSInstrumentation(ctx context.Context) (*WebL
 
 func (wls *WebLoginSession) update(resp *onboardingTaskResponse) error {
 	if resp == nil {
-		return fmt.Errorf("X login response was empty")
+		return fmt.Errorf("x login response was empty")
 	}
 	if resp.FlowToken == "" && !wls.client.IsLoggedIn() {
 		return ErrWebLoginMissingFlowToken

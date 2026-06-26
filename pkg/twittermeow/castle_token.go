@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -97,7 +96,7 @@ func castleHeader(uuidHex string, initTime int64) ([]byte, error) {
 		return nil, err
 	}
 	out := castleEncodeTimestampEncrypted(initTime)
-	version := uint16((3 << 13) | ((3 & 1) << 11) | ((31 & 6) << 6) | (63 & 0))
+	version := uint16((3 << 13) | (1 << 11) | (6 << 6))
 	out = binary.BigEndian.AppendUint16(out, version)
 	out = append(out, []byte(castlePublicKey)...)
 	out = append(out, uuidBytes...)
@@ -304,7 +303,7 @@ func castleFPOne(initTime int64) ([]byte, error) {
 	if err := addBytes(31, castleValueJustAppend, []byte{0xa2, 0x6a}); err != nil {
 		return nil, err
 	}
-	out := []byte{byte((7&0)<<5 | (31 & len(values)))}
+	out := []byte{byte(31 & len(values))}
 	for _, value := range values {
 		out = append(out, value...)
 	}
@@ -434,7 +433,7 @@ func castleFPThree(initTime int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]byte{byte((7&7)<<5 | 2)}, append(first, second...)...), nil
+	return append([]byte{byte((7 << 5) | 2)}, append(first, second...)...), nil
 }
 
 func castleEventLog() ([]byte, error) {
@@ -597,18 +596,17 @@ func xxteaEncrypt(data []byte, key []uint32) []byte {
 	}
 	sum := uint32(0)
 	o := blocks[u]
-	a := blocks[0]
 	rounds := 6 + 52/(u+1)
 	for rounds > 0 {
 		rounds--
 		sum += 0x9e3779b9
 		e := (sum >> 2) & 3
 		for c := 0; c < u; c++ {
-			a = blocks[c+1]
+			a := blocks[c+1]
 			blocks[c] += (((o >> 5) ^ (a << 2)) + ((a >> 3) ^ (o << 4))) ^ ((sum ^ a) + (key[(c&3)^int(e)] ^ o))
 			o = blocks[c]
 		}
-		a = blocks[0]
+		a := blocks[0]
 		blocks[u] += (((o >> 5) ^ (a << 2)) + ((a >> 3) ^ (o << 4))) ^ ((sum ^ a) + (key[(u&3)^int(e)] ^ o))
 		o = blocks[u]
 	}
@@ -661,8 +659,4 @@ func randomBytes(length int) ([]byte, error) {
 	out := make([]byte, length)
 	_, err := rand.Read(out)
 	return out, err
-}
-
-func looksLikeCastleToken(token string) bool {
-	return len(token) > 500 && !strings.Contains(token, "=")
 }

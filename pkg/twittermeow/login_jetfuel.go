@@ -72,7 +72,7 @@ func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, 
 	}
 	parsed := parseJetfuelLoginResponse(body)
 	if !parsed.hasPath(endpoints.JETFUEL_BEGIN_LOGIN_PATH) && !parsed.hasField("username_or_email") {
-		return nil, fmt.Errorf("%w: Jetfuel login page did not expose a username action", ErrWebLoginUnexpectedSubtask)
+		return nil, fmt.Errorf("%w: jetfuel login page did not expose a username action", ErrWebLoginUnexpectedSubtask)
 	}
 	wls.backend = webLoginBackendJetfuel
 	wls.jetfuel = &jetfuelLoginState{}
@@ -89,7 +89,7 @@ func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, 
 func (wls *WebLoginSession) submitJetfuelIdentifier(ctx context.Context, identifier string) (*WebLoginResult, error) {
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
-		return nil, fmt.Errorf("X username, email, or phone is required")
+		return nil, fmt.Errorf("x username, email, or phone is required")
 	}
 	if err := wls.client.sendJetfuelViewerContextEvent(ctx); err != nil {
 		wls.client.Logger.Debug().Err(err).Msg("Jetfuel viewer-context preflight failed")
@@ -129,16 +129,16 @@ func (wls *WebLoginSession) submitJetfuelIdentifier(ctx context.Context, identif
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
-	return nil, fmt.Errorf("%w: Jetfuel identifier response did not expose a supported next action", ErrWebLoginUnexpectedSubtask)
+	return nil, fmt.Errorf("%w: jetfuel identifier response did not expose a supported next action", ErrWebLoginUnexpectedSubtask)
 }
 
 func (wls *WebLoginSession) submitJetfuelCredentials(ctx context.Context, identifier, password string) (*WebLoginResult, error) {
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
-		return nil, fmt.Errorf("X username, email, or phone is required")
+		return nil, fmt.Errorf("x username, email, or phone is required")
 	}
 	if password == "" {
-		return nil, fmt.Errorf("X password is required")
+		return nil, fmt.Errorf("x password is required")
 	}
 	result, err := wls.submitJetfuelIdentifier(ctx, identifier)
 	if err != nil {
@@ -203,15 +203,15 @@ func (wls *WebLoginSession) submitJetfuelCombinedCredentials(ctx context.Context
 			},
 		}, nil
 	}
-	return nil, fmt.Errorf("%w: Jetfuel credentials response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
+	return nil, fmt.Errorf("%w: jetfuel credentials response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
 }
 
 func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password string) (*WebLoginResult, error) {
 	if password == "" {
-		return nil, fmt.Errorf("X password is required")
+		return nil, fmt.Errorf("x password is required")
 	}
 	if wls.jetfuel == nil || wls.jetfuel.passwordAction == "" {
-		return nil, fmt.Errorf("%w: Jetfuel password action is missing", ErrWebLoginUnexpectedSubtask)
+		return nil, fmt.Errorf("%w: jetfuel password action is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{
 		"password": {password},
@@ -246,12 +246,12 @@ func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password 
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
-	return nil, fmt.Errorf("%w: Jetfuel password response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
+	return nil, fmt.Errorf("%w: jetfuel password response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
 }
 
 func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, action string) (*WebLoginResult, error) {
 	if wls.jetfuel == nil {
-		return nil, fmt.Errorf("%w: Jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
+		return nil, fmt.Errorf("%w: jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{}
 	if wls.jetfuel.preludeDispatchID != "" {
@@ -281,16 +281,16 @@ func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, act
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
-	return nil, fmt.Errorf("%w: Jetfuel two-factor prelude did not expose a verification challenge", ErrWebLoginUnexpectedSubtask)
+	return nil, fmt.Errorf("%w: jetfuel two-factor prelude did not expose a verification challenge", ErrWebLoginUnexpectedSubtask)
 }
 
 func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) (*WebLoginResult, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, fmt.Errorf("X verification code is required")
+		return nil, fmt.Errorf("x verification code is required")
 	}
 	if wls.jetfuel == nil || wls.jetfuel.verificationAction == "" {
-		return nil, fmt.Errorf("%w: Jetfuel verification action is missing", ErrWebLoginUnexpectedSubtask)
+		return nil, fmt.Errorf("%w: jetfuel verification action is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{}
 	for _, field := range wls.jetfuelVerificationFields() {
@@ -337,7 +337,7 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
-	return nil, fmt.Errorf("%w: Jetfuel verification response did not complete login", ErrWebLoginUnexpectedSubtask)
+	return nil, fmt.Errorf("%w: jetfuel verification response did not complete login", ErrWebLoginUnexpectedSubtask)
 }
 
 func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
