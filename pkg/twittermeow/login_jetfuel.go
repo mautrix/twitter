@@ -33,6 +33,13 @@ var (
 	jetfuelActionPathRegex = regexp.MustCompile(`/onboarding/web/actions/[A-Za-z0-9_./-]+`)
 	jetfuelFieldRegex      = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$-]{1,80}$`)
 	jetfuelUUIDRegex       = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	jetfuelActionAliases   = map[string]string{
+		"begin_login":            endpoints.JETFUEL_BEGIN_LOGIN_PATH,
+		"login_enter_password":   endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH,
+		"begin_two_factor_auth":  endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH,
+		"finish_two_factor_auth": "/onboarding/web/actions/finish_two_factor_auth",
+		"two_factor_code":        "/onboarding/web/actions/two_factor_code",
+	}
 )
 
 type webLoginBackend string
@@ -41,6 +48,7 @@ type jetfuelLoginState struct {
 	identifier         string
 	passwordAction     string
 	verificationAction string
+	verificationFields []string
 	sessionToken       string
 	preludeDispatchID  string
 }
@@ -114,6 +122,7 @@ func (wls *WebLoginSession) submitJetfuelIdentifier(ctx context.Context, identif
 	}
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 		return &WebLoginResult{
 			Status:           WebLoginStatusNeedsText,
 			CurrentSubtaskID: "JetfuelVerification",
@@ -176,6 +185,7 @@ func (wls *WebLoginSession) submitJetfuelCombinedCredentials(ctx context.Context
 	}
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 		return &WebLoginResult{
 			Status:           WebLoginStatusNeedsText,
 			CurrentSubtaskID: "JetfuelVerification",
@@ -229,6 +239,7 @@ func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password 
 	}
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 		return &WebLoginResult{
 			Status:           WebLoginStatusNeedsText,
 			CurrentSubtaskID: "JetfuelVerification",
@@ -263,6 +274,7 @@ func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, act
 	}
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 		return &WebLoginResult{
 			Status:           WebLoginStatusNeedsText,
 			CurrentSubtaskID: "JetfuelVerification",
@@ -280,10 +292,9 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	if wls.jetfuel == nil || wls.jetfuel.verificationAction == "" {
 		return nil, fmt.Errorf("%w: Jetfuel verification action is missing", ErrWebLoginUnexpectedSubtask)
 	}
-	form := url.Values{
-		"challenge_response": {text},
-		"verification_code":  {text},
-		"code":               {text},
+	form := url.Values{}
+	for _, field := range wls.jetfuelVerificationFields() {
+		form.Set(field, text)
 	}
 	if wls.jetfuel.sessionToken != "" {
 		form.Set("session_token", wls.jetfuel.sessionToken)
@@ -299,8 +310,32 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	if err := parsed.loginError(); err != nil {
 		return nil, err
 	}
+	wls.updateJetfuelState(parsed)
 	if wls.client.IsLoggedIn() || parsed.isComplete() {
 		return &WebLoginResult{Status: WebLoginStatusComplete}, nil
+	}
+	if action := parsed.passwordAction(); action != "" {
+		wls.jetfuel.passwordAction = action
+		return &WebLoginResult{
+			Status:           WebLoginStatusNeedsPassword,
+			CurrentSubtaskID: "JetfuelPassword",
+			Challenge: &WebLoginChallenge{
+				SubtaskID: "JetfuelPassword",
+				Hint:      "Password",
+			},
+		}, nil
+	}
+	if action := parsed.beginTwoFactorAction(); action != "" {
+		return wls.submitJetfuelBeginTwoFactor(ctx, action)
+	}
+	if action := parsed.verificationAction(); action != "" {
+		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
+		return &WebLoginResult{
+			Status:           WebLoginStatusNeedsText,
+			CurrentSubtaskID: "JetfuelVerification",
+			Challenge:        parsed.verificationChallenge(),
+		}, nil
 	}
 	return nil, fmt.Errorf("%w: Jetfuel verification response did not complete login", ErrWebLoginUnexpectedSubtask)
 }
@@ -320,7 +355,15 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	}
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 	}
+}
+
+func (wls *WebLoginSession) jetfuelVerificationFields() []string {
+	if wls.jetfuel != nil && len(wls.jetfuel.verificationFields) > 0 {
+		return wls.jetfuel.verificationFields
+	}
+	return defaultJetfuelVerificationFields()
 }
 
 func (c *Client) jetfuelGet(ctx context.Context, path string) ([]byte, error) {
@@ -557,15 +600,31 @@ func parseJetfuelLoginResponse(body []byte) jetfuelLoginResponse {
 	fields := make([]string, 0)
 	for _, str := range strs {
 		for _, path := range jetfuelActionPathRegex.FindAllString(str, -1) {
-			if !slices.Contains(paths, path) {
-				paths = append(paths, path)
-			}
+			paths = appendJetfuelPath(paths, path)
+		}
+		if path := canonicalJetfuelActionPath(str); path != "" {
+			paths = appendJetfuelPath(paths, path)
 		}
 		if jetfuelFieldRegex.MatchString(str) && !slices.Contains(fields, str) {
 			fields = append(fields, str)
 		}
 	}
 	return jetfuelLoginResponse{strings: strs, paths: paths, fields: fields}
+}
+
+func canonicalJetfuelActionPath(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "/onboarding/web/actions/") {
+		return value
+	}
+	return jetfuelActionAliases[value]
+}
+
+func appendJetfuelPath(paths []string, path string) []string {
+	if path == "" || slices.Contains(paths, path) {
+		return paths
+	}
+	return append(paths, path)
 }
 
 func extractJetfuelStrings(body []byte) []string {
@@ -662,6 +721,58 @@ func (jfr jetfuelLoginResponse) verificationAction() string {
 	return ""
 }
 
+func (jfr jetfuelLoginResponse) verificationCodeFields() []string {
+	fields := make([]string, 0, 8)
+	text := jfr.text()
+	preferred := []string{
+		"challenge_response",
+		"verification_code",
+		"two_factor_code",
+		"code",
+		"token",
+	}
+	if strings.Contains(text, "backup code") {
+		preferred = append([]string{"backup_code"}, preferred...)
+	}
+	for _, field := range preferred {
+		if jfr.hasField(field) {
+			fields = appendJetfuelVerificationField(fields, field)
+		}
+	}
+	for _, field := range jfr.fields {
+		lower := strings.ToLower(field)
+		if field != lower {
+			continue
+		}
+		if lower == "session_token" || lower == "prelude_dispatch_id" ||
+			strings.Contains(lower, "csrf") || strings.Contains(lower, "oauth") ||
+			strings.Contains(lower, "castle") {
+			continue
+		}
+		if strings.Contains(lower, "code") || strings.Contains(lower, "otp") ||
+			strings.Contains(lower, "challenge") || strings.Contains(lower, "response") ||
+			strings.Contains(lower, "token") {
+			fields = appendJetfuelVerificationField(fields, field)
+		}
+	}
+	if len(fields) == 0 {
+		return defaultJetfuelVerificationFields()
+	}
+	return fields
+}
+
+func appendJetfuelVerificationField(fields []string, field string) []string {
+	field = strings.TrimSpace(field)
+	if field == "" || slices.Contains(fields, field) {
+		return fields
+	}
+	return append(fields, field)
+}
+
+func defaultJetfuelVerificationFields() []string {
+	return []string{"challenge_response", "verification_code", "two_factor_code", "backup_code", "code"}
+}
+
 func (jfr jetfuelLoginResponse) uuidValue(field string) string {
 	field = strings.ToLower(field)
 	for i, str := range jfr.strings {
@@ -691,14 +802,15 @@ func (jfr jetfuelLoginResponse) verificationChallenge() *WebLoginChallenge {
 		Hint:        "Verification code",
 		Description: jetfuelChallengeDescription(text),
 		IsTwoFactor: strings.Contains(text, "two-factor") || strings.Contains(text, "two factor") ||
-			strings.Contains(text, "authentication code") || strings.Contains(text, "verification code"),
+			strings.Contains(text, "authentication code") || strings.Contains(text, "verification code") ||
+			strings.Contains(text, "backup code") || strings.Contains(text, "totp"),
 	}
 }
 
 func jetfuelChallengeDescription(text string) string {
 	switch {
 	case strings.Contains(text, "backup code"):
-		return "Enter a backup code from X."
+		return "Enter the code from your authentication app."
 	case strings.Contains(text, "authentication code"):
 		return "Enter the authentication code from X."
 	case strings.Contains(text, "verification code"):
@@ -720,6 +832,8 @@ func (jfr jetfuelLoginResponse) loginError() error {
 		return &WebLoginError{Code: 399, Message: "Please use X.com or official X apps to proceed with log in/sign up."}
 	case strings.Contains(text, "temporarily limited") || strings.Contains(text, "try again later"):
 		return &WebLoginError{Code: 399, Message: "We've temporarily limited your login. Please try again later."}
+	case strings.Contains(text, "too many attempts") || strings.Contains(text, "try again in a few minutes"):
+		return &WebLoginError{Code: 399, Message: "Too many attempts. Try again in a few minutes."}
 	case strings.Contains(text, "missing_account") || strings.Contains(text, "not registered"):
 		return &WebLoginError{Code: 32, Message: "This email or username is not registered yet."}
 	case strings.Contains(text, "wrong password") || strings.Contains(text, "incorrect password"):

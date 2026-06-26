@@ -617,6 +617,15 @@ func (t *TwitterLogin) handleWebLoginResult(ctx context.Context, result *twitter
 		t.webLoginChallenge = result.Challenge
 		return makeVerificationStep(result.Challenge, ""), nil
 	case twittermeow.WebLoginStatusNeedsPassword:
+		if t.webLogin != nil && t.webLoginPassword != "" {
+			next, err := t.webLogin.SubmitPassword(ctx, t.webLoginPassword)
+			if err != nil {
+				return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+			}
+			if next != nil && next.Status != twittermeow.WebLoginStatusNeedsPassword {
+				return t.handleWebLoginResult(ctx, next)
+			}
+		}
 		return makeCredentialsStep("X still needs your password. Enter your login details again."), nil
 	case twittermeow.WebLoginStatusNeedsIdentifier:
 		return makeCredentialsStep("X still needs your username, email, or phone. Enter your login details again."), nil
