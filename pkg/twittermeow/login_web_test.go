@@ -188,6 +188,127 @@ func TestJetfuelLoginResponseDoesNotTreatChallengeModesAsFields(t *testing.T) {
 	}
 }
 
+func TestJetfuelLoginResponseFindsAuthMethodChoice(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte(
+		"Select a method to authenticate\x00Choose the method you prefer to use for 2-step verification.\x00two_factor_method\x00" +
+			"Totp\x00BackupCode\x00U2fSecurityKey\x00user_id\x001127993589949243392\x00session_token\x0012345678-1234-1234-1234-123456789abc\x00begin_two_factor_auth",
+	))
+	methods := parsed.authMethods()
+	if len(methods) != 3 {
+		t.Fatalf("authMethods() length = %d, want 3: %#v", len(methods), methods)
+	}
+	wantIDs := []string{"Totp", "BackupCode", "U2fSecurityKey"}
+	for i, want := range wantIDs {
+		if methods[i].ID != want || methods[i].Index != i {
+			t.Fatalf("method[%d] = %#v, want ID %s index %d", i, methods[i], want, i)
+		}
+	}
+	if !methods[0].Supported || !methods[1].Supported {
+		t.Fatalf("code-based methods should be supported: %#v", methods)
+	}
+	if !methods[2].Supported || methods[2].Kind != WebLoginAuthMethodKindSecurityKey {
+		t.Fatalf("security key method = %#v, want supported security-key method", methods[2])
+	}
+	if got := parsed.numericValue("user_id"); got != "1127993589949243392" {
+		t.Fatalf("numericValue(user_id) = %q", got)
+	}
+	if action := parsed.beginTwoFactorAction(); action != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("beginTwoFactorAction() = %q", action)
+	}
+}
+
+func TestJetfuelLoginResponseDoesNotTreatCodePromptAsAuthMethodChoice(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte("Enter your two factor code\x00Use your authenticator app to generate the code.\x00challenge_response\x00Totp\x00BackupCode\x00session_token"))
+	if methods := parsed.authMethods(); len(methods) != 0 {
+		t.Fatalf("authMethods() = %#v, want none for code prompt", methods)
+	}
+}
+
+func TestJetfuelAuthMethodFormShape(t *testing.T) {
+	state := &jetfuelLoginState{
+		sessionToken:      "session-token",
+		preludeDispatchID: "prelude-id",
+		userID:            "1127993589949243392",
+	}
+	form := state.authMethodForm(WebLoginAuthMethod{ID: "Totp", Index: 0})
+
+	if got := form.Get("two_factor_auth_method_type"); got != "Totp" {
+		t.Fatalf("two_factor_auth_method_type = %q", got)
+	}
+	if got := form.Get("_selected_method_idx"); got != "0" {
+		t.Fatalf("_selected_method_idx = %q", got)
+	}
+	if got := form.Get("user_id"); got != "1127993589949243392" {
+		t.Fatalf("user_id = %q", got)
+	}
+	if got := form.Get("session_token"); got != "session-token" {
+		t.Fatalf("session_token = %q", got)
+	}
+	if got := form.Get("prelude_dispatch_id"); got != "" {
+		t.Fatalf("prelude_dispatch_id = %q, want omitted", got)
+	}
+}
+
+func TestJetfuelLoginResponseFindsWebAuthnChallenge(t *testing.T) {
+	body := []byte(`security_key` + "\x00" + `{"action":"verification","challenge":{"publicKeyCredentialRequestOptions":{"rpId":"x.com","challenge":"abc123","allowCredentials":[{"type":"public-key","id":"AQID"}],"extensions":{"appid":"https://twitter.com"}}},"timeout":60000}` + "\x00challenge_response\x00finish_two_factor_auth")
+	parsed := parseJetfuelLoginResponse(body)
+
+	challenge, ok := parsed.webAuthnChallenge()
+	if !ok {
+		t.Fatal("webAuthnChallenge() returned false")
+	}
+	if challenge.RequestOptions.RPID != "x.com" {
+		t.Fatalf("rpId = %q", challenge.RequestOptions.RPID)
+	}
+	if challenge.RequestOptions.Challenge != "abc123" {
+		t.Fatalf("challenge = %q", challenge.RequestOptions.Challenge)
+	}
+	if got := challenge.RequestOptions.AllowCredentials[0].ID; got != "AQID" {
+		t.Fatalf("allowCredentials[0].id = %q", got)
+	}
+	if got := challenge.RequestOptions.Extensions.AppID; got != "https://twitter.com" {
+		t.Fatalf("extensions.appid = %q", got)
+	}
+}
+
+func TestWebAuthnChallengeResponseShape(t *testing.T) {
+	response, err := marshalWebAuthnChallengeResponse(&webAuthnAssertion{
+		CredentialID:      []byte{1, 2, 3},
+		ClientDataJSON:    []byte(`{"type":"webauthn.get"}`),
+		AuthenticatorData: []byte{4, 5, 6},
+		Signature:         []byte{7, 8, 9},
+	})
+	if err != nil {
+		t.Fatalf("marshalWebAuthnChallengeResponse() error = %v", err)
+	}
+
+	var payload struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Response struct {
+			ClientDataJSON    string `json:"clientDataJSON"`
+			AuthenticatorData string `json:"authenticatorData"`
+			Signature         string `json:"signature"`
+			UserHandle        string `json:"userHandle"`
+		} `json:"response"`
+		ClientExtensionResults struct {
+			AppID bool `json:"appid"`
+		} `json:"clientExtensionResults"`
+	}
+	if err := json.Unmarshal([]byte(response), &payload); err != nil {
+		t.Fatalf("Unmarshal(response) error = %v", err)
+	}
+	if payload.ID != "AQID" || payload.Type != "public-key" {
+		t.Fatalf("payload identity = %#v", payload)
+	}
+	if payload.Response.AuthenticatorData != "BAUG" || payload.Response.Signature != "BwgJ" {
+		t.Fatalf("payload response = %#v", payload.Response)
+	}
+	if payload.Response.UserHandle != "" || !payload.ClientExtensionResults.AppID {
+		t.Fatalf("payload extension/user handle = %#v", payload)
+	}
+}
+
 func TestJetfuelLoginResponseClassifiesTemporaryLimit(t *testing.T) {
 	parsed := parseJetfuelLoginResponse([]byte("We've temporarily limited your login. Please try again later."))
 	err := parsed.loginError()

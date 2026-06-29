@@ -23,9 +23,11 @@ const (
 )
 
 var (
-	ErrWebLoginUnexpectedSubtask = errors.New("unexpected X login subtask")
-	ErrWebLoginMissingFlowToken  = errors.New("x login response did not include a flow token")
-	ErrWebLoginMissingGuestToken = errors.New("x guest activation response did not include a guest token")
+	ErrWebLoginUnexpectedSubtask      = errors.New("unexpected X login subtask")
+	ErrWebLoginMissingFlowToken       = errors.New("x login response did not include a flow token")
+	ErrWebLoginMissingGuestToken      = errors.New("x guest activation response did not include a guest token")
+	ErrWebLoginUnsupportedAuthMethod  = errors.New("unsupported X login verification method")
+	ErrWebLoginMissingAuthMethodState = errors.New("x login verification method state is missing")
 )
 
 type WebLoginStatus string
@@ -34,8 +36,18 @@ const (
 	WebLoginStatusNeedsIdentifier WebLoginStatus = "needs_identifier"
 	WebLoginStatusNeedsPassword   WebLoginStatus = "needs_password"
 	WebLoginStatusNeedsText       WebLoginStatus = "needs_text"
+	WebLoginStatusNeedsAuthMethod WebLoginStatus = "needs_auth_method"
 	WebLoginStatusComplete        WebLoginStatus = "complete"
 	WebLoginStatusUnsupported     WebLoginStatus = "unsupported"
+)
+
+type WebLoginAuthMethodKind string
+
+const (
+	WebLoginAuthMethodKindCode        WebLoginAuthMethodKind = "code"
+	WebLoginAuthMethodKindBackupCode  WebLoginAuthMethodKind = "backup_code"
+	WebLoginAuthMethodKindSecurityKey WebLoginAuthMethodKind = "security_key"
+	WebLoginAuthMethodKindUnknown     WebLoginAuthMethodKind = "unknown"
 )
 
 type WebLoginError struct {
@@ -78,9 +90,19 @@ type WebLoginChallenge struct {
 	IsTwoFactor bool
 }
 
+type WebLoginAuthMethod struct {
+	ID          string
+	Name        string
+	Description string
+	Kind        WebLoginAuthMethodKind
+	Supported   bool
+	Index       int
+}
+
 type WebLoginResult struct {
 	Status           WebLoginStatus
 	Challenge        *WebLoginChallenge
+	AuthMethods      []WebLoginAuthMethod
 	CurrentSubtaskID string
 }
 
@@ -224,6 +246,13 @@ func (wls *WebLoginSession) SubmitPassword(ctx context.Context, password string)
 		return nil, err
 	}
 	return wls.advanceJSInstrumentation(ctx)
+}
+
+func (wls *WebLoginSession) SubmitAuthMethod(ctx context.Context, methodID string) (*WebLoginResult, error) {
+	if wls.backend == webLoginBackendJetfuel {
+		return wls.submitJetfuelAuthMethod(ctx, methodID)
+	}
+	return nil, fmt.Errorf("%w: auth method selection is unsupported for %s login", ErrWebLoginUnexpectedSubtask, wls.backend)
 }
 
 func (wls *WebLoginSession) SubmitText(ctx context.Context, text string) (*WebLoginResult, error) {

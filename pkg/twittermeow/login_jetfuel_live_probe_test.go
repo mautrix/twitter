@@ -276,6 +276,71 @@ func TestLiveJetfuelPasswordResponseProbe(t *testing.T) {
 	}
 }
 
+func TestLiveJetfuelAuthMethodSelectionProbe(t *testing.T) {
+	identifier := strings.TrimSpace(os.Getenv("TWITTER_LIVE_IDENTIFIER"))
+	password := os.Getenv("TWITTER_LIVE_PASSWORD")
+	methodID := strings.TrimSpace(os.Getenv("TWITTER_LIVE_AUTH_METHOD"))
+	if identifier == "" || password == "" || methodID == "" {
+		t.Skip("TWITTER_LIVE_IDENTIFIER, TWITTER_LIVE_PASSWORD, and TWITTER_LIVE_AUTH_METHOD are required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	session := NewWebLoginSession(client)
+	result, err := session.Start(ctx)
+	logWebLoginStage(t, "start", result, err)
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	result, err = session.SubmitCredentials(ctx, identifier, password)
+	logWebLoginStage(t, "credentials", result, err)
+	if err != nil {
+		t.Fatalf("SubmitCredentials() failed: %v", err)
+	}
+	if result.Status != WebLoginStatusNeedsAuthMethod {
+		t.Fatalf("SubmitCredentials() status = %s, want %s", result.Status, WebLoginStatusNeedsAuthMethod)
+	}
+
+	method, ok := session.jetfuel.findAuthMethod(methodID)
+	if !ok {
+		t.Fatalf("auth method %q not found in %#v", methodID, result.AuthMethods)
+	}
+	action := session.jetfuel.twoFactorAction
+	if action == "" {
+		action = endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH
+	}
+	body, err := client.jetfuelPostForm(ctx, action, session.jetfuel.authMethodForm(method))
+	if err != nil {
+		t.Fatalf("auth method POST failed: %v", err)
+	}
+	parsed := parseJetfuelLoginResponse(body)
+	t.Logf("auth method response: method=%s kind=%s supported=%t logged_in=%t complete=%t strings=%d paths=%v fields=%v begin_2fa_action=%q verification_action=%q",
+		method.ID,
+		method.Kind,
+		method.Supported,
+		client.IsLoggedIn(),
+		parsed.isComplete(),
+		len(parsed.strings),
+		redactJetfuelDebugList(parsed.paths, identifier, password),
+		redactJetfuelDebugList(parsed.fields, identifier, password),
+		parsed.beginTwoFactorAction(),
+		parsed.verificationAction(),
+	)
+	if err := parsed.loginError(); err != nil {
+		var webErr *WebLoginError
+		if errors.As(err, &webErr) {
+			t.Logf("auth method response login error: code=%d message=%q", webErr.Code, redactJetfuelDebugString(webErr.Message, identifier, password))
+		} else {
+			t.Logf("auth method response login error: %T", err)
+		}
+	}
+	for _, line := range filteredJetfuelDebugStrings(parsed, identifier, password) {
+		t.Logf("auth method response string: %s", line)
+	}
+}
+
 func jetfuelProbePageURL() string {
 	if os.Getenv("TWITTER_ROOT_PAGE_PROBE") == "1" {
 		return endpoints.BASE_URL + "/"

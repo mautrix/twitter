@@ -53,6 +53,7 @@ type TwitterLogin struct {
 	webLogin          *twittermeow.WebLoginSession
 	webLoginPassword  string
 	webLoginChallenge *twittermeow.WebLoginChallenge
+	webLoginMethods   []twittermeow.WebLoginAuthMethod
 	profile           twittermeow.CurrentUserProfile
 }
 
@@ -61,12 +62,14 @@ var (
 	LoginFlowIDCookies         = "cookies"
 	LoginStepIDCredentials     = "fi.mau.twitter.login.enter_credentials"
 	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
+	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
 	LoginStepIDCookies         = "fi.mau.twitter.login.enter_cookies"
 	LoginStepJuiceboxPIN       = "fi.mau.twitter.login.juicebox_pin"
 	LoginStepIDComplete        = "fi.mau.twitter.login.complete"
 	loginFieldIdentifier       = "identifier"
 	loginFieldPassword         = "password"
 	loginFieldVerificationCode = "verification_code"
+	loginFieldAuthMethod       = "auth_method"
 )
 
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
@@ -233,6 +236,37 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 					Type: fieldType,
 					ID:   loginFieldVerificationCode,
 					Name: fieldName,
+				},
+			},
+		},
+	}
+}
+
+func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine string) *bridgev2.LoginStep {
+	instructions := "Choose how to verify this X login."
+	if errorLine != "" {
+		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+	}
+	options := make([]string, 0, len(methods))
+	for _, method := range methods {
+		if method.Name == "" {
+			options = append(options, method.ID)
+		} else {
+			options = append(options, method.Name)
+		}
+	}
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeUserInput,
+		StepID:       LoginStepIDAuthMethod,
+		Instructions: instructions,
+		UserInputParams: &bridgev2.LoginUserInputParams{
+			Fields: []bridgev2.LoginInputDataField{
+				{
+					Type:        bridgev2.LoginInputFieldTypeSelect,
+					ID:          loginFieldAuthMethod,
+					Name:        "Verification method",
+					Description: "Choose the method X should use for this login.",
+					Options:     options,
 				},
 			},
 		},
@@ -547,6 +581,9 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	if _, ok := input["pin"]; ok {
 		return t.submitPINInput(ctx, input)
 	}
+	if _, ok := input[loginFieldAuthMethod]; ok {
+		return t.submitWebAuthMethodInput(ctx, input)
+	}
 	if _, ok := input[loginFieldVerificationCode]; ok || t.webLoginChallenge != nil {
 		return t.submitWebVerificationInput(ctx, input)
 	}
@@ -567,6 +604,7 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 	t.webLogin = twittermeow.NewWebLoginSession(client)
 	t.webLoginPassword = password
 	t.webLoginChallenge = nil
+	t.webLoginMethods = nil
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
@@ -583,10 +621,50 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 	return t.handleWebLoginResult(ctx, result)
 }
 
+func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	if t.webLogin == nil {
+		t.webLoginMethods = nil
+		return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
+	}
+	methodID := strings.TrimSpace(input[loginFieldAuthMethod])
+	if methodID == "" {
+		return makeAuthMethodStep(t.webLoginMethods, "Choose a verification method."), nil
+	}
+	result, err := t.webLogin.SubmitAuthMethod(ctx, methodID)
+	if err != nil {
+		if errors.Is(err, twittermeow.ErrWebLoginUnsupportedAuthMethod) ||
+			errors.Is(err, twittermeow.ErrWebLoginMissingAuthMethodState) {
+			return makeAuthMethodStep(t.webLoginMethods, webLoginErrorInstructions(err)), nil
+		}
+		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+	}
+	return t.handleWebLoginResult(ctx, result)
+}
+
+func findWebLoginAuthMethod(methods []twittermeow.WebLoginAuthMethod, selected string) (twittermeow.WebLoginAuthMethod, bool) {
+	selected = normalizeLoginChoice(selected)
+	for _, method := range methods {
+		if normalizeLoginChoice(method.ID) == selected || normalizeLoginChoice(method.Name) == selected {
+			return method, true
+		}
+	}
+	return twittermeow.WebLoginAuthMethod{}, false
+}
+
+func normalizeLoginChoice(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, " ", "")
+	value = strings.ReplaceAll(value, "_", "")
+	value = strings.ReplaceAll(value, "-", "")
+	value = strings.ReplaceAll(value, ".", "")
+	return value
+}
+
 func (t *TwitterLogin) submitWebVerificationInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	if t.webLogin == nil {
 		t.webLoginChallenge = nil
 		t.webLoginPassword = ""
+		t.webLoginMethods = nil
 		return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
 	}
 	code := strings.TrimSpace(input[loginFieldVerificationCode])
@@ -613,8 +691,16 @@ func (t *TwitterLogin) handleWebLoginResult(ctx context.Context, result *twitter
 	switch result.Status {
 	case twittermeow.WebLoginStatusComplete:
 		return t.completeWebLogin(ctx)
+	case twittermeow.WebLoginStatusNeedsAuthMethod:
+		if len(result.AuthMethods) == 0 {
+			return makeCredentialsStep("X returned a verification method chooser without any methods. Try again."), nil
+		}
+		t.webLoginChallenge = nil
+		t.webLoginMethods = result.AuthMethods
+		return makeAuthMethodStep(result.AuthMethods, ""), nil
 	case twittermeow.WebLoginStatusNeedsText:
 		t.webLoginChallenge = result.Challenge
+		t.webLoginMethods = nil
 		return makeVerificationStep(result.Challenge, ""), nil
 	case twittermeow.WebLoginStatusNeedsPassword:
 		if t.webLogin != nil && t.webLoginPassword != "" {
@@ -653,6 +739,7 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
 	t.webLoginPassword = ""
 	t.webLoginChallenge = nil
+	t.webLoginMethods = nil
 
 	return makePINStep("", t.needsPINSetup), nil
 }
@@ -667,6 +754,12 @@ func webLoginErrorInstructions(err error) string {
 	}
 	if errors.Is(err, twittermeow.ErrWebLoginUnexpectedSubtask) {
 		return "X returned a login challenge this bridge does not support yet."
+	}
+	if errors.Is(err, twittermeow.ErrWebLoginUnsupportedAuthMethod) {
+		return "That X verification method is not available for this login."
+	}
+	if errors.Is(err, twittermeow.ErrWebLoginMissingAuthMethodState) {
+		return "The X verification method selection expired. Enter your X login details again."
 	}
 	msg := strings.TrimSpace(err.Error())
 	if msg == "" {
