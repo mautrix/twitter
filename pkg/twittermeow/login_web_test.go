@@ -1,13 +1,25 @@
 package twittermeow
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (rtf roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return rtf(req)
+}
 
 func TestSettingsListIdentifierPayloadShape(t *testing.T) {
 	payload := onboardingTaskRequest{
@@ -246,6 +258,55 @@ func TestJetfuelAuthMethodFormShape(t *testing.T) {
 	}
 	if got := form.Get("prelude_dispatch_id"); got != "" {
 		t.Fatalf("prelude_dispatch_id = %q, want omitted", got)
+	}
+}
+
+func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+			t.Fatalf("request path = %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("ReadAll(request body) error = %v", err)
+		}
+		form := string(body)
+		if !strings.Contains(form, "two_factor_auth_method_type=Totp") {
+			t.Fatalf("request body = %q, want Totp method", form)
+		}
+		responseBody := "Select a method to authenticate\x00two_factor_method\x00Totp\x00BackupCode\x00U2fSecurityKey\x00" +
+			"Enter the code from your authentication app.\x00challenge_response\x00finish_two_factor_auth\x00session_token"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(responseBody)),
+		}, nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{
+		sessionToken:    "session-token",
+		twoFactorAction: endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH,
+		twoFactorMethods: []WebLoginAuthMethod{
+			{ID: "Totp", Name: "Authenticator App", Kind: WebLoginAuthMethodKindCode, Supported: true},
+			{ID: "BackupCode", Name: "Backup Code", Kind: WebLoginAuthMethodKindBackupCode, Supported: true, Index: 1},
+			{ID: "U2fSecurityKey", Name: "Security Key PC", Kind: WebLoginAuthMethodKindSecurityKey, Supported: true, Index: 2},
+		},
+	}
+
+	result, err := session.SubmitAuthMethod(context.Background(), "Authenticator App")
+	if err != nil {
+		t.Fatalf("SubmitAuthMethod() error = %v", err)
+	}
+	if result.Status != WebLoginStatusNeedsText {
+		t.Fatalf("SubmitAuthMethod() status = %s, want %s", result.Status, WebLoginStatusNeedsText)
+	}
+	if result.Challenge == nil || result.Challenge.Description != "Enter the code from your authentication app." {
+		t.Fatalf("Challenge = %#v, want authenticator app code prompt", result.Challenge)
+	}
+	if session.jetfuel.verificationAction != endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("verificationAction = %q", session.jetfuel.verificationAction)
 	}
 }
 

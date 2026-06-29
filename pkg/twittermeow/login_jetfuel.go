@@ -443,9 +443,6 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 	if method.Kind == WebLoginAuthMethodKindSecurityKey {
 		return wls.submitJetfuelSecurityKeyChallenge(ctx, method, parsed)
 	}
-	if result := wls.jetfuelAuthMethodChoiceResult(parsed); result != nil {
-		return result, nil
-	}
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
 		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
@@ -454,6 +451,9 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 			CurrentSubtaskID: "JetfuelVerification",
 			Challenge:        parsed.verificationChallengeForMethod(method),
 		}, nil
+	}
+	if result := wls.jetfuelAuthMethodChoiceResult(parsed); result != nil {
+		return result, nil
 	}
 	return nil, fmt.Errorf("%w: jetfuel auth method response did not expose a verification challenge", ErrWebLoginUnexpectedSubtask)
 }
