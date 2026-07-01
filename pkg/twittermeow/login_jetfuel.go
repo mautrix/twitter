@@ -403,6 +403,14 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 	if wls.jetfuel != nil {
 		wls.jetfuel.twoFactorMethods = methods
 	}
+	supportedMethods := supportedWebLoginAuthMethods(methods)
+	if len(supportedMethods) == 0 {
+		return &WebLoginResult{
+			Status:           WebLoginStatusUnsupported,
+			Challenge:        unsupportedWebLoginAuthMethodChallenge(methods),
+			CurrentSubtaskID: "JetfuelTwoFactorMethod",
+		}
+	}
 	return &WebLoginResult{
 		Status:           WebLoginStatusNeedsAuthMethod,
 		CurrentSubtaskID: "JetfuelTwoFactorMethod",
@@ -412,8 +420,31 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 			Description: "Choose how to verify this X login.",
 			IsTwoFactor: true,
 		},
-		AuthMethods: methods,
+		AuthMethods: supportedMethods,
 	}
+}
+
+func unsupportedWebLoginAuthMethodChallenge(methods []WebLoginAuthMethod) *WebLoginChallenge {
+	description := "X returned a login challenge this bridge does not support yet."
+	if len(methods) == 1 && methods[0].Description != "" {
+		description = methods[0].Description
+	}
+	return &WebLoginChallenge{
+		SubtaskID:   "JetfuelTwoFactorMethod",
+		Hint:        "Verification method",
+		Description: description,
+		IsTwoFactor: true,
+	}
+}
+
+func supportedWebLoginAuthMethods(methods []WebLoginAuthMethod) []WebLoginAuthMethod {
+	supported := make([]WebLoginAuthMethod, 0, len(methods))
+	for _, method := range methods {
+		if method.Supported {
+			supported = append(supported, method)
+		}
+	}
+	return supported
 }
 
 func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodID string) (*WebLoginResult, error) {
@@ -424,10 +455,20 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, strings.TrimSpace(methodID))
 	}
+	if !method.Supported {
+		return nil, fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, method.Name)
+	}
 	action := wls.jetfuel.twoFactorAction
 	if action == "" {
 		action = endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH
 	}
+	wls.client.Logger.Debug().
+		Str("method_id", method.ID).
+		Str("method_submit_id", method.SubmitID).
+		Str("method_kind", string(method.Kind)).
+		Int("method_index", method.Index).
+		Str("action", action).
+		Msg("Submitting Jetfuel auth method")
 	body, err := wls.client.jetfuelPostForm(ctx, action, wls.jetfuel.authMethodForm(method))
 	if err != nil {
 		return nil, err
@@ -440,10 +481,7 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 	if wls.client.IsLoggedIn() || parsed.isComplete() {
 		return &WebLoginResult{Status: WebLoginStatusComplete}, nil
 	}
-	if method.Kind == WebLoginAuthMethodKindSecurityKey {
-		return wls.submitJetfuelSecurityKeyChallenge(ctx, method, parsed)
-	}
-	if action := parsed.verificationAction(); action != "" {
+	if action := parsed.verificationActionForMethod(method); action != "" {
 		wls.jetfuel.verificationAction = action
 		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 		return &WebLoginResult{
@@ -455,54 +493,23 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 	if result := wls.jetfuelAuthMethodChoiceResult(parsed); result != nil {
 		return result, nil
 	}
+	wls.client.Logger.Debug().
+		Str("method_id", method.ID).
+		Str("method_submit_id", method.SubmitID).
+		Str("method_kind", string(method.Kind)).
+		Strs("paths", parsed.paths).
+		Strs("fields", parsed.fields).
+		Bool("has_verification_challenge", parsed.hasVerificationChallengeForMethod(method)).
+		Msg("Jetfuel auth method response did not expose a supported verification challenge")
 	return nil, fmt.Errorf("%w: jetfuel auth method response did not expose a verification challenge", ErrWebLoginUnexpectedSubtask)
-}
-
-func (wls *WebLoginSession) submitJetfuelSecurityKeyChallenge(ctx context.Context, method WebLoginAuthMethod, parsed jetfuelLoginResponse) (*WebLoginResult, error) {
-	challenge, ok := parsed.webAuthnChallenge()
-	if !ok {
-		return nil, missingWebAuthnChallengeError(method.Name)
-	}
-	challengeResponse, err := createWebAuthnChallengeResponse(ctx, challenge)
-	if err != nil {
-		return nil, err
-	}
-	action := parsed.verificationAction()
-	if action == "" {
-		action = endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH
-	}
-	form := webAuthnChallengeSubmitForm(challengeResponse, parsed.verificationCodeFields(), wls.jetfuel.sessionToken, wls.jetfuel.preludeDispatchID)
-	body, err := wls.client.jetfuelPostForm(ctx, action, form)
-	if err != nil {
-		return nil, err
-	}
-	next := parseJetfuelLoginResponse(body)
-	if err := next.loginError(); err != nil {
-		return nil, err
-	}
-	wls.updateJetfuelState(next)
-	if wls.client.IsLoggedIn() || next.isComplete() {
-		return &WebLoginResult{Status: WebLoginStatusComplete}, nil
-	}
-	if result := wls.jetfuelAuthMethodChoiceResult(next); result != nil {
-		return result, nil
-	}
-	if action := next.verificationAction(); action != "" {
-		wls.jetfuel.verificationAction = action
-		wls.jetfuel.verificationFields = next.verificationCodeFields()
-		return &WebLoginResult{
-			Status:           WebLoginStatusNeedsText,
-			CurrentSubtaskID: "JetfuelVerification",
-			Challenge:        next.verificationChallengeForMethod(method),
-		}, nil
-	}
-	return nil, fmt.Errorf("%w: jetfuel security-key response did not complete login", ErrWebLoginUnexpectedSubtask)
 }
 
 func (jls *jetfuelLoginState) findAuthMethod(methodID string) (WebLoginAuthMethod, bool) {
 	methodID = normalizeJetfuelMethodID(methodID)
 	for _, method := range jls.twoFactorMethods {
-		if normalizeJetfuelMethodID(method.ID) == methodID || normalizeJetfuelMethodID(method.Name) == methodID {
+		if normalizeJetfuelMethodID(method.ID) == methodID ||
+			normalizeJetfuelMethodID(method.SubmitID) == methodID ||
+			normalizeJetfuelMethodID(method.Name) == methodID {
 			return method, true
 		}
 	}
@@ -510,8 +517,12 @@ func (jls *jetfuelLoginState) findAuthMethod(methodID string) (WebLoginAuthMetho
 }
 
 func (jls *jetfuelLoginState) authMethodForm(method WebLoginAuthMethod) url.Values {
+	methodID := method.ID
+	if method.SubmitID != "" {
+		methodID = method.SubmitID
+	}
 	form := url.Values{
-		"two_factor_auth_method_type": {method.ID},
+		"two_factor_auth_method_type": {methodID},
 		"_selected_method_idx":        {fmt.Sprintf("%d", method.Index)},
 	}
 	if jls.userID != "" {
@@ -878,7 +889,94 @@ func (jfr jetfuelLoginResponse) verificationAction() string {
 	return ""
 }
 
+func (jfr jetfuelLoginResponse) verificationActionForMethod(method WebLoginAuthMethod) string {
+	if action := jfr.verificationAction(); action != "" {
+		return action
+	}
+	if action := jfr.methodVerificationAction(method); action != "" {
+		return action
+	}
+	if jfr.hasVerificationChallengeForMethod(method) {
+		return endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH
+	}
+	return ""
+}
+
+func (jfr jetfuelLoginResponse) methodVerificationAction(method WebLoginAuthMethod) string {
+	if method.Kind != WebLoginAuthMethodKindSMS {
+		return ""
+	}
+	isPhoneNumberChallenge := jfr.isPhoneNumberChallenge()
+	for _, path := range jfr.paths {
+		lower := strings.ToLower(path)
+		if strings.Contains(lower, "begin_two_factor_auth") || strings.Contains(lower, "resend") {
+			continue
+		}
+		if isPhoneNumberChallenge &&
+			(strings.Contains(lower, "phone") || strings.Contains(lower, "sms") ||
+				strings.Contains(lower, "text") || strings.Contains(lower, "send")) {
+			return path
+		}
+		if !isPhoneNumberChallenge && (strings.Contains(lower, "code") || strings.Contains(lower, "pin")) {
+			return path
+		}
+	}
+	return ""
+}
+
+func (jfr jetfuelLoginResponse) hasVerificationChallengeForMethod(method WebLoginAuthMethod) bool {
+	text := jfr.text()
+	if strings.Contains(text, "verification code") ||
+		strings.Contains(text, "authentication code") ||
+		strings.Contains(text, "two-factor code") ||
+		strings.Contains(text, "two factor code") ||
+		strings.Contains(text, "backup code") {
+		return true
+	}
+	if method.Kind == WebLoginAuthMethodKindSMS &&
+		(strings.Contains(text, "text message") || strings.Contains(text, "sms") ||
+			isJetfuelPhoneNumberChallengeText(text) || jfr.hasExplicitPhoneNumberField()) {
+		return true
+	}
+	return jfr.hasExplicitVerificationField()
+}
+
+func (jfr jetfuelLoginResponse) hasExplicitPhoneNumberField() bool {
+	for _, field := range jfr.fields {
+		lower := strings.ToLower(field)
+		if lower == "phone_number" || lower == "phone" || lower == "loginacid" || lower == "login_acid" ||
+			strings.Contains(lower, "phone") || strings.Contains(lower, "acid") {
+			return true
+		}
+	}
+	return false
+}
+
+func (jfr jetfuelLoginResponse) hasExplicitVerificationField() bool {
+	for _, field := range jfr.fields {
+		lower := strings.ToLower(field)
+		if lower == "session_token" || lower == "prelude_dispatch_id" ||
+			strings.Contains(lower, "csrf") || strings.Contains(lower, "oauth") ||
+			strings.Contains(lower, "castle") {
+			continue
+		}
+		if lower == "challenge_response" || lower == "verification_code" ||
+			lower == "two_factor_code" || lower == "backup_code" ||
+			lower == "code" || lower == "response" || lower == "token" ||
+			strings.Contains(lower, "otp") || strings.Contains(lower, "phone") ||
+			strings.Contains(lower, "acid") {
+			return true
+		}
+	}
+	return false
+}
+
 func (jfr jetfuelLoginResponse) verificationCodeFields() []string {
+	if jfr.isPhoneNumberChallenge() {
+		if fields := jfr.phoneNumberVerificationFields(); len(fields) > 0 {
+			return fields
+		}
+	}
 	fields := make([]string, 0, 8)
 	text := jfr.text()
 	preferred := []string{
@@ -914,6 +1012,38 @@ func (jfr jetfuelLoginResponse) verificationCodeFields() []string {
 	}
 	if len(fields) == 0 {
 		return defaultJetfuelVerificationFields()
+	}
+	return fields
+}
+
+func (jfr jetfuelLoginResponse) phoneNumberVerificationFields() []string {
+	fields := make([]string, 0, 4)
+	for _, field := range []string{"phone_number", "phone", "LoginAcid", "login_acid"} {
+		if jfr.hasField(field) {
+			fields = appendJetfuelVerificationField(fields, field)
+		}
+	}
+	if len(fields) > 0 {
+		return fields
+	}
+	for _, field := range jfr.fields {
+		lower := strings.ToLower(field)
+		if lower == "session_token" || lower == "prelude_dispatch_id" ||
+			strings.Contains(lower, "csrf") || strings.Contains(lower, "oauth") ||
+			strings.Contains(lower, "castle") {
+			continue
+		}
+		if strings.Contains(lower, "phone") || strings.Contains(lower, "acid") {
+			fields = appendJetfuelVerificationField(fields, field)
+		}
+	}
+	if len(fields) > 0 {
+		return fields
+	}
+	for _, field := range []string{"challenge_response", "response"} {
+		if jfr.hasField(field) {
+			fields = appendJetfuelVerificationField(fields, field)
+		}
 	}
 	return fields
 }
@@ -976,10 +1106,25 @@ func firstJetfuelNumericID(value string) string {
 
 func (jfr jetfuelLoginResponse) isAuthMethodChoice() bool {
 	text := jfr.text()
-	return strings.Contains(text, "select a method") ||
+	if strings.Contains(text, "select a method") ||
 		strings.Contains(text, "choose the method") ||
 		strings.Contains(text, "two_factor_method") ||
-		strings.Contains(text, "two factor method")
+		strings.Contains(text, "two factor method") {
+		return true
+	}
+	if strings.Contains(text, "verification code") || strings.Contains(text, "authentication code") ||
+		strings.Contains(text, "backup code") || strings.Contains(text, "two-factor code") ||
+		strings.Contains(text, "two factor code") {
+		return false
+	}
+	return jfr.beginTwoFactorAction() != "" && jfr.hasAuthMethodToken()
+}
+
+func (jfr jetfuelLoginResponse) hasAuthMethodToken() bool {
+	return slices.ContainsFunc(jfr.strings, func(str string) bool {
+		_, ok := classifyJetfuelAuthMethod(str)
+		return ok
+	})
 }
 
 func (jfr jetfuelLoginResponse) authMethods() []WebLoginAuthMethod {
@@ -987,12 +1132,17 @@ func (jfr jetfuelLoginResponse) authMethods() []WebLoginAuthMethod {
 		return nil
 	}
 	methods := make([]WebLoginAuthMethod, 0, 3)
+	methodIndex := 0
 	for _, str := range jfr.strings {
 		method, ok := classifyJetfuelAuthMethod(str)
-		if !ok || containsJetfuelAuthMethod(methods, method.ID) {
+		if !ok {
 			continue
 		}
-		method.Index = len(methods)
+		if updated := updateJetfuelAuthMethod(methods, method); updated {
+			continue
+		}
+		method.Index = methodIndex
+		methodIndex++
 		methods = append(methods, method)
 	}
 	return methods
@@ -1017,24 +1167,52 @@ func classifyJetfuelAuthMethod(value string) (WebLoginAuthMethod, bool) {
 			Kind:        WebLoginAuthMethodKindBackupCode,
 			Supported:   true,
 		}, true
+	case "sms", "smscode", "smsverification", "smsauth", "smsauthentication", "text", "textmessage", "textmessagecode", "textmessageauth", "textmessageauthentication", "phone", "phonecode", "phonenumber", "phoneverification", "phoneauth", "phoneauthentication", "mobile", "mobilephone":
+		return WebLoginAuthMethod{
+			ID:          "Sms",
+			SubmitID:    jetfuelAuthMethodSubmitID("Sms", value),
+			Name:        "Text Message",
+			Description: "Text message verification is coming soon.",
+			Kind:        WebLoginAuthMethodKindSMS,
+			Supported:   false,
+		}, true
 	case "u2fsecuritykey", "securitykey", "securitykeypc", "passkey":
 		return WebLoginAuthMethod{
 			ID:          "U2fSecurityKey",
 			Name:        "Security Key PC",
-			Description: "Use a security key or passkey.",
-			Kind:        WebLoginAuthMethodKindSecurityKey,
-			Supported:   true,
+			Description: "Requires passkey/WebAuthn client support.",
+			Kind:        WebLoginAuthMethodKindUnknown,
+			Supported:   false,
 		}, true
 	default:
 		return WebLoginAuthMethod{}, false
 	}
 }
 
-func containsJetfuelAuthMethod(methods []WebLoginAuthMethod, id string) bool {
-	normalized := normalizeJetfuelMethodID(id)
-	return slices.ContainsFunc(methods, func(method WebLoginAuthMethod) bool {
-		return normalizeJetfuelMethodID(method.ID) == normalized
-	})
+func jetfuelAuthMethodSubmitID(canonicalID, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || normalizeJetfuelMethodID(raw) == normalizeJetfuelMethodID(canonicalID) {
+		return ""
+	}
+	if strings.ContainsAny(raw, " \t\r\n") {
+		return ""
+	}
+	return raw
+}
+
+func updateJetfuelAuthMethod(methods []WebLoginAuthMethod, method WebLoginAuthMethod) bool {
+	normalized := normalizeJetfuelMethodID(method.ID)
+	for i := range methods {
+		if normalizeJetfuelMethodID(methods[i].ID) != normalized {
+			continue
+		}
+		if methods[i].SubmitID == "" && method.SubmitID != "" {
+			method.Index = methods[i].Index
+			methods[i] = method
+		}
+		return true
+	}
+	return false
 }
 
 func normalizeJetfuelMethodID(value string) string {
@@ -1048,13 +1226,21 @@ func normalizeJetfuelMethodID(value string) string {
 
 func (jfr jetfuelLoginResponse) verificationChallenge() *WebLoginChallenge {
 	text := jfr.text()
+	isPhoneNumber := jfr.isPhoneNumberChallenge()
+	hint := "Verification code"
+	inputKind := WebLoginChallengeInputKindCode
+	if isPhoneNumber {
+		hint = "Phone number"
+		inputKind = WebLoginChallengeInputKindPhoneNumber
+	}
 	return &WebLoginChallenge{
 		SubtaskID:   "JetfuelVerification",
-		Hint:        "Verification code",
+		Hint:        hint,
 		Description: jetfuelChallengeDescription(text),
-		IsTwoFactor: strings.Contains(text, "two-factor") || strings.Contains(text, "two factor") ||
+		IsTwoFactor: !isPhoneNumber && (strings.Contains(text, "two-factor") || strings.Contains(text, "two factor") ||
 			strings.Contains(text, "authentication code") || strings.Contains(text, "verification code") ||
-			strings.Contains(text, "backup code") || strings.Contains(text, "totp"),
+			strings.Contains(text, "backup code") || strings.Contains(text, "totp")),
+		InputKind: inputKind,
 	}
 }
 
@@ -1066,15 +1252,25 @@ func (jfr jetfuelLoginResponse) verificationChallengeForMethod(method WebLoginAu
 	case WebLoginAuthMethodKindBackupCode:
 		challenge.Hint = "Backup code"
 		challenge.Description = "Enter a backup code from X."
+	case WebLoginAuthMethodKindSMS:
+		if challenge.InputKind == WebLoginChallengeInputKindPhoneNumber {
+			challenge.Description = "Enter the phone number associated with your X account."
+		} else {
+			challenge.Description = "Enter the code sent to your phone number."
+		}
 	}
-	challenge.IsTwoFactor = true
+	challenge.IsTwoFactor = challenge.InputKind != WebLoginChallengeInputKindPhoneNumber
 	return challenge
 }
 
 func jetfuelChallengeDescription(text string) string {
 	switch {
+	case isJetfuelPhoneNumberChallengeText(text):
+		return "Enter the phone number associated with your X account."
 	case strings.Contains(text, "backup code"):
 		return "Enter the code from your authentication app."
+	case strings.Contains(text, "text message") || strings.Contains(text, "phone") || strings.Contains(text, "sms"):
+		return "Enter the code sent to your phone number."
 	case strings.Contains(text, "authentication code"):
 		return "Enter the authentication code from X."
 	case strings.Contains(text, "verification code"):
@@ -1082,6 +1278,30 @@ func jetfuelChallengeDescription(text string) string {
 	default:
 		return "X needs additional verification for this login."
 	}
+}
+
+func (jfr jetfuelLoginResponse) isPhoneNumberChallenge() bool {
+	text := jfr.text()
+	if strings.Contains(text, "verification code") || strings.Contains(text, "authentication code") ||
+		strings.Contains(text, "backup code") || strings.Contains(text, "two-factor code") ||
+		strings.Contains(text, "two factor code") || strings.Contains(text, "text message") ||
+		strings.Contains(text, "sms") {
+		return false
+	}
+	if isJetfuelPhoneNumberChallengeText(text) {
+		return true
+	}
+	return jfr.hasField("phone_number") || jfr.hasField("phone") ||
+		jfr.hasField("LoginAcid") || jfr.hasField("login_acid")
+}
+
+func isJetfuelPhoneNumberChallengeText(text string) bool {
+	if !strings.Contains(text, "phone") {
+		return false
+	}
+	return strings.Contains(text, "enter") || strings.Contains(text, "confirm") ||
+		strings.Contains(text, "verify") || strings.Contains(text, "provide") ||
+		strings.Contains(text, "associated")
 }
 
 func (jfr jetfuelLoginResponse) isComplete() bool {
@@ -1100,11 +1320,22 @@ func (jfr jetfuelLoginResponse) loginError() error {
 		return &WebLoginError{Code: 399, Message: "Too many attempts. Try again in a few minutes."}
 	case strings.Contains(text, "missing_account") || strings.Contains(text, "not registered"):
 		return &WebLoginError{Code: 32, Message: "This email or username is not registered yet."}
-	case strings.Contains(text, "wrong password") || strings.Contains(text, "incorrect password"):
+	case isJetfuelBadCredentialsText(text):
 		return &WebLoginError{Code: 32, Message: "Wrong password"}
 	case strings.Contains(text, "could not log you in") || strings.Contains(text, "couldn't log you in"):
 		return &WebLoginError{Code: 399, Message: "Could not log you in now. Please try again later."}
 	default:
 		return nil
 	}
+}
+
+func isJetfuelBadCredentialsText(text string) bool {
+	return strings.Contains(text, "wrong password") ||
+		strings.Contains(text, "incorrect password") ||
+		strings.Contains(text, "invalid password") ||
+		strings.Contains(text, "password you entered") ||
+		strings.Contains(text, "password is incorrect") ||
+		strings.Contains(text, "username and password") && strings.Contains(text, "did not match") ||
+		strings.Contains(text, "invalid username or password") ||
+		strings.Contains(text, "invalid credentials")
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -162,6 +164,28 @@ func TestJetfuelLoginResponseExpandsBareTwoFactorActions(t *testing.T) {
 	}
 }
 
+func TestJetfuelLoginResponseFindsSMSPhoneAction(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte(
+		"Confirm the phone number associated with your X account.\x00phone_number\x00/onboarding/web/actions/send_sms_code\x00session_token",
+	))
+
+	method := WebLoginAuthMethod{Kind: WebLoginAuthMethodKindSMS}
+	if action := parsed.verificationActionForMethod(method); action != "/onboarding/web/actions/send_sms_code" {
+		t.Fatalf("verificationActionForMethod(SMS) = %q, want send_sms_code action", action)
+	}
+}
+
+func TestJetfuelLoginResponseFindsSMSCodeAction(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte(
+		"We sent a text message with a verification code to your phone.\x00challenge_response\x00/onboarding/web/actions/enter_sms_pin\x00session_token",
+	))
+
+	method := WebLoginAuthMethod{Kind: WebLoginAuthMethodKindSMS}
+	if action := parsed.verificationActionForMethod(method); action != "/onboarding/web/actions/enter_sms_pin" {
+		t.Fatalf("verificationActionForMethod(SMS) = %q, want enter_sms_pin action", action)
+	}
+}
+
 func TestJetfuelLoginResponseFindsTwoFactorCodeFields(t *testing.T) {
 	parsed := parseJetfuelLoginResponse([]byte("authentication code\x00session_token\x00challenge_response\x00verification_code\x00two_factor_code\x00prelude_dispatch_id"))
 	fields := parsed.verificationCodeFields()
@@ -177,6 +201,46 @@ func TestJetfuelLoginResponseFindsBackupCodeFields(t *testing.T) {
 	want := []string{"backup_code", "challenge_response"}
 	if strings.Join(fields, ",") != strings.Join(want, ",") {
 		t.Fatalf("verificationCodeFields() = %#v, want %#v", fields, want)
+	}
+}
+
+func TestJetfuelLoginResponseFindsPhoneNumberFields(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte("Enter the phone number associated with your X account.\x00phone_number\x00challenge_response\x00session_token"))
+	fields := parsed.verificationCodeFields()
+	want := []string{"phone_number"}
+	if strings.Join(fields, ",") != strings.Join(want, ",") {
+		t.Fatalf("verificationCodeFields() = %#v, want %#v", fields, want)
+	}
+}
+
+func TestJetfuelLoginResponseBuildsPhoneNumberChallenge(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte("Confirm the phone number associated with your X account.\x00phone_number\x00session_token"))
+	challenge := parsed.verificationChallenge()
+	if challenge.Description != "Enter the phone number associated with your X account." {
+		t.Fatalf("verificationChallenge().Description = %q", challenge.Description)
+	}
+	if challenge.Hint != "Phone number" {
+		t.Fatalf("verificationChallenge().Hint = %q", challenge.Hint)
+	}
+	if challenge.InputKind != WebLoginChallengeInputKindPhoneNumber {
+		t.Fatalf("verificationChallenge().InputKind = %q, want phone_number", challenge.InputKind)
+	}
+	if challenge.IsTwoFactor {
+		t.Fatal("verificationChallenge().IsTwoFactor = true, want false for phone number input")
+	}
+}
+
+func TestJetfuelLoginResponseKeepsSMSCodeAsTwoFactorCode(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte("We sent a text message with a verification code to your phone.\x00challenge_response\x00session_token"))
+	challenge := parsed.verificationChallenge()
+	if challenge.InputKind != WebLoginChallengeInputKindCode {
+		t.Fatalf("verificationChallenge().InputKind = %q, want code", challenge.InputKind)
+	}
+	if challenge.Description != "Enter the code sent to your phone number." {
+		t.Fatalf("verificationChallenge().Description = %q", challenge.Description)
+	}
+	if !challenge.IsTwoFactor {
+		t.Fatal("verificationChallenge().IsTwoFactor = false, want true")
 	}
 }
 
@@ -203,23 +267,30 @@ func TestJetfuelLoginResponseDoesNotTreatChallengeModesAsFields(t *testing.T) {
 func TestJetfuelLoginResponseFindsAuthMethodChoice(t *testing.T) {
 	parsed := parseJetfuelLoginResponse([]byte(
 		"Select a method to authenticate\x00Choose the method you prefer to use for 2-step verification.\x00two_factor_method\x00" +
-			"Totp\x00BackupCode\x00U2fSecurityKey\x00user_id\x001127993589949243392\x00session_token\x0012345678-1234-1234-1234-123456789abc\x00begin_two_factor_auth",
+			"Totp\x00Sms\x00BackupCode\x00U2fSecurityKey\x00user_id\x001127993589949243392\x00session_token\x0012345678-1234-1234-1234-123456789abc\x00begin_two_factor_auth",
 	))
 	methods := parsed.authMethods()
-	if len(methods) != 3 {
-		t.Fatalf("authMethods() length = %d, want 3: %#v", len(methods), methods)
+	if len(methods) != 4 {
+		t.Fatalf("authMethods() length = %d, want 4: %#v", len(methods), methods)
 	}
-	wantIDs := []string{"Totp", "BackupCode", "U2fSecurityKey"}
+	wantIDs := []string{"Totp", "Sms", "BackupCode", "U2fSecurityKey"}
 	for i, want := range wantIDs {
 		if methods[i].ID != want || methods[i].Index != i {
 			t.Fatalf("method[%d] = %#v, want ID %s index %d", i, methods[i], want, i)
 		}
 	}
-	if !methods[0].Supported || !methods[1].Supported {
-		t.Fatalf("code-based methods should be supported: %#v", methods)
+	if !methods[0].Supported || methods[1].Supported || !methods[2].Supported {
+		t.Fatalf("only authenticator app and backup code should be supported: %#v", methods)
 	}
-	if !methods[2].Supported || methods[2].Kind != WebLoginAuthMethodKindSecurityKey {
-		t.Fatalf("security key method = %#v, want supported security-key method", methods[2])
+	if methods[1].Kind != WebLoginAuthMethodKindSMS {
+		t.Fatalf("sms method = %#v, want SMS method", methods[1])
+	}
+	if methods[3].Supported || methods[3].Kind != WebLoginAuthMethodKindUnknown {
+		t.Fatalf("security key method = %#v, want known unsupported method", methods[3])
+	}
+	supported := supportedWebLoginAuthMethods(methods)
+	if len(supported) != 2 {
+		t.Fatalf("supportedWebLoginAuthMethods() length = %d, want 2: %#v", len(supported), supported)
 	}
 	if got := parsed.numericValue("user_id"); got != "1127993589949243392" {
 		t.Fatalf("numericValue(user_id) = %q", got)
@@ -229,10 +300,84 @@ func TestJetfuelLoginResponseFindsAuthMethodChoice(t *testing.T) {
 	}
 }
 
+func TestJetfuelLoginResponseFindsBareAuthMethodChoice(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte(
+		"Totp\x00Text\x00BackupCode\x00U2fSecurityKey\x00user_id\x001127993589949243392\x00begin_two_factor_auth",
+	))
+	session := &WebLoginSession{jetfuel: &jetfuelLoginState{}}
+	session.updateJetfuelState(parsed)
+
+	result := session.jetfuelAuthMethodChoiceResult(parsed)
+	if result == nil {
+		t.Fatal("jetfuelAuthMethodChoiceResult() returned nil")
+	}
+	if result.Status != WebLoginStatusNeedsAuthMethod {
+		t.Fatalf("Status = %s, want %s", result.Status, WebLoginStatusNeedsAuthMethod)
+	}
+	if len(result.AuthMethods) != 2 {
+		t.Fatalf("AuthMethods length = %d, want 2 supported methods: %#v", len(result.AuthMethods), result.AuthMethods)
+	}
+	wantIDs := []string{"Totp", "BackupCode"}
+	for i, want := range wantIDs {
+		if result.AuthMethods[i].ID != want {
+			t.Fatalf("AuthMethods[%d].ID = %q, want %q", i, result.AuthMethods[i].ID, want)
+		}
+	}
+	if session.jetfuel.twoFactorAction != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("twoFactorAction = %q, want begin_two_factor_auth", session.jetfuel.twoFactorAction)
+	}
+}
+
+func TestJetfuelLoginResponsePrefersSMSSubmitToken(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte(
+		"Select a method to authenticate\x00two_factor_method\x00Text Message\x00Totp\x00Text\x00BackupCode\x00begin_two_factor_auth",
+	))
+	methods := parsed.authMethods()
+	if len(methods) != 3 {
+		t.Fatalf("authMethods() length = %d, want 3: %#v", len(methods), methods)
+	}
+	if methods[0].ID != "Sms" {
+		t.Fatalf("authMethods()[0].ID = %q, want Sms", methods[0].ID)
+	}
+	if methods[0].SubmitID != "Text" {
+		t.Fatalf("authMethods()[0].SubmitID = %q, want Text", methods[0].SubmitID)
+	}
+	if methods[0].Index != 0 {
+		t.Fatalf("authMethods()[0].Index = %d, want 0", methods[0].Index)
+	}
+}
+
 func TestJetfuelLoginResponseDoesNotTreatCodePromptAsAuthMethodChoice(t *testing.T) {
 	parsed := parseJetfuelLoginResponse([]byte("Enter your two factor code\x00Use your authenticator app to generate the code.\x00challenge_response\x00Totp\x00BackupCode\x00session_token"))
 	if methods := parsed.authMethods(); len(methods) != 0 {
 		t.Fatalf("authMethods() = %#v, want none for code prompt", methods)
+	}
+}
+
+func TestJetfuelLoginResponseClassifiesPhoneAuthMethodAliases(t *testing.T) {
+	tests := []struct {
+		raw      string
+		submitID string
+	}{
+		{raw: "Sms"},
+		{raw: "SMS"},
+		{raw: "Text", submitID: "Text"},
+		{raw: "Text message"},
+		{raw: "Phone number"},
+		{raw: "TextMessage", submitID: "TextMessage"},
+		{raw: "PhoneNumber", submitID: "PhoneNumber"},
+	}
+	for _, test := range tests {
+		method, ok := classifyJetfuelAuthMethod(test.raw)
+		if !ok {
+			t.Fatalf("classifyJetfuelAuthMethod(%q) returned false", test.raw)
+		}
+		if method.ID != "Sms" || method.Kind != WebLoginAuthMethodKindSMS || method.Supported {
+			t.Fatalf("classifyJetfuelAuthMethod(%q) = %#v, want coming-soon SMS method", test.raw, method)
+		}
+		if method.SubmitID != test.submitID {
+			t.Fatalf("classifyJetfuelAuthMethod(%q).SubmitID = %q, want %q", test.raw, method.SubmitID, test.submitID)
+		}
 	}
 }
 
@@ -258,6 +403,18 @@ func TestJetfuelAuthMethodFormShape(t *testing.T) {
 	}
 	if got := form.Get("prelude_dispatch_id"); got != "" {
 		t.Fatalf("prelude_dispatch_id = %q, want omitted", got)
+	}
+}
+
+func TestJetfuelAuthMethodFormUsesSubmitID(t *testing.T) {
+	state := &jetfuelLoginState{}
+	form := state.authMethodForm(WebLoginAuthMethod{ID: "Sms", SubmitID: "TextMessage", Index: 1})
+
+	if got := form.Get("two_factor_auth_method_type"); got != "TextMessage" {
+		t.Fatalf("two_factor_auth_method_type = %q, want TextMessage", got)
+	}
+	if got := form.Get("_selected_method_idx"); got != "1" {
+		t.Fatalf("_selected_method_idx = %q, want 1", got)
 	}
 }
 
@@ -291,7 +448,7 @@ func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
 		twoFactorMethods: []WebLoginAuthMethod{
 			{ID: "Totp", Name: "Authenticator App", Kind: WebLoginAuthMethodKindCode, Supported: true},
 			{ID: "BackupCode", Name: "Backup Code", Kind: WebLoginAuthMethodKindBackupCode, Supported: true, Index: 1},
-			{ID: "U2fSecurityKey", Name: "Security Key PC", Kind: WebLoginAuthMethodKindSecurityKey, Supported: true, Index: 2},
+			{ID: "U2fSecurityKey", Name: "Security Key PC", Kind: WebLoginAuthMethodKindUnknown, Supported: false, Index: 2},
 		},
 	}
 
@@ -310,63 +467,210 @@ func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
 	}
 }
 
-func TestJetfuelLoginResponseFindsWebAuthnChallenge(t *testing.T) {
-	body := []byte(`security_key` + "\x00" + `{"action":"verification","challenge":{"publicKeyCredentialRequestOptions":{"rpId":"x.com","challenge":"abc123","allowCredentials":[{"type":"public-key","id":"AQID"}],"extensions":{"appid":"https://twitter.com"}}},"timeout":60000}` + "\x00challenge_response\x00finish_two_factor_auth")
-	parsed := parseJetfuelLoginResponse(body)
+func TestSubmitJetfuelSMSAuthMethodReturnsPhoneChallenge(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+			t.Fatalf("request path = %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("ReadAll(request body) error = %v", err)
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery(request body) error = %v", err)
+		}
+		if got := form.Get("two_factor_auth_method_type"); got != "Sms" {
+			t.Fatalf("two_factor_auth_method_type = %q, want Sms", got)
+		}
+		if got := form.Get("_selected_method_idx"); got != "1" {
+			t.Fatalf("_selected_method_idx = %q, want 1", got)
+		}
+		responseBody := "We sent a text message with a verification code to your phone.\x00challenge_response\x00finish_two_factor_auth\x00session_token"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(responseBody)),
+		}, nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{
+		sessionToken:    "session-token",
+		twoFactorAction: endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH,
+		twoFactorMethods: []WebLoginAuthMethod{
+			{ID: "Totp", Name: "Authenticator App", Kind: WebLoginAuthMethodKindCode, Supported: true},
+			{ID: "Sms", Name: "Text Message", Kind: WebLoginAuthMethodKindSMS, Supported: true, Index: 1},
+			{ID: "BackupCode", Name: "Backup Code", Kind: WebLoginAuthMethodKindBackupCode, Supported: true, Index: 2},
+		},
+	}
 
-	challenge, ok := parsed.webAuthnChallenge()
-	if !ok {
-		t.Fatal("webAuthnChallenge() returned false")
+	result, err := session.SubmitAuthMethod(context.Background(), "Text Message")
+	if err != nil {
+		t.Fatalf("SubmitAuthMethod() error = %v", err)
 	}
-	if challenge.RequestOptions.RPID != "x.com" {
-		t.Fatalf("rpId = %q", challenge.RequestOptions.RPID)
+	if result.Status != WebLoginStatusNeedsText {
+		t.Fatalf("SubmitAuthMethod() status = %s, want %s", result.Status, WebLoginStatusNeedsText)
 	}
-	if challenge.RequestOptions.Challenge != "abc123" {
-		t.Fatalf("challenge = %q", challenge.RequestOptions.Challenge)
+	if result.Challenge == nil || result.Challenge.Description != "Enter the code sent to your phone number." {
+		t.Fatalf("Challenge = %#v, want phone code prompt", result.Challenge)
 	}
-	if got := challenge.RequestOptions.AllowCredentials[0].ID; got != "AQID" {
-		t.Fatalf("allowCredentials[0].id = %q", got)
-	}
-	if got := challenge.RequestOptions.Extensions.AppID; got != "https://twitter.com" {
-		t.Fatalf("extensions.appid = %q", got)
+	if session.jetfuel.verificationAction != endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("verificationAction = %q", session.jetfuel.verificationAction)
 	}
 }
 
-func TestWebAuthnChallengeResponseShape(t *testing.T) {
-	response, err := marshalWebAuthnChallengeResponse(&webAuthnAssertion{
-		CredentialID:      []byte{1, 2, 3},
-		ClientDataJSON:    []byte(`{"type":"webauthn.get"}`),
-		AuthenticatorData: []byte{4, 5, 6},
-		Signature:         []byte{7, 8, 9},
-	})
-	if err != nil {
-		t.Fatalf("marshalWebAuthnChallengeResponse() error = %v", err)
+func TestSubmitJetfuelSMSAuthMethodDefaultsActionForPhoneChallenge(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+			t.Fatalf("request path = %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("ReadAll(request body) error = %v", err)
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery(request body) error = %v", err)
+		}
+		if got := form.Get("two_factor_auth_method_type"); got != "Text" {
+			t.Fatalf("two_factor_auth_method_type = %q, want Text", got)
+		}
+		responseBody := "Confirm the phone number associated with your X account.\x00phone_number\x00session_token"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(responseBody)),
+		}, nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{
+		sessionToken:    "session-token",
+		twoFactorAction: endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH,
+		twoFactorMethods: []WebLoginAuthMethod{
+			{ID: "Totp", Name: "Authenticator App", Kind: WebLoginAuthMethodKindCode, Supported: true},
+			{ID: "Sms", SubmitID: "Text", Name: "Text Message", Kind: WebLoginAuthMethodKindSMS, Supported: true, Index: 1},
+			{ID: "BackupCode", Name: "Backup Code", Kind: WebLoginAuthMethodKindBackupCode, Supported: true, Index: 2},
+		},
 	}
 
-	var payload struct {
-		ID       string `json:"id"`
-		Type     string `json:"type"`
-		Response struct {
-			ClientDataJSON    string `json:"clientDataJSON"`
-			AuthenticatorData string `json:"authenticatorData"`
-			Signature         string `json:"signature"`
-			UserHandle        string `json:"userHandle"`
-		} `json:"response"`
-		ClientExtensionResults struct {
-			AppID bool `json:"appid"`
-		} `json:"clientExtensionResults"`
+	result, err := session.SubmitAuthMethod(context.Background(), "Text Message")
+	if err != nil {
+		t.Fatalf("SubmitAuthMethod() error = %v", err)
 	}
-	if err := json.Unmarshal([]byte(response), &payload); err != nil {
-		t.Fatalf("Unmarshal(response) error = %v", err)
+	if result.Status != WebLoginStatusNeedsText {
+		t.Fatalf("SubmitAuthMethod() status = %s, want %s", result.Status, WebLoginStatusNeedsText)
 	}
-	if payload.ID != "AQID" || payload.Type != "public-key" {
-		t.Fatalf("payload identity = %#v", payload)
+	if result.Challenge == nil || result.Challenge.InputKind != WebLoginChallengeInputKindPhoneNumber {
+		t.Fatalf("Challenge = %#v, want phone-number prompt", result.Challenge)
 	}
-	if payload.Response.AuthenticatorData != "BAUG" || payload.Response.Signature != "BwgJ" {
-		t.Fatalf("payload response = %#v", payload.Response)
+	if session.jetfuel.verificationAction != endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("verificationAction = %q", session.jetfuel.verificationAction)
 	}
-	if payload.Response.UserHandle != "" || !payload.ClientExtensionResults.AppID {
-		t.Fatalf("payload extension/user handle = %#v", payload)
+}
+
+func TestSubmitJetfuelPhoneNumberVerificationPostsPhoneField(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
+			t.Fatalf("request path = %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("ReadAll(request body) error = %v", err)
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery(request body) error = %v", err)
+		}
+		if got := form.Get("phone_number"); got != "+15551234567" {
+			t.Fatalf("phone_number = %q, want test phone number", got)
+		}
+		if got := form.Get("challenge_response"); got != "" {
+			t.Fatalf("challenge_response = %q, want omitted when phone_number is known", got)
+		}
+		if got := form.Get("verification_code"); got != "" {
+			t.Fatalf("verification_code = %q, want omitted when phone_number is known", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("/home")),
+		}, nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{
+		verificationAction: endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH,
+		verificationFields: []string{"phone_number"},
+	}
+
+	result, err := session.SubmitText(context.Background(), "+15551234567")
+	if err != nil {
+		t.Fatalf("SubmitText() error = %v", err)
+	}
+	if result.Status != WebLoginStatusComplete {
+		t.Fatalf("SubmitText() status = %s, want %s", result.Status, WebLoginStatusComplete)
+	}
+}
+
+func TestJetfuelAuthMethodChoiceWithOnlyUnsupportedMethod(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte("Select a method to authenticate\x00two_factor_method\x00U2fSecurityKey\x00begin_two_factor_auth"))
+	session := &WebLoginSession{jetfuel: &jetfuelLoginState{}}
+
+	result := session.jetfuelAuthMethodChoiceResult(parsed)
+	if result == nil {
+		t.Fatal("jetfuelAuthMethodChoiceResult() returned nil")
+	}
+	if result.Status != WebLoginStatusUnsupported {
+		t.Fatalf("Status = %s, want %s", result.Status, WebLoginStatusUnsupported)
+	}
+	if len(session.jetfuel.twoFactorMethods) != 1 || session.jetfuel.twoFactorMethods[0].Supported {
+		t.Fatalf("twoFactorMethods = %#v, want one unsupported method", session.jetfuel.twoFactorMethods)
+	}
+}
+
+func TestJetfuelAuthMethodChoiceWithOnlySMSIsComingSoon(t *testing.T) {
+	parsed := parseJetfuelLoginResponse([]byte("Select a method to authenticate\x00two_factor_method\x00Text\x00begin_two_factor_auth"))
+	session := &WebLoginSession{jetfuel: &jetfuelLoginState{}}
+
+	result := session.jetfuelAuthMethodChoiceResult(parsed)
+	if result == nil {
+		t.Fatal("jetfuelAuthMethodChoiceResult() returned nil")
+	}
+	if result.Status != WebLoginStatusUnsupported {
+		t.Fatalf("Status = %s, want %s", result.Status, WebLoginStatusUnsupported)
+	}
+	if len(session.jetfuel.twoFactorMethods) != 1 {
+		t.Fatalf("twoFactorMethods length = %d, want 1: %#v", len(session.jetfuel.twoFactorMethods), session.jetfuel.twoFactorMethods)
+	}
+	method := session.jetfuel.twoFactorMethods[0]
+	if method.ID != "Sms" || method.Supported || method.Description != "Text message verification is coming soon." {
+		t.Fatalf("SMS method = %#v, want coming-soon unsupported method", method)
+	}
+	if result.Challenge == nil || result.Challenge.Description != "Text message verification is coming soon." {
+		t.Fatalf("Challenge = %#v, want coming-soon description", result.Challenge)
+	}
+}
+
+func TestSubmitJetfuelAuthMethodRejectsUnsupportedMethod(t *testing.T) {
+	session := &WebLoginSession{
+		backend: webLoginBackendJetfuel,
+		jetfuel: &jetfuelLoginState{
+			twoFactorMethods: []WebLoginAuthMethod{{
+				ID:        "U2fSecurityKey",
+				Name:      "Security Key PC",
+				Supported: false,
+			}},
+		},
+	}
+
+	_, err := session.SubmitAuthMethod(context.Background(), "U2fSecurityKey")
+	if !errors.Is(err, ErrWebLoginUnsupportedAuthMethod) {
+		t.Fatalf("SubmitAuthMethod() error = %v, want ErrWebLoginUnsupportedAuthMethod", err)
 	}
 }
 
@@ -430,6 +734,30 @@ func TestJetfuelLoginResponseClassifiesMissingAccount(t *testing.T) {
 	}
 	if webErr.Code != 32 {
 		t.Fatalf("WebLoginError.Code = %d, want 32", webErr.Code)
+	}
+}
+
+func TestJetfuelLoginResponseClassifiesBadCredentials(t *testing.T) {
+	tests := []string{
+		"Wrong password",
+		"The password you entered is incorrect.",
+		"The username and password you entered did not match our records.",
+		"Invalid username or password",
+		"Invalid credentials",
+	}
+	for _, body := range tests {
+		parsed := parseJetfuelLoginResponse([]byte(body))
+		err := parsed.loginError()
+		if err == nil {
+			t.Fatalf("loginError(%q) returned nil", body)
+		}
+		webErr, ok := err.(*WebLoginError)
+		if !ok {
+			t.Fatalf("loginError(%q) = %T, want *WebLoginError", body, err)
+		}
+		if webErr.Code != 32 {
+			t.Fatalf("WebLoginError.Code for %q = %d, want 32", body, webErr.Code)
+		}
 	}
 }
 

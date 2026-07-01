@@ -215,11 +215,26 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 		} else if challenge.Hint != "" {
 			instructions = challenge.Hint
 		}
-		if challenge.IsTwoFactor {
+		switch challenge.InputKind {
+		case twittermeow.WebLoginChallengeInputKindPhoneNumber:
+			fieldName = "Phone number"
+			fieldType = bridgev2.LoginInputFieldTypePhoneNumber
+			if instructions == "" {
+				instructions = "Enter the phone number associated with your X account."
+			}
+		case twittermeow.WebLoginChallengeInputKindCode:
 			fieldName = "Verification code"
 			fieldType = bridgev2.LoginInputFieldType2FACode
 			if instructions == "" {
 				instructions = "Enter the verification code from X."
+			}
+		default:
+			if challenge.IsTwoFactor {
+				fieldName = "Verification code"
+				fieldType = bridgev2.LoginInputFieldType2FACode
+				if instructions == "" {
+					instructions = "Enter the verification code from X."
+				}
 			}
 		}
 	}
@@ -242,6 +257,13 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 	}
 }
 
+func webLoginMissingVerificationInput(challenge *twittermeow.WebLoginChallenge) string {
+	if challenge != nil && challenge.InputKind == twittermeow.WebLoginChallengeInputKindPhoneNumber {
+		return "Enter the phone number associated with your X account."
+	}
+	return "Enter the X verification code."
+}
+
 func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine string) *bridgev2.LoginStep {
 	instructions := "Choose how to verify this X login."
 	if errorLine != "" {
@@ -249,6 +271,9 @@ func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine stri
 	}
 	options := make([]string, 0, len(methods))
 	for _, method := range methods {
+		if !method.Supported {
+			continue
+		}
 		if method.Name == "" {
 			options = append(options, method.ID)
 		} else {
@@ -667,11 +692,11 @@ func (t *TwitterLogin) submitWebVerificationInput(ctx context.Context, input map
 		t.webLoginMethods = nil
 		return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
 	}
-	code := strings.TrimSpace(input[loginFieldVerificationCode])
-	if code == "" {
-		return makeVerificationStep(t.webLoginChallenge, "Enter the X verification code."), nil
+	text := strings.TrimSpace(input[loginFieldVerificationCode])
+	if text == "" {
+		return makeVerificationStep(t.webLoginChallenge, webLoginMissingVerificationInput(t.webLoginChallenge)), nil
 	}
-	result, err := t.webLogin.SubmitText(ctx, code)
+	result, err := t.webLogin.SubmitText(ctx, text)
 	if err != nil {
 		return makeVerificationStep(t.webLoginChallenge, webLoginErrorInstructions(err)), nil
 	}
@@ -720,8 +745,18 @@ func (t *TwitterLogin) handleWebLoginResult(ctx context.Context, result *twitter
 			Str("subtask_id", result.CurrentSubtaskID).
 			Str("status", string(result.Status)).
 			Msg("X returned unsupported login subtask")
-		return makeCredentialsStep("X returned a login challenge this bridge does not support yet."), nil
+		return makeCredentialsStep(webLoginUnsupportedInstructions(result)), nil
 	}
+}
+
+func webLoginUnsupportedInstructions(result *twittermeow.WebLoginResult) string {
+	if result != nil && result.Challenge != nil {
+		description := strings.TrimSpace(result.Challenge.Description)
+		if description != "" {
+			return description
+		}
+	}
+	return "X returned a login challenge this bridge does not support yet."
 }
 
 func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginStep, error) {

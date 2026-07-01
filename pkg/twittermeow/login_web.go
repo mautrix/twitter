@@ -44,10 +44,17 @@ const (
 type WebLoginAuthMethodKind string
 
 const (
-	WebLoginAuthMethodKindCode        WebLoginAuthMethodKind = "code"
-	WebLoginAuthMethodKindBackupCode  WebLoginAuthMethodKind = "backup_code"
-	WebLoginAuthMethodKindSecurityKey WebLoginAuthMethodKind = "security_key"
-	WebLoginAuthMethodKindUnknown     WebLoginAuthMethodKind = "unknown"
+	WebLoginAuthMethodKindCode       WebLoginAuthMethodKind = "code"
+	WebLoginAuthMethodKindBackupCode WebLoginAuthMethodKind = "backup_code"
+	WebLoginAuthMethodKindSMS        WebLoginAuthMethodKind = "sms"
+	WebLoginAuthMethodKindUnknown    WebLoginAuthMethodKind = "unknown"
+)
+
+type WebLoginChallengeInputKind string
+
+const (
+	WebLoginChallengeInputKindCode        WebLoginChallengeInputKind = "code"
+	WebLoginChallengeInputKindPhoneNumber WebLoginChallengeInputKind = "phone_number"
 )
 
 type WebLoginError struct {
@@ -88,10 +95,12 @@ type WebLoginChallenge struct {
 	Hint        string
 	Description string
 	IsTwoFactor bool
+	InputKind   WebLoginChallengeInputKind
 }
 
 type WebLoginAuthMethod struct {
 	ID          string
+	SubmitID    string
 	Name        string
 	Description string
 	Kind        WebLoginAuthMethodKind
@@ -689,7 +698,6 @@ func webLoginSubtaskVersions() map[string]int {
 		"open_link":                            1,
 		"phone_verification":                   4,
 		"privacy_options":                      1,
-		"security_key":                         3,
 		"select_avatar":                        4,
 		"select_banner":                        2,
 		"settings_list":                        7,
