@@ -118,12 +118,22 @@ var (
 		Err:        "Couldn't read your X account ID. Please try again.",
 		StatusCode: http.StatusInternalServerError,
 	}
+	ErrMissingLoginInput = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.MISSING_LOGIN_INPUT",
+		Err:        "Missing required login input.",
+		StatusCode: http.StatusBadRequest,
+	}
+	ErrWebLoginFailed = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.LOGIN_FAILED",
+		Err:        "X login failed.",
+		StatusCode: http.StatusBadGateway,
+	}
 )
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
 		{
-			Name:        "X login",
+			Name:        "Username/password",
 			Description: "Log in with your X username, email, or phone number and password",
 			ID:          LoginFlowIDPassword,
 		},
@@ -255,13 +265,6 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 			},
 		},
 	}
-}
-
-func webLoginMissingVerificationInput(challenge *twittermeow.WebLoginChallenge) string {
-	if challenge != nil && challenge.InputKind == twittermeow.WebLoginChallengeInputKindPhoneNumber {
-		return "Enter the phone number associated with your X account."
-	}
-	return "Enter the X verification code."
 }
 
 func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine string) *bridgev2.LoginStep {
@@ -615,14 +618,14 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	if _, ok := input[loginFieldIdentifier]; ok || input[loginFieldPassword] != "" {
 		return t.submitCredentialsInput(ctx, input)
 	}
-	return makeCredentialsStep("Enter your X username, email, or phone number and password."), nil
+	return nil, ErrMissingLoginInput
 }
 
 func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	identifier := strings.TrimSpace(input[loginFieldIdentifier])
 	password := input[loginFieldPassword]
 	if identifier == "" || password == "" {
-		return makeCredentialsStep("Enter both your X identifier and password."), nil
+		return nil, ErrMissingLoginInput
 	}
 
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
@@ -633,7 +636,7 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
-		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+		return nil, webLoginFailureError(err)
 	}
 	if result.Status != twittermeow.WebLoginStatusNeedsIdentifier {
 		return t.handleWebLoginResult(ctx, result)
@@ -641,7 +644,7 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 
 	result, err = t.webLogin.SubmitCredentials(ctx, identifier, password)
 	if err != nil {
-		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+		return handleWebLoginCredentialsError(err)
 	}
 	return t.handleWebLoginResult(ctx, result)
 }
@@ -653,15 +656,11 @@ func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[s
 	}
 	methodID := strings.TrimSpace(input[loginFieldAuthMethod])
 	if methodID == "" {
-		return makeAuthMethodStep(t.webLoginMethods, "Choose a verification method."), nil
+		return nil, ErrMissingLoginInput
 	}
 	result, err := t.webLogin.SubmitAuthMethod(ctx, methodID)
 	if err != nil {
-		if errors.Is(err, twittermeow.ErrWebLoginUnsupportedAuthMethod) ||
-			errors.Is(err, twittermeow.ErrWebLoginMissingAuthMethodState) {
-			return makeAuthMethodStep(t.webLoginMethods, webLoginErrorInstructions(err)), nil
-		}
-		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+		return nil, webLoginFailureError(err)
 	}
 	return t.handleWebLoginResult(ctx, result)
 }
@@ -694,16 +693,16 @@ func (t *TwitterLogin) submitWebVerificationInput(ctx context.Context, input map
 	}
 	text := strings.TrimSpace(input[loginFieldVerificationCode])
 	if text == "" {
-		return makeVerificationStep(t.webLoginChallenge, webLoginMissingVerificationInput(t.webLoginChallenge)), nil
+		return nil, ErrMissingLoginInput
 	}
 	result, err := t.webLogin.SubmitText(ctx, text)
 	if err != nil {
-		return makeVerificationStep(t.webLoginChallenge, webLoginErrorInstructions(err)), nil
+		return handleWebLoginVerificationError(t.webLoginChallenge, err)
 	}
 	if result.Status == twittermeow.WebLoginStatusNeedsPassword && t.webLoginPassword != "" {
 		result, err = t.webLogin.SubmitPassword(ctx, t.webLoginPassword)
 		if err != nil {
-			return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+			return handleWebLoginCredentialsError(err)
 		}
 	}
 	return t.handleWebLoginResult(ctx, result)
@@ -731,7 +730,7 @@ func (t *TwitterLogin) handleWebLoginResult(ctx context.Context, result *twitter
 		if t.webLogin != nil && t.webLoginPassword != "" {
 			next, err := t.webLogin.SubmitPassword(ctx, t.webLoginPassword)
 			if err != nil {
-				return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+				return handleWebLoginCredentialsError(err)
 			}
 			if next != nil && next.Status != twittermeow.WebLoginStatusNeedsPassword {
 				return t.handleWebLoginResult(ctx, next)
@@ -759,6 +758,62 @@ func webLoginUnsupportedInstructions(result *twittermeow.WebLoginResult) string 
 	return "X returned a login challenge this bridge does not support yet."
 }
 
+func handleWebLoginCredentialsError(err error) (*bridgev2.LoginStep, error) {
+	if isWebLoginCredentialsInputError(err) {
+		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+	}
+	return nil, webLoginFailureError(err)
+}
+
+func handleWebLoginVerificationError(challenge *twittermeow.WebLoginChallenge, err error) (*bridgev2.LoginStep, error) {
+	if isWebLoginVerificationInputError(err) {
+		return makeVerificationStep(challenge, webLoginErrorInstructions(err)), nil
+	}
+	return nil, webLoginFailureError(err)
+}
+
+func isWebLoginCredentialsInputError(err error) bool {
+	var webErr *twittermeow.WebLoginError
+	if !errors.As(err, &webErr) {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(webErr.Message))
+	if webErr.Code != 32 {
+		return false
+	}
+	return strings.Contains(msg, "wrong password") ||
+		strings.Contains(msg, "incorrect password") ||
+		strings.Contains(msg, "invalid password") ||
+		strings.Contains(msg, "password you entered") ||
+		strings.Contains(msg, "password is incorrect") ||
+		strings.Contains(msg, "username and password") && strings.Contains(msg, "did not match") ||
+		strings.Contains(msg, "invalid username or password") ||
+		strings.Contains(msg, "invalid credentials") ||
+		strings.Contains(msg, "missing_account") ||
+		strings.Contains(msg, "not registered")
+}
+
+func isWebLoginVerificationInputError(err error) bool {
+	var webErr *twittermeow.WebLoginError
+	if !errors.As(err, &webErr) {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(webErr.Message))
+	return strings.Contains(msg, "wrong code") ||
+		strings.Contains(msg, "incorrect code") ||
+		strings.Contains(msg, "invalid code") ||
+		strings.Contains(msg, "code is incorrect") ||
+		strings.Contains(msg, "verification code") && strings.Contains(msg, "incorrect") ||
+		strings.Contains(msg, "authentication code") && strings.Contains(msg, "incorrect")
+}
+
+func webLoginFailureError(err error) error {
+	if err == nil {
+		return ErrWebLoginFailed
+	}
+	return ErrWebLoginFailed.WithMessage(webLoginErrorInstructions(err))
+}
+
 func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
 	if t.webLogin == nil || t.webLogin.Client() == nil {
 		return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
@@ -766,7 +821,7 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	client := t.webLogin.Client()
 	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
-		return makeCredentialsStep("X accepted the login, but the bridge could not load the authenticated messages page. Try again."), nil
+		return nil, fmt.Errorf("failed to load authenticated X messages page after login: %w", err)
 	}
 	t.client = client
 	t.profile = profile

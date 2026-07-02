@@ -68,7 +68,7 @@ func ParseDocumentCookieAssignments(html string) map[string]string {
 	if len(matches) == 0 {
 		return nil
 	}
-	header := http.Header{}
+	out := make(map[string]string)
 	for _, match := range matches {
 		if len(match) < 2 {
 			continue
@@ -77,12 +77,10 @@ func ParseDocumentCookieAssignments(html string) map[string]string {
 		if err != nil || cookie == "" {
 			continue
 		}
-		header.Add("Set-Cookie", cookie)
-	}
-	resp := &http.Response{Header: header}
-	out := make(map[string]string)
-	for _, cookie := range resp.Cookies() {
-		out[cookie.Name] = cookie.Value
+		parsedCookie, err := http.ParseSetCookie(cookie)
+		if err == nil {
+			out[parsedCookie.Name] = parsedCookie.Value
+		}
 	}
 	return out
 }

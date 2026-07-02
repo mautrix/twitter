@@ -7,6 +7,24 @@ import (
 	"time"
 )
 
+func TestParseDocumentCookieAssignments(t *testing.T) {
+	html := `<script>
+document.cookie = "ct0=csrf-value; Path=/; Secure";
+document.cookie = "guest_id=guest-value; Domain=.x.com; SameSite=None";
+</script>`
+
+	cookies := ParseDocumentCookieAssignments(html)
+	if got := cookies["ct0"]; got != "csrf-value" {
+		t.Fatalf("ct0 = %q, want csrf-value", got)
+	}
+	if got := cookies["guest_id"]; got != "guest-value" {
+		t.Fatalf("guest_id = %q, want guest-value", got)
+	}
+	if got := cookies["Path"]; got != "" {
+		t.Fatalf("Path pseudo-cookie = %q, want omitted", got)
+	}
+}
+
 func TestParseOndemandSURLFromScript(t *testing.T) {
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, "https://x.com/", nil)

@@ -71,7 +71,7 @@ type Client struct {
 func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.Logger) *Client {
 	cli := Client{
 		HTTP: &http.Client{
-			Transport: req.NewClient().ImpersonateChrome().SetTLSFingerprintChrome().DisableHTTP3().GetTransport(),
+			Transport: req.NewClient().ImpersonateChrome().DisableHTTP3().GetTransport(),
 			Timeout:   60 * time.Second,
 		},
 		Logger: logger,

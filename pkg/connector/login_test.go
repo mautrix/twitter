@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,6 +10,52 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 )
+
+func TestSubmitUserInputRejectsMissingRequiredCredentialFields(t *testing.T) {
+	login := &TwitterLogin{}
+	tests := []map[string]string{
+		{},
+		{loginFieldIdentifier: "alice"},
+		{loginFieldPassword: "secret"},
+		{loginFieldIdentifier: "   ", loginFieldPassword: "secret"},
+		{loginFieldIdentifier: "alice", loginFieldPassword: ""},
+	}
+
+	for _, input := range tests {
+		step, err := login.SubmitUserInput(context.Background(), input)
+		if step != nil {
+			t.Fatalf("SubmitUserInput(%#v) step = %#v, want nil", input, step)
+		}
+		if !errors.Is(err, ErrMissingLoginInput) {
+			t.Fatalf("SubmitUserInput(%#v) error = %v, want ErrMissingLoginInput", input, err)
+		}
+	}
+}
+
+func TestHandleWebLoginCredentialsErrorRetriesOnlyCredentialErrors(t *testing.T) {
+	step, err := handleWebLoginCredentialsError(&twittermeow.WebLoginError{
+		Code:    32,
+		Message: "Wrong password",
+	})
+	if err != nil {
+		t.Fatalf("handleWebLoginCredentialsError(wrong password) error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDCredentials {
+		t.Fatalf("handleWebLoginCredentialsError(wrong password) step = %#v, want credentials step", step)
+	}
+
+	step, err = handleWebLoginCredentialsError(&twittermeow.WebLoginError{
+		Code:    399,
+		Message: "We've temporarily limited your login. Please try again later.",
+	})
+	if step != nil {
+		t.Fatalf("handleWebLoginCredentialsError(temporary limit) step = %#v, want nil", step)
+	}
+	var respErr bridgev2.RespError
+	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
+		t.Fatalf("handleWebLoginCredentialsError(temporary limit) error = %#v, want ErrWebLoginFailed response", err)
+	}
+}
 
 func TestMakeAuthMethodStepUsesNativeSelect(t *testing.T) {
 	methods := []twittermeow.WebLoginAuthMethod{
