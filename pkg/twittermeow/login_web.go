@@ -131,6 +131,10 @@ func (wls *WebLoginSession) Client() *Client {
 	return wls.client
 }
 
+func (wls *WebLoginSession) UsesJetfuel() bool {
+	return wls != nil && wls.backend == webLoginBackendJetfuel
+}
+
 func (wls *WebLoginSession) Start(ctx context.Context) (*WebLoginResult, error) {
 	if result, err := wls.startJetfuel(ctx); err == nil {
 		return result, nil
@@ -225,6 +229,13 @@ func (wls *WebLoginSession) SubmitCredentials(ctx context.Context, identifier, p
 	return wls.SubmitPassword(ctx, password)
 }
 
+func (wls *WebLoginSession) SubmitCombinedCredentials(ctx context.Context, identifier, password string) (*WebLoginResult, error) {
+	if wls.backend == webLoginBackendJetfuel {
+		return wls.submitJetfuelCombinedCredentials(ctx, identifier, password)
+	}
+	return wls.SubmitCredentials(ctx, identifier, password)
+}
+
 func (wls *WebLoginSession) SubmitPassword(ctx context.Context, password string) (*WebLoginResult, error) {
 	if wls.backend == webLoginBackendJetfuel {
 		return wls.submitJetfuelPassword(ctx, password)
@@ -262,6 +273,16 @@ func (wls *WebLoginSession) SubmitAuthMethod(ctx context.Context, methodID strin
 		return wls.submitJetfuelAuthMethod(ctx, methodID)
 	}
 	return nil, fmt.Errorf("%w: auth method selection is unsupported for %s login", ErrWebLoginUnexpectedSubtask, wls.backend)
+}
+
+func (wls *WebLoginSession) SubmitPendingTwoFactor(ctx context.Context) (*WebLoginResult, error) {
+	if wls.backend != webLoginBackendJetfuel {
+		return nil, fmt.Errorf("%w: two-factor prelude is unsupported for %s login", ErrWebLoginUnexpectedSubtask, wls.backend)
+	}
+	if wls.jetfuel == nil || wls.jetfuel.twoFactorAction == "" {
+		return nil, fmt.Errorf("%w: jetfuel two-factor action is missing", ErrWebLoginUnexpectedSubtask)
+	}
+	return wls.submitJetfuelBeginTwoFactor(ctx, wls.jetfuel.twoFactorAction)
 }
 
 func (wls *WebLoginSession) SubmitText(ctx context.Context, text string) (*WebLoginResult, error) {

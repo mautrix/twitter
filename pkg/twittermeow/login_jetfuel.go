@@ -3,7 +3,6 @@ package twittermeow
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +26,7 @@ const (
 	webLoginBackendJetfuel webLoginBackend = "jetfuel"
 
 	jetfuelHeaderVersion = "JP-5"
+	jetfuelHeaderTheme   = "dark"
 )
 
 var (
@@ -65,7 +65,7 @@ type jetfuelLoginResponse struct {
 }
 
 func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, error) {
-	if err := wls.client.loadPage(ctx, endpoints.BASE_FLOW_LOGIN_URL); err != nil {
+	if err := wls.client.loadPage(ctx, endpoints.JETFUEL_LOGIN_REFERER_URL); err != nil {
 		return nil, fmt.Errorf("failed to load X login page: %w", err)
 	}
 	if _, err := wls.client.jetfuelGet(ctx, endpoints.JETFUEL_LANDING_PATH); err != nil {
@@ -96,8 +96,10 @@ func (wls *WebLoginSession) submitJetfuelIdentifier(ctx context.Context, identif
 	if identifier == "" {
 		return nil, fmt.Errorf("x username, email, or phone is required")
 	}
-	if err := wls.client.sendJetfuelViewerContextEvent(ctx); err != nil {
-		wls.client.Logger.Debug().Err(err).Msg("Jetfuel viewer-context preflight failed")
+	if shouldSendJetfuelViewerContextEvent() {
+		if err := wls.client.sendJetfuelViewerContextEvent(ctx); err != nil {
+			wls.client.Logger.Debug().Err(err).Msg("Jetfuel viewer-context preflight failed")
+		}
 	}
 	body, err := wls.client.jetfuelPostForm(ctx, endpoints.JETFUEL_BEGIN_LOGIN_PATH, url.Values{
 		"username_or_email": {identifier},
@@ -167,6 +169,10 @@ func isJetfuelPrePasswordParityError(err error) bool {
 	text := strings.ToLower(webErr.Message)
 	return webErr.Code == 399 && (strings.Contains(text, "temporarily limited") ||
 		strings.Contains(text, "official x apps") || strings.Contains(text, "use x.com"))
+}
+
+func IsWebLoginPrePasswordParityError(err error) bool {
+	return isJetfuelPrePasswordParityError(err)
 }
 
 func (wls *WebLoginSession) submitJetfuelCombinedCredentials(ctx context.Context, identifier, password string) (*WebLoginResult, error) {
@@ -540,25 +546,10 @@ func (c *Client) jetfuelGet(ctx context.Context, path string) ([]byte, error) {
 
 func (c *Client) jetfuelPostForm(ctx context.Context, path string, form url.Values) ([]byte, error) {
 	if err := c.addJetfuelCastleTokenToForm(form); err != nil {
-		c.Logger.Trace().Err(err).Msg("Failed to create Castle request token")
+		c.Logger.Trace().Err(err).Msg("Failed to attach Castle request token")
+		return nil, err
 	}
 	return c.jetfuelRequest(ctx, path, http.MethodPost, []byte(form.Encode()))
-}
-
-func (c *Client) addJetfuelCastleTokenToForm(form url.Values) error {
-	if form.Get("$castle_token") != "" {
-		return nil
-	}
-	token, err := createCurrentCastleRequestToken(c.session.ClientUUID)
-	if err == nil {
-		form.Set("$castle_token", token)
-		return nil
-	}
-	if fallbackErr := addCastleTokenToForm(form); fallbackErr != nil {
-		return fmt.Errorf("current Castle: %w; fallback Castle: %w", err, fallbackErr)
-	}
-	c.Logger.Trace().Err(err).Msg("Fell back to legacy Castle request token")
-	return nil
 }
 
 func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body []byte) ([]byte, error) {
@@ -577,11 +568,10 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 		"sec-fetch-site":          "same-origin",
 		"timezone":                jetfuelTimezone(),
 		"x-client-transaction-id": txID,
-		"x-jf-client-theme":       "light",
+		"x-jf-client-theme":       jetfuelHeaderTheme,
 		"x-jf-v":                  jetfuelHeaderVersion,
 		"x-twitter-active-user":   "yes",
 	}
-	c.addJetfuelBrowserParityHeaders(extra)
 	if csrfToken := c.cookies.Get(cookies.XCt0); csrfToken != "" {
 		extra["x-csrf-token"] = csrfToken
 	}
@@ -589,7 +579,7 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 		WithNonAuthBearer: true,
 		WithCookies:       true,
 		WithXGuestToken:   true,
-		Referer:           endpoints.BASE_URL + "/",
+		Referer:           endpoints.JETFUEL_LOGIN_REFERER_URL,
 		Extra:             extra,
 	})
 	headers.Del("x-twitter-client-language")
@@ -699,60 +689,8 @@ func jetfuelTimezone() string {
 	}
 }
 
-func (c *Client) addJetfuelBrowserParityHeaders(extra map[string]string) {
-	addTFEGuestCookieHeader(extra, "x-tfe-guest-cookie-id", c.cookies.Get(cookies.XGuestID))
-	addTFEGuestCookieHeader(extra, "x-tfe-guest-cookie-id-ads", c.cookies.Get(cookies.XGuestIDAds))
-	addTFEGuestCookieHeader(extra, "x-tfe-guest-cookie-id-marketing", c.cookies.Get(cookies.XGuestIDMarketing))
-	if dtab := decodeDtabLocal(c.cookies.Get(cookies.XDtabLocal)); dtab != "" {
-		extra["dtab-local"] = dtab
-	}
-}
-
-func addTFEGuestCookieHeader(extra map[string]string, headerName, cookieValue string) {
-	if value := decodeTFEGuestCookie(cookieValue); value != "" {
-		extra[headerName] = value
-	}
-}
-
-func decodeTFEGuestCookie(cookieValue string) string {
-	value, err := url.QueryUnescape(cookieValue)
-	if err != nil {
-		value = cookieValue
-	}
-	return strings.TrimPrefix(value, "v1:")
-}
-
-func decodeDtabLocal(cookieValue string) string {
-	if cookieValue == "" {
-		return ""
-	}
-	value, err := url.QueryUnescape(cookieValue)
-	if err != nil {
-		value = cookieValue
-	}
-	if strings.HasPrefix(value, "/") && isPrintableASCII(value) {
-		return value
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil {
-		decoded, err = base64.URLEncoding.DecodeString(value)
-	}
-	if err == nil && strings.HasPrefix(string(decoded), "/") && isPrintableASCII(string(decoded)) {
-		return string(decoded)
-	}
-	if isPrintableASCII(value) {
-		return value
-	}
-	return ""
-}
-
-func isPrintableASCII(value string) bool {
-	for _, r := range value {
-		if r < 0x20 || r > 0x7e {
-			return false
-		}
-	}
-	return value != ""
+func shouldSendJetfuelViewerContextEvent() bool {
+	return strings.TrimSpace(os.Getenv("TWITTER_JETFUEL_VIEWER_CONTEXT")) == "1"
 }
 
 func ensureLeadingSlash(path string) string {

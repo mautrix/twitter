@@ -18,12 +18,15 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -49,18 +52,24 @@ type TwitterLogin struct {
 	needsPINSetup     bool
 	useCookieLogin    bool
 
-	client            *twittermeow.Client
-	webLogin          *twittermeow.WebLoginSession
-	webLoginPassword  string
-	webLoginChallenge *twittermeow.WebLoginChallenge
-	webLoginMethods   []twittermeow.WebLoginAuthMethod
-	profile           twittermeow.CurrentUserProfile
+	client              *twittermeow.Client
+	webLogin            *twittermeow.WebLoginSession
+	webLoginIdentifier  string
+	webLoginPassword    string
+	webLoginCastleStage string
+	webLoginAuthMethod  string
+	webLoginText        string
+	webLoginChallenge   *twittermeow.WebLoginChallenge
+	webLoginMethods     []twittermeow.WebLoginAuthMethod
+	browserHeaders      twittermeow.BrowserHeaders
+	profile             twittermeow.CurrentUserProfile
 }
 
 var (
 	LoginFlowIDPassword        = "password"
 	LoginFlowIDCookies         = "cookies"
 	LoginStepIDCredentials     = "fi.mau.twitter.login.enter_credentials"
+	LoginStepIDCastleToken     = "fi.mau.twitter.login.castle_token"
 	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
 	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
 	LoginStepIDCookies         = "fi.mau.twitter.login.enter_cookies"
@@ -68,9 +77,635 @@ var (
 	LoginStepIDComplete        = "fi.mau.twitter.login.complete"
 	loginFieldIdentifier       = "identifier"
 	loginFieldPassword         = "password"
+	loginFieldCastleToken      = "castle_token"
+	loginFieldBrowserUserAgent = "browser_user_agent"
+	loginFieldBrowserSecCHUA   = "browser_sec_ch_ua"
+	loginFieldBrowserPlatform  = "browser_sec_ch_ua_platform"
+	loginFieldBrowserMobile    = "browser_sec_ch_ua_mobile"
 	loginFieldVerificationCode = "verification_code"
 	loginFieldAuthMethod       = "auth_method"
 )
+
+const (
+	webLoginCastleStageIdentifier     = "identifier"
+	webLoginCastleStagePassword       = "password"
+	webLoginCastleStageCombined       = "combined"
+	webLoginCastleStageBeginTwoFactor = "begin_two_factor"
+	webLoginCastleStageAuthMethod     = "auth_method"
+	webLoginCastleStageText           = "text"
+	castleTokenWebviewURL             = "https://x.com/robots.txt"
+	castleTokenContextURL             = "https://x.com/i/jf/onboarding/web?mode=login"
+	castleTokenHeaderPrefix           = "text/plain, application/x-mautrix-twitter-castle;v="
+	castleTokenBatchSize              = 8
+)
+
+var castleTokenCookieNames = []string{
+	"__cf_bm",
+	"__cuid",
+	"gt",
+	"guest_id",
+	"guest_id_ads",
+	"guest_id_marketing",
+	"personalization_id",
+}
+
+type browserHeaderField struct {
+	ID         string
+	HeaderName string
+	Required   bool
+	Pattern    string
+}
+
+var browserHeaderFields = []browserHeaderField{
+	{
+		ID:         loginFieldBrowserUserAgent,
+		HeaderName: "user-agent",
+		Required:   true,
+		Pattern:    `^[^\r\n]{1,1024}$`,
+	},
+	{
+		ID:         loginFieldBrowserSecCHUA,
+		HeaderName: "sec-ch-ua",
+		Pattern:    `^[^\r\n]{1,1024}$`,
+	},
+	{
+		ID:         loginFieldBrowserPlatform,
+		HeaderName: "sec-ch-ua-platform",
+		Pattern:    `^[^\r\n]{1,1024}$`,
+	},
+	{
+		ID:         loginFieldBrowserMobile,
+		HeaderName: "sec-ch-ua-mobile",
+		Pattern:    `^\?[01]$`,
+	},
+}
+
+func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier string) string {
+	scriptURL, _ := json.Marshal(info.ScriptURL)
+	publicKey, _ := json.Marshal(info.PublicKey)
+	cookieNames, _ := json.Marshal(castleTokenCookieNames)
+	contextURL, _ := json.Marshal(castleTokenContextURL)
+	identifierJSON, _ := json.Marshal(identifier)
+	return fmt.Sprintf(`(async () => {
+  const scriptURL = %s;
+  const publicKey = %s;
+  const cookieNames = new Set(%s);
+  const contextURL = %s;
+  const identifier = %s;
+  const castleStorageKey = "fi.mau.twitter.castle_token";
+  const castleTokenBatchSize = %d;
+
+  let browserStatusText;
+  function showBrowserLoginStatus(message) {
+    try {
+      document.title = "Signing in to X";
+      if (!browserStatusText || !browserStatusText.isConnected) {
+        const body = document.body || document.documentElement.appendChild(document.createElement("body"));
+        const container = document.createElement("main");
+        container.id = "mautrix-twitter-login-status";
+        container.setAttribute("role", "status");
+        container.setAttribute("aria-live", "polite");
+
+        const title = document.createElement("h1");
+        title.textContent = "Signing in to X";
+        Object.assign(title.style, {
+          margin: "0",
+          color: "#eff3f4",
+          fontSize: "28px",
+          fontWeight: "700",
+          lineHeight: "1.2",
+        });
+
+        const progress = document.createElement("progress");
+        progress.setAttribute("aria-label", "Signing in");
+        Object.assign(progress.style, {
+          width: "220px",
+          height: "6px",
+          margin: "28px 0 22px",
+          accentColor: "#1d9bf0",
+        });
+
+        browserStatusText = document.createElement("p");
+        Object.assign(browserStatusText.style, {
+          margin: "0",
+          color: "#8b98a5",
+          fontSize: "15px",
+          lineHeight: "1.5",
+        });
+
+        container.append(title, progress, browserStatusText);
+        Object.assign(container.style, {
+          width: "min(420px, calc(100%% - 48px))",
+          textAlign: "center",
+        });
+        Object.assign(document.documentElement.style, {
+          minHeight: "100%%",
+          background: "#000000",
+          colorScheme: "dark",
+        });
+        Object.assign(body.style, {
+          minHeight: "100vh",
+          margin: "0",
+          display: "grid",
+          placeItems: "center",
+          background: "#000000",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        });
+        body.replaceChildren(container);
+      }
+      browserStatusText.textContent = message;
+    } catch (_) {}
+  }
+  showBrowserLoginStatus("Preparing secure login...");
+
+  const browserLog = message => {
+    try {
+      console.log("[BrowserAuth] mautrix-twitter Castle: " + message);
+    } catch (_) {}
+  };
+  function getLocalStorage() {
+    try {
+      return window.localStorage;
+    } catch (_) {}
+    return null;
+  }
+  function castleTokenResultKey(index) {
+    return index === 1 ? "castle_token" : "castle_token_" + index;
+  }
+  function castleTokenStorageKeyForIndex(index) {
+    return index === 1 ? castleStorageKey : castleStorageKey + "_" + index;
+  }
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  async function waitFor(predicate, message, timeout = 30000) {
+    const deadlineAt = Date.now() + timeout;
+    while (Date.now() < deadlineAt) {
+      const value = predicate();
+      if (value) {
+        return value;
+      }
+      await sleep(100);
+    }
+    throw new Error(message);
+  }
+  function resetStoredResult() {
+    try {
+      const storage = getLocalStorage();
+      if (!storage) {
+        return;
+      }
+      storage.removeItem(castleStorageKey);
+      for (let index = 2; index <= castleTokenBatchSize; index++) {
+        storage.removeItem(castleTokenStorageKeyForIndex(index));
+      }
+      for (const name of cookieNames) {
+        storage.removeItem("fi.mau.twitter.cookie." + name);
+      }
+    } catch (_) {}
+  }
+  function storeBrowserAuthResult(result) {
+    try {
+      globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__ = result;
+      globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = false;
+      globalThis.__BEEP_BEEP_AUTH_RESULTS__ = result;
+      if (typeof window !== "undefined") {
+        window.__BEEP_BEEP_AUTH_RESULTS__ = result;
+      }
+    } catch (_) {}
+    try {
+      const storage = getLocalStorage();
+      if (!storage) {
+        return;
+      }
+      storage.setItem(castleStorageKey, result.castle_token || "");
+      for (let index = 2; index <= castleTokenBatchSize; index++) {
+        const key = castleTokenResultKey(index);
+        if (result[key]) {
+          storage.setItem(castleTokenStorageKeyForIndex(index), result[key]);
+        }
+      }
+      for (const name of cookieNames) {
+        if (result[name]) {
+          storage.setItem("fi.mau.twitter.cookie." + name, result[name]);
+        }
+      }
+    } catch (_) {}
+  }
+  function storedBrowserAuthResult() {
+    try {
+      const result = globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__;
+      if (result && result.castle_token) {
+        return result;
+      }
+    } catch (_) {}
+    try {
+      const storage = getLocalStorage();
+      if (!storage) {
+        return null;
+      }
+      const token = storage.getItem(castleStorageKey);
+      if (!token) {
+        return null;
+      }
+      const result = { castle_token: token };
+      for (let index = 2; index <= castleTokenBatchSize; index++) {
+        const token = storage.getItem(castleTokenStorageKeyForIndex(index));
+        if (token) {
+          result[castleTokenResultKey(index)] = token;
+        }
+      }
+      for (const name of cookieNames) {
+        const value = storage.getItem("fi.mau.twitter.cookie." + name);
+        if (value) {
+          result[name] = value;
+        }
+      }
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+  const existingResult = storedBrowserAuthResult();
+  if (existingResult) {
+    browserLog("returning stored result");
+    return existingResult;
+  }
+  if (globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__) {
+    browserLog("waiting for in-flight result");
+    return await waitFor(() => storedBrowserAuthResult(), "X Castle token generation did not finish", 30000);
+  }
+  globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = true;
+  resetStoredResult();
+
+  function addModules(entry, modules) {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const defs = entry[1];
+    if (!defs || typeof defs !== "object") {
+      return;
+    }
+    for (const id of Object.keys(defs)) {
+      modules[id] = defs[id];
+    }
+  }
+
+  function loadScript(doc, url, timeout = 10000) {
+    return new Promise((resolve, reject) => {
+      const script = doc.createElement("script");
+      const timer = setTimeout(() => {
+        try {
+          script.remove();
+        } catch (_) {}
+        reject(new Error("Timed out loading X Castle script"));
+      }, timeout);
+      script.src = url;
+      script.async = true;
+      script.onload = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      script.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("Failed to load X Castle script"));
+      };
+      (doc.head || doc.documentElement).appendChild(script);
+    });
+  }
+
+  function installModuleCapture(win) {
+    const chunk = win.webpackChunk_twitter_responsive_web = win.webpackChunk_twitter_responsive_web || [];
+    const modules = {};
+    for (const entry of chunk) {
+      addModules(entry, modules);
+    }
+    if (!chunk.__mautrixCastleCaptured) {
+      const nativePush = chunk.push.bind(chunk);
+      chunk.push = (...entries) => {
+        for (const entry of entries) {
+          addModules(entry, modules);
+        }
+        return nativePush(...entries);
+      };
+      Object.defineProperty(chunk, "__mautrixCastleCaptured", { value: true });
+    }
+    return modules;
+  }
+
+  async function createTokenInContext(win, doc) {
+    const modules = installModuleCapture(win);
+    await loadScript(doc, scriptURL);
+    await waitFor(() => Object.keys(modules).length > 0, "X Castle script did not register modules", 15000);
+
+    const cache = {};
+    function req(id) {
+      const key = String(id);
+      if (cache[key]) {
+        return cache[key].exports;
+      }
+      const fn = modules[key];
+      if (typeof fn !== "function") {
+        throw new Error("Missing X Castle module " + key);
+      }
+      const module = { exports: {} };
+      cache[key] = module;
+      fn(module, module.exports, req);
+      return module.exports;
+    }
+    req.d = (exports, definition) => {
+      for (const key of Object.keys(definition)) {
+        if (!Object.prototype.hasOwnProperty.call(exports, key)) {
+          Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+        }
+      }
+    };
+    req.o = (obj, prop) => Object.prototype.hasOwnProperty.call(obj, prop);
+    req.r = exports => {
+      if (typeof win.Symbol !== "undefined" && win.Symbol.toStringTag) {
+        Object.defineProperty(exports, win.Symbol.toStringTag, { value: "Module" });
+      }
+      Object.defineProperty(exports, "__esModule", { value: true });
+    };
+
+    let configure;
+    for (const id of Object.keys(modules)) {
+      try {
+        const exports = req(id);
+        if (exports && typeof exports.configure === "function") {
+          configure = exports.configure;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (typeof configure !== "function") {
+      throw new Error("X Castle module is unavailable");
+    }
+
+    const castle = configure({ pk: publicKey });
+    if (!castle || typeof castle.createRequestToken !== "function") {
+      throw new Error("X Castle token generator is unavailable");
+    }
+    const tokens = [];
+    for (let index = 0; index < castleTokenBatchSize; index++) {
+      const token = await castle.createRequestToken();
+      if (token) {
+        tokens.push(token);
+      }
+      await sleep(10);
+    }
+    return tokens;
+  }
+
+  async function synthesizeCastleActivity(win, doc) {
+    const target = doc.body || doc.documentElement;
+    if (!target) {
+      return;
+    }
+    const input = doc.createElement("input");
+    input.type = "text";
+    input.autocomplete = "username";
+    input.style.cssText = "position:fixed;left:24px;top:24px;width:240px;height:32px;opacity:0;pointer-events:none;";
+    target.appendChild(input);
+    input.focus();
+    const points = [[52, 48], [96, 52], [148, 60], [212, 68]];
+    for (const [x, y] of points) {
+      const eventInit = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x + 16, screenY: y + 88, pointerType: "mouse", isPrimary: true, buttons: 0 };
+      if (typeof win.PointerEvent === "function") {
+        target.dispatchEvent(new win.PointerEvent("pointermove", eventInit));
+      } else {
+        target.dispatchEvent(new win.MouseEvent("mousemove", eventInit));
+      }
+      await sleep(20);
+    }
+    const downInit = { bubbles: true, cancelable: true, clientX: 96, clientY: 52, screenX: 112, screenY: 140, pointerType: "mouse", isPrimary: true, buttons: 1 };
+    if (typeof win.PointerEvent === "function") {
+      input.dispatchEvent(new win.PointerEvent("pointerdown", downInit));
+      input.dispatchEvent(new win.PointerEvent("pointerup", { ...downInit, buttons: 0 }));
+    }
+    input.dispatchEvent(new win.MouseEvent("mousedown", downInit));
+    input.dispatchEvent(new win.MouseEvent("mouseup", { ...downInit, buttons: 0 }));
+    input.dispatchEvent(new win.MouseEvent("click", { ...downInit, buttons: 0 }));
+    const chars = identifier || "x";
+    const valueSetter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value").set;
+    for (const ch of chars.slice(0, 16)) {
+      input.dispatchEvent(new win.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: ch }));
+      valueSetter.call(input, input.value + ch);
+      input.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: ch }));
+      input.dispatchEvent(new win.KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: ch }));
+      await sleep(15);
+    }
+    input.dispatchEvent(new win.Event("change", { bubbles: true }));
+    await sleep(100);
+  }
+
+  async function loadFetchedContextFrame() {
+    const resp = await fetch(contextURL, { credentials: "include" });
+    if (!resp.ok) {
+      throw new Error("Failed to fetch X login context: HTTP " + resp.status);
+    }
+    const html = await resp.text();
+    const iframe = document.createElement("iframe");
+    iframe.tabIndex = -1;
+    iframe.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1024px;height:768px;border:0;opacity:0;pointer-events:none;";
+    document.documentElement.appendChild(iframe);
+    const win = iframe.contentWindow;
+    const doc = iframe.contentDocument;
+    if (!win || !doc) {
+      throw new Error("Synthetic X login context is not accessible");
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+    try {
+      win.history.replaceState(null, "", contextURL);
+    } catch (_) {}
+    await waitFor(() => doc.readyState === "interactive" || doc.readyState === "complete", "Synthetic X login context did not become ready", 15000);
+    return { win, doc };
+  }
+
+  function copyCookies(result, cookieText) {
+    for (const part of cookieText.split(";")) {
+      const idx = part.indexOf("=");
+      if (idx <= 0) {
+        continue;
+      }
+      const name = part.slice(0, idx).trim();
+      if (cookieNames.has(name)) {
+        result[name] = part.slice(idx + 1).trim();
+      }
+    }
+  }
+
+  function quoteClientHint(value) {
+    return '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+  }
+
+  function captureBrowserHeaders() {
+    const headers = {
+      browser_user_agent: String(navigator.userAgent || ""),
+    };
+    const userAgentData = navigator.userAgentData;
+    if (!userAgentData) {
+      return headers;
+    }
+    const brands = Array.from(userAgentData.brands || []);
+    if (brands.length > 0) {
+      headers.browser_sec_ch_ua = brands.map(item =>
+        quoteClientHint(item.brand) + ";v=" + quoteClientHint(item.version)
+      ).join(", ");
+    }
+    if (userAgentData.platform) {
+      headers.browser_sec_ch_ua_platform = quoteClientHint(userAgentData.platform);
+    }
+    headers.browser_sec_ch_ua_mobile = userAgentData.mobile ? "?1" : "?0";
+    return headers;
+  }
+
+  try {
+    browserLog("loading X context");
+    const context = await loadFetchedContextFrame();
+    browserLog("context ready");
+    browserLog("creating module token");
+    showBrowserLoginStatus("Completing sign-in...");
+    await synthesizeCastleActivity(context.win, context.doc);
+    const castleTokens = await createTokenInContext(context.win, context.doc);
+    const castleToken = castleTokens[0] || "";
+    browserLog("module tokens ready, count " + castleTokens.length + ", first length " + String(castleToken || "").length);
+    const result = { castle_token: castleToken };
+    Object.assign(result, captureBrowserHeaders());
+    for (let index = 1; index < castleTokens.length; index++) {
+      result[castleTokenResultKey(index + 1)] = castleTokens[index];
+    }
+    copyCookies(result, document.cookie);
+    copyCookies(result, context.doc.cookie);
+    storeBrowserAuthResult(result);
+    browserLog("result stored");
+    showBrowserLoginStatus("Finishing...");
+    return result;
+  } catch (err) {
+    showBrowserLoginStatus("Unable to finish signing in.");
+    try {
+      globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = false;
+    } catch (_) {}
+    throw err;
+  }
+})()`, scriptURL, publicKey, cookieNames, contextURL, identifierJSON, castleTokenBatchSize)
+}
+
+func decodeCastleTokenInput(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if idx := strings.Index(value, castleTokenHeaderPrefix); idx >= 0 {
+		encoded := removeCastleTokenWhitespace(value[idx+len(castleTokenHeaderPrefix):])
+		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("decode Castle header token: %w", err)
+		}
+		value = string(decoded)
+	}
+	return removeCastleTokenWhitespace(value), nil
+}
+
+func removeCastleTokenWhitespace(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, value)
+}
+
+func castleTokenFieldID(index int) string {
+	if index <= 1 {
+		return loginFieldCastleToken
+	}
+	return fmt.Sprintf("%s_%d", loginFieldCastleToken, index)
+}
+
+func castleTokenCookieFields() []bridgev2.LoginCookieField {
+	fields := []bridgev2.LoginCookieField{
+		{
+			ID:       loginFieldCastleToken,
+			Required: true,
+			Pattern:  `^[\s\S]{128,}$`,
+			Sources: []bridgev2.LoginCookieFieldSource{
+				{
+					Type: bridgev2.LoginCookieTypeSpecial,
+					Name: "fi.mau.twitter.castle_token",
+				},
+				{
+					Type: bridgev2.LoginCookieTypeLocalStorage,
+					Name: "fi.mau.twitter.castle_token",
+				},
+			},
+		},
+	}
+	for index := 2; index <= castleTokenBatchSize; index++ {
+		fieldID := castleTokenFieldID(index)
+		storageKey := fmt.Sprintf("fi.mau.twitter.castle_token_%d", index)
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:       fieldID,
+			Required: false,
+			Pattern:  `^[\s\S]{128,}$`,
+			Sources: []bridgev2.LoginCookieFieldSource{
+				{
+					Type: bridgev2.LoginCookieTypeSpecial,
+					Name: storageKey,
+				},
+				{
+					Type: bridgev2.LoginCookieTypeLocalStorage,
+					Name: storageKey,
+				},
+			},
+		})
+	}
+	for _, field := range browserHeaderFields {
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:       field.ID,
+			Required: field.Required,
+			Pattern:  field.Pattern,
+			Sources: []bridgev2.LoginCookieFieldSource{
+				{
+					Type:            bridgev2.LoginCookieTypeRequestHeader,
+					Name:            field.HeaderName,
+					RequestURLRegex: `^https://x\.com/`,
+				},
+				{
+					Type: bridgev2.LoginCookieTypeSpecial,
+					Name: field.ID,
+				},
+			},
+		})
+	}
+	for _, name := range castleTokenCookieNames {
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:       name,
+			Required: false,
+			Sources: []bridgev2.LoginCookieFieldSource{
+				{
+					Type:         bridgev2.LoginCookieTypeCookie,
+					Name:         name,
+					CookieDomain: "x.com",
+				},
+				{
+					Type:         bridgev2.LoginCookieTypeCookie,
+					Name:         name,
+					CookieDomain: ".x.com",
+				},
+				{
+					Type: bridgev2.LoginCookieTypeSpecial,
+					Name: "fi.mau.twitter.cookie." + name,
+				},
+				{
+					Type: bridgev2.LoginCookieTypeLocalStorage,
+					Name: "fi.mau.twitter.cookie." + name,
+				},
+			},
+		})
+	}
+	return fields
+}
 
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
 var _ bridgev2.LoginProcessUserInput = (*TwitterLogin)(nil)
@@ -137,11 +772,6 @@ func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 			Description: "Log in with your X username, email, or phone number and password",
 			ID:          LoginFlowIDPassword,
 		},
-		{
-			Name:        "Cookies",
-			Description: "Log in with your X account using your cookies",
-			ID:          LoginFlowIDCookies,
-		},
 	}
 }
 
@@ -164,8 +794,7 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 		StepID:       LoginStepIDCookies,
 		Instructions: "Open the Login URL in an Incognito/Private browsing mode. Then, extract the cookies as a JSON object/cURL command copied from the Network tab of your browser's DevTools. After that, close the browser **before** pasting the cookies.\n\nFor example: `{\"ct0\":\"123466-...\",\"auth_token\":\"abcde-...\"}`",
 		CookiesParams: &bridgev2.LoginCookiesParams{
-			URL:       "https://x.com/i/flow/login",
-			UserAgent: "",
+			URL: "https://x.com/i/flow/login",
 			Fields: []bridgev2.LoginCookieField{
 				{
 					ID:       "ct0",
@@ -213,6 +842,38 @@ func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
 			},
 		},
 	}
+}
+
+func makeCastleTokenStep(info twittermeow.JetfuelCastleTokenInfo, identifier, errorLine string) *bridgev2.LoginStep {
+	instructions := "Generating an X browser token for this login."
+	if errorLine != "" {
+		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+	}
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeCookies,
+		StepID:       LoginStepIDCastleToken,
+		Instructions: instructions,
+		CookiesParams: &bridgev2.LoginCookiesParams{
+			URL:               castleTokenWebviewURL,
+			ExtractJS:         castleTokenExtractJS(info, identifier),
+			WaitForURLPattern: `^https://x\.com/robots\.txt$`,
+			Fields:            castleTokenCookieFields(),
+		},
+	}
+}
+
+func (t *TwitterLogin) makeWebLoginCastleTokenStep(errorLine string) *bridgev2.LoginStep {
+	if t.webLogin == nil || t.webLogin.Client() == nil {
+		t.webLoginCastleStage = ""
+		return makeCredentialsStep("The X login session expired. Enter your X login details again.")
+	}
+	info := t.webLogin.Client().JetfuelCastleTokenInfo()
+	if !info.IsValid() {
+		t.webLoginCastleStage = ""
+		t.User.Log.Warn().Msg("X Castle web metadata missing from login page bootstrap")
+		return makeCredentialsStep("X did not provide the browser-token metadata needed for native login. Try again.")
+	}
+	return makeCastleTokenStep(info, t.webLoginIdentifier, errorLine)
 }
 
 func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine string) *bridgev2.LoginStep {
@@ -338,6 +999,9 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 
 	// Migration case: validate existing cookies and skip to passcode
 	t.Cookies = meta.Cookies
+	if meta.BrowserHeaders != nil {
+		t.browserHeaders = *meta.BrowserHeaders
+	}
 	if err := t.ensureClientForPIN(ctx); err != nil {
 		// Cookies expired, fall back to normal flow
 		t.User.Log.Warn().Err(err).Msg("Migration: cookies invalid, falling back to full login")
@@ -353,6 +1017,9 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
+	if t.isWaitingForWebLoginCastleToken() {
+		return t.submitWebCastleTokenInput(ctx, cookies)
+	}
 	cookieStruct := twitCookies.NewCookies(cookies)
 	t.Cookies = cookieStruct.String()
 
@@ -393,6 +1060,9 @@ func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) error {
 	}
 	cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 	t.client = twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+	if t.browserHeaders.UserAgent != "" {
+		t.client.SetBrowserHeaders(t.browserHeaders)
+	}
 	profile, err := t.client.LoadMessagesPage(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load messages page: %w", err)
@@ -630,7 +1300,11 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 	t.webLogin = twittermeow.NewWebLoginSession(client)
+	t.webLoginIdentifier = identifier
 	t.webLoginPassword = password
+	t.webLoginCastleStage = ""
+	t.webLoginAuthMethod = ""
+	t.webLoginText = ""
 	t.webLoginChallenge = nil
 	t.webLoginMethods = nil
 
@@ -641,12 +1315,157 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 	if result.Status != twittermeow.WebLoginStatusNeedsIdentifier {
 		return t.handleWebLoginResult(ctx, result)
 	}
+	if t.webLogin.UsesJetfuel() {
+		t.webLoginCastleStage = webLoginCastleStageIdentifier
+		return t.makeWebLoginCastleTokenStep(""), nil
+	}
 
 	result, err = t.webLogin.SubmitCredentials(ctx, identifier, password)
 	if err != nil {
 		return handleWebLoginCredentialsError(err)
 	}
 	return t.handleWebLoginResult(ctx, result)
+}
+
+func (t *TwitterLogin) isWaitingForWebLoginCastleToken() bool {
+	return t.webLogin != nil && t.webLoginCastleStage != "" && t.webLoginIdentifier != "" && t.webLoginPassword != ""
+}
+
+func (t *TwitterLogin) submitWebCastleTokenInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	if !t.isWaitingForWebLoginCastleToken() {
+		t.webLoginCastleStage = ""
+		return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
+	}
+	castleTokens, err := decodeCastleTokenBatchInput(input)
+	if err != nil {
+		return t.makeWebLoginCastleTokenStep("The X webview returned an invalid browser token."), nil
+	}
+	if len(castleTokens) == 0 {
+		return t.makeWebLoginCastleTokenStep("The X webview did not return a browser token."), nil
+	}
+	client := t.webLogin.Client()
+	if !client.SetBrowserHeaders(browserHeadersFromInput(input)) {
+		return t.makeWebLoginCastleTokenStep("The X webview did not return a valid browser fingerprint."), nil
+	}
+	t.browserHeaders = client.GetBrowserHeaders()
+	client.SetCookies(castleWebviewCookies(input))
+	client.SetNextJetfuelCastleTokens(castleTokens)
+	return t.continueWebCastleLogin(ctx)
+}
+
+func browserHeadersFromInput(input map[string]string) twittermeow.BrowserHeaders {
+	return twittermeow.BrowserHeaders{
+		UserAgent:      input[loginFieldBrowserUserAgent],
+		SecCHUserAgent: input[loginFieldBrowserSecCHUA],
+		SecCHPlatform:  input[loginFieldBrowserPlatform],
+		SecCHMobile:    input[loginFieldBrowserMobile],
+	}
+}
+
+func decodeCastleTokenBatchInput(input map[string]string) ([]string, error) {
+	tokens := make([]string, 0, castleTokenBatchSize)
+	seen := make(map[string]struct{}, castleTokenBatchSize)
+	for index := 1; index <= castleTokenBatchSize; index++ {
+		token, err := decodeCastleTokenInput(input[castleTokenFieldID(index)])
+		if err != nil {
+			return nil, err
+		}
+		if token == "" {
+			continue
+		}
+		if len(token) < 128 || len(token) > 20000 {
+			return nil, fmt.Errorf("invalid Castle token length")
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		tokens = append(tokens, token)
+	}
+	return tokens, nil
+}
+
+func (t *TwitterLogin) continueWebCastleLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
+	for attempts := 0; attempts < castleTokenBatchSize; attempts++ {
+		stage := t.webLoginCastleStage
+		t.User.Log.Debug().Str("stage", stage).Msg("Submitting X Jetfuel Castle token")
+
+		var (
+			result *twittermeow.WebLoginResult
+			err    error
+		)
+		switch stage {
+		case webLoginCastleStageIdentifier:
+			result, err = t.webLogin.SubmitIdentifier(ctx, t.webLoginIdentifier)
+			if err != nil && twittermeow.IsWebLoginPrePasswordParityError(err) {
+				t.webLoginCastleStage = webLoginCastleStageCombined
+				continue
+			}
+		case webLoginCastleStagePassword:
+			result, err = t.webLogin.SubmitPassword(ctx, t.webLoginPassword)
+		case webLoginCastleStageCombined:
+			result, err = t.webLogin.SubmitCombinedCredentials(ctx, t.webLoginIdentifier, t.webLoginPassword)
+		case webLoginCastleStageBeginTwoFactor:
+			result, err = t.webLogin.SubmitPendingTwoFactor(ctx)
+		case webLoginCastleStageAuthMethod:
+			methodID := t.webLoginAuthMethod
+			if methodID == "" {
+				t.webLoginCastleStage = ""
+				return makeAuthMethodStep(t.webLoginMethods, "Choose a verification method."), nil
+			}
+			result, err = t.webLogin.SubmitAuthMethod(ctx, methodID)
+		case webLoginCastleStageText:
+			text := t.webLoginText
+			if text == "" {
+				t.webLoginCastleStage = ""
+				return makeVerificationStep(t.webLoginChallenge, "Enter the X verification code."), nil
+			}
+			result, err = t.webLogin.SubmitText(ctx, text)
+		default:
+			t.webLoginCastleStage = ""
+			return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
+		}
+		if err != nil {
+			if errors.Is(err, twittermeow.ErrJetfuelCastleTokenRequired) {
+				if stage == webLoginCastleStagePassword || stage == webLoginCastleStageText {
+					t.webLoginCastleStage = webLoginCastleStageBeginTwoFactor
+					continue
+				}
+				return t.makeWebLoginCastleTokenStep("X needs a fresh browser token to continue this login."), nil
+			}
+			t.webLoginCastleStage = ""
+			if stage == webLoginCastleStageText {
+				return makeVerificationStep(t.webLoginChallenge, webLoginErrorInstructions(err)), nil
+			}
+			if stage == webLoginCastleStageAuthMethod {
+				return makeAuthMethodStep(t.webLoginMethods, webLoginErrorInstructions(err)), nil
+			}
+			return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+		}
+		if stage == webLoginCastleStageAuthMethod {
+			t.webLoginAuthMethod = ""
+		}
+		if stage == webLoginCastleStageText {
+			t.webLoginText = ""
+		}
+		if result != nil && result.Status == twittermeow.WebLoginStatusNeedsPassword && t.webLoginPassword != "" {
+			t.webLoginCastleStage = webLoginCastleStagePassword
+			continue
+		}
+		t.webLoginCastleStage = ""
+		return t.handleWebLoginResult(ctx, result)
+	}
+	return t.makeWebLoginCastleTokenStep("X needs a fresh browser token to continue this login."), nil
+}
+
+func castleWebviewCookies(input map[string]string) map[string]string {
+	out := make(map[string]string)
+	for _, name := range castleTokenCookieNames {
+		if value := strings.TrimSpace(input[name]); value != "" {
+			out[name] = value
+		}
+	}
+	return out
 }
 
 func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
@@ -657,6 +1476,20 @@ func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[s
 	methodID := strings.TrimSpace(input[loginFieldAuthMethod])
 	if methodID == "" {
 		return nil, ErrMissingLoginInput
+	}
+	if method, ok := findWebLoginAuthMethod(t.webLoginMethods, methodID); ok {
+		methodID = method.ID
+		if methodID == "" {
+			methodID = method.Name
+		}
+	}
+	if t.webLogin.UsesJetfuel() {
+		t.webLoginAuthMethod = methodID
+		t.webLoginCastleStage = webLoginCastleStageAuthMethod
+		if t.webLogin.Client().HasNextJetfuelCastleToken() {
+			return t.continueWebCastleLogin(ctx)
+		}
+		return t.makeWebLoginCastleTokenStep(""), nil
 	}
 	result, err := t.webLogin.SubmitAuthMethod(ctx, methodID)
 	if err != nil {
@@ -695,11 +1528,23 @@ func (t *TwitterLogin) submitWebVerificationInput(ctx context.Context, input map
 	if text == "" {
 		return nil, ErrMissingLoginInput
 	}
+	if t.webLogin.UsesJetfuel() {
+		t.webLoginText = text
+		t.webLoginCastleStage = webLoginCastleStageText
+		if t.webLogin.Client().HasNextJetfuelCastleToken() {
+			return t.continueWebCastleLogin(ctx)
+		}
+		return t.makeWebLoginCastleTokenStep(""), nil
+	}
 	result, err := t.webLogin.SubmitText(ctx, text)
 	if err != nil {
 		return handleWebLoginVerificationError(t.webLoginChallenge, err)
 	}
 	if result.Status == twittermeow.WebLoginStatusNeedsPassword && t.webLoginPassword != "" {
+		if t.webLogin.UsesJetfuel() {
+			t.webLoginCastleStage = webLoginCastleStagePassword
+			return t.makeWebLoginCastleTokenStep(""), nil
+		}
 		result, err = t.webLogin.SubmitPassword(ctx, t.webLoginPassword)
 		if err != nil {
 			return handleWebLoginCredentialsError(err)
@@ -728,6 +1573,10 @@ func (t *TwitterLogin) handleWebLoginResult(ctx context.Context, result *twitter
 		return makeVerificationStep(result.Challenge, ""), nil
 	case twittermeow.WebLoginStatusNeedsPassword:
 		if t.webLogin != nil && t.webLoginPassword != "" {
+			if t.webLogin.UsesJetfuel() {
+				t.webLoginCastleStage = webLoginCastleStagePassword
+				return t.makeWebLoginCastleTokenStep(""), nil
+			}
 			next, err := t.webLogin.SubmitPassword(ctx, t.webLoginPassword)
 			if err != nil {
 				return handleWebLoginCredentialsError(err)
@@ -827,7 +1676,11 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	t.profile = profile
 	t.persistClientCookiesAndUserID()
 	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
+	t.webLoginIdentifier = ""
 	t.webLoginPassword = ""
+	t.webLoginCastleStage = ""
+	t.webLoginAuthMethod = ""
+	t.webLoginText = ""
 	t.webLoginChallenge = nil
 	t.webLoginMethods = nil
 
@@ -914,6 +1767,9 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 		SecretKey:         t.SecretKey,
 		SigningKey:        t.SigningKey,
 		SigningKeyVersion: t.SigningKeyVersion,
+	}
+	if browserHeaders := t.client.GetBrowserHeaders(); browserHeaders.UserAgent != "" {
+		meta.BrowserHeaders = &browserHeaders
 	}
 
 	// If this is a migration, mark it and flag for full encrypted room sync

@@ -67,6 +67,9 @@ func TestLiveNativeLoginFlowProbe(t *testing.T) {
 	t.Logf("next step: type=%s id=%s instructions=%q", next.Type, next.StepID, next.Instructions)
 
 	switch next.StepID {
+	case LoginStepIDCastleToken:
+		t.Log("native credentials reached the client BrowserAuth Castle step")
+		return
 	case LoginStepJuiceboxPIN, LoginStepIDVerification, LoginStepIDComplete:
 		verificationCode := strings.TrimSpace(os.Getenv("TWITTER_LIVE_VERIFICATION_CODE"))
 		if next.StepID == LoginStepIDVerification {
@@ -145,6 +148,10 @@ func TestLiveNativeLoginStageProbe(t *testing.T) {
 
 	result, err = webLogin.SubmitCredentials(ctx, identifier, password)
 	logStage(t, "credentials", result, err)
+	if errors.Is(err, twittermeow.ErrJetfuelCastleTokenRequired) {
+		t.Log("native login reached the client BrowserAuth Castle boundary")
+		return
+	}
 	if err != nil {
 		t.Fatalf("SubmitCredentials() failed: %v", err)
 	}
@@ -175,6 +182,10 @@ func TestLiveIdentifierOnlyProbe(t *testing.T) {
 
 	result, err = webLogin.SubmitIdentifier(ctx, identifier)
 	logStage(t, "identifier", result, err)
+	if errors.Is(err, twittermeow.ErrJetfuelCastleTokenRequired) {
+		t.Log("identifier submission reached the client BrowserAuth Castle boundary")
+		return
+	}
 	if err == nil && result.Status != twittermeow.WebLoginStatusNeedsPassword {
 		t.Fatalf("SubmitIdentifier() status = %s, want password step or a login error", result.Status)
 	}

@@ -64,8 +64,12 @@ type Client struct {
 	xchatProcessor *XChatEventProcessor
 	keyManager     *crypto.KeyManager
 
-	xchatToken   *cachedXChatToken
-	xchatTokenMu sync.Mutex
+	jetfuelCastleTokens  []string
+	jetfuelCastleInfo    JetfuelCastleTokenInfo
+	browserHeaders       BrowserHeaders
+	jetfuelCastleTokenMu sync.Mutex
+	xchatToken           *cachedXChatToken
+	xchatTokenMu         sync.Mutex
 }
 
 func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.Logger) *Client {
@@ -93,6 +97,17 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 
 func (c *Client) GetCookieString() string {
 	return c.cookies.String()
+}
+
+func (c *Client) SetCookies(values map[string]string) {
+	for name, value := range values {
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		c.cookies.Set(cookies.XCookieName(name), value)
+	}
 }
 
 func (c *Client) SetSession(sess *CachedSession) {
@@ -439,6 +454,16 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	c.session.Country = country
 	c.session.VerificationToken = verificationToken
 	c.session.loadingAnims = loadingAnims
+	c.jetfuelCastleInfo = JetfuelCastleTokenInfo{
+		ScriptURL: methods.ParseOndemandCastleURLFromScript([]byte(mainPageHTML)),
+		PublicKey: methods.ParseResponsiveWebCastlePublicKey(mainPageHTML),
+	}
+	if !c.jetfuelCastleInfo.IsValid() {
+		c.Logger.Debug().
+			Bool("has_script_url", c.jetfuelCastleInfo.ScriptURL != "").
+			Bool("has_public_key", c.jetfuelCastleInfo.PublicKey != "").
+			Msg("X Castle web metadata not found in main page HTML")
+	}
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {

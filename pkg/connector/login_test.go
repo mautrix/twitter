@@ -2,7 +2,12 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -57,6 +62,21 @@ func TestHandleWebLoginCredentialsErrorRetriesOnlyCredentialErrors(t *testing.T)
 	}
 }
 
+func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
+	var tc TwitterConnector
+	flows := tc.GetLoginFlows()
+
+	if len(flows) != 1 {
+		t.Fatalf("len(flows) = %d, want 1", len(flows))
+	}
+	if flows[0].ID != LoginFlowIDPassword {
+		t.Fatalf("flow ID = %s, want %s", flows[0].ID, LoginFlowIDPassword)
+	}
+	if strings.Contains(strings.ToLower(flows[0].Description), "cookie") {
+		t.Fatalf("flow description = %q, want native login flow", flows[0].Description)
+	}
+}
+
 func TestMakeAuthMethodStepUsesNativeSelect(t *testing.T) {
 	methods := []twittermeow.WebLoginAuthMethod{
 		{ID: "Totp", Name: "Authenticator App", Supported: true},
@@ -100,6 +120,254 @@ func TestWebLoginUnsupportedInstructionsUsesChallengeDescription(t *testing.T) {
 
 	if got := webLoginUnsupportedInstructions(result); got != "Text message verification is coming soon." {
 		t.Fatalf("webLoginUnsupportedInstructions() = %q", got)
+	}
+}
+
+func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
+	if castleTokenBatchSize < 6 {
+		t.Fatalf("castleTokenBatchSize = %d, want enough tokens for the six-request 2FA login path", castleTokenBatchSize)
+	}
+	info := twittermeow.JetfuelCastleTokenInfo{
+		ScriptURL: "https://abs.twimg.com/responsive-web/client-web/ondemand.castle.1ff15ffa.js",
+		PublicKey: "castle-public-key",
+	}
+	step := makeCastleTokenStep(info, "test-user", "")
+
+	if step.Type != bridgev2.LoginStepTypeCookies {
+		t.Fatalf("Type = %s, want cookies webview step", step.Type)
+	}
+	if step.StepID != LoginStepIDCastleToken {
+		t.Fatalf("StepID = %s, want %s", step.StepID, LoginStepIDCastleToken)
+	}
+	if step.CookiesParams == nil {
+		t.Fatal("CookiesParams = nil")
+	}
+	if step.CookiesParams.UserAgent != "" {
+		t.Fatalf("UserAgent = %q, want the webview's native user agent", step.CookiesParams.UserAgent)
+	}
+	if step.CookiesParams.URL != castleTokenWebviewURL {
+		t.Fatalf("URL = %q", step.CookiesParams.URL)
+	}
+	if strings.Contains(step.CookiesParams.URL, "/i/flow/login") {
+		t.Fatalf("URL = %q, want neutral webview page", step.CookiesParams.URL)
+	}
+	if !strings.Contains(step.CookiesParams.WaitForURLPattern, "robots") {
+		t.Fatalf("WaitForURLPattern = %q, want neutral X URL", step.CookiesParams.WaitForURLPattern)
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, info.ScriptURL) ||
+		!strings.Contains(step.CookiesParams.ExtractJS, "createRequestToken") {
+		t.Fatalf("ExtractJS does not load X Castle token generator")
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, castleTokenContextURL) {
+		t.Fatalf("ExtractJS does not include the X login context")
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, "showBrowserLoginStatus") ||
+		!strings.Contains(step.CookiesParams.ExtractJS, "Signing in to X") ||
+		!strings.Contains(step.CookiesParams.ExtractJS, "mautrix-twitter-login-status") ||
+		!strings.Contains(step.CookiesParams.ExtractJS, "body.replaceChildren(container)") {
+		t.Fatalf("ExtractJS does not replace robots.txt with the visible X login status")
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, "__BEEP_BEEP_AUTH_RESULTS__") {
+		t.Fatalf("ExtractJS does not store the BrowserAuth result for Desktop polling")
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, "__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__") {
+		t.Fatalf("ExtractJS does not guard against repeated BrowserAuth navigation runs")
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, "castleTokenBatchSize") {
+		t.Fatalf("ExtractJS does not generate a Castle token batch")
+	}
+	fields := map[string]bridgev2.LoginCookieField{}
+	for _, field := range step.CookiesParams.Fields {
+		fields[field.ID] = field
+	}
+	if field, ok := fields[loginFieldCastleToken]; !ok || !field.Required {
+		t.Fatalf("Fields = %#v, want required Castle token field", step.CookiesParams.Fields)
+	} else if !hasCookieFieldSource(field, bridgev2.LoginCookieTypeLocalStorage, "fi.mau.twitter.castle_token") {
+		t.Fatalf("Castle token field sources = %#v, want local_storage fallback", field.Sources)
+	}
+	for index := 2; index <= castleTokenBatchSize; index++ {
+		fieldID := castleTokenFieldID(index)
+		field, ok := fields[fieldID]
+		if !ok {
+			t.Fatalf("Fields missing optional Castle token batch field %q", fieldID)
+		}
+		if field.Required {
+			t.Fatalf("Castle token batch field %q is required", fieldID)
+		}
+		if !hasCookieFieldSource(field, bridgev2.LoginCookieTypeLocalStorage, "fi.mau.twitter.castle_token_"+strconv.Itoa(index)) {
+			t.Fatalf("Castle token batch field %q sources = %#v, want local_storage fallback", fieldID, field.Sources)
+		}
+	}
+	for _, expected := range browserHeaderFields {
+		field, ok := fields[expected.ID]
+		if !ok {
+			t.Fatalf("Fields missing browser header %q", expected.ID)
+		}
+		if field.Required != expected.Required {
+			t.Fatalf("browser header %q required = %t, want %t", expected.ID, field.Required, expected.Required)
+		}
+		if !hasCookieFieldSource(field, bridgev2.LoginCookieTypeRequestHeader, expected.HeaderName) {
+			t.Fatalf("browser header %q sources = %#v, want request header %q", expected.ID, field.Sources, expected.HeaderName)
+		}
+		if field.Sources[0].RequestURLRegex == "" || !hasCookieFieldSource(field, bridgev2.LoginCookieTypeSpecial, expected.ID) {
+			t.Fatalf("browser header %q sources = %#v, want x.com request extraction and webview JS fallback", expected.ID, field.Sources)
+		}
+	}
+	if !strings.Contains(step.CookiesParams.ExtractJS, "navigator.userAgent") ||
+		!strings.Contains(step.CookiesParams.ExtractJS, "navigator.userAgentData") {
+		t.Fatal("ExtractJS does not include the webview browser-header fallback")
+	}
+	for _, name := range castleTokenCookieNames {
+		field, ok := fields[name]
+		if !ok {
+			t.Fatalf("Fields missing optional browser cookie %q", name)
+		}
+		if field.Required {
+			t.Fatalf("browser cookie field %q is required", name)
+		}
+		if !strings.Contains(step.CookiesParams.ExtractJS, name) {
+			t.Fatalf("ExtractJS does not include browser cookie %q", name)
+		}
+		if !hasCookieFieldSource(field, bridgev2.LoginCookieTypeLocalStorage, "fi.mau.twitter.cookie."+name) {
+			t.Fatalf("browser cookie field %q sources = %#v, want local_storage fallback", name, field.Sources)
+		}
+	}
+	for _, name := range []string{"auth_token", "ct0", "twid", "kdt"} {
+		if _, ok := fields[name]; ok {
+			t.Fatalf("Fields include auth cookie %q", name)
+		}
+	}
+}
+
+func TestBrowserHeadersFromInput(t *testing.T) {
+	input := map[string]string{
+		loginFieldBrowserUserAgent: "test user agent",
+		loginFieldBrowserSecCHUA:   `"Chromium";v="150"`,
+		loginFieldBrowserPlatform:  `"Android"`,
+		loginFieldBrowserMobile:    "?1",
+	}
+	got := browserHeadersFromInput(input)
+	if got.UserAgent != input[loginFieldBrowserUserAgent] ||
+		got.SecCHUserAgent != input[loginFieldBrowserSecCHUA] ||
+		got.SecCHPlatform != input[loginFieldBrowserPlatform] ||
+		got.SecCHMobile != input[loginFieldBrowserMobile] {
+		t.Fatalf("browserHeadersFromInput() = %#v", got)
+	}
+}
+
+func TestUserLoginMetadataPersistsBrowserHeaders(t *testing.T) {
+	meta := UserLoginMetadata{
+		Cookies: "ct0=test",
+		BrowserHeaders: &twittermeow.BrowserHeaders{
+			UserAgent:      "test user agent",
+			SecCHUserAgent: `"Chromium";v="150"`,
+			SecCHPlatform:  `"Windows"`,
+			SecCHMobile:    "?0",
+		},
+	}
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var decoded UserLoginMetadata
+	if err = json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if decoded.BrowserHeaders == nil || *decoded.BrowserHeaders != *meta.BrowserHeaders {
+		t.Fatalf("decoded BrowserHeaders = %#v, want %#v", decoded.BrowserHeaders, meta.BrowserHeaders)
+	}
+}
+
+func hasCookieFieldSource(field bridgev2.LoginCookieField, sourceType bridgev2.LoginCookieFieldSourceType, name string) bool {
+	for _, source := range field.Sources {
+		if source.Type == sourceType && source.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDecodeCastleTokenInputAcceptsHeaderCaptureValue(t *testing.T) {
+	token := strings.Repeat("castle-token-", 64)
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(token))
+	got, err := decodeCastleTokenInput(castleTokenHeaderPrefix + encoded)
+	if err != nil {
+		t.Fatalf("decodeCastleTokenInput() failed: %v", err)
+	}
+	if got != token {
+		t.Fatalf("decodeCastleTokenInput() = %q, want original token", got)
+	}
+
+	got, err = decodeCastleTokenInput(token)
+	if err != nil {
+		t.Fatalf("decodeCastleTokenInput(raw) failed: %v", err)
+	}
+	if got != token {
+		t.Fatalf("decodeCastleTokenInput(raw) = %q, want original token", got)
+	}
+}
+
+func TestDecodeCastleTokenInputStripsTransportWhitespace(t *testing.T) {
+	token := strings.Repeat("castle-token-", 64)
+	wrapped := token[:80] + "\r\n" + token[80:160] + "\n\t " + token[160:]
+	got, err := decodeCastleTokenInput(wrapped)
+	if err != nil {
+		t.Fatalf("decodeCastleTokenInput(wrapped) failed: %v", err)
+	}
+	if got != token {
+		t.Fatalf("decodeCastleTokenInput(wrapped) = %q, want original token", got)
+	}
+
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(token))
+	wrappedEncoded := encoded[:80] + "\n" + encoded[80:]
+	got, err = decodeCastleTokenInput(castleTokenHeaderPrefix + wrappedEncoded)
+	if err != nil {
+		t.Fatalf("decodeCastleTokenInput(wrapped header) failed: %v", err)
+	}
+	if got != token {
+		t.Fatalf("decodeCastleTokenInput(wrapped header) = %q, want original token", got)
+	}
+}
+
+func TestDecodeCastleTokenBatchInput(t *testing.T) {
+	tokensByIndex := make([]string, castleTokenBatchSize)
+	input := make(map[string]string, castleTokenBatchSize)
+	for index := 1; index <= castleTokenBatchSize; index++ {
+		token := strings.Repeat(fmt.Sprintf("castle-%d-", index), 64)
+		tokensByIndex[index-1] = token
+		input[castleTokenFieldID(index)] = token
+	}
+	input[loginFieldCastleToken] = tokensByIndex[0][:80] + "\n" + tokensByIndex[0][80:]
+
+	tokens, err := decodeCastleTokenBatchInput(input)
+	if err != nil {
+		t.Fatalf("decodeCastleTokenBatchInput() error = %v", err)
+	}
+	if len(tokens) != castleTokenBatchSize {
+		t.Fatalf("len(tokens) = %d, want %d", len(tokens), castleTokenBatchSize)
+	}
+	for index := range tokens {
+		if tokens[index] != tokensByIndex[index] {
+			t.Fatalf("tokens[%d] = %q, want token %d", index, tokens[index], index+1)
+		}
+	}
+}
+
+func TestCastleTokenFieldPatternAcceptsWrappedTransportValue(t *testing.T) {
+	fields := castleTokenCookieFields()
+	if len(fields) == 0 || fields[0].ID != loginFieldCastleToken {
+		t.Fatalf("first field = %#v, want Castle token field", fields)
+	}
+	token := strings.Repeat("castle-token-", 64)
+	wrapped := token[:80] + "\n" + token[80:]
+	if !regexp.MustCompile(fields[0].Pattern).MatchString(wrapped) {
+		t.Fatalf("Castle token field pattern %q rejected wrapped token transport", fields[0].Pattern)
+	}
+	if strings.Contains(fields[0].Pattern, "(?s)") {
+		t.Fatalf("Castle token field pattern %q must be JavaScript RegExp compatible", fields[0].Pattern)
+	}
+	if !strings.Contains(fields[0].Pattern, `[\s\S]`) {
+		t.Fatalf("Castle token field pattern %q should match newlines without JS-only-invalid flags", fields[0].Pattern)
 	}
 }
 

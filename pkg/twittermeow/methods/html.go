@@ -19,6 +19,8 @@ var (
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
 	ondemandSChunkIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.s"`)
+	ondemandCastleIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.castle"`)
+	castlePublicKeyRegex   = regexp.MustCompile(`"responsive_web_castle_public_key"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"`)
 	variableIndexesRegex   = regexp.MustCompile(`\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
 )
 
@@ -110,7 +112,15 @@ func ParseCountry(html string) string {
 }
 
 func ParseOndemandSURLFromScript(js []byte) string {
-	chunkIDMatch := ondemandSChunkIDRegex.FindSubmatchIndex(js)
+	return parseOndemandChunkURLFromScript(js, "ondemand.s", ondemandSChunkIDRegex)
+}
+
+func ParseOndemandCastleURLFromScript(js []byte) string {
+	return parseOndemandChunkURLFromScript(js, "ondemand.castle", ondemandCastleIDRegex)
+}
+
+func parseOndemandChunkURLFromScript(js []byte, chunkName string, chunkIDRegex *regexp.Regexp) string {
+	chunkIDMatch := chunkIDRegex.FindSubmatchIndex(js)
 	if len(chunkIDMatch) < 4 {
 		return ""
 	}
@@ -124,5 +134,13 @@ func ParseOndemandSURLFromScript(js []byte) string {
 	}
 
 	hash := string(jsAfterNameMap[hashMatch[2]:hashMatch[3]])
-	return "https://abs.twimg.com/responsive-web/client-web/ondemand.s." + hash + "a.js"
+	return "https://abs.twimg.com/responsive-web/client-web/" + chunkName + "." + hash + "a.js"
+}
+
+func ParseResponsiveWebCastlePublicKey(html string) string {
+	match := castlePublicKeyRegex.FindStringSubmatch(html)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
 }

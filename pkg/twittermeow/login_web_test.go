@@ -2,7 +2,6 @@ package twittermeow
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -418,11 +417,159 @@ func TestJetfuelAuthMethodFormUsesSubmitID(t *testing.T) {
 	}
 }
 
+func TestJetfuelCastleTokenUsesClientProvidedOneShotToken(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	form := make(url.Values)
+
+	if err := client.addJetfuelCastleTokenToForm(form); !errors.Is(err, ErrJetfuelCastleTokenRequired) {
+		t.Fatalf("addJetfuelCastleTokenToForm() error = %v, want ErrJetfuelCastleTokenRequired", err)
+	}
+
+	client.SetNextJetfuelCastleTokens([]string{" castle-from-webview "})
+	if err := client.addJetfuelCastleTokenToForm(form); err != nil {
+		t.Fatalf("addJetfuelCastleTokenToForm() error = %v", err)
+	}
+	if got := form.Get("$castle_token"); got != "castle-from-webview" {
+		t.Fatalf("$castle_token = %q, want webview token", got)
+	}
+	if err := client.addJetfuelCastleTokenToForm(make(url.Values)); !errors.Is(err, ErrJetfuelCastleTokenRequired) {
+		t.Fatalf("second addJetfuelCastleTokenToForm() error = %v, want one-shot token to be consumed", err)
+	}
+}
+
+func TestJetfuelCastleTokenConsumesQueuedTokensInOrder(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{" first-token ", "", "second-token"})
+
+	firstForm := make(url.Values)
+	if err := client.addJetfuelCastleTokenToForm(firstForm); err != nil {
+		t.Fatalf("first addJetfuelCastleTokenToForm() error = %v", err)
+	}
+	if got := firstForm.Get("$castle_token"); got != "first-token" {
+		t.Fatalf("first $castle_token = %q, want first-token", got)
+	}
+	if !client.HasNextJetfuelCastleToken() {
+		t.Fatal("HasNextJetfuelCastleToken() = false, want queued second token")
+	}
+
+	secondForm := make(url.Values)
+	if err := client.addJetfuelCastleTokenToForm(secondForm); err != nil {
+		t.Fatalf("second addJetfuelCastleTokenToForm() error = %v", err)
+	}
+	if got := secondForm.Get("$castle_token"); got != "second-token" {
+		t.Fatalf("second $castle_token = %q, want second-token", got)
+	}
+	if client.HasNextJetfuelCastleToken() {
+		t.Fatal("HasNextJetfuelCastleToken() = true, want queue exhausted")
+	}
+}
+
+func TestSetCookiesPreservesExistingLoginCookies(t *testing.T) {
+	client := NewClient(cookies.NewCookies(map[string]string{
+		"att":      "native-login-cookie",
+		"guest_id": "old-guest-id",
+	}), nil, zerolog.Nop())
+
+	client.SetCookies(map[string]string{
+		"guest_id": "browser-guest-id",
+		"__cf_bm":  "browser-cf-cookie",
+	})
+
+	if got := client.cookies.Get(cookies.XAtt); got != "native-login-cookie" {
+		t.Fatalf("att cookie = %q, want native login cookie to be preserved", got)
+	}
+	if got := client.cookies.Get(cookies.XGuestID); got != "browser-guest-id" {
+		t.Fatalf("guest_id cookie = %q, want webview cookie to update existing value", got)
+	}
+	if got := client.cookies.Get(cookies.XCookieName("__cf_bm")); got != "browser-cf-cookie" {
+		t.Fatalf("__cf_bm cookie = %q, want webview cookie", got)
+	}
+}
+
+func TestSubmitJetfuelPasswordDefersTwoFactorPreludeUntilNextCastleToken(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"password-castle-token"})
+
+	var paths []string
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("ReadAll(request body) error = %v", err)
+		}
+		paths = append(paths, req.URL.Path)
+		form := string(body)
+		switch req.URL.Path {
+		case "/i/jfapi" + endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
+			if !strings.Contains(form, "%24castle_token=password-castle-token") {
+				t.Fatalf("password request body = %q, want password Castle token", form)
+			}
+			responseBody := "begin_two_factor_auth\x00session_token\x0012345678-1234-1234-1234-123456789abc\x00prelude_dispatch_id\x00abcdefab-1234-1234-1234-abcdefabcdef"
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(responseBody)),
+			}, nil
+		case "/i/jfapi" + endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH:
+			if !strings.Contains(form, "%24castle_token=twofactor-castle-token") {
+				t.Fatalf("two-factor request body = %q, want second Castle token", form)
+			}
+			if !strings.Contains(form, "session_token=12345678-1234-1234-1234-123456789abc") {
+				t.Fatalf("two-factor request body = %q, want session token", form)
+			}
+			responseBody := "Select a method to authenticate\x00two_factor_method\x00Totp\x00BackupCode"
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(responseBody)),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{
+		identifier:     "test-user",
+		passwordAction: endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH,
+	}
+
+	result, err := session.SubmitPassword(context.Background(), "password")
+	if !errors.Is(err, ErrJetfuelCastleTokenRequired) {
+		t.Fatalf("SubmitPassword() error = %v, want ErrJetfuelCastleTokenRequired", err)
+	}
+	if result != nil {
+		t.Fatalf("SubmitPassword() result = %#v, want nil while waiting for next Castle token", result)
+	}
+	if got := session.jetfuel.twoFactorAction; got != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("twoFactorAction = %q, want begin two-factor action", got)
+	}
+	if len(paths) != 1 || paths[0] != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+		t.Fatalf("paths after password = %#v, want only password request", paths)
+	}
+
+	client.SetNextJetfuelCastleTokens([]string{"twofactor-castle-token"})
+	result, err = session.SubmitPendingTwoFactor(context.Background())
+	if err != nil {
+		t.Fatalf("SubmitPendingTwoFactor() error = %v", err)
+	}
+	if result == nil || result.Status != WebLoginStatusNeedsAuthMethod {
+		t.Fatalf("SubmitPendingTwoFactor() result = %#v, want auth method chooser", result)
+	}
+	if len(paths) != 2 || paths[1] != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		t.Fatalf("paths after pending two-factor = %#v", paths)
+	}
+}
+
 func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"castle-from-webview"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
+		}
+		if got := req.Header.Get("x-jf-client-theme"); got != jetfuelHeaderTheme {
+			t.Fatalf("x-jf-client-theme = %q, want %q", got, jetfuelHeaderTheme)
 		}
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -431,6 +578,9 @@ func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
 		form := string(body)
 		if !strings.Contains(form, "two_factor_auth_method_type=Totp") {
 			t.Fatalf("request body = %q, want Totp method", form)
+		}
+		if !strings.Contains(form, "%24castle_token=castle-from-webview") {
+			t.Fatalf("request body = %q, want webview Castle token", form)
 		}
 		responseBody := "Select a method to authenticate\x00two_factor_method\x00Totp\x00BackupCode\x00U2fSecurityKey\x00" +
 			"Enter the code from your authentication app.\x00challenge_response\x00finish_two_factor_auth\x00session_token"
@@ -469,6 +619,7 @@ func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
 
 func TestSubmitJetfuelSMSAuthMethodReturnsPhoneChallenge(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"sms-method-castle-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
@@ -523,6 +674,7 @@ func TestSubmitJetfuelSMSAuthMethodReturnsPhoneChallenge(t *testing.T) {
 
 func TestSubmitJetfuelSMSAuthMethodDefaultsActionForPhoneChallenge(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"sms-phone-challenge-castle-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
@@ -574,6 +726,7 @@ func TestSubmitJetfuelSMSAuthMethodDefaultsActionForPhoneChallenge(t *testing.T)
 
 func TestSubmitJetfuelPhoneNumberVerificationPostsPhoneField(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"phone-number-castle-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
@@ -760,20 +913,6 @@ func TestJetfuelLoginResponseClassifiesBadCredentials(t *testing.T) {
 		}
 	}
 }
-
-func TestJetfuelBrowserParityHeaderDecoding(t *testing.T) {
-	if got := decodeTFEGuestCookie("v1%3A12345"); got != "12345" {
-		t.Fatalf("decodeTFEGuestCookie() = %q, want 12345", got)
-	}
-	path := "/svc/route"
-	if got := decodeDtabLocal(base64.RawURLEncoding.EncodeToString([]byte(path))); got != path {
-		t.Fatalf("decodeDtabLocal() = %q, want %s", got, path)
-	}
-	if got := decodeDtabLocal("%2Fsvc%2Froute"); got != path {
-		t.Fatalf("decodeDtabLocal(encoded path) = %q, want %s", got, path)
-	}
-}
-
 func TestJetfuelTimezoneEnvOverride(t *testing.T) {
 	t.Setenv("TWITTER_JETFUEL_TIMEZONE", "Europe/Paris")
 	if got := jetfuelTimezone(); got != "Europe/Paris" {
