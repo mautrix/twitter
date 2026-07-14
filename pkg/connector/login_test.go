@@ -77,6 +77,20 @@ func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
 	}
 }
 
+func TestCookieLoginRemainsVisible(t *testing.T) {
+	login := &TwitterLogin{useCookieLogin: true}
+	step, err := login.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if step.CookiesParams == nil {
+		t.Fatal("CookiesParams = nil")
+	}
+	if step.CookiesParams.Hidden {
+		t.Fatal("CookiesParams.Hidden = true, want user-driven cookie login to remain visible")
+	}
+}
+
 func TestMakeAuthMethodStepUsesNativeSelect(t *testing.T) {
 	methods := []twittermeow.WebLoginAuthMethod{
 		{ID: "Totp", Name: "Authenticator App", Supported: true},
@@ -141,6 +155,9 @@ func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
 	}
 	if step.CookiesParams == nil {
 		t.Fatal("CookiesParams = nil")
+	}
+	if !step.CookiesParams.Hidden {
+		t.Fatal("CookiesParams.Hidden = false, want Castle token acquisition to run in a hidden webview")
 	}
 	if step.CookiesParams.UserAgent != "" {
 		t.Fatalf("UserAgent = %q, want the webview's native user agent", step.CookiesParams.UserAgent)

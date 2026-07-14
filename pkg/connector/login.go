@@ -858,6 +858,7 @@ func makeCastleTokenStep(info twittermeow.JetfuelCastleTokenInfo, identifier, er
 			ExtractJS:         castleTokenExtractJS(info, identifier),
 			WaitForURLPattern: `^https://x\.com/robots\.txt$`,
 			Fields:            castleTokenCookieFields(),
+			Hidden:            true,
 		},
 	}
 }
