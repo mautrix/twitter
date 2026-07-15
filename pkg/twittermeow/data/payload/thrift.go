@@ -26,6 +26,14 @@ const (
 	FailureTypeNonLatestCkeyVersion               FailureType = 6
 	FailureTypeRecipientHasNotTrustedConversation FailureType = 7
 	FailureTypeRecipientKeyHasChanged             FailureType = 8
+	FailureTypeOnlyEncryptedMessagesAllowed       FailureType = 9
+	FailureTypeRequesterNotAdmin                  FailureType = 10
+	FailureTypeFlaggedAsSpam                      FailureType = 11
+	FailureTypeRateLimitUpsell                    FailureType = 12
+	FailureTypeSignatureVerificationFailed        FailureType = 13
+	FailureTypeGenericError                       FailureType = 14
+	FailureTypeSenderNotGroupMember               FailureType = 15
+	FailureTypeInvalidSignatureVersion            FailureType = 16
 )
 
 type MediaType int32
@@ -274,6 +282,7 @@ type MarkConversationRead struct {
 type MarkConversationReadEvent struct {
 	SeenUntilSequenceId *string `thrift:"seen_until_sequence_id,1" json:"seen_until_sequence_id,omitempty"`
 	SeenAtMillis        *int64  `thrift:"seen_at_millis,2" json:"seen_at_millis,omitempty"`
+	IsGrok              *bool   `thrift:"is_grok,3" json:"is_grok,omitempty"`
 }
 
 type MarkConversationUnread struct {

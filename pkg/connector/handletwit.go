@@ -34,6 +34,13 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
+func conversationReadSenderID(evt *types.ConversationRead, fallback string) string {
+	if evt.SenderID != "" {
+		return evt.SenderID
+	}
+	return fallback
+}
+
 func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey networkid.PortalKey, evtType bridgev2.RemoteEventType) *simplevent.Reaction {
 	senderID := data.SenderID
 	if senderID == "" {
@@ -295,6 +302,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 
 	case *types.ConversationRead:
+		senderID := conversationReadSenderID(evt, ParseUserLoginID(tc.userLogin.ID))
 		lastTarget := MakeMessageID(evt.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(evt.Time)
 		readUpToStreamOrder := methods.ParseSnowflakeInt(evt.LastReadEventID)
@@ -309,7 +317,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
-				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
+				Sender:    tc.MakeEventSender(senderID),
 				Timestamp: readUpTo,
 				PreHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
 					if intent := tc.userLogin.User.DoublePuppet(ctx); intent != nil {
@@ -617,6 +625,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.ConversationRead:
+		senderID := conversationReadSenderID(e, ParseUserLoginID(tc.userLogin.ID))
 		lastTarget := MakeMessageID(e.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(e.Time)
 		readUpToStreamOrder := methods.ParseSnowflakeInt(e.LastReadEventID)
@@ -631,7 +640,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.MakePortalKeyFromID(conversationID),
-				Sender:    tc.MakeEventSender(ParseUserLoginID(tc.userLogin.ID)),
+				Sender:    tc.MakeEventSender(senderID),
 				Timestamp: readUpTo,
 			},
 			LastTarget:          lastTarget,

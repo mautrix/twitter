@@ -18,7 +18,7 @@ const (
 	SignatureVersion3 = "3"
 	// SignatureVersion7 is the current send signature version for MessageCreateEvent.
 	SignatureVersion7 = "7"
-	// SignatureVersion4 is the current signature version for MarkConversationReadEvent.
+	// SignatureVersion4 is the legacy signature version for MarkConversationReadEvent.
 	SignatureVersion4 = "4"
 
 	// SignatureSize is the size of a raw ECDSA P-256 signature (r || s).
@@ -35,10 +35,10 @@ func SignaturePreimage(messageID, senderID, conversationID, keyVersion string, c
 	return []byte(preimage)
 }
 
-// SignaturePreimageMarkConversationReadEvent builds the preimage for signature version 4.
-func SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID string, seenAtMillis int64) []byte {
-	preimage := fmt.Sprintf("MarkConversationReadEvent,%s,%s,%s,%s,%s,%s,%d",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID, seenAtMillis)
+// SignaturePreimageMarkConversationReadEvent builds the current signature version 7 preimage.
+func SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, seenUntilSequenceID string, seenAtMillis int64) []byte {
+	preimage := fmt.Sprintf("MarkConversationReadEvent,%s,%s,%s,%s,%d",
+		messageID, senderID, conversationID, seenUntilSequenceID, seenAtMillis)
 	return []byte(preimage)
 }
 
@@ -87,8 +87,8 @@ func SignMessage(privateKey *ecdsa.PrivateKey, messageID, senderID, conversation
 }
 
 // SignMarkConversationReadEvent creates a signature for a MarkConversationReadEvent.
-func SignMarkConversationReadEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID string, seenAtMillis int64) (string, error) {
-	preimage := SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID, seenAtMillis)
+func SignMarkConversationReadEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, seenUntilSequenceID string, seenAtMillis int64) (string, error) {
+	preimage := SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, seenUntilSequenceID, seenAtMillis)
 	return Sign(privateKey, preimage)
 }
 
