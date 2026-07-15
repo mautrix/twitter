@@ -36,6 +36,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 type TwitterLogin struct {
@@ -277,7 +278,7 @@ func (t *TwitterLogin) detectPINSetupNeeded(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, hasJuiceboxTokens := firstPublicKeyWithJuiceboxTokens(publicKeysResp)
+	_, hasJuiceboxTokens := latestPublicKeyWithJuiceboxTokens(publicKeysResp)
 	needsSetup := !hasJuiceboxTokens
 	t.User.Log.Debug().
 		Bool("has_juicebox_tokens", hasJuiceboxTokens).
@@ -286,18 +287,23 @@ func (t *TwitterLogin) detectPINSetupNeeded(ctx context.Context) (bool, error) {
 	return needsSetup, nil
 }
 
-func firstPublicKeyWithJuiceboxTokens(data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool) {
-	if len(data.Data.UserResultsByRestIDs) == 0 {
+func latestPublicKeyWithJuiceboxTokens(data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool) {
+	if data == nil || len(data.Data.UserResultsByRestIDs) == 0 {
 		return response.PublicKeyWithTokenMap{}, false
 	}
 	withTokens := data.Data.UserResultsByRestIDs[0].Result.GetPublicKeys.PublicKeysWithTokenMap
+	var latest response.PublicKeyWithTokenMap
+	found := false
 	for _, keyData := range withTokens {
 		if len(keyData.TokenMap.TokenMap) == 0 {
 			continue
 		}
-		return keyData, true
+		if !found || methods.CompareSnowflake(keyData.PublicKeyWithMetadata.Version, latest.PublicKeyWithMetadata.Version) > 0 {
+			latest = keyData
+			found = true
+		}
 	}
-	return response.PublicKeyWithTokenMap{}, false
+	return latest, found
 }
 
 func resolveJuiceboxConfigAndTokens(tokenMap response.KeyStoreTokenMap) (string, map[string]string) {
@@ -483,7 +489,7 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		signingKeyVersion string
 	)
 
-	keyData, hasJuiceboxTokens := firstPublicKeyWithJuiceboxTokens(publicKeysResp)
+	keyData, hasJuiceboxTokens := latestPublicKeyWithJuiceboxTokens(publicKeysResp)
 	needsPINSetup := !hasJuiceboxTokens
 	if needsPINSetup {
 		keys, signingKeyVersion, err = t.bootstrapJuiceboxPIN(ctx, pin)
