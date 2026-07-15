@@ -59,6 +59,13 @@ func (m *PortalMetadata) CanUseXChat() bool {
 	return m != nil && len(m.ConversationKeys) > 0
 }
 
+// CanBackfillXChat returns true when the conversation has been observed on
+// XChat. Unlike interactive actions, history fetches can bootstrap a missing
+// conversation key from the key-change events returned with the page.
+func (m *PortalMetadata) CanBackfillXChat() bool {
+	return m != nil && (m.ConversationToken != "" || len(m.ConversationKeys) > 0)
+}
+
 type UserLoginMetadata struct {
 	Cookies           string    `json:"cookies"`
 	SecretKey         string    `json:"secret_key,omitempty"`
