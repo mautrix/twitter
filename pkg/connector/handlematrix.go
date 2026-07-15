@@ -829,11 +829,16 @@ func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bri
 		return err
 	}
 
-	return tc.client.DeleteXChatMessage(ctx, twittermeow.DeleteXChatMessageOpts{
+	return tc.client.DeleteXChatMessage(ctx, xchatMessageRemovalOpts(conversationID, sequenceID))
+}
+
+// Beeper handles delete-for-self locally, so a Matrix redaction always means delete for everyone.
+func xchatMessageRemovalOpts(conversationID, sequenceID string) twittermeow.DeleteXChatMessageOpts {
+	return twittermeow.DeleteXChatMessageOpts{
 		ConversationID: conversationID,
 		SequenceIDs:    []string{sequenceID},
-		DeleteForAll:   false, // Delete for self only
-	})
+		DeleteForAll:   true,
+	}
 }
 
 func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
