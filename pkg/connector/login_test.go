@@ -175,6 +175,9 @@ func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
 		!strings.Contains(step.CookiesParams.ExtractJS, "createRequestToken") {
 		t.Fatalf("ExtractJS does not load X Castle token generator")
 	}
+	if strings.Contains(step.CookiesParams.ExtractJS, castleTokenJSConfigPlaceholder) {
+		t.Fatal("ExtractJS still contains the embedded script config placeholder")
+	}
 	if !strings.Contains(step.CookiesParams.ExtractJS, castleTokenContextURL) {
 		t.Fatalf("ExtractJS does not include the X login context")
 	}
