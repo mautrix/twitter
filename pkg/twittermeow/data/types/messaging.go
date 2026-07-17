@@ -61,6 +61,7 @@ type ConversationRead struct {
 	AffectsSort     bool   `json:"affects_sort,omitempty"`
 	ConversationID  string `json:"conversation_id,omitempty"`
 	LastReadEventID string `json:"last_read_event_id,omitempty"`
+	SenderID        string `json:"sender_id,omitempty"`
 }
 
 type ConversationAvatarUpdate struct {

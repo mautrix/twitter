@@ -25,11 +25,10 @@ func (c *Client) SendXChatReadReceipt(ctx context.Context, conversationID, lastR
 		return errors.New("last read event ID is required")
 	}
 
+	seenAt := time.Now()
 	if readAt.IsZero() {
-		readAt = time.Now()
+		readAt = seenAt
 	}
-	readAtMillis := readAt.UnixMilli()
-	createdAtMsec := strconv.FormatInt(readAtMillis, 10)
 
 	senderID := c.GetCurrentUserID()
 	if senderID == "" {
@@ -41,45 +40,73 @@ func (c *Client) SendXChatReadReceipt(ctx context.Context, conversationID, lastR
 		return err
 	}
 
-	messageID := uuid.NewString()
-	readEvent := &payload.MarkConversationReadEvent{
-		SeenUntilSequenceId: &lastReadEventID,
-		SeenAtMillis:        &readAtMillis,
+	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
 	}
-	event := &payload.MessageEvent{
-		MessageId:         &messageID,
-		SenderId:          &senderID,
-		ConversationId:    &conversationID,
-		ConversationToken: &conversationToken,
-		CreatedAtMsec:     &createdAtMsec,
-		Detail: &payload.MessageEventDetail{
-			MarkConversationReadEvent: readEvent,
-		},
-	}
-
-	if keyPair, err := c.keyManager.GetOwnSigningKey(ctx); err == nil && keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
-		signature, err := crypto.SignMarkConversationReadEvent(
-			keyPair.SigningKey,
-			messageID,
-			senderID,
-			conversationID,
-			conversationToken,
-			createdAtMsec,
-			lastReadEventID,
-			readAtMillis,
-		)
-		if err != nil {
-			return fmt.Errorf("sign read receipt: %w", err)
-		}
-		sigVersion := crypto.SignatureVersion4
-		event.MessageEventSignature = &payload.MessageEventSignature{
-			Signature:        &signature,
-			PublicKeyVersion: &keyPair.KeyVersion,
-			SignatureVersion: &sigVersion,
-		}
+	event, err := buildXChatReadReceiptEvent(
+		uuid.NewString(), senderID, conversationID, conversationToken,
+		lastReadEventID, readAt, seenAt, keyPair,
+	)
+	if err != nil {
+		return err
 	}
 
 	return c.SendXChatPayload(ctx, &payload.Message{MessageEvent: event})
+}
+
+func buildXChatReadReceiptEvent(
+	messageID, senderID, conversationID, conversationToken, lastReadEventID string,
+	createdAt, seenAt time.Time,
+	keyPair *crypto.SigningKeyPair,
+) (*payload.MessageEvent, error) {
+	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return nil, errors.New("complete signing key is required")
+	}
+
+	seenAtMillis := seenAt.UnixMilli()
+	createdAtMsec := strconv.FormatInt(createdAt.UnixMilli(), 10)
+	signature, err := crypto.SignMarkConversationReadEvent(
+		keyPair.SigningKey,
+		messageID,
+		senderID,
+		conversationID,
+		lastReadEventID,
+		seenAtMillis,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sign read receipt: %w", err)
+	}
+	signingPublicKey, err := crypto.EncodePublicKeySPKI(&keyPair.SigningKey.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("encode signing public key: %w", err)
+	}
+
+	relaySource := int32(0)
+	isGrok := false
+	sigVersion := crypto.SignatureVersion7
+	return &payload.MessageEvent{
+		MessageId:          &messageID,
+		SenderId:           &senderID,
+		ConversationId:     &conversationID,
+		ConversationToken:  &conversationToken,
+		CreatedAtMsec:      &createdAtMsec,
+		RelaySource:        &relaySource,
+		PreviousSequenceId: &lastReadEventID,
+		Detail: &payload.MessageEventDetail{
+			MarkConversationReadEvent: &payload.MarkConversationReadEvent{
+				SeenUntilSequenceId: &lastReadEventID,
+				SeenAtMillis:        &seenAtMillis,
+				IsGrok:              &isGrok,
+			},
+		},
+		MessageEventSignature: &payload.MessageEventSignature{
+			Signature:        &signature,
+			PublicKeyVersion: &keyPair.KeyVersion,
+			SignatureVersion: &sigVersion,
+			SigningPublicKey: &signingPublicKey,
+		},
+	}, nil
 }
 
 func (c *Client) ensureConversationToken(ctx context.Context, conversationID string) (string, error) {

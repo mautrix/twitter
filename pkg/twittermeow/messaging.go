@@ -648,11 +648,6 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 		return fmt.Errorf("sender ID is required")
 	}
 
-	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
-	if err != nil {
-		return fmt.Errorf("get conversation token: %w", err)
-	}
-
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
@@ -662,68 +657,25 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 	}
 
 	deleteAction := payload.DeleteMessageActionTypeForSelf
-	thriftAction := int32(payload.DeleteMessageActionDeleteForSelf)
+	messageDeleteAction := payload.DeleteMessageActionDeleteForSelf
 	if opts.DeleteForAll {
 		deleteAction = payload.DeleteMessageActionTypeForAll
-		thriftAction = int32(payload.DeleteMessageActionDeleteForAll)
+		messageDeleteAction = payload.DeleteMessageActionDeleteForAll
 	}
-
-	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
 
 	actionSignatures := make([]payload.DeleteMessageActionSignature, 0, len(opts.SequenceIDs))
 	for _, seqID := range opts.SequenceIDs {
 		messageID := uuid.NewString()
-
-		detail := &payload.MessageEventDetail{
-			MessageDeleteEvent: &payload.MessageDeleteEvent{
-				SequenceIds:         []string{seqID},
-				DeleteMessageAction: &thriftAction,
-			},
-		}
-
-		encodedDetail, err := crypto.EncodeMessageEventDetail(detail)
-		if err != nil {
-			return fmt.Errorf("encode message event detail for %s: %w", seqID, err)
-		}
-
-		actionSig := payload.DeleteMessageActionSignature{
-			MessageID:                 messageID,
-			EncodedMessageEventDetail: encodedDetail,
-		}
-		actionSig.SignaturePayload = crypto.SignaturePayloadMessageDeleteEvent(
+		actionSig, err := buildXChatDeleteActionSignature(
+			keyPair,
 			messageID,
 			senderID,
 			opts.ConversationID,
-			token,
-			createdAtMsec,
-			encodedDetail,
+			seqID,
+			messageDeleteAction,
 		)
-
-		if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
-			signature, err := crypto.SignMessageDeleteEvent(
-				keyPair.SigningKey,
-				messageID,
-				senderID,
-				opts.ConversationID,
-				token,
-				createdAtMsec,
-				encodedDetail,
-			)
-			if err != nil {
-				return fmt.Errorf("sign delete event for %s: %w", seqID, err)
-			}
-
-			sigVersion := crypto.SignatureVersion4
-			actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
-				Signature:        signature,
-				PublicKeyVersion: keyPair.KeyVersion,
-				SignatureVersion: sigVersion,
-			}
-		} else {
-			c.Logger.Warn().
-				Str("conversation_id", opts.ConversationID).
-				Str("sequence_id", seqID).
-				Msg("Proceeding with unsigned message deletion")
+		if err != nil {
+			return fmt.Errorf("build delete action signature for %s: %w", seqID, err)
 		}
 
 		actionSignatures = append(actionSignatures, actionSig)
@@ -761,6 +713,85 @@ func (c *Client) DeleteXChatMessage(ctx context.Context, opts DeleteXChatMessage
 		RawJSON("response", respBody).
 		Msg("DeleteMessageMutation response")
 
+	return parseDeleteMessageMutationResponse(respBody)
+}
+
+func buildXChatDeleteActionSignature(
+	keyPair *crypto.SigningKeyPair,
+	messageID, senderID, conversationID, sequenceID string,
+	action payload.DeleteMessageAction,
+) (payload.DeleteMessageActionSignature, error) {
+	thriftAction := int32(action)
+	detail := &payload.MessageEventDetail{
+		MessageDeleteEvent: &payload.MessageDeleteEvent{
+			SequenceIds:         []string{sequenceID},
+			DeleteMessageAction: &thriftAction,
+		},
+	}
+	encodedDetail, err := crypto.EncodeMessageEventDetail(detail)
+	if err != nil {
+		return payload.DeleteMessageActionSignature{}, fmt.Errorf("encode message event detail: %w", err)
+	}
+
+	sequenceIDs := []string{sequenceID}
+	signaturePayload := crypto.SignaturePayloadMessageDeleteEvent(
+		messageID,
+		senderID,
+		conversationID,
+		action,
+		sequenceIDs,
+	)
+	signature, err := crypto.SignMessageDeleteEvent(
+		keyPair.SigningKey,
+		messageID,
+		senderID,
+		conversationID,
+		action,
+		sequenceIDs,
+	)
+	if err != nil {
+		return payload.DeleteMessageActionSignature{}, fmt.Errorf("sign message delete event: %w", err)
+	}
+
+	return payload.DeleteMessageActionSignature{
+		MessageID:                 messageID,
+		EncodedMessageEventDetail: encodedDetail,
+		SignaturePayload:          signaturePayload,
+		MessageEventSignature: &payload.DeleteMessageEventSignatureJSON{
+			Signature:        signature,
+			PublicKeyVersion: keyPair.KeyVersion,
+			SignatureVersion: crypto.SignatureVersion7,
+		},
+	}, nil
+}
+
+func parseDeleteMessageMutationResponse(respBody []byte) error {
+	var resp struct {
+		Data struct {
+			DeleteMessages *struct {
+				Typename  string          `json:"__typename"`
+				ErrorCode json.RawMessage `json:"error_code"`
+			} `json:"xchat_delete_messages"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return fmt.Errorf("decode delete message mutation response: %w", err)
+	}
+	if len(resp.Errors) > 0 {
+		return fmt.Errorf("delete message mutation error: %s", resp.Errors[0].Message)
+	}
+	if resp.Data.DeleteMessages == nil {
+		return fmt.Errorf("delete message mutation returned no result")
+	}
+	if code := string(resp.Data.DeleteMessages.ErrorCode); code != "" && code != "null" {
+		return fmt.Errorf("delete message mutation returned error code %s", code)
+	}
+	if resp.Data.DeleteMessages.Typename != "DeleteMessageResponse" {
+		return fmt.Errorf("delete message mutation returned unexpected result %q", resp.Data.DeleteMessages.Typename)
+	}
 	return nil
 }
 

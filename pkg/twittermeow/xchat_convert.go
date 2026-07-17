@@ -284,11 +284,16 @@ func convertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.Mes
 
 // convertXChatMarkReadEvent converts XChat MarkConversationReadEvent to types.ConversationRead
 func convertXChatMarkReadEvent(evt *payload.MessageEvent, read *payload.MarkConversationReadEvent) *types.ConversationRead {
+	readAt := ptr.Val(evt.CreatedAtMsec)
+	if read.SeenAtMillis != nil {
+		readAt = strconv.FormatInt(*read.SeenAtMillis, 10)
+	}
 	return &types.ConversationRead{
 		ID:              ptr.Val(evt.SequenceId),
-		Time:            ptr.Val(evt.CreatedAtMsec),
+		Time:            readAt,
 		ConversationID:  ptr.Val(evt.ConversationId),
 		LastReadEventID: ptr.Val(read.SeenUntilSequenceId),
+		SenderID:        ptr.Val(evt.SenderId),
 	}
 }
 

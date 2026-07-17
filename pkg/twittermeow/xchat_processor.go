@@ -738,6 +738,9 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 				Msg("Failed to decode read event from initial inbox")
 			continue
 		}
+		if ptr.Val(evt.SenderId) == "" && readEvt.ParticipantID.RestID != "" {
+			evt.SenderId = ptr.Ptr(readEvt.ParticipantID.RestID)
+		}
 		if seqID := ptr.Val(evt.SequenceId); seqID != "" {
 			if _, ok := processedSeqIDs[seqID]; ok {
 				continue
