@@ -250,3 +250,14 @@ func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens 
 
 	return parseRecoveredKeyBackupData(secret, logger)
 }
+
+// CheckJuiceboxRegistration checks for a recoverable registration without evaluating a PIN.
+func CheckJuiceboxRegistration(ctx context.Context, configJSON string, authTokens map[string]string, logger zerolog.Logger) error {
+	client, err := newJuiceboxClient(configJSON, authTokens, logger)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	return client.CheckRegistration(ctx)
+}
