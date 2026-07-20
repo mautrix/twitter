@@ -96,7 +96,7 @@ func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
 	}
 }
 
-func TestContinueWebCastleLoginRequestsFreshTokenForPasswordReplay(t *testing.T) {
+func TestContinueWebCastleLoginRequestsFreshTokenForActionlessPasswordReplay(t *testing.T) {
 	t.Setenv("TWITTER_JETFUEL_VIEWER_CONTEXT", "0")
 	const mainPageHTML = `<html><head><meta name="twitter-site-verification" content="verification-token"></head><body><script>
 {"country": "US", "responsive_web_castle_public_key":{"value":"test-public-key"}}
@@ -139,7 +139,7 @@ gt=123456789
 				t.Fatalf("password request %d body = %q, want token %q", passwordRequestCount, body, wantToken)
 			}
 			if passwordRequestCount == 1 {
-				return connectorTestHTTPResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
+				return connectorTestHTTPResponse("/onboarding/web/actions/persist_login_state\x00opaque_field"), nil
 			}
 			return connectorTestHTTPResponse(endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH + "\x00challenge_response\x00Enter your verification code"), nil
 		default:

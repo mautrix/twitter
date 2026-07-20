@@ -634,15 +634,35 @@ func TestSubmitJetfuelCombinedCredentialsReturnsPasswordAction(t *testing.T) {
 	}
 }
 
-func TestSubmitJetfuelPasswordAllowsOneResponseDrivenReplay(t *testing.T) {
+func TestSubmitJetfuelPasswordAllowsOneBoundedReplay(t *testing.T) {
+	structuredActionlessBody := "/onboarding/web/actions/persist_login_state\x00opaque_field"
 	tests := []struct {
 		name         string
+		replayBody   string
 		terminalBody string
 		wantStatus   WebLoginStatus
 	}{
-		{name: "complete", terminalBody: "/home", wantStatus: WebLoginStatusComplete},
 		{
-			name:         "verification challenge",
+			name:         "explicit password action then complete",
+			replayBody:   endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password",
+			terminalBody: "/home",
+			wantStatus:   WebLoginStatusComplete,
+		},
+		{
+			name:         "explicit password action then verification challenge",
+			replayBody:   endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password",
+			terminalBody: endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH + "\x00challenge_response\x00Enter your verification code",
+			wantStatus:   WebLoginStatusNeedsText,
+		},
+		{
+			name:         "structured actionless response then complete",
+			replayBody:   structuredActionlessBody,
+			terminalBody: "/home",
+			wantStatus:   WebLoginStatusComplete,
+		},
+		{
+			name:         "structured actionless response then verification challenge",
+			replayBody:   structuredActionlessBody,
 			terminalBody: endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH + "\x00challenge_response\x00Enter your verification code",
 			wantStatus:   WebLoginStatusNeedsText,
 		},
@@ -680,7 +700,7 @@ func TestSubmitJetfuelPasswordAllowsOneResponseDrivenReplay(t *testing.T) {
 					t.Fatalf("password request %d Castle token = %q, want %q", passwordRequestCount, got, wantToken)
 				}
 				if passwordRequestCount == 1 {
-					return jetfuelTestResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
+					return jetfuelTestResponse(tc.replayBody), nil
 				}
 				return jetfuelTestResponse(tc.terminalBody), nil
 			})}
@@ -761,6 +781,86 @@ func TestSubmitJetfuelPasswordRejectsSecondResponseDrivenReplay(t *testing.T) {
 	}
 	if !client.HasNextJetfuelCastleToken() {
 		t.Fatal("third Castle token was consumed; password replay was not bounded")
+	}
+}
+
+func TestSubmitJetfuelPasswordRejectsSecondStructuredActionlessResponse(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"combined-token", "first-password-token", "replay-password-token", "unused-token"})
+
+	passwordRequestCount := 0
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH {
+			return jetfuelTestResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
+		}
+		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+			t.Fatalf("request path = %s, want login_enter_password", req.URL.Path)
+		}
+		passwordRequestCount++
+		return jetfuelTestResponse("/onboarding/web/actions/persist_login_state\x00opaque_field"), nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{}
+
+	result, err := session.SubmitCombinedCredentials(context.Background(), "test-user", "test-password")
+	if err != nil || result == nil || result.Status != WebLoginStatusNeedsPassword {
+		t.Fatalf("SubmitCombinedCredentials() result = %#v, error = %v", result, err)
+	}
+
+	result, err = session.SubmitPassword(context.Background(), "test-password")
+	if err != nil || result == nil || result.Status != WebLoginStatusNeedsPassword {
+		t.Fatalf("first SubmitPassword() result = %#v, error = %v", result, err)
+	}
+	result, err = session.SubmitPassword(context.Background(), "test-password")
+	if result != nil {
+		t.Fatalf("replay SubmitPassword() result = %#v, want nil", result)
+	}
+	if !errors.Is(err, ErrWebLoginUnexpectedSubtask) {
+		t.Fatalf("replay SubmitPassword() error = %v, want ErrWebLoginUnexpectedSubtask", err)
+	}
+	if passwordRequestCount != 2 {
+		t.Fatalf("password request count = %d, want 2", passwordRequestCount)
+	}
+	if !client.HasNextJetfuelCastleToken() {
+		t.Fatal("third Castle token was consumed; actionless password replay was not bounded")
+	}
+}
+
+func TestSubmitJetfuelPasswordDoesNotReplayUnstructuredResponse(t *testing.T) {
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"password-token", "unused-token"})
+
+	passwordRequestCount := 0
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+			t.Fatalf("request path = %s, want login_enter_password", req.URL.Path)
+		}
+		passwordRequestCount++
+		return jetfuelTestResponse("opaque response with no action path"), nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{
+		identifier:     "test-user",
+		passwordAction: endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH,
+	}
+
+	result, err := session.SubmitPassword(context.Background(), "test-password")
+	if result != nil {
+		t.Fatalf("SubmitPassword() result = %#v, want nil", result)
+	}
+	if !errors.Is(err, ErrWebLoginUnexpectedSubtask) {
+		t.Fatalf("SubmitPassword() error = %v, want ErrWebLoginUnexpectedSubtask", err)
+	}
+	if session.jetfuel.passwordReplayUsed {
+		t.Fatal("unstructured response incorrectly consumed the password replay")
+	}
+	if passwordRequestCount != 1 {
+		t.Fatalf("password request count = %d, want 1", passwordRequestCount)
+	}
+	if !client.HasNextJetfuelCastleToken() {
+		t.Fatal("unused Castle token was consumed after an unstructured response")
 	}
 }
 

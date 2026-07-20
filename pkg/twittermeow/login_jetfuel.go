@@ -285,6 +285,22 @@ func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password 
 		wls.logUnsupportedJetfuelResponse("password_replay_limit", parsed)
 		return nil, fmt.Errorf("%w: jetfuel password action repeated after the allowed replay", ErrWebLoginUnexpectedSubtask)
 	}
+	if parsed.canReplayPasswordWithoutAction() {
+		if !wls.jetfuel.passwordReplayUsed {
+			wls.jetfuel.passwordReplayUsed = true
+			wls.logUnsupportedJetfuelResponse("password_actionless_replay", parsed)
+			return &WebLoginResult{
+				Status:           WebLoginStatusNeedsPassword,
+				CurrentSubtaskID: "JetfuelPassword",
+				Challenge: &WebLoginChallenge{
+					SubtaskID: "JetfuelPassword",
+					Hint:      "Password",
+				},
+			}, nil
+		}
+		wls.logUnsupportedJetfuelResponse("password_replay_limit", parsed)
+		return nil, fmt.Errorf("%w: jetfuel password response remained actionless after the allowed replay", ErrWebLoginUnexpectedSubtask)
+	}
 	wls.logUnsupportedJetfuelResponse("password", parsed)
 	return nil, fmt.Errorf("%w: jetfuel password response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
 }
@@ -825,6 +841,12 @@ func (jfr jetfuelLoginResponse) hasPath(path string) bool {
 
 func (jfr jetfuelLoginResponse) hasField(field string) bool {
 	return slices.Contains(jfr.fields, field)
+}
+
+// X may require one fresh-token replay without repeating the password action in the response.
+// Require parsed structure so an empty or opaque transport response does not trigger another password POST.
+func (jfr jetfuelLoginResponse) canReplayPasswordWithoutAction() bool {
+	return len(jfr.raw) > 0 && len(jfr.paths) > 0 && len(jfr.fields) > 0
 }
 
 func (jfr jetfuelLoginResponse) passwordAction() string {
