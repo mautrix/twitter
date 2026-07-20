@@ -23,11 +23,12 @@ const (
 )
 
 var (
-	ErrWebLoginUnexpectedSubtask      = errors.New("unexpected X login subtask")
-	ErrWebLoginMissingFlowToken       = errors.New("x login response did not include a flow token")
-	ErrWebLoginMissingGuestToken      = errors.New("x guest activation response did not include a guest token")
-	ErrWebLoginUnsupportedAuthMethod  = errors.New("unsupported X login verification method")
-	ErrWebLoginMissingAuthMethodState = errors.New("x login verification method state is missing")
+	ErrWebLoginUnexpectedSubtask          = errors.New("unexpected X login subtask")
+	ErrJetfuelIdentifierNoSupportedAction = fmt.Errorf("%w: jetfuel identifier response did not expose a supported next action", ErrWebLoginUnexpectedSubtask)
+	ErrWebLoginMissingFlowToken           = errors.New("x login response did not include a flow token")
+	ErrWebLoginMissingGuestToken          = errors.New("x guest activation response did not include a guest token")
+	ErrWebLoginUnsupportedAuthMethod      = errors.New("unsupported X login verification method")
+	ErrWebLoginMissingAuthMethodState     = errors.New("x login verification method state is missing")
 )
 
 type WebLoginStatus string

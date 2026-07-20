@@ -55,6 +55,7 @@ type jetfuelLoginState struct {
 	sessionToken       string
 	preludeDispatchID  string
 	userID             string
+	passwordReplayUsed bool
 }
 
 type jetfuelLoginResponse struct {
@@ -136,7 +137,8 @@ func (wls *WebLoginSession) submitJetfuelIdentifier(ctx context.Context, identif
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
-	return nil, fmt.Errorf("%w: jetfuel identifier response did not expose a supported next action", ErrWebLoginUnexpectedSubtask)
+	wls.logUnsupportedJetfuelResponse("identifier", parsed)
+	return nil, ErrJetfuelIdentifierNoSupportedAction
 }
 
 func (wls *WebLoginSession) submitJetfuelCredentials(ctx context.Context, identifier, password string) (*WebLoginResult, error) {
@@ -162,6 +164,9 @@ func (wls *WebLoginSession) submitJetfuelCredentials(ctx context.Context, identi
 }
 
 func isJetfuelPrePasswordParityError(err error) bool {
+	if errors.Is(err, ErrJetfuelIdentifierNoSupportedAction) {
+		return true
+	}
 	var webErr *WebLoginError
 	if !errors.As(err, &webErr) {
 		return false
@@ -217,6 +222,7 @@ func (wls *WebLoginSession) submitJetfuelCombinedCredentials(ctx context.Context
 			},
 		}, nil
 	}
+	wls.logUnsupportedJetfuelResponse("combined_credentials", parsed)
 	return nil, fmt.Errorf("%w: jetfuel credentials response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
 }
 
@@ -263,7 +269,37 @@ func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password 
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
+	if action := parsed.passwordAction(); action != "" {
+		wls.jetfuel.passwordAction = action
+		if !wls.jetfuel.passwordReplayUsed {
+			wls.jetfuel.passwordReplayUsed = true
+			return &WebLoginResult{
+				Status:           WebLoginStatusNeedsPassword,
+				CurrentSubtaskID: "JetfuelPassword",
+				Challenge: &WebLoginChallenge{
+					SubtaskID: "JetfuelPassword",
+					Hint:      "Password",
+				},
+			}, nil
+		}
+		wls.logUnsupportedJetfuelResponse("password_replay_limit", parsed)
+		return nil, fmt.Errorf("%w: jetfuel password action repeated after the allowed replay", ErrWebLoginUnexpectedSubtask)
+	}
+	wls.logUnsupportedJetfuelResponse("password", parsed)
 	return nil, fmt.Errorf("%w: jetfuel password response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
+}
+
+func (wls *WebLoginSession) logUnsupportedJetfuelResponse(stage string, parsed jetfuelLoginResponse) {
+	if wls == nil || wls.client == nil {
+		return
+	}
+	wls.client.Logger.Debug().
+		Str("stage", stage).
+		Int("response_bytes", len(parsed.raw)).
+		Int("string_count", len(parsed.strings)).
+		Int("path_count", len(parsed.paths)).
+		Int("field_count", len(parsed.fields)).
+		Msg("Jetfuel response did not expose a supported next action")
 }
 
 func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, action string) (*WebLoginResult, error) {

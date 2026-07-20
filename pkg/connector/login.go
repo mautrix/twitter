@@ -999,6 +999,9 @@ func (t *TwitterLogin) continueWebCastleLogin(ctx context.Context) (*bridgev2.Lo
 		}
 		if result != nil && result.Status == twittermeow.WebLoginStatusNeedsPassword && t.webLoginPassword != "" {
 			t.webLoginCastleStage = webLoginCastleStagePassword
+			if !t.webLogin.Client().HasNextJetfuelCastleToken() {
+				return t.makeWebLoginCastleTokenStep("X needs a fresh browser token to continue this login."), nil
+			}
 			continue
 		}
 		t.webLoginCastleStage = ""
