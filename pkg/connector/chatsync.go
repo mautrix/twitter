@@ -118,8 +118,14 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 				tc.connector.br.WakeupBackfillQueue()
 			}
 		}
-	} else {
-		if shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
+	} else if shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
+		if evt := bridgev2.GetRemoteEventFromContext(ctx); evt != nil && evt.GetPortalKey().ID == portal.PortalKey.ID {
+			// Already inside this portal's own event handler (e.g. RefreshConversationKeys
+			// during message conversion). Queueing another event for the same portal would
+			// self-deadlock when the portal event queue is synchronous (PortalEventBuffer=0),
+			// so apply the update directly instead.
+			portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
+		} else {
 			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 				EventMeta: simplevent.EventMeta{
 					Type:      bridgev2.RemoteEventChatInfoChange,
