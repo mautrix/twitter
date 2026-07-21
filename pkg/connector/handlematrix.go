@@ -335,6 +335,10 @@ func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
 		return "X rejected this message: contents too large"
 	case payload.FailureTypeRecipientHasNotTrustedConversation:
 		return "X rejected this message: recipient has not trusted this conversation"
+	case payload.FailureTypeInvalidSignatureVersion:
+		return "X rejected this message: invalid signature version"
+	case payload.FailureTypeSignatureVerificationFailed:
+		return "X rejected this message: signature verification failed"
 	default:
 		return fmt.Sprintf("X rejected this message: failure type %d", ptr.Val(failure.FailureType))
 	}
@@ -604,12 +608,21 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 	return err
 }
 
-func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
-	conversationID := ParsePortalID(msg.Portal.ID)
-	readAt := msg.ReadUpTo
+func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt time.Time) {
+	readUpTo = msg.ReadUpTo
+	if readUpTo.IsZero() {
+		readUpTo = msg.Receipt.Timestamp
+	}
+	readAt = msg.Receipt.Timestamp
 	if readAt.IsZero() {
 		readAt = time.Now()
 	}
+	return readUpTo, readAt
+}
+
+func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
+	conversationID := ParsePortalID(msg.Portal.ID)
+	readUpTo, readAt := matrixReadReceiptTimes(msg)
 
 	canUseXChat := msg.Portal.Metadata.(*PortalMetadata).CanUseXChat()
 	isAllDigits := func(s string) bool {
@@ -631,6 +644,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 		Str("event_id", msg.EventID.String()).
 		Bool("can_use_xchat", canUseXChat).
 		Bool("implicit", msg.Implicit).
+		Time("read_up_to", readUpTo).
 		Time("read_at", readAt).
 		Msg("Handling Matrix read receipt")
 
@@ -661,7 +675,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 			err         error
 		)
 		if !canUseXChat {
-			lastMessage, err = tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, readAt)
+			lastMessage, err = tc.userLogin.Bridge.DB.Message.GetLastPartAtOrBeforeTime(ctx, msg.Portal.PortalKey, readUpTo)
 			if err != nil {
 				return err
 			}
@@ -678,7 +692,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 				return err
 			}
 			for _, m := range recent {
-				if m == nil || m.Timestamp.After(readAt) {
+				if m == nil || m.Timestamp.After(readUpTo) {
 					continue
 				}
 				candidate := ParseMessageID(m.ID)
@@ -693,7 +707,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 		log.Debug().
 			Str("conversation_id", conversationID).
 			Bool("can_use_xchat", canUseXChat).
-			Time("read_at", readAt).
+			Time("read_up_to", readUpTo).
 			Msg("Not sending read receipt: no suitable target message found")
 		return nil
 	}
@@ -703,6 +717,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 		Bool("can_use_xchat", canUseXChat).
 		Str("last_read_event_id", lastReadEventID).
 		Bool("last_read_event_id_is_numeric", isAllDigits(lastReadEventID)).
+		Time("read_up_to", readUpTo).
 		Time("read_at", readAt).
 		Msg("Sending read receipt")
 
@@ -727,21 +742,6 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 			return tc.client.MarkConversationRead(ctx, params)
 		}
 		return xchatErr
-	}
-
-	// Best-effort: also mark read via REST for explicit receipts.
-	// This helps the XChat web UI which appears to rely on the legacy DM read state.
-	if !msg.Implicit {
-		params := &payload.MarkConversationReadQuery{
-			ConversationID:  ConvertConversationIDToREST(conversationID),
-			LastReadEventID: lastReadEventID,
-		}
-		if err := tc.client.MarkConversationRead(ctx, params); err != nil {
-			log.Debug().
-				Err(err).
-				Str("conversation_id", conversationID).
-				Msg("REST mark_read failed after XChat read receipt")
-		}
 	}
 
 	return nil
@@ -829,11 +829,16 @@ func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bri
 		return err
 	}
 
-	return tc.client.DeleteXChatMessage(ctx, twittermeow.DeleteXChatMessageOpts{
+	return tc.client.DeleteXChatMessage(ctx, xchatMessageRemovalOpts(conversationID, sequenceID))
+}
+
+// Beeper handles delete-for-self locally, so a Matrix redaction always means delete for everyone.
+func xchatMessageRemovalOpts(conversationID, sequenceID string) twittermeow.DeleteXChatMessageOpts {
+	return twittermeow.DeleteXChatMessageOpts{
 		ConversationID: conversationID,
 		SequenceIDs:    []string{sequenceID},
-		DeleteForAll:   false, // Delete for self only
-	})
+		DeleteForAll:   true,
+	}
 }
 
 func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {

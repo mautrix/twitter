@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 type TwitterLogin struct {
@@ -644,7 +646,7 @@ func (t *TwitterLogin) detectPINSetupNeeded(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, hasJuiceboxTokens := firstPublicKeyWithJuiceboxTokens(publicKeysResp)
+	_, hasJuiceboxTokens := latestPublicKeyWithJuiceboxTokens(publicKeysResp)
 	needsSetup := !hasJuiceboxTokens
 	t.User.Log.Debug().
 		Bool("has_juicebox_tokens", hasJuiceboxTokens).
@@ -653,27 +655,82 @@ func (t *TwitterLogin) detectPINSetupNeeded(ctx context.Context) (bool, error) {
 	return needsSetup, nil
 }
 
-func firstPublicKeyWithJuiceboxTokens(data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool) {
-	if len(data.Data.UserResultsByRestIDs) == 0 {
+func latestPublicKeyWithJuiceboxTokens(data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool) {
+	if data == nil || len(data.Data.UserResultsByRestIDs) == 0 {
 		return response.PublicKeyWithTokenMap{}, false
 	}
 	withTokens := data.Data.UserResultsByRestIDs[0].Result.GetPublicKeys.PublicKeysWithTokenMap
+	var latest response.PublicKeyWithTokenMap
+	found := false
 	for _, keyData := range withTokens {
 		if len(keyData.TokenMap.TokenMap) == 0 {
 			continue
 		}
-		return keyData, true
+		if !found || methods.CompareSnowflake(keyData.PublicKeyWithMetadata.Version, latest.PublicKeyWithMetadata.Version) > 0 {
+			latest = keyData
+			found = true
+		}
 	}
-	return response.PublicKeyWithTokenMap{}, false
+	return latest, found
 }
 
 func resolveJuiceboxConfigAndTokens(tokenMap response.KeyStoreTokenMap) (string, map[string]string) {
-	juiceboxConfigJSON := tokenMap.KeyStoreTokenMapJSON
+	juiceboxConfigJSON := strings.TrimSpace(tokenMap.KeyStoreTokenMapJSON)
 	authTokens := make(map[string]string, len(tokenMap.TokenMap))
 	for _, entry := range tokenMap.TokenMap {
-		authTokens[strings.ToLower(entry.Key)] = entry.Value.Token
+		realmID := strings.ToLower(strings.TrimSpace(entry.Key))
+		token := strings.TrimSpace(entry.Value.Token)
+		if realmID != "" && token != "" {
+			authTokens[realmID] = token
+		}
 	}
 	return juiceboxConfigJSON, authTokens
+}
+
+type juiceboxRegistrationChecker func(context.Context, string, map[string]string) error
+
+func selectRegisteredJuiceboxKey(
+	ctx context.Context,
+	data *response.GetPublicKeysResponse,
+	checkRegistration juiceboxRegistrationChecker,
+) (response.PublicKeyWithTokenMap, bool, error) {
+	if data == nil || len(data.Data.UserResultsByRestIDs) == 0 {
+		return response.PublicKeyWithTokenMap{}, false, nil
+	}
+
+	candidates := slices.Clone(data.Data.UserResultsByRestIDs[0].Result.GetPublicKeys.PublicKeysWithTokenMap)
+	slices.SortStableFunc(candidates, func(a, b response.PublicKeyWithTokenMap) int {
+		return methods.CompareSnowflake(b.PublicKeyWithMetadata.Version, a.PublicKeyWithMetadata.Version)
+	})
+
+	hasCandidates := false
+	for _, keyData := range candidates {
+		configJSON, authTokens := resolveJuiceboxConfigAndTokens(keyData.TokenMap)
+		if configJSON == "" || len(authTokens) == 0 {
+			continue
+		}
+		hasCandidates = true
+		err := checkRegistration(ctx, configJSON, authTokens)
+		switch {
+		case err == nil:
+			return keyData, true, nil
+		case errors.Is(err, juiceboxgo.ErrNotRegistered):
+			continue
+		default:
+			return response.PublicKeyWithTokenMap{}, true, err
+		}
+	}
+	if hasCandidates {
+		return response.PublicKeyWithTokenMap{}, true, juiceboxgo.ErrNotRegistered
+	}
+	return response.PublicKeyWithTokenMap{}, false, nil
+}
+
+func (t *TwitterLogin) selectRegisteredJuiceboxKey(ctx context.Context, data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool, error) {
+	logger := t.User.Log.With().Str("component", "juicebox").Logger()
+	return selectRegisteredJuiceboxKey(ctx, data, func(ctx context.Context, configJSON string, authTokens map[string]string) error {
+		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, logger)
+	})
 }
 
 func validateRecoveredKey(name, key string) error {
@@ -1285,14 +1342,23 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 		signingKeyVersion string
 	)
 
-	keyData, hasJuiceboxTokens := firstPublicKeyWithJuiceboxTokens(publicKeysResp)
-	needsPINSetup := !hasJuiceboxTokens
+	keyData, hasJuiceboxCandidates, selectionErr := t.selectRegisteredJuiceboxKey(ctx, publicKeysResp)
+	needsPINSetup := !hasJuiceboxCandidates
 	if needsPINSetup {
 		keys, signingKeyVersion, err = t.bootstrapJuiceboxPIN(ctx, pin)
 		if err != nil {
 			return nil, err
 		}
 	} else {
+		if selectionErr != nil {
+			if mappedErr := mapCommonJuiceboxError(selectionErr); mappedErr != nil {
+				return nil, mappedErr
+			}
+			if errors.Is(selectionErr, juiceboxgo.ErrNotRegistered) {
+				return nil, ErrJuiceboxNotRegistered
+			}
+			return nil, fmt.Errorf("failed to select registered juicebox key: %w", selectionErr)
+		}
 		var retryStep *bridgev2.LoginStep
 		keys, signingKeyVersion, retryStep, err = t.recoverJuiceboxPIN(ctx, pin, keyData)
 		if err != nil {

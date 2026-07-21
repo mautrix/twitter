@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
+	"strings"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
@@ -18,7 +20,7 @@ const (
 	SignatureVersion3 = "3"
 	// SignatureVersion7 is the current send signature version for MessageCreateEvent.
 	SignatureVersion7 = "7"
-	// SignatureVersion4 is the current signature version for MarkConversationReadEvent.
+	// SignatureVersion4 is the legacy signature version for MarkConversationReadEvent.
 	SignatureVersion4 = "4"
 
 	// SignatureSize is the size of a raw ECDSA P-256 signature (r || s).
@@ -35,24 +37,29 @@ func SignaturePreimage(messageID, senderID, conversationID, keyVersion string, c
 	return []byte(preimage)
 }
 
-// SignaturePreimageMarkConversationReadEvent builds the preimage for signature version 4.
-func SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID string, seenAtMillis int64) []byte {
-	preimage := fmt.Sprintf("MarkConversationReadEvent,%s,%s,%s,%s,%s,%s,%d",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID, seenAtMillis)
+// SignaturePreimageMarkConversationReadEvent builds the current signature version 7 preimage.
+func SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, seenUntilSequenceID string, seenAtMillis int64) []byte {
+	preimage := fmt.Sprintf("MarkConversationReadEvent,%s,%s,%s,%s,%d",
+		messageID, senderID, conversationID, seenUntilSequenceID, seenAtMillis)
 	return []byte(preimage)
 }
 
-// SignaturePreimageMessageDeleteEvent builds the preimage for signature version 4 for delete events.
-// Format: "MessageDeleteEvent,{message_id},{sender_id},{conversation_id},{conversation_token},{created_at_msec},{encoded_message_event_detail}"
-func SignaturePreimageMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
-	preimage := SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+// SignaturePreimageMessageDeleteEvent builds the current signature version 7 preimage.
+func SignaturePreimageMessageDeleteEvent(messageID, senderID, conversationID string, action payload.DeleteMessageAction, sequenceIDs []string) []byte {
+	preimage := SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID, action, sequenceIDs)
 	return []byte(preimage)
 }
 
 // SignaturePayloadMessageDeleteEvent builds the canonical signature payload for MessageDeleteEvent.
-func SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) string {
-	return fmt.Sprintf("MessageDeleteEvent,%s,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+func SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID string, action payload.DeleteMessageAction, sequenceIDs []string) string {
+	fields := []string{
+		"MessageDeleteEvent",
+		messageID,
+		senderID,
+		conversationID,
+		strconv.FormatInt(int64(action), 10),
+	}
+	return strings.Join(append(fields, sequenceIDs...), ",")
 }
 
 // Sign creates an ECDSA P-256 signature over the given preimage.
@@ -87,14 +94,14 @@ func SignMessage(privateKey *ecdsa.PrivateKey, messageID, senderID, conversation
 }
 
 // SignMarkConversationReadEvent creates a signature for a MarkConversationReadEvent.
-func SignMarkConversationReadEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID string, seenAtMillis int64) (string, error) {
-	preimage := SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, seenUntilSequenceID, seenAtMillis)
+func SignMarkConversationReadEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, seenUntilSequenceID string, seenAtMillis int64) (string, error) {
+	preimage := SignaturePreimageMarkConversationReadEvent(messageID, senderID, conversationID, seenUntilSequenceID, seenAtMillis)
 	return Sign(privateKey, preimage)
 }
 
 // SignMessageDeleteEvent creates a signature for a MessageDeleteEvent.
-func SignMessageDeleteEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
-	preimage := SignaturePreimageMessageDeleteEvent(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
+func SignMessageDeleteEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID string, action payload.DeleteMessageAction, sequenceIDs []string) (string, error) {
+	preimage := SignaturePreimageMessageDeleteEvent(messageID, senderID, conversationID, action, sequenceIDs)
 	return Sign(privateKey, preimage)
 }
 

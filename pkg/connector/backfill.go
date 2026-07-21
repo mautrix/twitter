@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -21,7 +22,10 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
-var _ bridgev2.BackfillingNetworkAPI = (*TwitterClient)(nil)
+var (
+	_ bridgev2.BackfillingNetworkAPI           = (*TwitterClient)(nil)
+	_ bridgev2.BackfillingNetworkAPIWithLimits = (*TwitterClient)(nil)
+)
 
 const xchatBackfillMaxInt = "9223372036854775807"
 const restFallbackCursorPrefix = "rest_fallback:"
@@ -32,10 +36,14 @@ type restBackfillOptions struct {
 	// This is needed when transitioning from XChat to REST where the anchor ID
 	// may be an XChat sequence ID that REST can't paginate with.
 	IgnoreAnchorForQuery bool
-	// IgnoreAnchorForFiltering skips message-side anchor filtering after a REST
-	// page is fetched. This is needed in cross-protocol fallback, where the
-	// anchor originates from XChat and doesn't map cleanly to REST history.
-	IgnoreAnchorForFiltering bool
+}
+
+func (tc *TwitterClient) GetBackfillMaxBatchCount(_ context.Context, portal *bridgev2.Portal, _ *database.BackfillTask) int {
+	overrideKey := "dm"
+	if strings.HasPrefix(ParsePortalID(portal.PortalKey.ID), "g") {
+		overrideKey = "group_dm"
+	}
+	return portal.Bridge.Config.Backfill.Queue.GetOverride(overrideKey)
 }
 
 type restBackfillCursorMode int
@@ -61,7 +69,6 @@ func parseRESTBackfillCursorMode(cursor networkid.PaginationCursor) restBackfill
 func prepareRESTBackfillFetchParams(
 	fetchParams bridgev2.FetchMessagesParams,
 	mode restBackfillCursorMode,
-	crossProtocol bool,
 ) (bridgev2.FetchMessagesParams, restBackfillOptions) {
 	restParams := fetchParams
 	opts := restBackfillOptions{}
@@ -69,12 +76,8 @@ func prepareRESTBackfillFetchParams(
 	case restBackfillCursorModeFallback:
 		restParams.Cursor = ""
 		opts.IgnoreAnchorForQuery = true
-		opts.IgnoreAnchorForFiltering = true
 	case restBackfillCursorModePagination:
 		restParams.Cursor = networkid.PaginationCursor(strings.TrimPrefix(string(fetchParams.Cursor), restPaginationCursorPrefix))
-		if crossProtocol {
-			opts.IgnoreAnchorForFiltering = true
-		}
 	}
 	return restParams, opts
 }
@@ -84,9 +87,8 @@ func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
 	conversationID string,
 	fetchParams bridgev2.FetchMessagesParams,
 	mode restBackfillCursorMode,
-	crossProtocol bool,
 ) (*bridgev2.FetchMessagesResponse, error) {
-	restParams, opts := prepareRESTBackfillFetchParams(fetchParams, mode, crossProtocol)
+	restParams, opts := prepareRESTBackfillFetchParams(fetchParams, mode)
 	restResp, err := tc.fetchRESTMessagesWithOptions(ctx, conversationID, restParams, opts)
 	if err != nil {
 		return nil, err
@@ -99,14 +101,15 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
 	cursorMode := parseRESTBackfillCursorMode(fetchParams.Cursor)
 
-	// Use REST API backfill for conversations without encryption keys.
-	if !meta.CanUseXChat() {
-		return tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, cursorMode, false)
+	// XChat history pages include missing key-change events, so a stored
+	// conversation token is enough to bootstrap keys for encrypted backfill.
+	if !meta.CanBackfillXChat() {
+		return tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, cursorMode)
 	}
 
 	// Prefixed cursors indicate an in-progress XChat -> REST transition.
 	if cursorMode != restBackfillCursorModeRaw {
-		return tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, cursorMode, true)
+		return tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, cursorMode)
 	}
 
 	if fetchParams.Forward {
@@ -192,7 +195,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		Bool("page_has_more", parsed.pageHasMore).
 		Int("encoded_event_count", parsed.encodedEventCount).
 		Msg("XChat backfill exhausted, attempting REST fallback")
-	restResp, err := tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, restBackfillCursorModeFallback, true)
+	restResp, err := tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, restBackfillCursorModeFallback)
 	if err != nil {
 		return nil, err
 	}
@@ -734,7 +737,7 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 
 		// Keep only messages strictly on the requested side of the anchor.
 		// This avoids poisoning the queue when transitioning from XChat IDs to REST IDs.
-		if fetchParams.AnchorMessage != nil && !opts.IgnoreAnchorForFiltering {
+		if fetchParams.AnchorMessage != nil {
 			anchorID := ParseMessageID(fetchParams.AnchorMessage.ID)
 			if canonicalID != "" && canonicalID == anchorID {
 				filteredAnchorCount++
@@ -804,7 +807,6 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 	if len(backfillMessages) == 0 &&
 		!fetchParams.Forward &&
 		fetchParams.AnchorMessage != nil &&
-		!opts.IgnoreAnchorForFiltering &&
 		inbox.MinEntryID != "" &&
 		reqQuery.MaxID != inbox.MinEntryID {
 		result.HasMore = true
@@ -853,7 +855,6 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		Str("cursor", string(result.Cursor)).
 		Bool("forward", fetchParams.Forward).
 		Bool("ignore_anchor_for_query", opts.IgnoreAnchorForQuery).
-		Bool("ignore_anchor_for_filtering", opts.IgnoreAnchorForFiltering).
 		Bool("forced_older_page", forcedOlderPage).
 		Msg("REST API backfill response")
 
