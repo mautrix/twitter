@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -81,6 +82,79 @@ func TestHandleWebLoginCredentialsErrorRetriesOnlyCredentialErrors(t *testing.T)
 	}
 }
 
+func TestHandleWebLoginVerificationErrorRetriesOnlyCodeErrors(t *testing.T) {
+	challenge := &twittermeow.WebLoginChallenge{Description: "Enter the verification code from X."}
+	step, err := handleWebLoginVerificationError(challenge, &twittermeow.WebLoginError{
+		Code:    32,
+		Message: "The verification code is incorrect",
+	})
+	if err != nil {
+		t.Fatalf("handleWebLoginVerificationError(wrong code) error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDVerification {
+		t.Fatalf("handleWebLoginVerificationError(wrong code) step = %#v, want verification step", step)
+	}
+
+	step, err = handleWebLoginVerificationError(challenge, &twittermeow.WebLoginError{
+		Code:    399,
+		Message: "We've temporarily limited your login. Please try again later.",
+	})
+	if step != nil {
+		t.Fatalf("handleWebLoginVerificationError(temporary limit) step = %#v, want nil", step)
+	}
+	var respErr bridgev2.RespError
+	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
+		t.Fatalf("handleWebLoginVerificationError(temporary limit) error = %#v, want ErrWebLoginFailed", err)
+	}
+}
+
+func TestHandleWebLoginAuthMethodErrorRetriesOnlyUnsupportedSelection(t *testing.T) {
+	methods := []twittermeow.WebLoginAuthMethod{{ID: "Totp", Name: "Authenticator App", Supported: true}}
+	step, err := handleWebLoginAuthMethodError(methods, fmt.Errorf("%w: Security Key", twittermeow.ErrWebLoginUnsupportedAuthMethod))
+	if err != nil {
+		t.Fatalf("handleWebLoginAuthMethodError(unsupported method) error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDAuthMethod {
+		t.Fatalf("handleWebLoginAuthMethodError(unsupported method) step = %#v, want auth method step", step)
+	}
+
+	step, err = handleWebLoginAuthMethodError(methods, &twittermeow.WebLoginError{
+		Code:    399,
+		Message: "We've temporarily limited your login. Please try again later.",
+	})
+	if step != nil {
+		t.Fatalf("handleWebLoginAuthMethodError(temporary limit) step = %#v, want nil", step)
+	}
+	var respErr bridgev2.RespError
+	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
+		t.Fatalf("handleWebLoginAuthMethodError(temporary limit) error = %#v, want ErrWebLoginFailed", err)
+	}
+
+	step, err = handleWebLoginAuthMethodError(methods, twittermeow.ErrWebLoginMissingAuthMethodState)
+	if err != nil {
+		t.Fatalf("handleWebLoginAuthMethodError(missing state) error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDCredentials {
+		t.Fatalf("handleWebLoginAuthMethodError(missing state) step = %#v, want credentials step", step)
+	}
+}
+
+func TestHandleWebCastleStageErrorMakesPreludeFailureTerminal(t *testing.T) {
+	step, err := handleWebCastleStageError(
+		webLoginCastleStageBeginTwoFactor,
+		nil,
+		nil,
+		fmt.Errorf("%w: two-factor prelude response", twittermeow.ErrWebLoginUnexpectedSubtask),
+	)
+	if step != nil {
+		t.Fatalf("handleWebCastleStageError() step = %#v, want nil", step)
+	}
+	var respErr bridgev2.RespError
+	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
+		t.Fatalf("handleWebCastleStageError() error = %#v, want ErrWebLoginFailed", err)
+	}
+}
+
 func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
 	var tc TwitterConnector
 	flows := tc.GetLoginFlows()
@@ -93,6 +167,101 @@ func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(flows[0].Description), "cookie") {
 		t.Fatalf("flow description = %q, want native login flow", flows[0].Description)
+	}
+}
+
+func TestWebCastleLoginStartsCombinedAndReturnsCode399AsFailure(t *testing.T) {
+	t.Setenv("TWITTER_JETFUEL_VIEWER_CONTEXT", "0")
+	const mainPageHTML = `<html><head><meta name="twitter-site-verification" content="verification-token"></head><body><script>
+{"country": "US", "responsive_web_castle_public_key":{"value":"test-public-key"}}
+gt=123456789
+123:"ondemand.castle",{123:"abcdef"}
+</script></body></html>`
+
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+	combinedRequestCount := 0
+	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/i/jf/onboarding/web":
+			resp := connectorTestHTTPResponse(mainPageHTML)
+			resp.Header.Add("Set-Cookie", "guest_id=v1%3A123456789; Path=/; Secure")
+			return resp, nil
+		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_LANDING_PATH:
+			return connectorTestHTTPResponse("landing"), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi/onboarding/web" && req.URL.Query().Get("mode") == "login":
+			return connectorTestHTTPResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH:
+			combinedRequestCount++
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("ReadAll(combined request) error = %v", err)
+			}
+			for _, value := range []string{"username_or_email=test-user", "password=test-password", "%24castle_token=combined-token"} {
+				if !strings.Contains(string(body), value) {
+					t.Fatalf("combined request body missing %q", value)
+				}
+			}
+			return connectorTestHTTPResponse("We've temporarily limited your login. Please try again later."), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})}
+	session := twittermeow.NewWebLoginSession(client)
+	result, err := session.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !session.UsesJetfuel() || result == nil || result.Status != twittermeow.WebLoginStatusNeedsIdentifier {
+		t.Fatalf("Start() result = %#v, UsesJetfuel = %t", result, session.UsesJetfuel())
+	}
+
+	login := &TwitterLogin{
+		User:               &bridgev2.User{Log: zerolog.Nop()},
+		webLogin:           session,
+		webLoginIdentifier: "test-user",
+		webLoginPassword:   "test-password",
+	}
+	step, err := login.continueStartedCredentialsLogin(context.Background(), result)
+	if err != nil {
+		t.Fatalf("continueStartedCredentialsLogin() error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDCastleToken {
+		t.Fatalf("continueStartedCredentialsLogin() step = %#v, want Castle token step", step)
+	}
+	if login.webLoginCastleStage != webLoginCastleStageCombined {
+		t.Fatalf("initial Castle stage = %q, want combined", login.webLoginCastleStage)
+	}
+
+	client.SetNextJetfuelCastleTokens([]string{"combined-token", "unused-token"})
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs).With().Str("login_id", "test-login").Logger()
+	ctx := logger.WithContext(context.Background())
+	step, err = login.continueWebCastleLogin(ctx)
+	if step != nil {
+		t.Fatalf("continueWebCastleLogin() step = %#v, want nil", step)
+	}
+	var respErr bridgev2.RespError
+	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
+		t.Fatalf("continueWebCastleLogin() error = %#v, want ErrWebLoginFailed", err)
+	}
+	if login.webLoginCastleStage != "" {
+		t.Fatalf("Castle stage = %q, want cleared", login.webLoginCastleStage)
+	}
+	if combinedRequestCount != 1 {
+		t.Fatalf("combined request count = %d, want 1", combinedRequestCount)
+	}
+	if !client.HasNextJetfuelCastleToken() {
+		t.Fatal("unused Castle token was consumed after code 399")
+	}
+	logged := logs.String()
+	for _, field := range []string{"\"login_id\":\"test-login\"", "\"stage\":\"combined\"", "\"error_kind\":\"x_response\"", "\"error_code\":399"} {
+		if !strings.Contains(logged, field) {
+			t.Fatalf("safe Castle failure log missing %q: %s", field, logged)
+		}
+	}
+	if strings.Contains(logged, "temporarily limited") || strings.Contains(logged, "test-password") || strings.Contains(logged, "combined-token") {
+		t.Fatalf("Castle failure log leaked response or submitted values: %s", logged)
 	}
 }
 

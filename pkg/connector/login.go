@@ -28,6 +28,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -918,19 +919,29 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 	if err != nil {
 		return nil, webLoginFailureError(err)
 	}
+	return t.continueStartedCredentialsLogin(ctx, result)
+}
+
+func (t *TwitterLogin) continueStartedCredentialsLogin(ctx context.Context, result *twittermeow.WebLoginResult) (*bridgev2.LoginStep, error) {
 	if result.Status != twittermeow.WebLoginStatusNeedsIdentifier {
 		return t.handleWebLoginResult(ctx, result)
 	}
 	if t.webLogin.UsesJetfuel() {
-		t.webLoginCastleStage = webLoginCastleStageIdentifier
-		return t.makeWebLoginCastleTokenStep(""), nil
+		return t.startWebCastleLogin(), nil
 	}
 
-	result, err = t.webLogin.SubmitCredentials(ctx, identifier, password)
+	result, err := t.webLogin.SubmitCredentials(ctx, t.webLoginIdentifier, t.webLoginPassword)
 	if err != nil {
 		return handleWebLoginCredentialsError(err)
 	}
 	return t.handleWebLoginResult(ctx, result)
+}
+
+func (t *TwitterLogin) startWebCastleLogin() *bridgev2.LoginStep {
+	// The browser sends username and password together in begin_login. Starting with the
+	// combined form avoids advancing the same Jetfuel session with an identifier-only POST.
+	t.webLoginCastleStage = webLoginCastleStageCombined
+	return t.makeWebLoginCastleTokenStep("")
 }
 
 func (t *TwitterLogin) isWaitingForWebLoginCastleToken() bool {
@@ -994,7 +1005,10 @@ func decodeCastleTokenBatchInput(input map[string]string) ([]string, error) {
 func (t *TwitterLogin) continueWebCastleLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
 	for attempts := 0; attempts < castleTokenBatchSize; attempts++ {
 		stage := t.webLoginCastleStage
-		t.User.Log.Debug().Str("stage", stage).Msg("Submitting X Jetfuel Castle token")
+		zerolog.Ctx(ctx).Debug().
+			Str("stage", stage).
+			Bool("castle_token_available", t.webLogin.Client().HasNextJetfuelCastleToken()).
+			Msg("Processing X Jetfuel Castle stage")
 
 		var (
 			result *twittermeow.WebLoginResult
@@ -1039,14 +1053,9 @@ func (t *TwitterLogin) continueWebCastleLogin(ctx context.Context) (*bridgev2.Lo
 				}
 				return t.makeWebLoginCastleTokenStep("X needs a fresh browser token to continue this login."), nil
 			}
+			logWebCastleFailure(ctx, stage, err)
 			t.webLoginCastleStage = ""
-			if stage == webLoginCastleStageText {
-				return makeVerificationStep(t.webLoginChallenge, webLoginErrorInstructions(err)), nil
-			}
-			if stage == webLoginCastleStageAuthMethod {
-				return makeAuthMethodStep(t.webLoginMethods, webLoginErrorInstructions(err)), nil
-			}
-			return makeCredentialsStep(webLoginErrorInstructions(err)), nil
+			return handleWebCastleStageError(stage, t.webLoginChallenge, t.webLoginMethods, err)
 		}
 		if stage == webLoginCastleStageAuthMethod {
 			t.webLoginAuthMethod = ""
@@ -1065,6 +1074,33 @@ func (t *TwitterLogin) continueWebCastleLogin(ctx context.Context) (*bridgev2.Lo
 		return t.handleWebLoginResult(ctx, result)
 	}
 	return t.makeWebLoginCastleTokenStep("X needs a fresh browser token to continue this login."), nil
+}
+
+func logWebCastleFailure(ctx context.Context, stage string, err error) {
+	event := zerolog.Ctx(ctx).Debug().Str("stage", stage)
+	var webErr *twittermeow.WebLoginError
+	switch {
+	case errors.As(err, &webErr):
+		event = event.Str("error_kind", "x_response").Int("error_code", webErr.Code)
+	case errors.Is(err, twittermeow.ErrWebLoginUnexpectedSubtask):
+		event = event.Str("error_kind", "unsupported_response")
+	default:
+		event = event.Str("error_kind", "request")
+	}
+	event.Msg("X Jetfuel Castle stage failed")
+}
+
+func handleWebCastleStageError(stage string, challenge *twittermeow.WebLoginChallenge, methods []twittermeow.WebLoginAuthMethod, err error) (*bridgev2.LoginStep, error) {
+	switch stage {
+	case webLoginCastleStageIdentifier, webLoginCastleStagePassword, webLoginCastleStageCombined:
+		return handleWebLoginCredentialsError(err)
+	case webLoginCastleStageText:
+		return handleWebLoginVerificationError(challenge, err)
+	case webLoginCastleStageAuthMethod:
+		return handleWebLoginAuthMethodError(methods, err)
+	default:
+		return nil, webLoginFailureError(err)
+	}
 }
 
 func castleWebviewCookies(input map[string]string) map[string]string {
@@ -1226,6 +1262,16 @@ func handleWebLoginCredentialsError(err error) (*bridgev2.LoginStep, error) {
 func handleWebLoginVerificationError(challenge *twittermeow.WebLoginChallenge, err error) (*bridgev2.LoginStep, error) {
 	if isWebLoginVerificationInputError(err) {
 		return makeVerificationStep(challenge, webLoginErrorInstructions(err)), nil
+	}
+	return nil, webLoginFailureError(err)
+}
+
+func handleWebLoginAuthMethodError(methods []twittermeow.WebLoginAuthMethod, err error) (*bridgev2.LoginStep, error) {
+	if errors.Is(err, twittermeow.ErrWebLoginUnsupportedAuthMethod) {
+		return makeAuthMethodStep(methods, webLoginErrorInstructions(err)), nil
+	}
+	if errors.Is(err, twittermeow.ErrWebLoginMissingAuthMethodState) {
+		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
 	}
 	return nil, webLoginFailureError(err)
 }
