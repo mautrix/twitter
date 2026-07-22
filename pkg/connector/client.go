@@ -56,6 +56,10 @@ type TwitterClient struct {
 	ensurePortalLocks sync.Map
 
 	pollingChatResyncLast sync.Map
+
+	connectLock    sync.Mutex
+	connectCancel  context.CancelFunc
+	connectRunLock sync.Mutex
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -112,6 +116,42 @@ const (
 )
 
 func (tc *TwitterClient) Connect(ctx context.Context) {
+	// Bridge startup waits for every NetworkAPI.Connect call, while inbox import may take minutes.
+	tc.startConnect(ctx, tc.connect)
+}
+
+func (tc *TwitterClient) startConnect(ctx context.Context, connect func(context.Context)) {
+	connectCtx, cancel := context.WithCancel(ctx)
+	tc.connectLock.Lock()
+	previousCancel := tc.connectCancel
+	tc.connectCancel = cancel
+	tc.connectLock.Unlock()
+	if previousCancel != nil {
+		previousCancel()
+	}
+	go func() {
+		tc.connectRunLock.Lock()
+		defer tc.connectRunLock.Unlock()
+		if connectCtx.Err() == nil {
+			connect(connectCtx)
+		}
+	}()
+}
+
+func (tc *TwitterClient) cancelConnect() {
+	tc.connectLock.Lock()
+	cancel := tc.connectCancel
+	tc.connectCancel = nil
+	tc.connectLock.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (tc *TwitterClient) connect(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	log := zerolog.Ctx(ctx)
 
 	if tc.client == nil {
@@ -166,6 +206,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		// Load messages page to initialize session (populates cookies, tokens, etc.)
 		_, err := tc.client.LoadMessagesPage(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			log.Err(err).Msg("Failed to load messages page")
 			if twittermeow.IsAuthError(err) {
 				tc.userLogin.BridgeState.Send(status.BridgeState{
@@ -319,6 +362,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 		initialResp, err := tc.client.GetInitialXChatPage(ctx, vars)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			fetchLog.Err(err).
 				Msg("Failed to fetch initial XChat inbox page")
 			tc.userLogin.BridgeState.Send(status.BridgeState{
@@ -341,6 +387,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 		updatePageState(page)
 		processPage(page)
+		if ctx.Err() != nil {
+			return
+		}
 
 		cursor = nextXChatInboxCursor(page)
 		tc.saveXChatInboxCheckpoint(ctx, cursor, getMaxSeqID(), msgPullVersion)
@@ -364,6 +413,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		inboxVars := payload.NewInboxPageRequestQueryVariables(cursor)
 		resp, err := tc.client.GetInboxPageRequest(ctx, inboxVars)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			fetchLog.Err(err).
 				Msg("Failed to fetch XChat inbox page")
 			tc.userLogin.BridgeState.Send(status.BridgeState{
@@ -386,6 +438,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 
 		updatePageState(page)
 		processPage(page)
+		if ctx.Err() != nil {
+			return
+		}
 
 		nextCursor := nextXChatInboxCursor(page)
 		if nextCursor != nil && nextCursor.CursorId == cursor.CursorId {
@@ -421,9 +476,15 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 			log.Warn().Err(err).Msg("Failed to fetch some missing users")
 		}
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Start XChat websocket for real-time events after initial sync
 	if err := tc.client.StartXChatWebsocket(ctx); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		log.Err(err).Msg("Failed to start XChat websocket")
 	}
 
@@ -431,6 +492,9 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		Int("conversations", int(totalItems.Load())).
 		Msg("Finished fetching XChat inbox")
 
+	if ctx.Err() != nil {
+		return
+	}
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
 
 	// Update remote profile from cached user data
@@ -606,6 +670,7 @@ func (tc *TwitterClient) saveUserLoginState(ctx context.Context) error {
 }
 
 func (tc *TwitterClient) Disconnect() {
+	tc.cancelConnect()
 	tc.client.Disconnect()
 }
 
@@ -664,6 +729,12 @@ func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) []str
 // It syncs the room data (members, name, avatar, etc.) from the fetched conversation data.
 func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conversationID string, item *response.XChatInboxItem) {
 	if item == nil {
+		return
+	}
+	if tc.connector.br.BackgroundCtx != nil {
+		ctx = tc.userLogin.Log.WithContext(tc.connector.br.BackgroundCtx)
+	}
+	if ctx.Err() != nil {
 		return
 	}
 

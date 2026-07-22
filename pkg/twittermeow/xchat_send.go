@@ -324,11 +324,18 @@ func (c *Client) RefreshConversationKeys(ctx context.Context, conversationID str
 	}
 
 	// Notify callback to sync room data (members, name, avatar, etc.)
-	if c.onConversationDataRefresh != nil {
-		c.onConversationDataRefresh(ctx, conversationID, &item)
-	}
+	c.notifyConversationDataRefresh(ctx, conversationID, item)
 
 	return nil
+}
+
+func (c *Client) notifyConversationDataRefresh(ctx context.Context, conversationID string, item response.XChatInboxItem) {
+	callback := c.onConversationDataRefresh
+	if callback == nil {
+		return
+	}
+	// Room refresh may queue on the portal currently converting this message, so never wait inline.
+	go callback(ctx, conversationID, &item)
 }
 
 func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversationID string, item *response.XChatInboxItem) error {
