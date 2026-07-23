@@ -190,9 +190,13 @@ func (p *XChatEventProcessor) processMessageEvent(ctx context.Context, evt *payl
 	}
 }
 
+func isEncryptedMessageCreateEvent(mce *payload.MessageCreateEvent) bool {
+	return mce != nil && ptr.Val(mce.ConversationKeyVersion) != ""
+}
+
 // processMessageCreateEvent handles a MessageCreateEvent, decrypting or parsing contents.
-// If the event has a signature, the contents are encrypted and need decryption.
-// If no signature, the contents are plaintext thrift and can be parsed directly.
+// Encrypted events declare a conversation key version. Signed plaintext XChat
+// events omit it and contain directly encoded Thrift.
 func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt *payload.MessageEvent, mce *payload.MessageCreateEvent) error {
 	conversationID := ptr.Val(evt.ConversationId)
 	contentsBytes := mce.Contents
@@ -209,8 +213,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	var contents *payload.MessageEntryContents
 	var err error
 
-	// Check if message has a signature - if so, it's encrypted
-	if evt.MessageEventSignature != nil && evt.MessageEventSignature.Signature != nil {
+	if isEncryptedMessageCreateEvent(mce) {
 		// Encrypted message - decrypt using conversation key
 		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
 		if errors.Is(err, crypto.ErrKeyNotFound) {
@@ -252,7 +255,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			return nil
 		}
 	} else {
-		// No signature - parse as plaintext thrift
+		// No conversation key version - parse as plaintext Thrift.
 		contents, err = crypto.ParseMessageEntryContentsBytes(contentsBytes)
 		if err != nil {
 			p.log.Warn().

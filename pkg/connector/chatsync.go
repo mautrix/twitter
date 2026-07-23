@@ -71,6 +71,30 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 	}
 
 	portalKey := tc.MakePortalKey(conv)
+	if restKey, ok := restGroupPortalAliasKey(portalKey); ok {
+		restPortal, err := tc.connector.br.GetExistingPortalByKey(ctx, restKey)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("conversation_id", conv.ConversationID).
+				Msg("Failed to check for REST group portal alias")
+			return
+		} else if restPortal != nil {
+			result, _, err := tc.connector.br.ReIDPortal(ctx, restKey, portalKey)
+			if err != nil {
+				log.Warn().Err(err).
+					Str("conversation_id", conv.ConversationID).
+					Msg("Failed to reconcile REST group portal into XChat portal")
+				return
+			}
+			if result != bridgev2.ReIDResultNoOp {
+				log.Info().
+					Stringer("source_portal_key", restKey).
+					Stringer("target_portal_key", portalKey).
+					Int("reid_result", int(result)).
+					Msg("Reconciled REST group portal into XChat portal")
+			}
+		}
+	}
 
 	// Get or create portal in database
 	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
@@ -329,6 +353,9 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 func (tc *TwitterClient) decryptGroupName(ctx context.Context, conversationID, encName string) string {
 	if encName == "" {
 		return ""
+	}
+	if !isProbablyEncryptedGroupName(encName) {
+		return encName
 	}
 
 	keyVersion := ""

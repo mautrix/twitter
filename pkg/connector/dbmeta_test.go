@@ -27,9 +27,37 @@ func TestPortalMetadataCanBackfillXChat(t *testing.T) {
 	}
 }
 
-func TestPortalMetadataTokenDoesNotEnableInteractiveXChat(t *testing.T) {
+func TestPortalMetadataTokenDoesNotEnableEncryptedXChat(t *testing.T) {
 	meta := &PortalMetadata{ConversationToken: "token"}
 	if meta.CanUseXChat() {
-		t.Fatal("CanUseXChat() = true for token-only metadata; interactive actions require a conversation key")
+		t.Fatal("CanUseXChat() = true for token-only metadata; encrypted actions require a conversation key")
+	}
+	if !meta.IsXChatConversation() {
+		t.Fatal("IsXChatConversation() = false for token-only metadata")
+	}
+}
+
+func TestSelectMessageSendMode(t *testing.T) {
+	tests := []struct {
+		name string
+		meta *PortalMetadata
+		want messageSendMode
+	}{
+		{name: "legacy REST conversation", meta: &PortalMetadata{}, want: messageSendREST},
+		{name: "plaintext XChat conversation", meta: &PortalMetadata{
+			ConversationToken: "token",
+		}, want: messageSendXChatPlaintext},
+		{name: "encrypted XChat conversation", meta: &PortalMetadata{
+			ConversationToken: "token",
+			ConversationKeys:  map[string]*ConversationKeyData{"123": {}},
+		}, want: messageSendXChatEncrypted},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := selectMessageSendMode(test.meta); got != test.want {
+				t.Fatalf("selectMessageSendMode() = %d, want %d", got, test.want)
+			}
+		})
 	}
 }
