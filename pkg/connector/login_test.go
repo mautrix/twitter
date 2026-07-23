@@ -155,8 +155,20 @@ func TestHandleWebCastleStageErrorMakesPreludeFailureTerminal(t *testing.T) {
 	}
 }
 
-func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
+func TestGetLoginFlowsUsesWebViewByDefault(t *testing.T) {
 	var tc TwitterConnector
+	flows := tc.GetLoginFlows()
+
+	if len(flows) != 1 {
+		t.Fatalf("len(flows) = %d, want 1", len(flows))
+	}
+	if flows[0].ID != LoginFlowIDCookies {
+		t.Fatalf("flow ID = %s, want %s", flows[0].ID, LoginFlowIDCookies)
+	}
+}
+
+func TestGetLoginFlowsUsesNativeOnlyWhenEnabled(t *testing.T) {
+	tc := TwitterConnector{Config: Config{NativeLogin: true}}
 	flows := tc.GetLoginFlows()
 
 	if len(flows) != 1 {
@@ -165,8 +177,83 @@ func TestGetLoginFlowsAdvertisesNativePasswordOnly(t *testing.T) {
 	if flows[0].ID != LoginFlowIDPassword {
 		t.Fatalf("flow ID = %s, want %s", flows[0].ID, LoginFlowIDPassword)
 	}
-	if strings.Contains(strings.ToLower(flows[0].Description), "cookie") {
-		t.Fatalf("flow description = %q, want native login flow", flows[0].Description)
+}
+
+func TestCreateLoginRespectsNativeLoginConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		nativeLogin bool
+		flowID      string
+		wantType    bridgev2.LoginStepType
+		wantStepID  string
+		wantInvalid bool
+	}{
+		{
+			name:       "default flow uses WebView",
+			wantType:   bridgev2.LoginStepTypeCookies,
+			wantStepID: LoginStepIDCookies,
+		},
+		{
+			name:       "explicit WebView flow",
+			flowID:     LoginFlowIDCookies,
+			wantType:   bridgev2.LoginStepTypeCookies,
+			wantStepID: LoginStepIDCookies,
+		},
+		{
+			name:        "native flow disabled",
+			flowID:      LoginFlowIDPassword,
+			wantInvalid: true,
+		},
+		{
+			name:        "default flow uses native when enabled",
+			nativeLogin: true,
+			wantType:    bridgev2.LoginStepTypeUserInput,
+			wantStepID:  LoginStepIDCredentials,
+		},
+		{
+			name:        "explicit native flow",
+			nativeLogin: true,
+			flowID:      LoginFlowIDPassword,
+			wantType:    bridgev2.LoginStepTypeUserInput,
+			wantStepID:  LoginStepIDCredentials,
+		},
+		{
+			name:        "WebView flow disabled when native enabled",
+			nativeLogin: true,
+			flowID:      LoginFlowIDCookies,
+			wantInvalid: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tc := TwitterConnector{Config: Config{NativeLogin: test.nativeLogin}}
+			process, err := tc.CreateLogin(context.Background(), nil, test.flowID)
+			if test.wantInvalid {
+				if !errors.Is(err, bridgev2.ErrInvalidLoginFlowID) {
+					t.Fatalf("CreateLogin() error = %v, want ErrInvalidLoginFlowID", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateLogin() error = %v", err)
+			}
+
+			step, err := process.Start(context.Background())
+			if err != nil {
+				t.Fatalf("Start() error = %v", err)
+			}
+			if step.Type != test.wantType || step.StepID != test.wantStepID {
+				t.Fatalf("Start() step = (%s, %s), want (%s, %s)", step.Type, step.StepID, test.wantType, test.wantStepID)
+			}
+			if test.wantType == bridgev2.LoginStepTypeCookies {
+				if step.CookiesParams == nil || step.UserInputParams != nil {
+					t.Fatalf("Start() params = cookies %#v, user input %#v", step.CookiesParams, step.UserInputParams)
+				}
+			} else if step.UserInputParams == nil || step.CookiesParams != nil {
+				t.Fatalf("Start() params = user input %#v, cookies %#v", step.UserInputParams, step.CookiesParams)
+			}
+		})
 	}
 }
 

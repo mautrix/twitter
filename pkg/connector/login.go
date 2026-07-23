@@ -317,20 +317,29 @@ var (
 )
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	return []bridgev2.LoginFlow{
-		{
+	if tc.Config.NativeLogin {
+		return []bridgev2.LoginFlow{{
 			Name:        "Username/password",
 			Description: "Log in with your X username, email, or phone number and password",
 			ID:          LoginFlowIDPassword,
-		},
+		}}
 	}
+	return []bridgev2.LoginFlow{{
+		Name:        "Cookies",
+		Description: "Log in with your X account using your cookies",
+		ID:          LoginFlowIDCookies,
+	}}
 }
 
 func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
-	if flowID == "" {
-		flowID = LoginFlowIDPassword
+	configuredFlowID := LoginFlowIDCookies
+	if tc.Config.NativeLogin {
+		configuredFlowID = LoginFlowIDPassword
 	}
-	if flowID != LoginFlowIDPassword && flowID != LoginFlowIDCookies {
+	if flowID == "" {
+		flowID = configuredFlowID
+	}
+	if flowID != configuredFlowID {
 		return nil, bridgev2.ErrInvalidLoginFlowID
 	}
 	return &TwitterLogin{User: user, tc: tc, useCookieLogin: flowID == LoginFlowIDCookies}, nil
