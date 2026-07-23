@@ -42,6 +42,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -63,6 +64,23 @@ var (
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
 
+type messageSendMode int
+
+const (
+	messageSendREST messageSendMode = iota
+	messageSendXChatPlaintext
+	messageSendXChatEncrypted
+)
+
+func selectMessageSendMode(meta *PortalMetadata) messageSendMode {
+	if meta.CanUseXChat() {
+		return messageSendXChatEncrypted
+	} else if meta.IsXChatConversation() {
+		return messageSendXChatPlaintext
+	}
+	return messageSendREST
+}
+
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
 		return nil
@@ -70,8 +88,7 @@ func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.M
 
 	conversationID := ParsePortalID(msg.Portal.ID)
 
-	// Use WebSocket for encrypted conversations, GraphQL for unencrypted
-	if msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+	if msg.Portal.Metadata.(*PortalMetadata).IsXChatConversation() {
 		return tc.client.SendXChatTypingNotification(ctx, conversationID)
 	}
 	return tc.client.SendTypingNotification(ctx, ConvertConversationIDToREST(conversationID))
@@ -84,6 +101,7 @@ func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.Ro
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	content := msg.Content
+	sendMode := selectMessageSendMode(msg.Portal.Metadata.(*PortalMetadata))
 
 	text := content.Body
 	if content.Format == event.FormatHTML {
@@ -186,31 +204,22 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			opts.Text = ""
 		}
 
-		// Only upload via XChat when conversation keys are available.
-		if msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+		if sendMode != messageSendREST {
 			data, err := tc.connector.br.Bot.DownloadMedia(ctx, content.URL, content.File)
 			if err != nil {
 				return nil, err
 			}
 
+			mimeType := content.Info.MimeType
 			// Convert audio to mp4 if needed
-			if content.MsgType == event.MsgAudio && content.Info.MimeType != "video/mp4" {
-				converted, err := tc.client.ConvertAudioPayload(ctx, data, content.Info.MimeType)
+			if content.MsgType == event.MsgAudio && mimeType != "video/mp4" {
+				converted, err := tc.client.ConvertAudioPayload(ctx, data, mimeType)
 				if err != nil {
 					return nil, err
 				}
 				data = converted
+				mimeType = "video/mp4"
 			}
-
-			// Upload media using encrypted XChat flow
-			uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
-			if err != nil {
-				return nil, err
-			}
-
-			zerolog.Ctx(ctx).Debug().
-				Str("media_hash_key", uploadResult.MediaHashKey).
-				Msg("Successfully uploaded encrypted media to XChat")
 
 			attType := payload.MediaTypeImage
 			switch content.MsgType {
@@ -222,18 +231,61 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			width := int64(content.Info.Width)
 			height := int64(content.Info.Height)
 			size := int64(len(data))
-			opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
-				Media: &payload.MediaAttachment{
-					MediaHashKey: &uploadResult.MediaHashKey,
-					Type:         ptr.Ptr(int32(attType)),
-					Dimensions: &payload.MediaDimensions{
-						Width:  &width,
-						Height: &height,
+
+			if sendMode == messageSendXChatEncrypted {
+				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
+				if err != nil {
+					return nil, err
+				}
+
+				zerolog.Ctx(ctx).Debug().
+					Str("media_hash_key", uploadResult.MediaHashKey).
+					Msg("Successfully uploaded encrypted media to XChat")
+
+				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
+					Media: &payload.MediaAttachment{
+						MediaHashKey: &uploadResult.MediaHashKey,
+						Type:         ptr.Ptr(int32(attType)),
+						Dimensions: &payload.MediaDimensions{
+							Width:  &width,
+							Height: &height,
+						},
+						FilesizeBytes: &size,
+						Filename:      ptr.Ptr(content.FileName),
 					},
-					FilesizeBytes: &size,
-					Filename:      ptr.Ptr(content.FileName),
-				},
-			})
+				})
+			} else {
+				mediaCategory := payload.MEDIA_CATEGORY_DM_IMAGE
+				switch content.MsgType {
+				case event.MsgVideo, event.MsgAudio:
+					mediaCategory = payload.MEDIA_CATEGORY_DM_VIDEO
+				default:
+					if mimeType == "image/gif" || content.Info.MauGIF {
+						mediaCategory = payload.MEDIA_CATEGORY_DM_GIF
+					}
+				}
+				uploadResult, err := tc.client.UploadMedia(ctx, &payload.UploadMediaQuery{
+					MediaType:     mimeType,
+					MediaCategory: mediaCategory,
+				}, data)
+				if err != nil {
+					return nil, err
+				}
+				size = int64(uploadResult.Size)
+				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
+					Media: &payload.MediaAttachment{
+						MediaHashKey: &uploadResult.MediaKey,
+						Type:         ptr.Ptr(int32(attType)),
+						Dimensions: &payload.MediaDimensions{
+							Width:  &width,
+							Height: &height,
+						},
+						FilesizeBytes: &size,
+						Filename:      ptr.Ptr(content.FileName),
+						AttachmentId:  &uploadResult.MediaIDString,
+					},
+				})
+			}
 		}
 	default:
 		return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
@@ -262,21 +314,23 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		},
 	}
 	txnID := networkid.TransactionID(messageID)
-	// Check portal metadata for encryption capability
-	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
-		// No encryption keys - use REST API
+	if sendMode == messageSendREST {
 		return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 	}
 
-	// Encrypted conversation: the mutation response includes the real XChat sequence ID,
-	// so ignore the later remote echo instead of leaving the send pending.
+	// The mutation response includes the real XChat sequence ID, so ignore the
+	// later remote echo instead of leaving the send pending.
 	msg.AddPendingToIgnore(txnID)
 
-	// Use XChat protocol, with REST fallback on key/token not found.
-	resp, err := tc.client.SendEncryptedMessage(ctx, opts)
+	var resp *response.SendMessageMutationResponse
+	if sendMode == messageSendXChatPlaintext {
+		resp, err = tc.client.SendUnencryptedMessage(ctx, opts)
+	} else {
+		resp, err = tc.client.SendEncryptedMessage(ctx, opts)
+	}
 	if err != nil {
 		msg.RemovePending(txnID)
-		if errors.Is(err, crypto.ErrKeyNotFound) {
+		if sendMode == messageSendXChatEncrypted && errors.Is(err, crypto.ErrKeyNotFound) {
 			zerolog.Ctx(ctx).Debug().
 				Str("conversation_id", conversationID).
 				Msg("Falling back to REST API for message send (key/token not found)")
@@ -344,7 +398,8 @@ func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
 	}
 }
 
-// sendDirectMessageREST sends a message via the REST API for untrusted conversations
+// sendDirectMessageREST sends a message via the REST API for conversations
+// that have not been observed on XChat.
 func (tc *TwitterClient) sendDirectMessageREST(
 	ctx context.Context,
 	msg *bridgev2.MatrixMessage,
@@ -360,7 +415,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 	log.Debug().
 		Str("conversation_id", conversationID).
 		Str("message_id", messageID).
-		Msg("Sending message via REST API (untrusted conversation)")
+		Msg("Sending message via REST API (legacy conversation)")
 
 	pl := &payload.SendDirectMessagePayload{
 		ConversationID: conversationID,
