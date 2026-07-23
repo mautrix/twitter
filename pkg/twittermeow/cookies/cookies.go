@@ -21,6 +21,8 @@ const (
 	XLang              XCookieName = "lang"
 	XAtt               XCookieName = "att"
 	XPersonalizationID XCookieName = "personalization_id"
+	XDtabLocal         XCookieName = "dtab_local"
+	XGuestIDAds        XCookieName = "guest_id_ads"
 	XGuestIDMarketing  XCookieName = "guest_id_marketing"
 )
 
@@ -41,21 +43,31 @@ func NewCookies(store map[string]string) *Cookies {
 
 func NewCookiesFromString(cookieStr string) *Cookies {
 	c := NewCookies(nil)
-	cookieStrings := strings.Split(cookieStr, ";")
-	fakeHeader := http.Header{}
-	for _, cookieStr := range cookieStrings {
-		trimmedCookieStr := strings.TrimSpace(cookieStr)
-		if trimmedCookieStr != "" {
-			fakeHeader.Add("Set-Cookie", trimmedCookieStr)
-		}
-	}
-	fakeResponse := &http.Response{Header: fakeHeader}
-
-	for _, cookie := range fakeResponse.Cookies() {
+	for _, cookie := range parseCookiesFromString(cookieStr) {
 		c.store[cookie.Name] = cookie.Value
 	}
 
 	return c
+}
+
+func parseCookiesFromString(cookieStr string) []*http.Cookie {
+	parsedCookies, err := http.ParseCookie(cookieStr)
+	if err == nil {
+		return parsedCookies
+	}
+	setCookie, err := http.ParseSetCookie(cookieStr)
+	if err == nil {
+		return []*http.Cookie{setCookie}
+	}
+	cookieStrings := strings.Split(cookieStr, ";")
+	cookies := make([]*http.Cookie, 0, len(cookieStrings))
+	for _, cookieStr := range cookieStrings {
+		cookie, err := http.ParseSetCookie(strings.TrimSpace(cookieStr))
+		if err == nil {
+			cookies = append(cookies, cookie)
+		}
+	}
+	return cookies
 }
 
 func (c *Cookies) String() string {
@@ -88,7 +100,7 @@ func (c *Cookies) UpdateFromResponse(r *http.Response) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	for _, cookie := range r.Cookies() {
-		if cookie.MaxAge == 0 || cookie.Expires.Before(time.Now()) {
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
 			delete(c.store, cookie.Name)
 		} else {
 			//log.Println(fmt.Sprintf("updated cookie %s to value %s", cookie.Name, cookie.Value))

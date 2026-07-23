@@ -3,8 +3,10 @@ package twittermeow
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -62,8 +64,12 @@ type Client struct {
 	xchatProcessor *XChatEventProcessor
 	keyManager     *crypto.KeyManager
 
-	xchatToken   *cachedXChatToken
-	xchatTokenMu sync.Mutex
+	jetfuelCastleTokens  []string
+	jetfuelCastleInfo    JetfuelCastleTokenInfo
+	browserHeaders       BrowserHeaders
+	jetfuelCastleTokenMu sync.Mutex
+	xchatToken           *cachedXChatToken
+	xchatTokenMu         sync.Mutex
 }
 
 func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.Logger) *Client {
@@ -91,6 +97,17 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 
 func (c *Client) GetCookieString() string {
 	return c.cookies.String()
+}
+
+func (c *Client) SetCookies(values map[string]string) {
+	for name, value := range values {
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		c.cookies.Set(cookies.XCookieName(name), value)
+	}
 }
 
 func (c *Client) SetSession(sess *CachedSession) {
@@ -277,6 +294,50 @@ func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
 	return scriptRespBody, err
 }
 
+func (c *Client) fetchCloudflareJSD(ctx context.Context, pageURL *url.URL, mainPageHTML string) error {
+	scriptURL := methods.ParseCloudflareJSDURL(mainPageHTML)
+	if scriptURL == "" {
+		return nil
+	}
+	parsedScriptURL, err := pageURL.Parse(scriptURL)
+	if err != nil {
+		return err
+	}
+	extraHeaders := map[string]string{
+		"accept":         "*/*",
+		"sec-fetch-dest": "script",
+		"sec-fetch-mode": "no-cors",
+		"sec-fetch-site": "same-origin",
+	}
+	originalCheckRedirect := c.HTTP.CheckRedirect
+	c.disableRedirects()
+	defer func() {
+		c.HTTP.CheckRedirect = originalCheckRedirect
+	}()
+	for i := 0; i < 4; i++ {
+		resp, _, err := c.MakeRequest(ctx, parsedScriptURL.String(), http.MethodGet, c.buildHeaders(HeaderOpts{
+			Extra:       extraHeaders,
+			Referer:     pageURL.String(),
+			WithCookies: true,
+		}), nil, types.ContentTypeNone)
+		if resp != nil {
+			c.cookies.UpdateFromResponse(resp)
+		}
+		if !errors.Is(err, ErrRedirectAttempted) {
+			return err
+		}
+		location := resp.Header.Get("Location")
+		if location == "" {
+			return err
+		}
+		parsedScriptURL, err = parsedScriptURL.Parse(location)
+		if err != nil {
+			return err
+		}
+	}
+	return ErrMaxRetriesReached
+}
+
 func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) string {
 	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
@@ -381,9 +442,28 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 			Msg("Found loading animations and verification token")
 	}
 
+	for name, value := range methods.ParseDocumentCookieAssignments(mainPageHTML) {
+		c.cookies.Set(cookies.XCookieName(name), value)
+	}
+	if mainPageResp.Request != nil && mainPageResp.Request.URL != nil {
+		if err := c.fetchCloudflareJSD(ctx, mainPageResp.Request.URL, mainPageHTML); err != nil {
+			c.Logger.Debug().Err(err).Msg("Failed to fetch Cloudflare JSD bootstrap")
+		}
+	}
+
 	c.session.Country = country
 	c.session.VerificationToken = verificationToken
 	c.session.loadingAnims = loadingAnims
+	c.jetfuelCastleInfo = JetfuelCastleTokenInfo{
+		ScriptURL: methods.ParseOndemandCastleURLFromScript([]byte(mainPageHTML)),
+		PublicKey: methods.ParseResponsiveWebCastlePublicKey(mainPageHTML),
+	}
+	if !c.jetfuelCastleInfo.IsValid() {
+		c.Logger.Debug().
+			Bool("has_script_url", c.jetfuelCastleInfo.ScriptURL != "").
+			Bool("has_public_key", c.jetfuelCastleInfo.PublicKey != "").
+			Msg("X Castle web metadata not found in main page HTML")
+	}
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {

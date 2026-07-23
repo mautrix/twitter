@@ -67,11 +67,12 @@ func (m *PortalMetadata) CanBackfillXChat() bool {
 }
 
 type UserLoginMetadata struct {
-	Cookies           string    `json:"cookies"`
-	SecretKey         string    `json:"secret_key,omitempty"`
-	SigningKey        string    `json:"signing_key,omitempty"`
-	SigningKeyVersion string    `json:"signing_key_version,omitempty"`
-	PushKeys          *PushKeys `json:"push_keys,omitempty"`
+	Cookies           string                      `json:"cookies"`
+	SecretKey         string                      `json:"secret_key,omitempty"`
+	SigningKey        string                      `json:"signing_key,omitempty"`
+	SigningKeyVersion string                      `json:"signing_key_version,omitempty"`
+	PushKeys          *PushKeys                   `json:"push_keys,omitempty"`
+	BrowserHeaders    *twittermeow.BrowserHeaders `json:"browser_headers,omitempty"`
 
 	Session            *twittermeow.CachedSession `json:"session,omitempty"`
 	MaxUserSequenceID  string                     `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
