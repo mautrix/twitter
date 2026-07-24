@@ -120,16 +120,23 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		}
 	} else {
 		if shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
-			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-				EventMeta: simplevent.EventMeta{
-					Type:      bridgev2.RemoteEventChatInfoChange,
-					PortalKey: portal.PortalKey,
-					Timestamp: time.Now(),
-				},
-				ChatInfoChange: &bridgev2.ChatInfoChange{
-					ChatInfo: chatInfo,
-				},
-			})
+			if evt := bridgev2.GetRemoteEventFromContext(ctx); evt != nil && evt.GetPortalKey() == portal.PortalKey {
+				// Already inside this portal's event handler: queueing another event
+				// for the same portal would deadlock when the event buffer is
+				// synchronous, so apply the info update directly instead.
+				portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
+			} else {
+				tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+					EventMeta: simplevent.EventMeta{
+						Type:      bridgev2.RemoteEventChatInfoChange,
+						PortalKey: portal.PortalKey,
+						Timestamp: time.Now(),
+					},
+					ChatInfoChange: &bridgev2.ChatInfoChange{
+						ChatInfo: chatInfo,
+					},
+				})
+			}
 		}
 	}
 
