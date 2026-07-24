@@ -195,6 +195,10 @@ func (tc *TwitterClient) Connect(ctx context.Context) {
 		})
 	}
 
+	if err := tc.reconcileExistingGroupPortalAliases(ctx); err != nil {
+		log.Warn().Err(err).Msg("Failed to reconcile existing REST/XChat group portal aliases")
+	}
+
 	// Start REST API sync for untrusted conversations in parallel
 	go func() {
 		tc.syncUntrustedChannels(ctx)
@@ -667,6 +671,17 @@ func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conv
 	log := zerolog.Ctx(ctx).With().
 		Str("conversation_id", conversationID).
 		Logger()
+	returnedConversationID := item.ConversationDetail.ConversationID
+	item.ConversationDetail.ConversationID = conversationDataResultID(
+		conversationID,
+		returnedConversationID,
+	)
+	if item.ConversationDetail.ConversationID != returnedConversationID {
+		log.Debug().
+			Str("returned_conversation_id", returnedConversationID).
+			Str("resolved_conversation_id", item.ConversationDetail.ConversationID).
+			Msg("Normalized conversation ID from conversation data refresh")
+	}
 
 	// Build users map from item and collect missing IDs
 	users := make(map[string]*types.User)

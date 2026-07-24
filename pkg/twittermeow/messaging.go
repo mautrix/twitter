@@ -405,6 +405,71 @@ type SendEncryptedMessageOpts struct {
 	Entities       []*payload.RichTextEntity
 }
 
+func buildUnencryptedMessageMutationPayload(
+	ctx context.Context,
+	opts SendEncryptedMessageOpts,
+	senderID string,
+	signingKey *crypto.SigningKeyPair,
+) (*payload.SendMessageMutationPayload, error) {
+	if opts.ConversationID == "" {
+		return nil, fmt.Errorf("conversation ID is required")
+	}
+	if senderID == "" {
+		return nil, fmt.Errorf("sender ID is required")
+	}
+	if signingKey == nil || signingKey.SigningKey == nil || signingKey.KeyVersion == "" {
+		return nil, fmt.Errorf("complete signing key is required")
+	}
+
+	messageID := opts.MessageID
+	if messageID == "" {
+		messageID = uuid.NewString()
+	}
+
+	builder := crypto.NewMessageBuilder(nil, senderID).
+		SetMessageID(messageID).
+		SetConversationID(opts.ConversationID).
+		SetText(opts.Text).
+		WithSigningKey(signingKey.SigningKey, signingKey.KeyVersion)
+	for _, att := range opts.Attachments {
+		builder.AddAttachment(att)
+	}
+	if opts.ReplyTo != nil {
+		builder.SetReplyTo(opts.ReplyTo)
+	}
+	if len(opts.Entities) > 0 {
+		builder.SetEntities(opts.Entities)
+	}
+
+	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build unencrypted message: %w", err)
+	}
+	if encodedSig == "" {
+		return nil, fmt.Errorf("build unencrypted message: signature is required")
+	}
+
+	return payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
+		ConversationID:               opts.ConversationID,
+		MessageID:                    messageID,
+		EncodedMessageCreateEvent:    encodedMCE,
+		EncodedMessageEventSignature: &encodedSig,
+	}), nil
+}
+
+// SendUnencryptedMessage sends a signed plaintext message through XChat.
+func (c *Client) SendUnencryptedMessage(ctx context.Context, opts SendEncryptedMessageOpts) (*response.SendMessageMutationResponse, error) {
+	signingKey, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get signing key: %w", err)
+	}
+	pl, err := buildUnencryptedMessageMutationPayload(ctx, opts, c.GetCurrentUserID(), signingKey)
+	if err != nil {
+		return nil, err
+	}
+	return c.sendMessageMutation(ctx, pl)
+}
+
 // SendEncryptedEditOpts contains options for sending an encrypted message edit.
 type SendEncryptedEditOpts struct {
 	ConversationID          string

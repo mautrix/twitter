@@ -49,6 +49,30 @@ func ParsePortalID(portalID networkid.PortalID) string {
 	return strings.ReplaceAll(string(portalID), "-", ":")
 }
 
+func xchatGroupPortalAliasKey(restKey networkid.PortalKey) (networkid.PortalKey, bool) {
+	restID := string(restKey.ID)
+	if _, err := strconv.ParseUint(restID, 10, 64); err != nil {
+		return networkid.PortalKey{}, false
+	}
+	xchatKey := restKey
+	xchatKey.ID = networkid.PortalID("g" + restID)
+	return xchatKey, true
+}
+
+func restGroupPortalAliasKey(xchatKey networkid.PortalKey) (networkid.PortalKey, bool) {
+	xchatID := string(xchatKey.ID)
+	if len(xchatID) < 2 || xchatID[0] != 'g' {
+		return networkid.PortalKey{}, false
+	}
+	restID := xchatID[1:]
+	if _, err := strconv.ParseUint(restID, 10, 64); err != nil {
+		return networkid.PortalKey{}, false
+	}
+	restKey := xchatKey
+	restKey.ID = networkid.PortalID(restID)
+	return restKey, true
+}
+
 func MakeUserID(userID string) networkid.UserID {
 	return networkid.UserID(userID)
 }

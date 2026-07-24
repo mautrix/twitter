@@ -26,6 +26,14 @@ func NormalizeConversationID(id string) string {
 	return strings.ReplaceAll(id, "-", ":")
 }
 
+func conversationDataResultID(requestedID, returnedID string) string {
+	if returnedID == "" ||
+		(strings.HasPrefix(requestedID, "g") && strings.TrimPrefix(requestedID, "g") == returnedID) {
+		return requestedID
+	}
+	return returnedID
+}
+
 // fetchConversationData retrieves conversation details via the conversation data endpoint
 // and converts them into an inbox item plus a user cache map to feed into existing sync logic.
 func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversationID string) (*response.XChatInboxItem, map[string]*types.User, error) {
@@ -37,6 +45,10 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 	}
 
 	data := resp.Data.GetInboxPageConversationData.Data
+	data.ConversationDetail.ConversationID = conversationDataResultID(
+		xchatConvID,
+		data.ConversationDetail.ConversationID,
+	)
 	users := make(map[string]*types.User)
 	missingIDs := make([]string, 0)
 

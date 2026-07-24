@@ -41,6 +41,66 @@ func conversationReadSenderID(evt *types.ConversationRead, fallback string) stri
 	return fallback
 }
 
+func (tc *TwitterClient) resolvePollingPortal(
+	ctx context.Context,
+	conversationID string,
+) (networkid.PortalKey, *bridgev2.Portal, error) {
+	primaryKey := tc.MakePortalKeyFromID(conversationID)
+	if xchatKey, ok := xchatGroupPortalAliasKey(primaryKey); ok {
+		portal, err := tc.connector.br.GetExistingPortalByKey(ctx, xchatKey)
+		if err != nil {
+			return networkid.PortalKey{}, nil, err
+		} else if portal != nil {
+			zerolog.Ctx(ctx).Debug().
+				Str("rest_conversation_id", conversationID).
+				Stringer("portal_key", xchatKey).
+				Msg("Resolved REST polling conversation to existing XChat portal")
+			return xchatKey, portal, nil
+		}
+	}
+
+	portal, err := tc.connector.br.GetPortalByKey(ctx, primaryKey)
+	return primaryKey, portal, err
+}
+
+func (tc *TwitterClient) reconcileExistingGroupPortalAliases(ctx context.Context) error {
+	portals, err := tc.connector.br.GetAllPortals(ctx)
+	if err != nil {
+		return err
+	}
+	portalKeys := make(map[networkid.PortalKey]struct{}, len(portals))
+	for _, portal := range portals {
+		portalKeys[portal.PortalKey] = struct{}{}
+	}
+	for _, targetPortal := range portals {
+		if targetPortal.Receiver != "" && targetPortal.Receiver != tc.userLogin.ID {
+			continue
+		}
+		meta, ok := targetPortal.Metadata.(*PortalMetadata)
+		if !ok || !meta.IsXChatConversation() {
+			continue
+		}
+		sourceKey, ok := restGroupPortalAliasKey(targetPortal.PortalKey)
+		if !ok {
+			continue
+		}
+		if _, exists := portalKeys[sourceKey]; !exists {
+			continue
+		}
+		result, _, err := tc.connector.br.ReIDPortal(ctx, sourceKey, targetPortal.PortalKey)
+		if err != nil {
+			return err
+		} else if result != bridgev2.ReIDResultNoOp {
+			zerolog.Ctx(ctx).Info().
+				Stringer("source_portal_key", sourceKey).
+				Stringer("target_portal_key", targetPortal.PortalKey).
+				Int("reid_result", int(result)).
+				Msg("Reconciled duplicate REST group portal into XChat portal")
+		}
+	}
+	return nil
+}
+
 func (tc *TwitterClient) wrapReaction(data *types.MessageReaction, portalKey networkid.PortalKey, evtType bridgev2.RemoteEventType) *simplevent.Reaction {
 	senderID := data.SenderID
 	if senderID == "" {
@@ -597,15 +657,25 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		return true
 	}
 
-	// Skip if conversation can use XChat (has encryption keys) - XChat WebSocket handles those
-	portalKey := tc.MakePortalKeyFromID(conversationID)
 	ctx := context.TODO()
-	if portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey); err == nil && portal != nil {
+	portalKey, portal, err := tc.resolvePollingPortal(ctx, conversationID)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("conversation_id", conversationID).
+			Msg("Failed to resolve portal for polling event")
+		return false
+	}
+
+	// XChat WebSocket handles all conversations observed through XChat,
+	// including token-only plaintext conversations.
+	if portal != nil {
 		meta := portal.Metadata.(*PortalMetadata)
-		if meta.CanUseXChat() {
+		if meta.IsXChatConversation() {
 			log.Debug().
 				Str("conversation_id", conversationID).
-				Msg("Skipping conversation event (handled by XChat WebSocket)")
+				Stringer("portal_key", portalKey).
+				Msg("Skipping REST polling event for XChat conversation")
 			return true
 		}
 	}
@@ -613,15 +683,13 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	// Dispatch to the appropriate handler based on event type
 	switch e := evt.(type) {
 	case *types.Message:
-		return tc.handlePollingMessage(e, inbox)
+		return tc.handlePollingMessage(e, inbox, portalKey, portal)
 	case *types.MessageReactionCreate:
 		reaction := (*types.MessageReaction)(e)
-		portalKey := tc.MakePortalKeyFromID(conversationID)
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.MessageReactionDelete:
 		reaction := (*types.MessageReaction)(e)
-		portalKey := tc.MakePortalKeyFromID(conversationID)
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.ConversationRead:
@@ -639,7 +707,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
-				PortalKey: tc.MakePortalKeyFromID(conversationID),
+				PortalKey: portalKey,
 				Sender:    tc.MakeEventSender(senderID),
 				Timestamp: readUpTo,
 			},
@@ -652,7 +720,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatDelete{
 			EventMeta: simplevent.EventMeta{
 				Type:        bridgev2.RemoteEventChatDelete,
-				PortalKey:   tc.MakePortalKeyFromID(conversationID),
+				PortalKey:   portalKey,
 				StreamOrder: methods.ParseSnowflakeInt(e.ID),
 				Timestamp:   methods.ParseMsecTimestamp(e.Time),
 			},
@@ -676,7 +744,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
 				Type:         bridgev2.RemoteEventChatResync,
-				PortalKey:    tc.MakePortalKeyFromID(conversationID),
+				PortalKey:    portalKey,
 				CreatePortal: true,
 				Timestamp:    methods.ParseMsecTimestamp(e.Time),
 				StreamOrder:  methods.ParseSnowflakeInt(e.ID),
@@ -720,9 +788,13 @@ func (tc *TwitterClient) markPollingChatResyncSuccess(conversationID string, now
 }
 
 // handlePollingMessage handles a message event from REST API polling.
-func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *response.TwitterInboxData) bool {
+func (tc *TwitterClient) handlePollingMessage(
+	evt *types.Message,
+	inbox *response.TwitterInboxData,
+	portalKey networkid.PortalKey,
+	portal *bridgev2.Portal,
+) bool {
 	isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
-	portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 	msgID := evt.ID
 	now := time.Now()
 	log := tc.userLogin.Log.With().
@@ -730,15 +802,7 @@ func (tc *TwitterClient) handlePollingMessage(evt *types.Message, inbox *respons
 		Str("conversation_id", evt.ConversationID).
 		Logger()
 
-	// For polling messages, ensure the portal exists
 	ctx := context.TODO()
-	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
-	if err != nil {
-		log.Warn().
-			Err(err).
-			Msg("Failed to get portal for polling message")
-		return false
-	}
 
 	// Create portal if it doesn't exist
 	if portal.MXID == "" {
