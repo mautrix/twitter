@@ -50,6 +50,8 @@ type Client struct {
 	session *CachedSession
 	HTTP    *http.Client
 
+	clientHTTPTransport *ClientHTTPTransport
+
 	eventHandler              EventHandler
 	streamEventHandler        StreamEventHandler
 	xchatEventHandler         XChatEventHandler
@@ -228,6 +230,9 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (CurrentUserProfile, erro
 
 	profile, err := c.GetCurrentUserProfile(ctx)
 	if err != nil {
+		if errors.Is(err, ErrClientHTTPRequestPending) {
+			return CurrentUserProfile{}, err
+		}
 		if IsAuthError(err) {
 			return CurrentUserProfile{}, err
 		}
@@ -338,11 +343,10 @@ func (c *Client) fetchCloudflareJSD(ctx context.Context, pageURL *url.URL, mainP
 	return ErrMaxRetriesReached
 }
 
-func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) string {
+func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) (string, error) {
 	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
-		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch main script")
-		return ""
+		return "", err
 	}
 	authTokenBytes := methods.ParseBearerToken(scriptRespBody)
 	authTokens := exslices.CastFunc(authTokenBytes, func(from []byte) string {
@@ -360,7 +364,7 @@ func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) 
 			Msg("Hardcoded token doesn't match fetched one")
 		c.session.bearerToken = authTokens[0]
 	}
-	return methods.ParseOndemandSURLFromScript(scriptRespBody)
+	return methods.ParseOndemandSURLFromScript(scriptRespBody), nil
 }
 
 func (c *Client) fetchAndParseSScript(ctx context.Context, scriptURL string) (*[4]int, error) {
@@ -447,6 +451,9 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	}
 	if mainPageResp.Request != nil && mainPageResp.Request.URL != nil {
 		if err := c.fetchCloudflareJSD(ctx, mainPageResp.Request.URL, mainPageHTML); err != nil {
+			if errors.Is(err, ErrClientHTTPRequestPending) {
+				return err
+			}
 			c.Logger.Debug().Err(err).Msg("Failed to fetch Cloudflare JSD bootstrap")
 		}
 	}
@@ -480,12 +487,21 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	if mainScriptURL == "" {
 		zerolog.Ctx(ctx).Warn().Int("status_code", mainPageResp.StatusCode).Msg("Main script URL not found in main page HTML")
 	} else if ondemandSURL == "" {
-		ondemandSURL = c.fetchAndParseMainScript(ctx, mainScriptURL)
+		var fetchErr error
+		ondemandSURL, fetchErr = c.fetchAndParseMainScript(ctx, mainScriptURL)
+		if errors.Is(fetchErr, ErrClientHTTPRequestPending) {
+			return fetchErr
+		} else if fetchErr != nil {
+			zerolog.Ctx(ctx).Warn().Err(fetchErr).Msg("Failed to fetch main script")
+		}
 	}
 
 	if ondemandSURL == "" {
 		c.Logger.Warn().Msg("ondemand.s URL not found in bootstrap sources")
 	} else if indexes, err := c.fetchAndParseSScript(ctx, ondemandSURL); err != nil {
+		if errors.Is(err, ErrClientHTTPRequestPending) {
+			return err
+		}
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.variableIndexes = indexes

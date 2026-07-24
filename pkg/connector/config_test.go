@@ -9,46 +9,62 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestExampleConfigDisablesNativeLoginByDefault(t *testing.T) {
+func TestExampleConfigUsesWebViewLoginByDefault(t *testing.T) {
 	var raw map[string]any
 	if err := yaml.Unmarshal([]byte(ExampleConfig), &raw); err != nil {
 		t.Fatalf("failed to parse example config: %v", err)
 	}
-	value, ok := raw["native_login"]
+	value, ok := raw["login_flow"]
 	if !ok {
-		t.Fatal("example config is missing native_login")
+		t.Fatal("example config is missing login_flow")
 	}
-	if value != false {
-		t.Fatalf("native_login = %#v, want false", value)
+	if value != string(LoginFlowWebView) {
+		t.Fatalf("login_flow = %#v, want %q", value, LoginFlowWebView)
 	}
 
 	var config Config
 	if err := yaml.Unmarshal([]byte(ExampleConfig), &config); err != nil {
 		t.Fatalf("failed to unmarshal example config: %v", err)
 	}
-	if config.NativeLogin {
-		t.Fatal("Config.NativeLogin = true, want false")
+	if config.LoginFlow != LoginFlowWebView {
+		t.Fatalf("Config.LoginFlow = %q, want %q", config.LoginFlow, LoginFlowWebView)
 	}
 }
 
-func TestConfigEnablesNativeLogin(t *testing.T) {
+func TestConfigAcceptsLoginFlows(t *testing.T) {
+	for _, flow := range []LoginFlow{LoginFlowWebView, LoginFlowNative, LoginFlowClientHTTP} {
+		t.Run(string(flow), func(t *testing.T) {
+			var config Config
+			if err := yaml.Unmarshal([]byte("login_flow: "+string(flow)+"\n"), &config); err != nil {
+				t.Fatalf("failed to unmarshal config: %v", err)
+			}
+			if config.LoginFlow != flow {
+				t.Fatalf("Config.LoginFlow = %q, want %q", config.LoginFlow, flow)
+			}
+		})
+	}
+
 	var config Config
-	if err := yaml.Unmarshal([]byte("native_login: true\n"), &config); err != nil {
-		t.Fatalf("failed to unmarshal config: %v", err)
-	}
-	if !config.NativeLogin {
-		t.Fatal("Config.NativeLogin = false, want true")
+	if err := yaml.Unmarshal([]byte("login_flow: proxy_magic\n"), &config); err == nil {
+		t.Fatal("invalid login_flow was accepted")
 	}
 }
 
-func TestConfigUpgradeHandlesNativeLogin(t *testing.T) {
+func TestConfigUpgradeHandlesLoginFlow(t *testing.T) {
 	tests := []struct {
 		name string
 		data string
-		want bool
+		want LoginFlow
 	}{
-		{name: "missing defaults false", data: "x: true\n", want: false},
-		{name: "explicit true is preserved", data: "native_login: true\n", want: true},
+		{name: "missing defaults to webview", data: "x: true\n", want: LoginFlowWebView},
+		{name: "webview is preserved", data: "login_flow: webview\n", want: LoginFlowWebView},
+		{name: "native is preserved", data: "login_flow: native\n", want: LoginFlowNative},
+		{name: "client HTTP is preserved", data: "login_flow: client_http\n", want: LoginFlowClientHTTP},
+		{name: "legacy client HTTP true migrates", data: "client_http_login: true\n", want: LoginFlowClientHTTP},
+		{name: "legacy client HTTP takes precedence", data: "client_http_login: true\nnative_login: true\n", want: LoginFlowClientHTTP},
+		{name: "legacy native true migrates", data: "native_login: true\n", want: LoginFlowNative},
+		{name: "legacy native false stays webview", data: "native_login: false\n", want: LoginFlowWebView},
+		{name: "legacy client HTTP false stays webview", data: "client_http_login: false\n", want: LoginFlowWebView},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -69,8 +85,8 @@ func TestConfigUpgradeHandlesNativeLogin(t *testing.T) {
 			if err = yaml.Unmarshal(output, &config); err != nil {
 				t.Fatalf("failed to unmarshal upgraded config: %v", err)
 			}
-			if config.NativeLogin != test.want {
-				t.Fatalf("Config.NativeLogin = %t, want %t", config.NativeLogin, test.want)
+			if config.LoginFlow != test.want {
+				t.Fatalf("Config.LoginFlow = %q, want %q", config.LoginFlow, test.want)
 			}
 		})
 	}

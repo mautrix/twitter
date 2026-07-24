@@ -139,6 +139,8 @@ func (wls *WebLoginSession) UsesJetfuel() bool {
 func (wls *WebLoginSession) Start(ctx context.Context) (*WebLoginResult, error) {
 	if result, err := wls.startJetfuel(ctx); err == nil {
 		return result, nil
+	} else if errors.Is(err, ErrClientHTTPRequestPending) || errors.Is(err, ErrJetfuelCastleTokenRequired) {
+		return nil, err
 	} else {
 		wls.client.Logger.Warn().Err(err).Msg("Jetfuel login start failed, falling back to OCF login")
 	}

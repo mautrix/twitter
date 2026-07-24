@@ -27,12 +27,14 @@ var (
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	log := zerolog.Ctx(ctx).With().
+	logContext := zerolog.Ctx(ctx).With().
 		Str("url", url).
 		Str("method", method).
-		Str("function", "MakeRequest").
-		Str("request_body", string(payload)).
-		Logger()
+		Str("function", "MakeRequest")
+	if !c.IsClientHTTPEnabled() {
+		logContext = logContext.Str("request_body", string(payload))
+	}
+	log := logContext.Logger()
 	var attempts int
 	for {
 		attempts++
@@ -49,6 +51,8 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 				Dur("duration", dur).
 				Msg("Request successful")
 			return resp, respDat, nil
+		} else if errors.Is(err, ErrClientHTTPRequestPending) {
+			return resp, respDat, err
 		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			log.Error().
 				Err(err).
@@ -63,11 +67,13 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 			return nil, nil, fmt.Errorf("%w: %w", ErrMaxRetriesReached, err)
 		} else if errors.Is(err, ErrRedirectAttempted) {
 			location := resp.Header.Get("Location")
-			c.Logger.Err(err).
+			redirectLog := c.Logger.Err(err).
 				Str("location", location).
-				Dur("duration", dur).
-				Str("request_body", string(payload)).
-				Msg("Redirect attempted")
+				Dur("duration", dur)
+			if !c.IsClientHTTPEnabled() {
+				redirectLog = redirectLog.Str("request_body", string(payload))
+			}
+			redirectLog.Msg("Redirect attempted")
 			return resp, nil, err
 		} else if ctx.Err() != nil {
 			return resp, nil, ctx.Err()
@@ -109,10 +115,13 @@ func (c *Client) makeRequestDirect(ctx context.Context, url string, method strin
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrResponseReadFailed, err)
 	}
-	c.Logger.Trace().
-		Int("status_code", response.StatusCode).
-		Str("response_body", string(responseBody)).
-		Msg("Raw HTTP response")
+	responseLog := c.Logger.Trace().Int("status_code", response.StatusCode)
+	if c.IsClientHTTPEnabled() {
+		responseLog = responseLog.Int("response_bytes", len(responseBody))
+	} else {
+		responseLog = responseLog.Str("response_body", string(responseBody))
+	}
+	responseLog.Msg("Raw HTTP response")
 	if response.StatusCode >= 400 {
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {

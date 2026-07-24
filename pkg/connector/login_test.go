@@ -155,79 +155,105 @@ func TestHandleWebCastleStageErrorMakesPreludeFailureTerminal(t *testing.T) {
 	}
 }
 
-func TestGetLoginFlowsUsesWebViewByDefault(t *testing.T) {
-	var tc TwitterConnector
-	flows := tc.GetLoginFlows()
-
-	if len(flows) != 1 {
-		t.Fatalf("len(flows) = %d, want 1", len(flows))
+func TestGetLoginFlowsUsesConfiguredFlow(t *testing.T) {
+	tests := []struct {
+		name       string
+		configFlow LoginFlow
+		wantID     string
+		wantBeta   bool
+	}{
+		{name: "zero value uses webview", wantID: LoginFlowIDCookies},
+		{name: "webview", configFlow: LoginFlowWebView, wantID: LoginFlowIDCookies},
+		{name: "native", configFlow: LoginFlowNative, wantID: LoginFlowIDPassword},
+		{name: "client HTTP", configFlow: LoginFlowClientHTTP, wantID: LoginFlowIDClientHTTP, wantBeta: true},
 	}
-	if flows[0].ID != LoginFlowIDCookies {
-		t.Fatalf("flow ID = %s, want %s", flows[0].ID, LoginFlowIDCookies)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tc := TwitterConnector{Config: Config{LoginFlow: test.configFlow}}
+			flows := tc.GetLoginFlows()
+			if len(flows) != 1 {
+				t.Fatalf("len(flows) = %d, want 1", len(flows))
+			}
+			if flows[0].ID != test.wantID {
+				t.Fatalf("flow ID = %s, want %s", flows[0].ID, test.wantID)
+			}
+			if strings.Contains(strings.ToLower(flows[0].Name), "beta") != test.wantBeta {
+				t.Fatalf("flow name = %q, want beta=%t", flows[0].Name, test.wantBeta)
+			}
+		})
 	}
 }
 
-func TestGetLoginFlowsUsesNativeOnlyWhenEnabled(t *testing.T) {
-	tc := TwitterConnector{Config: Config{NativeLogin: true}}
-	flows := tc.GetLoginFlows()
-
-	if len(flows) != 1 {
-		t.Fatalf("len(flows) = %d, want 1", len(flows))
-	}
-	if flows[0].ID != LoginFlowIDPassword {
-		t.Fatalf("flow ID = %s, want %s", flows[0].ID, LoginFlowIDPassword)
-	}
-}
-
-func TestCreateLoginRespectsNativeLoginConfig(t *testing.T) {
+func TestCreateLoginRespectsLoginFlowConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		nativeLogin bool
+		configFlow  LoginFlow
 		flowID      string
 		wantType    bridgev2.LoginStepType
 		wantStepID  string
 		wantInvalid bool
 	}{
 		{
-			name:       "default flow uses WebView",
+			name:       "zero value uses webview",
 			wantType:   bridgev2.LoginStepTypeCookies,
 			wantStepID: LoginStepIDCookies,
 		},
 		{
-			name:       "explicit WebView flow",
+			name:       "explicit webview flow",
+			configFlow: LoginFlowWebView,
 			flowID:     LoginFlowIDCookies,
 			wantType:   bridgev2.LoginStepTypeCookies,
 			wantStepID: LoginStepIDCookies,
 		},
 		{
-			name:        "native flow disabled",
+			name:        "native flow disabled by webview config",
+			configFlow:  LoginFlowWebView,
 			flowID:      LoginFlowIDPassword,
 			wantInvalid: true,
 		},
 		{
-			name:        "default flow uses native when enabled",
-			nativeLogin: true,
-			wantType:    bridgev2.LoginStepTypeUserInput,
-			wantStepID:  LoginStepIDCredentials,
+			name:       "default flow uses native",
+			configFlow: LoginFlowNative,
+			wantType:   bridgev2.LoginStepTypeUserInput,
+			wantStepID: LoginStepIDCredentials,
 		},
 		{
-			name:        "explicit native flow",
-			nativeLogin: true,
-			flowID:      LoginFlowIDPassword,
-			wantType:    bridgev2.LoginStepTypeUserInput,
-			wantStepID:  LoginStepIDCredentials,
+			name:       "explicit native flow",
+			configFlow: LoginFlowNative,
+			flowID:     LoginFlowIDPassword,
+			wantType:   bridgev2.LoginStepTypeUserInput,
+			wantStepID: LoginStepIDCredentials,
 		},
 		{
-			name:        "WebView flow disabled when native enabled",
-			nativeLogin: true,
+			name:        "webview flow disabled by native config",
+			configFlow:  LoginFlowNative,
 			flowID:      LoginFlowIDCookies,
+			wantInvalid: true,
+		},
+		{
+			name:       "default flow uses client HTTP",
+			configFlow: LoginFlowClientHTTP,
+			wantType:   bridgev2.LoginStepTypeUserInput,
+			wantStepID: LoginStepIDCredentials,
+		},
+		{
+			name:       "explicit client HTTP flow",
+			configFlow: LoginFlowClientHTTP,
+			flowID:     LoginFlowIDClientHTTP,
+			wantType:   bridgev2.LoginStepTypeUserInput,
+			wantStepID: LoginStepIDCredentials,
+		},
+		{
+			name:        "native flow disabled by client HTTP config",
+			configFlow:  LoginFlowClientHTTP,
+			flowID:      LoginFlowIDPassword,
 			wantInvalid: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tc := TwitterConnector{Config: Config{NativeLogin: test.nativeLogin}}
+			tc := TwitterConnector{Config: Config{LoginFlow: test.configFlow}}
 			process, err := tc.CreateLogin(context.Background(), nil, test.flowID)
 			if test.wantInvalid {
 				if !errors.Is(err, bridgev2.ErrInvalidLoginFlowID) {

@@ -14,10 +14,11 @@ conversation_sync_limit: 20
 # Should the bridge cache sessions instead of resyncing chats on every restart?
 cache_session: true
 
-# Should the bridge offer the native username/password login flow?
-# When enabled, native login replaces the WebView login flow.
-# Keep this disabled for cloud bridges.
-native_login: false
+# Login implementation to offer:
+# - webview: sign in through X's visible login page.
+# - native: build and send login requests from the bridge.
+# - client_http: build requests on the bridge, but send them directly from the Beeper client.
+login_flow: webview
 
 # Should the bridge use "X" instead of "Twitter" in certain places,
 # such as the management room welcome message and MSC2346 bridge info?

@@ -54,6 +54,8 @@ type TwitterLogin struct {
 	needsPINSetup     bool
 	useCookieLogin    bool
 
+	useClientHTTPLogin bool
+
 	client              *twittermeow.Client
 	webLogin            *twittermeow.WebLoginSession
 	webLoginIdentifier  string
@@ -65,6 +67,8 @@ type TwitterLogin struct {
 	webLoginMethods     []twittermeow.WebLoginAuthMethod
 	browserHeaders      twittermeow.BrowserHeaders
 	profile             twittermeow.CurrentUserProfile
+	clientHTTPTransport *twittermeow.ClientHTTPTransport
+	clientHTTPStage     string
 }
 
 var (
@@ -86,6 +90,11 @@ var (
 	loginFieldBrowserMobile    = "browser_sec_ch_ua_mobile"
 	loginFieldVerificationCode = "verification_code"
 	loginFieldAuthMethod       = "auth_method"
+)
+
+var (
+	LoginFlowIDClientHTTP        = "client-http"
+	LoginStepIDClientHTTPRequest = "fi.mau.twitter.login.client_http"
 )
 
 const (
@@ -317,24 +326,35 @@ var (
 )
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
-	if tc.Config.NativeLogin {
+	switch tc.Config.EffectiveLoginFlow() {
+	case LoginFlowClientHTTP:
+		return []bridgev2.LoginFlow{{
+			Name:        "Client HTTP (Beta)",
+			Description: "Log in with your X username, email, or phone number and run sign-in requests on this device",
+			ID:          LoginFlowIDClientHTTP,
+		}}
+	case LoginFlowNative:
 		return []bridgev2.LoginFlow{{
 			Name:        "Username/password",
 			Description: "Log in with your X username, email, or phone number and password",
 			ID:          LoginFlowIDPassword,
 		}}
+	default:
+		return []bridgev2.LoginFlow{{
+			Name:        "Cookies",
+			Description: "Log in with your X account using your cookies",
+			ID:          LoginFlowIDCookies,
+		}}
 	}
-	return []bridgev2.LoginFlow{{
-		Name:        "Cookies",
-		Description: "Log in with your X account using your cookies",
-		ID:          LoginFlowIDCookies,
-	}}
 }
 
 func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
 	configuredFlowID := LoginFlowIDCookies
-	if tc.Config.NativeLogin {
+	switch tc.Config.EffectiveLoginFlow() {
+	case LoginFlowNative:
 		configuredFlowID = LoginFlowIDPassword
+	case LoginFlowClientHTTP:
+		configuredFlowID = LoginFlowIDClientHTTP
 	}
 	if flowID == "" {
 		flowID = configuredFlowID
@@ -342,7 +362,12 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 	if flowID != configuredFlowID {
 		return nil, bridgev2.ErrInvalidLoginFlowID
 	}
-	return &TwitterLogin{User: user, tc: tc, useCookieLogin: flowID == LoginFlowIDCookies}, nil
+	return &TwitterLogin{
+		User:               user,
+		tc:                 tc,
+		useCookieLogin:     flowID == LoginFlowIDCookies,
+		useClientHTTPLogin: flowID == LoginFlowIDClientHTTP,
+	}, nil
 }
 
 func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
@@ -375,7 +400,9 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 	}, nil
 }
 
-func (t *TwitterLogin) Cancel() {}
+func (t *TwitterLogin) Cancel() {
+	t.stopClientHTTPLogin()
+}
 
 func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
 	instructions := "Enter your X username, email, or phone number and password."
@@ -578,6 +605,9 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
+	if t.isWaitingForClientHTTPRequest() {
+		return t.submitClientHTTPInput(ctx, cookies)
+	}
 	if t.isWaitingForWebLoginCastleToken() {
 		return t.submitWebCastleTokenInput(ctx, cookies)
 	}
@@ -914,6 +944,7 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 		return nil, ErrMissingLoginInput
 	}
 
+	t.stopClientHTTPLogin()
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 	t.webLogin = twittermeow.NewWebLoginSession(client)
 	t.webLoginIdentifier = identifier
@@ -923,6 +954,11 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 	t.webLoginText = ""
 	t.webLoginChallenge = nil
 	t.webLoginMethods = nil
+	if t.useClientHTTPLogin {
+		t.clientHTTPTransport = client.EnableClientHTTP()
+		t.clientHTTPStage = clientHTTPStageStart
+		return t.continueClientHTTPLogin(ctx)
+	}
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
@@ -976,6 +1012,10 @@ func (t *TwitterLogin) submitWebCastleTokenInput(ctx context.Context, input map[
 	t.browserHeaders = client.GetBrowserHeaders()
 	client.SetCookies(castleWebviewCookies(input))
 	client.SetNextJetfuelCastleTokens(castleTokens)
+	if t.useClientHTTPLogin {
+		t.webLoginCastleStage = ""
+		return t.continueClientHTTPLogin(ctx)
+	}
 	return t.continueWebCastleLogin(ctx)
 }
 
@@ -1137,6 +1177,11 @@ func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[s
 			methodID = method.Name
 		}
 	}
+	if t.useClientHTTPLogin {
+		t.webLoginAuthMethod = methodID
+		t.clientHTTPStage = webLoginCastleStageAuthMethod
+		return t.continueClientHTTPLogin(ctx)
+	}
 	if t.webLogin.UsesJetfuel() {
 		t.webLoginAuthMethod = methodID
 		t.webLoginCastleStage = webLoginCastleStageAuthMethod
@@ -1181,6 +1226,11 @@ func (t *TwitterLogin) submitWebVerificationInput(ctx context.Context, input map
 	text := strings.TrimSpace(input[loginFieldVerificationCode])
 	if text == "" {
 		return nil, ErrMissingLoginInput
+	}
+	if t.useClientHTTPLogin {
+		t.webLoginText = text
+		t.clientHTTPStage = webLoginCastleStageText
+		return t.continueClientHTTPLogin(ctx)
 	}
 	if t.webLogin.UsesJetfuel() {
 		t.webLoginText = text
@@ -1339,7 +1389,18 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	t.client = client
 	t.profile = profile
 	t.persistClientCookiesAndUserID()
-	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
+	if t.useClientHTTPLogin {
+		needsPINSetup, detectErr := t.detectPINSetupNeeded(ctx)
+		if errors.Is(detectErr, twittermeow.ErrClientHTTPRequestPending) {
+			return nil, detectErr
+		} else if detectErr != nil {
+			t.User.Log.Warn().Err(detectErr).Msg("Failed to determine PIN setup state after client HTTP login, using recovery prompt")
+		} else {
+			t.needsPINSetup = needsPINSetup
+		}
+	} else {
+		t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
+	}
 	t.webLoginIdentifier = ""
 	t.webLoginPassword = ""
 	t.webLoginCastleStage = ""

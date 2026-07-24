@@ -70,6 +70,9 @@ func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, 
 		return nil, fmt.Errorf("failed to load X login page: %w", err)
 	}
 	if _, err := wls.client.jetfuelGet(ctx, endpoints.JETFUEL_LANDING_PATH); err != nil {
+		if errors.Is(err, ErrClientHTTPRequestPending) {
+			return nil, err
+		}
 		wls.client.Logger.Debug().Err(err).Msg("Jetfuel login landing preflight failed")
 	}
 	body, err := wls.client.jetfuelGet(ctx, endpoints.JETFUEL_LOGIN_PATH)
@@ -99,6 +102,9 @@ func (wls *WebLoginSession) submitJetfuelIdentifier(ctx context.Context, identif
 	}
 	if shouldSendJetfuelViewerContextEvent() {
 		if err := wls.client.sendJetfuelViewerContextEvent(ctx); err != nil {
+			if errors.Is(err, ErrClientHTTPRequestPending) {
+				return nil, err
+			}
 			wls.client.Logger.Debug().Err(err).Msg("Jetfuel viewer-context preflight failed")
 		}
 	}

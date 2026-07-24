@@ -2,6 +2,7 @@ package connector
 
 import (
 	_ "embed"
+	"fmt"
 	"strings"
 	"text/template"
 
@@ -12,14 +13,22 @@ import (
 //go:embed example-config.yaml
 var ExampleConfig string
 
+type LoginFlow string
+
+const (
+	LoginFlowWebView    LoginFlow = "webview"
+	LoginFlowNative     LoginFlow = "native"
+	LoginFlowClientHTTP LoginFlow = "client_http"
+)
+
 type Config struct {
 	Proxy       string `yaml:"proxy"`
 	GetProxyURL string `yaml:"get_proxy_url"`
 
-	DisplaynameTemplate   string `yaml:"displayname_template"`
-	ConversationSyncLimit int    `yaml:"conversation_sync_limit"`
-	CacheSession          bool   `yaml:"cache_session"`
-	NativeLogin           bool   `yaml:"native_login"`
+	DisplaynameTemplate   string    `yaml:"displayname_template"`
+	ConversationSyncLimit int       `yaml:"conversation_sync_limit"`
+	CacheSession          bool      `yaml:"cache_session"`
+	LoginFlow             LoginFlow `yaml:"login_flow"`
 
 	X bool `yaml:"x"`
 
@@ -37,9 +46,24 @@ func (c *Config) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (c *Config) PostProcess() error {
+	if c.LoginFlow == "" {
+		c.LoginFlow = LoginFlowWebView
+	}
+	switch c.LoginFlow {
+	case LoginFlowWebView, LoginFlowNative, LoginFlowClientHTTP:
+	default:
+		return fmt.Errorf("invalid login_flow %q", c.LoginFlow)
+	}
 	var err error
 	c.displaynameTemplate, err = template.New("displayname").Parse(c.DisplaynameTemplate)
 	return err
+}
+
+func (c *Config) EffectiveLoginFlow() LoginFlow {
+	if c == nil || c.LoginFlow == "" {
+		return LoginFlowWebView
+	}
+	return c.LoginFlow
 }
 
 func upgradeConfig(helper up.Helper) {
@@ -48,7 +72,13 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str, "displayname_template")
 	helper.Copy(up.Int, "conversation_sync_limit")
 	helper.Copy(up.Bool, "cache_session")
-	helper.Copy(up.Bool, "native_login")
+	if _, ok := helper.Get(up.Str, "login_flow"); ok {
+		helper.Copy(up.Str, "login_flow")
+	} else if clientHTTPLogin, ok := helper.Get(up.Bool, "client_http_login"); ok && clientHTTPLogin == "true" {
+		helper.Set(up.Str, string(LoginFlowClientHTTP), "login_flow")
+	} else if nativeLogin, ok := helper.Get(up.Bool, "native_login"); ok && nativeLogin == "true" {
+		helper.Set(up.Str, string(LoginFlowNative), "login_flow")
+	}
 	helper.Copy(up.Bool, "x")
 }
 

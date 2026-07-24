@@ -29,7 +29,7 @@ func TestLiveNativeLoginFlowProbe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	tc := &TwitterConnector{Config: Config{NativeLogin: true}}
+	tc := &TwitterConnector{Config: Config{LoginFlow: LoginFlowNative}}
 	user := &bridgev2.User{
 		User: &database.User{
 			MXID: id.UserID("@highest:beeper.com"),
