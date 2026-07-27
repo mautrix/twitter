@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"maunium.net/go/mautrix/bridgev2"
 
@@ -15,6 +14,8 @@ const (
 	clientHTTPMaxImmediateActions = 16
 )
 
+var _ bridgev2.LoginProcessClientHTTP = (*TwitterLogin)(nil)
+
 func (t *TwitterLogin) isWaitingForClientHTTPRequest() bool {
 	return t.useClientHTTPLogin &&
 		t.webLogin != nil &&
@@ -24,26 +25,30 @@ func (t *TwitterLogin) isWaitingForClientHTTPRequest() bool {
 		t.clientHTTPStage != ""
 }
 
-func (t *TwitterLogin) submitClientHTTPInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+func (t *TwitterLogin) SubmitClientHTTPResponse(
+	ctx context.Context,
+	response *bridgev2.LoginClientHTTPResponse,
+) (*bridgev2.LoginStep, error) {
 	if !t.isWaitingForClientHTTPRequest() {
 		t.stopClientHTTPLogin()
 		return makeCredentialsStep("The X login session expired. Enter your X login details again."), nil
 	}
-	if strings.TrimSpace(input[loginFieldClientHTTPError]) != "" {
-		return t.failClientHTTPRequest("The request did not complete on this device. Please try again.")
-	}
-	response, err := decodeClientHTTPResponse(input)
-	if err != nil {
+	if response == nil {
 		return t.failClientHTTPRequest("The client returned an invalid HTTP response. Please try again.")
 	}
-	if !t.webLogin.Client().SetBrowserHeaders(browserHeadersFromInput(input)) {
-		return t.failClientHTTPRequest("The client did not return a valid browser fingerprint. Please try again.")
+	if response.Error != "" {
+		return t.failClientHTTPRequest("The request did not complete on this device. Please try again.")
 	}
-	if err = t.clientHTTPTransport.SubmitResponse(response); err != nil {
+	err := t.clientHTTPTransport.SubmitResponse(twittermeow.ClientHTTPResponse{
+		RequestID: response.RequestID,
+		Status:    response.StatusCode,
+		Headers:   response.Headers,
+		Body:      response.Body,
+		FinalURL:  response.FinalURL,
+	})
+	if err != nil {
 		return t.failClientHTTPRequest("The client HTTP response did not match this login. Please try again.")
 	}
-	t.browserHeaders = t.webLogin.Client().GetBrowserHeaders()
-	t.webLogin.Client().SetCookies(clientHTTPCookies(input))
 	return t.continueClientHTTPLogin(ctx)
 }
 

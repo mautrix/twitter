@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 const (
@@ -26,13 +28,11 @@ var (
 )
 
 type ClientHTTPRequest struct {
-	ID           string
-	Method       string
-	URL          string
-	Referrer     string
-	Headers      map[string]string
-	CookieHeader string
-	Body         []byte
+	ID      string
+	Method  string
+	URL     string
+	Headers http.Header
+	Body    []byte
 }
 
 func (req *ClientHTTPRequest) clone() *ClientHTTPRequest {
@@ -40,10 +40,7 @@ func (req *ClientHTTPRequest) clone() *ClientHTTPRequest {
 		return nil
 	}
 	cloned := *req
-	cloned.Headers = make(map[string]string, len(req.Headers))
-	for key, value := range req.Headers {
-		cloned.Headers[key] = value
-	}
+	cloned.Headers = req.Headers.Clone()
 	cloned.Body = bytes.Clone(req.Body)
 	return &cloned
 }
@@ -154,8 +151,14 @@ func (t *ClientHTTPTransport) SubmitResponse(response ClientHTTPResponse) error 
 	}
 	headerSize := 0
 	for name, values := range response.Headers {
+		if !httpguts.ValidHeaderFieldName(name) {
+			return fmt.Errorf("client HTTP response header name is invalid")
+		}
 		headerSize += len(name)
 		for _, value := range values {
+			if !httpguts.ValidHeaderFieldValue(value) {
+				return fmt.Errorf("client HTTP response header value is invalid")
+			}
 			headerSize += len(value)
 		}
 	}
@@ -218,13 +221,11 @@ func (t *ClientHTTPTransport) RoundTrip(request *http.Request) (*http.Response, 
 
 	t.nextID++
 	t.pending = &ClientHTTPRequest{
-		ID:           "client-http-" + strconv.FormatUint(t.nextID, 10),
-		Method:       request.Method,
-		URL:          request.URL.String(),
-		Referrer:     request.Header.Get("referer"),
-		Headers:      clientHTTPFetchHeaders(request.Header),
-		CookieHeader: request.Header.Get("cookie"),
-		Body:         bytes.Clone(body),
+		ID:      "client-http-" + strconv.FormatUint(t.nextID, 10),
+		Method:  request.Method,
+		URL:     request.URL.String(),
+		Headers: clientHTTPFetchHeaders(request.Header),
+		Body:    bytes.Clone(body),
 	}
 	return nil, ErrClientHTTPRequestPending
 }
@@ -269,25 +270,26 @@ func isAllowedClientHTTPURL(parsed *url.URL) bool {
 	}
 }
 
-func clientHTTPFetchHeaders(headers http.Header) map[string]string {
-	out := make(map[string]string)
+func clientHTTPFetchHeaders(headers http.Header) http.Header {
+	out := make(http.Header)
 	for key, values := range headers {
-		key = strings.ToLower(strings.TrimSpace(key))
-		if key == "" || isClientManagedHeader(key) {
+		key = strings.TrimSpace(key)
+		if key == "" || isClientManagedHeader(strings.ToLower(key)) {
 			continue
 		}
-		value := strings.TrimSpace(strings.Join(values, ", "))
-		if value == "" || strings.ContainsAny(value, "\r\n") {
-			continue
+		for _, value := range values {
+			if value == "" || strings.ContainsAny(value, "\r\n") {
+				continue
+			}
+			out.Add(key, value)
 		}
-		out[key] = value
 	}
 	return out
 }
 
 func isClientManagedHeader(name string) bool {
 	switch name {
-	case "accept-encoding", "connection", "content-length", "cookie", "expect",
+	case "accept-encoding", "connection", "content-length", "expect",
 		"host", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade", "via":
 		return true
 	}

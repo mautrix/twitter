@@ -1,9 +1,8 @@
 package connector
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,8 +35,9 @@ func TestClientHTTPLoginUsesCastleWebviewThenCapturesLocalRequest(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step.StepID != LoginStepIDClientHTTPRequest || !step.CookiesParams.Hidden {
-		t.Fatalf("first step = %#v, want hidden client HTTP request", step)
+	if step.Type != bridgev2.LoginStepTypeClientHTTP || step.StepID != LoginStepIDClientHTTPRequest ||
+		step.ClientHTTPParams == nil {
+		t.Fatalf("first step = %#v, want typed client HTTP request", step)
 	}
 
 	for range 20 {
@@ -60,9 +60,7 @@ func TestClientHTTPLoginUsesCastleWebviewThenCapturesLocalRequest(t *testing.T) 
 			body = "{}"
 		}
 		input := clientHTTPTestResponseInput(pending, body)
-		input["guest_id"] = "v1%3A123456789"
-		input["gt"] = "123456789"
-		step, err = login.submitClientHTTPInput(context.Background(), input)
+		step, err = login.SubmitClientHTTPResponse(context.Background(), input)
 		if err != nil {
 			t.Fatalf("submit response for %s: %v", pending.URL, err)
 		}
@@ -92,21 +90,16 @@ func TestClientHTTPLoginUsesCastleWebviewThenCapturesLocalRequest(t *testing.T) 
 	if form.Get("$castle_token") != clientHTTPTestCastleToken(1) {
 		t.Fatalf("Castle form value = %q", form.Get("$castle_token"))
 	}
-	if strings.Contains(step.CookiesParams.ExtractJS, "test-password") {
-		t.Fatal("client HTTP request envelope contains the plaintext password")
+	if step.ClientHTTPParams == nil || !bytes.Equal(step.ClientHTTPParams.Body, pending.Body) {
+		t.Fatal("client HTTP step did not carry the exact request body")
 	}
-	if strings.Contains(step.CookiesParams.ExtractJS, "createRequestToken") ||
-		strings.Contains(step.CookiesParams.ExtractJS, "fetch(") {
-		t.Fatal("client HTTP request envelope contains WebView networking code")
+	if step.CookiesParams != nil {
+		t.Fatal("client HTTP request unexpectedly used a cookie/WebView step")
 	}
 
 	input := clientHTTPTestResponseInput(pending, "login accepted")
-	input["guest_id"] = "v1%3A123456789"
-	input["gt"] = "123456789"
-	input["auth_token"] = "authenticated-cookie"
-	input["ct0"] = "csrf-cookie"
-	input["twid"] = "u%3D123456789"
-	step, err = login.submitClientHTTPInput(context.Background(), input)
+	clientHTTPTestAuthenticate(input)
+	step, err = login.SubmitClientHTTPResponse(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,12 +128,8 @@ func TestClientHTTPLoginUsesCastleWebviewThenCapturesLocalRequest(t *testing.T) 
 			body = clientHTTPTestMainPage
 		}
 		input = clientHTTPTestResponseInput(pending, body)
-		input["guest_id"] = "v1%3A123456789"
-		input["gt"] = "123456789"
-		input["auth_token"] = "authenticated-cookie"
-		input["ct0"] = "csrf-cookie"
-		input["twid"] = "u%3D123456789"
-		step, err = login.submitClientHTTPInput(context.Background(), input)
+		clientHTTPTestAuthenticate(input)
+		step, err = login.SubmitClientHTTPResponse(context.Background(), input)
 		if err != nil {
 			t.Fatalf("submit post-login response for %s: %v", pending.URL, err)
 		}
@@ -193,9 +182,7 @@ func TestClientHTTPLoginPreservesVerificationCodeDuringPostLoginRequests(t *test
 			body = endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"
 		}
 		input := clientHTTPTestResponseInput(pending, body)
-		input["guest_id"] = "v1%3A123456789"
-		input["gt"] = "123456789"
-		step, err = login.submitClientHTTPInput(ctx, input)
+		step, err = login.SubmitClientHTTPResponse(ctx, input)
 		if err != nil {
 			t.Fatalf("submit bootstrap response for %s: %v", pending.URL, err)
 		}
@@ -219,9 +206,7 @@ func TestClientHTTPLoginPreservesVerificationCodeDuringPostLoginRequests(t *test
 		"prelude_dispatch_id\x00abcdefab-1234-1234-1234-abcdefabcdef\x00" +
 		"begin_two_factor_auth"
 	input := clientHTTPTestResponseInput(pending, chooserBody)
-	input["guest_id"] = "v1%3A123456789"
-	input["gt"] = "123456789"
-	step, err = login.submitClientHTTPInput(ctx, input)
+	step, err = login.SubmitClientHTTPResponse(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,9 +228,7 @@ func TestClientHTTPLoginPreservesVerificationCodeDuringPostLoginRequests(t *test
 		endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH + "\x00" +
 		"session_token\x0012345678-1234-1234-1234-123456789abc"
 	input = clientHTTPTestResponseInput(pending, challengeBody)
-	input["guest_id"] = "v1%3A123456789"
-	input["gt"] = "123456789"
-	step, err = login.submitClientHTTPInput(ctx, input)
+	step, err = login.SubmitClientHTTPResponse(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,12 +248,8 @@ func TestClientHTTPLoginPreservesVerificationCodeDuringPostLoginRequests(t *test
 		t.Fatalf("verification submit step = %#v pending = %#v", step, pending)
 	}
 	input = clientHTTPTestResponseInput(pending, "/home")
-	input["guest_id"] = "v1%3A123456789"
-	input["gt"] = "123456789"
-	input["auth_token"] = "authenticated-cookie"
-	input["ct0"] = "csrf-cookie"
-	input["twid"] = "u%3D123456789"
-	step, err = login.submitClientHTTPInput(ctx, input)
+	clientHTTPTestAuthenticate(input)
+	step, err = login.SubmitClientHTTPResponse(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,12 +281,8 @@ func TestClientHTTPLoginPreservesVerificationCodeDuringPostLoginRequests(t *test
 			body = clientHTTPTestMainPage
 		}
 		input = clientHTTPTestResponseInput(pending, body)
-		input["guest_id"] = "v1%3A123456789"
-		input["gt"] = "123456789"
-		input["auth_token"] = "authenticated-cookie"
-		input["ct0"] = "csrf-cookie"
-		input["twid"] = "u%3D123456789"
-		step, err = login.submitClientHTTPInput(ctx, input)
+		clientHTTPTestAuthenticate(input)
+		step, err = login.SubmitClientHTTPResponse(ctx, input)
 		if err != nil {
 			t.Fatalf("submit post-login response for %s: %v", pending.URL, err)
 		}
@@ -342,8 +317,9 @@ func TestClientHTTPRequestFailureStopsAutomaticRetry(t *testing.T) {
 		t.Fatalf("initial step = %#v", step)
 	}
 
-	step, err = login.submitClientHTTPInput(context.Background(), map[string]string{
-		loginFieldClientHTTPError: "Failed to fetch",
+	step, err = login.SubmitClientHTTPResponse(context.Background(), &bridgev2.LoginClientHTTPResponse{
+		RequestID: step.ClientHTTPParams.RequestID,
+		Error:     "Failed to fetch",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -362,107 +338,69 @@ func TestClientHTTPRequestFailureStopsAutomaticRetry(t *testing.T) {
 
 func TestClientHTTPRequestStepContract(t *testing.T) {
 	request := &twittermeow.ClientHTTPRequest{
-		ID:           "client-http-7",
-		Method:       http.MethodPost,
-		URL:          "https://x.com/i/jfapi/onboarding/web/actions/begin_login",
-		Referrer:     endpoints.JETFUEL_LOGIN_REFERER_URL,
-		Headers:      map[string]string{"authorization": "Bearer public"},
-		CookieHeader: "guest_id=v1%3A123; ct0=csrf",
-		Body:         []byte("password=secret"),
+		ID:     "client-http-7",
+		Method: http.MethodPost,
+		URL:    "https://x.com/i/jfapi/onboarding/web/actions/begin_login",
+		Headers: http.Header{
+			"Authorization": {"Bearer public"},
+			"Cookie":        {"guest_id=v1%3A123; ct0=csrf"},
+			"Referer":       {endpoints.JETFUEL_LOGIN_REFERER_URL},
+			"X-Multi":       {"one", "two"},
+		},
+		Body: []byte("password=secret"),
 	}
 	step, err := makeClientHTTPRequestStep(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step.Type != bridgev2.LoginStepTypeCookies || step.StepID != LoginStepIDClientHTTPRequest ||
-		step.CookiesParams == nil || !step.CookiesParams.Hidden {
+	if step.Type != bridgev2.LoginStepTypeClientHTTP || step.StepID != LoginStepIDClientHTTPRequest ||
+		step.ClientHTTPParams == nil || step.CookiesParams != nil {
 		t.Fatalf("step = %#v", step)
 	}
-	if step.CookiesParams.URL != clientHTTPDispatchURL ||
-		!strings.Contains(step.CookiesParams.WaitForURLPattern, "beeper-client-http") {
-		t.Fatalf("client HTTP step does not carry its client-dispatch marker: %#v", step.CookiesParams)
+	params := step.ClientHTTPParams
+	if params.RequestID != request.ID || params.Method != request.Method || params.URL != request.URL {
+		t.Fatalf("client HTTP params = %#v", params)
 	}
-	fields := make(map[string]bridgev2.LoginCookieField)
-	for _, field := range step.CookiesParams.Fields {
-		fields[field.ID] = field
+	if !bytes.Equal(params.Body, request.Body) {
+		t.Fatalf("client HTTP body = %q", params.Body)
 	}
-	for _, fieldID := range []string{
-		loginFieldClientHTTPRequestID,
-		loginFieldClientHTTPStatus,
-		loginFieldClientHTTPResponseHeaders,
-		loginFieldClientHTTPResponseBody,
-		loginFieldBrowserUserAgent,
-		"auth_token",
-		"ct0",
-	} {
-		if _, ok := fields[fieldID]; !ok {
-			t.Fatalf("client HTTP fields missing %q", fieldID)
-		}
+	if got := params.Headers.Values("X-Multi"); len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Fatalf("multi-value headers = %#v", params.Headers)
 	}
-	if !fields[loginFieldClientHTTPRequestID].Required || !fields[loginFieldBrowserUserAgent].Required {
-		t.Fatal("request ID and browser user agent must be required")
+	if params.Headers.Get("Cookie") != request.Headers.Get("Cookie") ||
+		params.Headers.Get("Referer") != request.Headers.Get("Referer") {
+		t.Fatalf("cookies or referrer were not preserved: %#v", params.Headers)
 	}
-	if !strings.HasPrefix(step.CookiesParams.ExtractJS, clientHTTPConfigMarkerPrefix) {
-		t.Fatal("client HTTP request envelope is missing its protocol marker")
-	}
-	if strings.Contains(step.CookiesParams.ExtractJS, "password=secret") {
-		t.Fatal("client HTTP request envelope contains plaintext request body")
-	}
-	if strings.Contains(step.CookiesParams.ExtractJS, "fetch(") ||
-		strings.Contains(step.CookiesParams.ExtractJS, "createRequestToken") {
-		t.Fatal("client HTTP request envelope contains WebView networking code")
-	}
-	config := decodeClientHTTPTestConfig(t, step.CookiesParams.ExtractJS)
-	if config.RequestID != request.ID || config.RequestURL != request.URL ||
-		config.CookieHeader != request.CookieHeader ||
-		config.Body != base64.RawURLEncoding.EncodeToString(request.Body) {
-		t.Fatalf("decoded client HTTP config = %#v", config)
+	request.Headers.Set("Cookie", "changed")
+	request.Body[0] = 'X'
+	if params.Headers.Get("Cookie") == "changed" || params.Body[0] == 'X' {
+		t.Fatal("client HTTP step did not clone mutable request data")
 	}
 }
 
-func TestClientHTTPResponseDecodeRejectsMalformedData(t *testing.T) {
-	valid := clientHTTPTestResponseInput(&twittermeow.ClientHTTPRequest{
-		ID:  "client-http-1",
-		URL: "https://x.com/login",
-	}, "response")
-	if _, err := decodeClientHTTPResponse(valid); err != nil {
-		t.Fatalf("valid response rejected: %v", err)
-	}
-	for _, mutate := range []func(map[string]string){
-		func(input map[string]string) { delete(input, loginFieldClientHTTPRequestID) },
-		func(input map[string]string) { input[loginFieldClientHTTPStatus] = "not-a-status" },
-		func(input map[string]string) { input[loginFieldClientHTTPResponseBody] = "bad" },
-		func(input map[string]string) { input[loginFieldClientHTTPResponseHeaders] = "v1.invalid" },
-		func(input map[string]string) {
-			headers, _ := json.Marshal(map[string]string{"bad header": "value"})
-			input[loginFieldClientHTTPResponseHeaders] = clientHTTPEncodedFieldPrefix +
-				base64.RawURLEncoding.EncodeToString(headers)
+func clientHTTPTestResponseInput(
+	request *twittermeow.ClientHTTPRequest,
+	body string,
+) *bridgev2.LoginClientHTTPResponse {
+	return &bridgev2.LoginClientHTTPResponse{
+		RequestID:  request.ID,
+		StatusCode: http.StatusOK,
+		FinalURL:   request.URL,
+		Headers: http.Header{
+			"Content-Type": {"application/octet-stream"},
+			"Set-Cookie": {
+				"guest_id=v1%3A123456789; Domain=.x.com; Path=/",
+				"gt=123456789; Domain=.x.com; Path=/",
+			},
 		},
-	} {
-		input := make(map[string]string, len(valid))
-		for key, value := range valid {
-			input[key] = value
-		}
-		mutate(input)
-		if _, err := decodeClientHTTPResponse(input); err == nil {
-			t.Fatalf("malformed response accepted: %#v", input)
-		}
+		Body: []byte(body),
 	}
 }
 
-func clientHTTPTestResponseInput(request *twittermeow.ClientHTTPRequest, body string) map[string]string {
-	headers, _ := json.Marshal(map[string]string{"content-type": "application/octet-stream"})
-	return map[string]string{
-		loginFieldClientHTTPRequestID:       request.ID,
-		loginFieldClientHTTPStatus:          "200",
-		loginFieldClientHTTPResponseURL:     request.URL,
-		loginFieldClientHTTPResponseHeaders: clientHTTPEncodedFieldPrefix + base64.RawURLEncoding.EncodeToString(headers),
-		loginFieldClientHTTPResponseBody:    clientHTTPEncodedFieldPrefix + base64.RawURLEncoding.EncodeToString([]byte(body)),
-		loginFieldBrowserUserAgent:          "Mozilla/5.0 test client",
-		loginFieldBrowserSecCHUA:            `"Chromium";v="150"`,
-		loginFieldBrowserPlatform:           `"Windows"`,
-		loginFieldBrowserMobile:             "?0",
-	}
+func clientHTTPTestAuthenticate(response *bridgev2.LoginClientHTTPResponse) {
+	response.Headers.Add("Set-Cookie", "auth_token=authenticated-cookie; Domain=.x.com; Path=/")
+	response.Headers.Add("Set-Cookie", "ct0=csrf-cookie; Domain=.x.com; Path=/")
+	response.Headers.Add("Set-Cookie", "twid=u%3D123456789; Domain=.x.com; Path=/")
 }
 
 func clientHTTPTestCastleToken(index int) string {
@@ -477,25 +415,4 @@ func clientHTTPTestCastleInput() map[string]string {
 		input[castleTokenFieldID(index)] = clientHTTPTestCastleToken(index)
 	}
 	return input
-}
-
-func decodeClientHTTPTestConfig(t *testing.T, extractJS string) clientHTTPConfig {
-	t.Helper()
-	if !strings.HasPrefix(extractJS, clientHTTPConfigMarkerPrefix) {
-		t.Fatal("client HTTP config marker prefix is missing")
-	}
-	end := strings.Index(extractJS, clientHTTPConfigMarkerSuffix)
-	if end < 0 {
-		t.Fatal("client HTTP config marker suffix is missing")
-	}
-	encoded := strings.TrimPrefix(extractJS[:end], clientHTTPConfigMarkerPrefix)
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("decode client HTTP config: %v", err)
-	}
-	var config clientHTTPConfig
-	if err = json.Unmarshal(raw, &config); err != nil {
-		t.Fatalf("unmarshal client HTTP config: %v", err)
-	}
-	return config
 }

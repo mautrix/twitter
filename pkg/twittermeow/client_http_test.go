@@ -32,6 +32,8 @@ func TestClientHTTPTransportCapturesAndReplaysRequest(t *testing.T) {
 	request.Header.Set("referer", "https://x.com/i/jf/onboarding/web?mode=login")
 	request.Header.Set("sec-fetch-site", "same-origin")
 	request.Header.Set("user-agent", "bridge user agent")
+	request.Header.Add("x-multi", "one")
+	request.Header.Add("x-multi", "two")
 
 	_, err = transport.RoundTrip(request)
 	if !errors.Is(err, ErrClientHTTPRequestPending) {
@@ -41,32 +43,30 @@ func TestClientHTTPTransportCapturesAndReplaysRequest(t *testing.T) {
 	if pending == nil || pending.Method != http.MethodPost || pending.URL != request.URL.String() {
 		t.Fatalf("PendingRequest() = %#v", pending)
 	}
-	if pending.Referrer != request.Header.Get("referer") {
-		t.Fatalf("Referrer = %q", pending.Referrer)
+	if pending.Headers.Get("cookie") != "auth_token=secret" {
+		t.Fatalf("Cookie header = %q", pending.Headers.Get("cookie"))
 	}
-	if pending.CookieHeader != "auth_token=secret" {
-		t.Fatalf("CookieHeader = %q", pending.CookieHeader)
-	}
-	if pending.Headers["authorization"] != "Bearer public" {
+	if pending.Headers.Get("authorization") != "Bearer public" {
 		t.Fatalf("authorization header missing: %#v", pending.Headers)
 	}
-	for _, forwarded := range []string{"origin", "referer", "sec-fetch-site", "user-agent"} {
-		if _, ok := pending.Headers[forwarded]; !ok {
+	for _, forwarded := range []string{"cookie", "origin", "referer", "sec-fetch-site", "user-agent"} {
+		if pending.Headers.Get(forwarded) == "" {
 			t.Fatalf("end-to-end header %q was not forwarded", forwarded)
 		}
 	}
-	for _, forbidden := range []string{"cookie"} {
-		if _, ok := pending.Headers[forbidden]; ok {
-			t.Fatalf("session-managed header %q was forwarded", forbidden)
-		}
+	if got := pending.Headers.Values("x-multi"); len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Fatalf("multi-value header was not preserved: %#v", pending.Headers)
 	}
 
 	err = transport.SubmitResponse(ClientHTTPResponse{
 		RequestID: pending.ID,
 		Status:    http.StatusOK,
-		Headers:   http.Header{"Content-Type": {"application/octet-stream"}},
-		Body:      []byte("response body"),
-		FinalURL:  request.URL.String(),
+		Headers: http.Header{
+			"Content-Type": {"application/octet-stream"},
+			"Set-Cookie":   {"first=1; Path=/", "second=2; Path=/"},
+		},
+		Body:     []byte("response body"),
+		FinalURL: "https://x.com/home",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +86,12 @@ func TestClientHTTPTransportCapturesAndReplaysRequest(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || string(replayedBody) != "response body" {
 		t.Fatalf("replayed response = %d %q", response.StatusCode, replayedBody)
+	}
+	if response.Request.URL.String() != "https://x.com/home" {
+		t.Fatalf("replayed final URL = %q", response.Request.URL)
+	}
+	if got := response.Header.Values("Set-Cookie"); len(got) != 2 {
+		t.Fatalf("replayed Set-Cookie headers = %#v", got)
 	}
 	if err = transport.EndOperation(); err != nil {
 		t.Fatal(err)
@@ -132,10 +138,28 @@ func TestClientHTTPTransportRejectsUnsafeRequestsAndResponses(t *testing.T) {
 		{RequestID: pending.ID, Status: 99},
 		{RequestID: pending.ID, Status: http.StatusOK, FinalURL: "https://example.com/"},
 		{RequestID: pending.ID, Status: http.StatusOK, Body: make([]byte, ClientHTTPMaxResponseBodySize+1)},
+		{RequestID: pending.ID, Status: http.StatusOK, Headers: http.Header{"Bad Header": {"value"}}},
+		{RequestID: pending.ID, Status: http.StatusOK, Headers: http.Header{"X-Test": {"bad\rvalue"}}},
+		{RequestID: pending.ID, Status: http.StatusOK, Headers: http.Header{
+			"X-Test": {strings.Repeat("a", ClientHTTPMaxResponseHeadersSize+1)},
+		}},
 	} {
 		if err := transport.SubmitResponse(response); err == nil {
 			t.Fatalf("SubmitResponse(%#v) succeeded, want rejection", response)
 		}
+	}
+
+	largeBodyTransport := newClientHTTPTransport()
+	if err := largeBodyTransport.BeginOperation("test"); err != nil {
+		t.Fatal(err)
+	}
+	largeRequest, _ := http.NewRequest(
+		http.MethodPost,
+		"https://x.com/login",
+		strings.NewReader(strings.Repeat("a", clientHTTPMaxRequestBodySize+1)),
+	)
+	if _, err := largeBodyTransport.RoundTrip(largeRequest); err == nil {
+		t.Fatal("oversized client HTTP request body was accepted")
 	}
 }
 
@@ -155,6 +179,9 @@ func TestClientHTTPTransportOperationAndReplayGuards(t *testing.T) {
 	pending := transport.PendingRequest()
 	if err := transport.SubmitResponse(ClientHTTPResponse{RequestID: pending.ID, Status: http.StatusOK}); err != nil {
 		t.Fatal(err)
+	}
+	if err := transport.SubmitResponse(ClientHTTPResponse{RequestID: pending.ID, Status: http.StatusOK}); err == nil {
+		t.Fatal("duplicate client HTTP response was accepted")
 	}
 	if err := transport.BeginOperation("first"); err != nil {
 		t.Fatal(err)

@@ -605,9 +605,6 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
-	if t.isWaitingForClientHTTPRequest() {
-		return t.submitClientHTTPInput(ctx, cookies)
-	}
 	if t.isWaitingForWebLoginCastleToken() {
 		return t.submitWebCastleTokenInput(ctx, cookies)
 	}
