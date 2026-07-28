@@ -155,106 +155,63 @@ func TestHandleWebCastleStageErrorMakesPreludeFailureTerminal(t *testing.T) {
 	}
 }
 
-func TestGetLoginFlowsUsesConfiguredFlow(t *testing.T) {
-	tests := []struct {
-		name       string
-		configFlow LoginFlow
-		wantID     string
-		wantBeta   bool
-	}{
-		{name: "zero value uses webview", wantID: LoginFlowIDCookies},
-		{name: "webview", configFlow: LoginFlowWebView, wantID: LoginFlowIDCookies},
-		{name: "native", configFlow: LoginFlowNative, wantID: LoginFlowIDPassword},
-		{name: "client HTTP", configFlow: LoginFlowClientHTTP, wantID: LoginFlowIDClientHTTP, wantBeta: true},
+func TestGetLoginFlowsAdvertisesAllSupportedFlows(t *testing.T) {
+	flows := (&TwitterConnector{}).GetLoginFlows()
+	wantIDs := []string{LoginFlowIDCookies, LoginFlowIDPassword, LoginFlowIDClientHTTP}
+	if len(flows) != len(wantIDs) {
+		t.Fatalf("len(flows) = %d, want %d", len(flows), len(wantIDs))
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			tc := TwitterConnector{Config: Config{LoginFlow: test.configFlow}}
-			flows := tc.GetLoginFlows()
-			if len(flows) != 1 {
-				t.Fatalf("len(flows) = %d, want 1", len(flows))
-			}
-			if flows[0].ID != test.wantID {
-				t.Fatalf("flow ID = %s, want %s", flows[0].ID, test.wantID)
-			}
-			if strings.Contains(strings.ToLower(flows[0].Name), "beta") != test.wantBeta {
-				t.Fatalf("flow name = %q, want beta=%t", flows[0].Name, test.wantBeta)
-			}
-		})
+	for index, wantID := range wantIDs {
+		if flows[index].ID != wantID {
+			t.Errorf("flows[%d].ID = %q, want %q", index, flows[index].ID, wantID)
+		}
+	}
+	if !strings.Contains(strings.ToLower(flows[2].Name), "beta") {
+		t.Errorf("client HTTP flow name = %q, want beta label", flows[2].Name)
 	}
 }
 
-func TestCreateLoginRespectsLoginFlowConfig(t *testing.T) {
+func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 	tests := []struct {
 		name        string
-		configFlow  LoginFlow
 		flowID      string
 		wantType    bridgev2.LoginStepType
 		wantStepID  string
 		wantInvalid bool
 	}{
 		{
-			name:       "zero value uses webview",
+			name:       "empty flow defaults to cookies",
 			wantType:   bridgev2.LoginStepTypeCookies,
 			wantStepID: LoginStepIDCookies,
 		},
 		{
-			name:       "explicit webview flow",
-			configFlow: LoginFlowWebView,
+			name:       "cookies",
 			flowID:     LoginFlowIDCookies,
 			wantType:   bridgev2.LoginStepTypeCookies,
 			wantStepID: LoginStepIDCookies,
 		},
 		{
-			name:        "native flow disabled by webview config",
-			configFlow:  LoginFlowWebView,
-			flowID:      LoginFlowIDPassword,
-			wantInvalid: true,
-		},
-		{
-			name:       "default flow uses native",
-			configFlow: LoginFlowNative,
-			wantType:   bridgev2.LoginStepTypeUserInput,
-			wantStepID: LoginStepIDCredentials,
-		},
-		{
-			name:       "explicit native flow",
-			configFlow: LoginFlowNative,
+			name:       "native",
 			flowID:     LoginFlowIDPassword,
 			wantType:   bridgev2.LoginStepTypeUserInput,
 			wantStepID: LoginStepIDCredentials,
 		},
 		{
-			name:        "webview flow disabled by native config",
-			configFlow:  LoginFlowNative,
-			flowID:      LoginFlowIDCookies,
-			wantInvalid: true,
-		},
-		{
-			name:       "default flow uses client HTTP",
-			configFlow: LoginFlowClientHTTP,
-			wantType:   bridgev2.LoginStepTypeUserInput,
-			wantStepID: LoginStepIDCredentials,
-		},
-		{
-			name:       "explicit client HTTP flow",
-			configFlow: LoginFlowClientHTTP,
+			name:       "client HTTP",
 			flowID:     LoginFlowIDClientHTTP,
 			wantType:   bridgev2.LoginStepTypeUserInput,
 			wantStepID: LoginStepIDCredentials,
 		},
 		{
-			name:        "native flow disabled by client HTTP config",
-			configFlow:  LoginFlowClientHTTP,
-			flowID:      LoginFlowIDPassword,
+			name:        "unknown",
+			flowID:      "unknown",
 			wantInvalid: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tc := TwitterConnector{Config: Config{LoginFlow: test.configFlow}}
-			process, err := tc.CreateLogin(context.Background(), nil, test.flowID)
+			process, err := (&TwitterConnector{}).CreateLogin(context.Background(), nil, test.flowID)
 			if test.wantInvalid {
 				if !errors.Is(err, bridgev2.ErrInvalidLoginFlowID) {
 					t.Fatalf("CreateLogin() error = %v, want ErrInvalidLoginFlowID", err)
