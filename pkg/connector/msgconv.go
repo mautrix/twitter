@@ -654,11 +654,11 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 
 	if isPublicCDNURL(url) {
 		// Public CDN URLs use minimal headers - no auth, no Origin/Referer
-		req.Header.Set("User-Agent", twittermeow.UserAgent)
+		req.Header.Set("User-Agent", cli.GetUserAgent())
 		req.Header.Set("Accept", "*/*")
 	} else {
 		// Authenticated requests use full headers with cookies
-		headers := twittermeow.BaseHeaders.Clone()
+		headers := cli.GetBaseHeaders()
 		headers.Set("Cookie", cli.GetCookieString())
 		req.Header = headers
 	}

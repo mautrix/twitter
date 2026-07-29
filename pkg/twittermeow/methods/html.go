@@ -1,7 +1,9 @@
 package methods
 
 import (
+	"net/http"
 	"regexp"
+	"strconv"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
@@ -11,10 +13,14 @@ var (
 	migrateFormDataRegex   = regexp.MustCompile(`<form[^>]* action="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="tok" value="([^"]+)"[^>]*>[\s\S]*?<input[^>]* name="data" value="([^"]+)"[^>]*>`)
 	mainScriptURLRegex     = regexp.MustCompile(`https:\/\/(?:[A-Za-z0-9.-]+)\/responsive-web\/client-web\/main\.[0-9A-Za-z]+\.js`)
 	bearerTokenRegex       = regexp.MustCompile(`Bearer\s[A-Za-z0-9%]{16,}`)
+	documentCookieRegex    = regexp.MustCompile(`document\.cookie\s*=\s*("(?:\\.|[^"\\])*")`)
+	cloudflareJSDRegex     = regexp.MustCompile(`<script[^>]+src=["']([^"']*/cdn-cgi/challenge-platform/[^"']*api\.js[^"']*)["']`)
 	guestTokenRegex        = regexp.MustCompile(`gt=([0-9]+)`)
 	verificationTokenRegex = regexp.MustCompile(`meta name="twitter-site-verification" content="([^"]+)"`)
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
 	ondemandSChunkIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.s"`)
+	ondemandCastleIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.castle"`)
+	castlePublicKeyRegex   = regexp.MustCompile(`"responsive_web_castle_public_key"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"`)
 	variableIndexesRegex   = regexp.MustCompile(`\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
 )
 
@@ -59,6 +65,36 @@ func ParseGuestToken(html string) string {
 	return match[1]
 }
 
+func ParseDocumentCookieAssignments(html string) map[string]string {
+	matches := documentCookieRegex.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		cookie, err := strconv.Unquote(match[1])
+		if err != nil || cookie == "" {
+			continue
+		}
+		parsedCookie, err := http.ParseSetCookie(cookie)
+		if err == nil {
+			out[parsedCookie.Name] = parsedCookie.Value
+		}
+	}
+	return out
+}
+
+func ParseCloudflareJSDURL(html string) string {
+	match := cloudflareJSDRegex.FindStringSubmatch(html)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
+}
+
 func ParseVerificationToken(html string) string {
 	match := verificationTokenRegex.FindStringSubmatch(html)
 	if len(match) < 1 {
@@ -76,7 +112,15 @@ func ParseCountry(html string) string {
 }
 
 func ParseOndemandSURLFromScript(js []byte) string {
-	chunkIDMatch := ondemandSChunkIDRegex.FindSubmatchIndex(js)
+	return parseOndemandChunkURLFromScript(js, "ondemand.s", ondemandSChunkIDRegex)
+}
+
+func ParseOndemandCastleURLFromScript(js []byte) string {
+	return parseOndemandChunkURLFromScript(js, "ondemand.castle", ondemandCastleIDRegex)
+}
+
+func parseOndemandChunkURLFromScript(js []byte, chunkName string, chunkIDRegex *regexp.Regexp) string {
+	chunkIDMatch := chunkIDRegex.FindSubmatchIndex(js)
 	if len(chunkIDMatch) < 4 {
 		return ""
 	}
@@ -90,5 +134,13 @@ func ParseOndemandSURLFromScript(js []byte) string {
 	}
 
 	hash := string(jsAfterNameMap[hashMatch[2]:hashMatch[3]])
-	return "https://abs.twimg.com/responsive-web/client-web/ondemand.s." + hash + "a.js"
+	return "https://abs.twimg.com/responsive-web/client-web/" + chunkName + "." + hash + "a.js"
+}
+
+func ParseResponsiveWebCastlePublicKey(html string) string {
+	match := castlePublicKeyRegex.FindStringSubmatch(html)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
 }

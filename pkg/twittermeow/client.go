@@ -3,8 +3,10 @@ package twittermeow
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -48,6 +50,8 @@ type Client struct {
 	session *CachedSession
 	HTTP    *http.Client
 
+	clientHTTPTransport *ClientHTTPTransport
+
 	eventHandler              EventHandler
 	streamEventHandler        StreamEventHandler
 	xchatEventHandler         XChatEventHandler
@@ -62,8 +66,12 @@ type Client struct {
 	xchatProcessor *XChatEventProcessor
 	keyManager     *crypto.KeyManager
 
-	xchatToken   *cachedXChatToken
-	xchatTokenMu sync.Mutex
+	jetfuelCastleTokens  []string
+	jetfuelCastleInfo    JetfuelCastleTokenInfo
+	browserHeaders       BrowserHeaders
+	jetfuelCastleTokenMu sync.Mutex
+	xchatToken           *cachedXChatToken
+	xchatTokenMu         sync.Mutex
 }
 
 func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.Logger) *Client {
@@ -91,6 +99,17 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 
 func (c *Client) GetCookieString() string {
 	return c.cookies.String()
+}
+
+func (c *Client) SetCookies(values map[string]string) {
+	for name, value := range values {
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		c.cookies.Set(cookies.XCookieName(name), value)
+	}
 }
 
 func (c *Client) SetSession(sess *CachedSession) {
@@ -211,6 +230,9 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (CurrentUserProfile, erro
 
 	profile, err := c.GetCurrentUserProfile(ctx)
 	if err != nil {
+		if errors.Is(err, ErrClientHTTPRequestPending) {
+			return CurrentUserProfile{}, err
+		}
 		if IsAuthError(err) {
 			return CurrentUserProfile{}, err
 		}
@@ -277,11 +299,54 @@ func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {
 	return scriptRespBody, err
 }
 
-func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) string {
+func (c *Client) fetchCloudflareJSD(ctx context.Context, pageURL *url.URL, mainPageHTML string) error {
+	scriptURL := methods.ParseCloudflareJSDURL(mainPageHTML)
+	if scriptURL == "" {
+		return nil
+	}
+	parsedScriptURL, err := pageURL.Parse(scriptURL)
+	if err != nil {
+		return err
+	}
+	extraHeaders := map[string]string{
+		"accept":         "*/*",
+		"sec-fetch-dest": "script",
+		"sec-fetch-mode": "no-cors",
+		"sec-fetch-site": "same-origin",
+	}
+	originalCheckRedirect := c.HTTP.CheckRedirect
+	c.disableRedirects()
+	defer func() {
+		c.HTTP.CheckRedirect = originalCheckRedirect
+	}()
+	for i := 0; i < 4; i++ {
+		resp, _, err := c.MakeRequest(ctx, parsedScriptURL.String(), http.MethodGet, c.buildHeaders(HeaderOpts{
+			Extra:       extraHeaders,
+			Referer:     pageURL.String(),
+			WithCookies: true,
+		}), nil, types.ContentTypeNone)
+		if resp != nil {
+			c.cookies.UpdateFromResponse(resp)
+		}
+		if !errors.Is(err, ErrRedirectAttempted) {
+			return err
+		}
+		location := resp.Header.Get("Location")
+		if location == "" {
+			return err
+		}
+		parsedScriptURL, err = parsedScriptURL.Parse(location)
+		if err != nil {
+			return err
+		}
+	}
+	return ErrMaxRetriesReached
+}
+
+func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) (string, error) {
 	scriptRespBody, err := c.fetchScript(ctx, scriptURL)
 	if err != nil {
-		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch main script")
-		return ""
+		return "", err
 	}
 	authTokenBytes := methods.ParseBearerToken(scriptRespBody)
 	authTokens := exslices.CastFunc(authTokenBytes, func(from []byte) string {
@@ -299,7 +364,7 @@ func (c *Client) fetchAndParseMainScript(ctx context.Context, scriptURL string) 
 			Msg("Hardcoded token doesn't match fetched one")
 		c.session.bearerToken = authTokens[0]
 	}
-	return methods.ParseOndemandSURLFromScript(scriptRespBody)
+	return methods.ParseOndemandSURLFromScript(scriptRespBody), nil
 }
 
 func (c *Client) fetchAndParseSScript(ctx context.Context, scriptURL string) (*[4]int, error) {
@@ -381,9 +446,31 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 			Msg("Found loading animations and verification token")
 	}
 
+	for name, value := range methods.ParseDocumentCookieAssignments(mainPageHTML) {
+		c.cookies.Set(cookies.XCookieName(name), value)
+	}
+	if mainPageResp.Request != nil && mainPageResp.Request.URL != nil {
+		if err := c.fetchCloudflareJSD(ctx, mainPageResp.Request.URL, mainPageHTML); err != nil {
+			if errors.Is(err, ErrClientHTTPRequestPending) {
+				return err
+			}
+			c.Logger.Debug().Err(err).Msg("Failed to fetch Cloudflare JSD bootstrap")
+		}
+	}
+
 	c.session.Country = country
 	c.session.VerificationToken = verificationToken
 	c.session.loadingAnims = loadingAnims
+	c.jetfuelCastleInfo = JetfuelCastleTokenInfo{
+		ScriptURL: methods.ParseOndemandCastleURLFromScript([]byte(mainPageHTML)),
+		PublicKey: methods.ParseResponsiveWebCastlePublicKey(mainPageHTML),
+	}
+	if !c.jetfuelCastleInfo.IsValid() {
+		c.Logger.Debug().
+			Bool("has_script_url", c.jetfuelCastleInfo.ScriptURL != "").
+			Bool("has_public_key", c.jetfuelCastleInfo.PublicKey != "").
+			Msg("X Castle web metadata not found in main page HTML")
+	}
 
 	guestToken := methods.ParseGuestToken(mainPageHTML)
 	if guestToken == "" {
@@ -400,12 +487,21 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	if mainScriptURL == "" {
 		zerolog.Ctx(ctx).Warn().Int("status_code", mainPageResp.StatusCode).Msg("Main script URL not found in main page HTML")
 	} else if ondemandSURL == "" {
-		ondemandSURL = c.fetchAndParseMainScript(ctx, mainScriptURL)
+		var fetchErr error
+		ondemandSURL, fetchErr = c.fetchAndParseMainScript(ctx, mainScriptURL)
+		if errors.Is(fetchErr, ErrClientHTTPRequestPending) {
+			return fetchErr
+		} else if fetchErr != nil {
+			zerolog.Ctx(ctx).Warn().Err(fetchErr).Msg("Failed to fetch main script")
+		}
 	}
 
 	if ondemandSURL == "" {
 		c.Logger.Warn().Msg("ondemand.s URL not found in bootstrap sources")
 	} else if indexes, err := c.fetchAndParseSScript(ctx, ondemandSURL); err != nil {
+		if errors.Is(err, ErrClientHTTPRequestPending) {
+			return err
+		}
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.variableIndexes = indexes
