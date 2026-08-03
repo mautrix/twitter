@@ -157,42 +157,41 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			}
 		}
 
-		// If we couldn't fetch reply info, skip reply metadata
-		if !ok {
-			zerolog.Ctx(ctx).Debug().
-				Str("reply_to_id", ParseMessageID(msg.ReplyTo.ID)).
-				Msg("Could not fetch reply content, sending as standalone message")
-		} else {
-			var senderIDPtr *int64
-			if senderIDStr != "" {
-				if parsed, err := strconv.ParseInt(senderIDStr, 10, 64); err == nil {
-					senderIDPtr = &parsed
-				} else {
-					zerolog.Ctx(ctx).Debug().
-						Str("raw_sender_id", senderIDStr).
-						Err(err).
-						Msg("Failed to parse sender_id for reply preview")
-				}
+		var senderIDPtr *int64
+		if senderIDStr != "" {
+			if parsed, err := strconv.ParseInt(senderIDStr, 10, 64); err == nil {
+				senderIDPtr = &parsed
+			} else {
+				zerolog.Ctx(ctx).Debug().
+					Str("raw_sender_id", senderIDStr).
+					Err(err).
+					Msg("Failed to parse sender_id for reply preview")
 			}
-			if replyMsgID == "" {
-				replyMsgID = replySeqID
-			}
+		}
+		if replyMsgID == "" {
+			replyMsgID = replySeqID
+		}
+		opts.ReplyTo = buildReplyingToPreview(
+			replyMsgID,
+			replySeqID,
+			replyText,
+			replyDisplayName,
+			senderIDPtr,
+			replyAttachments,
+			ok,
+		)
+
+		if ok {
 			zerolog.Ctx(ctx).Info().
 				Str("conversation_id", conversationID).
 				Str("reply_to_id", ParseMessageID(msg.ReplyTo.ID)).
 				Int("reply_attachments", len(replyAttachments)).
-				Str("reply_text", replyText).
+				Int("reply_text_length", len(replyText)).
 				Msg("Preparing reply preview")
-			opts.ReplyTo = &payload.ReplyingToPreview{
-				ReplyingToMessageId:         &replyMsgID,
-				ReplyingToMessageSequenceId: &replySeqID,
-				MessageText:                 &replyText,
-				SenderDisplayName:           ptr.Ptr(replyDisplayName),
-				SenderId:                    senderIDPtr,
-			}
-			if len(replyAttachments) > 0 {
-				opts.ReplyTo.Attachments = replyAttachments
-			}
+		} else {
+			zerolog.Ctx(ctx).Debug().
+				Str("reply_to_id", ParseMessageID(msg.ReplyTo.ID)).
+				Msg("Could not fetch reply content, sending reply with target identifiers only")
 		}
 	}
 
@@ -379,6 +378,30 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		DB:            dbMsg,
 		RemovePending: txnID,
 	}, nil
+}
+
+func buildReplyingToPreview(
+	messageID string,
+	sequenceID string,
+	text string,
+	displayName string,
+	senderID *int64,
+	attachments []*payload.MessageAttachment,
+	includeContent bool,
+) *payload.ReplyingToPreview {
+	preview := &payload.ReplyingToPreview{
+		ReplyingToMessageId:         ptr.Ptr(messageID),
+		ReplyingToMessageSequenceId: ptr.Ptr(sequenceID),
+		SenderId:                    senderID,
+	}
+	if displayName != "" {
+		preview.SenderDisplayName = ptr.Ptr(displayName)
+	}
+	if includeContent {
+		preview.MessageText = ptr.Ptr(text)
+		preview.Attachments = attachments
+	}
+	return preview
 }
 
 func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
