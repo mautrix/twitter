@@ -50,7 +50,7 @@ type Client struct {
 	session *CachedSession
 	HTTP    *http.Client
 
-	clientHTTPTransport *ClientHTTPTransport
+	defaultTransport http.RoundTripper
 
 	eventHandler              EventHandler
 	streamEventHandler        StreamEventHandler
@@ -74,13 +74,19 @@ type Client struct {
 	xchatTokenMu         sync.Mutex
 }
 
+const (
+	defaultHTTPTimeout = 60 * time.Second
+)
+
 func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.Logger) *Client {
+	defaultTransport := req.NewClient().ImpersonateChrome().DisableHTTP3().GetTransport()
 	cli := Client{
 		HTTP: &http.Client{
-			Transport: req.NewClient().ImpersonateChrome().DisableHTTP3().GetTransport(),
-			Timeout:   60 * time.Second,
+			Transport: defaultTransport,
+			Timeout:   defaultHTTPTimeout,
 		},
-		Logger: logger,
+		defaultTransport: defaultTransport,
+		Logger:           logger,
 	}
 
 	cli.polling = cli.newPollingClient()
@@ -134,6 +140,15 @@ func (c *Client) GetXChatProcessor() *XChatEventProcessor {
 // This replaces the current KeyManager with a new one using the provided store.
 func (c *Client) SetKeyStore(store crypto.KeyStore) {
 	c.keyManager = crypto.NewKeyManager(store)
+}
+
+func (c *Client) SetLoginHTTPTransport(transport http.RoundTripper) {
+	if transport == nil {
+		c.HTTP.Transport = c.defaultTransport
+		c.HTTP.Timeout = defaultHTTPTimeout
+		return
+	}
+	c.HTTP.Transport = transport
 }
 
 // GetXChatToken returns a valid XChat token, refreshing if expired.
@@ -230,9 +245,6 @@ func (c *Client) LoadMessagesPage(ctx context.Context) (CurrentUserProfile, erro
 
 	profile, err := c.GetCurrentUserProfile(ctx)
 	if err != nil {
-		if errors.Is(err, ErrClientHTTPRequestPending) {
-			return CurrentUserProfile{}, err
-		}
 		if IsAuthError(err) {
 			return CurrentUserProfile{}, err
 		}
@@ -451,9 +463,6 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	}
 	if mainPageResp.Request != nil && mainPageResp.Request.URL != nil {
 		if err := c.fetchCloudflareJSD(ctx, mainPageResp.Request.URL, mainPageHTML); err != nil {
-			if errors.Is(err, ErrClientHTTPRequestPending) {
-				return err
-			}
 			c.Logger.Debug().Err(err).Msg("Failed to fetch Cloudflare JSD bootstrap")
 		}
 	}
@@ -489,9 +498,7 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	} else if ondemandSURL == "" {
 		var fetchErr error
 		ondemandSURL, fetchErr = c.fetchAndParseMainScript(ctx, mainScriptURL)
-		if errors.Is(fetchErr, ErrClientHTTPRequestPending) {
-			return fetchErr
-		} else if fetchErr != nil {
+		if fetchErr != nil {
 			zerolog.Ctx(ctx).Warn().Err(fetchErr).Msg("Failed to fetch main script")
 		}
 	}
@@ -499,9 +506,6 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	if ondemandSURL == "" {
 		c.Logger.Warn().Msg("ondemand.s URL not found in bootstrap sources")
 	} else if indexes, err := c.fetchAndParseSScript(ctx, ondemandSURL); err != nil {
-		if errors.Is(err, ErrClientHTTPRequestPending) {
-			return err
-		}
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.variableIndexes = indexes
