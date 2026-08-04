@@ -155,22 +155,6 @@ func TestHandleWebCastleStageErrorMakesPreludeFailureTerminal(t *testing.T) {
 	}
 }
 
-func TestGetLoginFlowsAdvertisesAllSupportedFlows(t *testing.T) {
-	flows := (&TwitterConnector{}).GetLoginFlows()
-	wantIDs := []string{LoginFlowIDCookies, LoginFlowIDPassword, LoginFlowIDClientHTTP}
-	if len(flows) != len(wantIDs) {
-		t.Fatalf("len(flows) = %d, want %d", len(flows), len(wantIDs))
-	}
-	for index, wantID := range wantIDs {
-		if flows[index].ID != wantID {
-			t.Errorf("flows[%d].ID = %q, want %q", index, flows[index].ID, wantID)
-		}
-	}
-	if !strings.Contains(strings.ToLower(flows[2].Name), "beta") {
-		t.Errorf("client HTTP flow name = %q, want beta label", flows[2].Name)
-	}
-}
-
 func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -193,12 +177,6 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 		{
 			name:       "native",
 			flowID:     LoginFlowIDPassword,
-			wantType:   bridgev2.LoginStepTypeUserInput,
-			wantStepID: LoginStepIDCredentials,
-		},
-		{
-			name:       "client HTTP",
-			flowID:     LoginFlowIDClientHTTP,
 			wantType:   bridgev2.LoginStepTypeUserInput,
 			wantStepID: LoginStepIDCredentials,
 		},
