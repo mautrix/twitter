@@ -75,3 +75,10 @@ func (te *TwitterErrors) Unwrap() []error {
 	}
 	return errs
 }
+
+// clientHTTPErrorPrefix mirrors bridgev2/matrix.ErrorFromClientPrefix, as documented there
+const clientHTTPErrorPrefix = "error from client: "
+
+func IsClientHTTPError(err error) bool {
+	return strings.Contains(err.Error(), clientHTTPErrorPrefix)
+}

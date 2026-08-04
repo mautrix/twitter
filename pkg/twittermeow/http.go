@@ -27,14 +27,12 @@ var (
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	logContext := zerolog.Ctx(ctx).With().
+	log := zerolog.Ctx(ctx).With().
 		Str("url", url).
 		Str("method", method).
-		Str("function", "MakeRequest")
-	if !c.IsClientHTTPEnabled() {
-		logContext = logContext.Str("request_body", string(payload))
-	}
-	log := logContext.Logger()
+		Str("request_body", string(payload)).
+		Str("function", "MakeRequest").
+		Logger()
 	var attempts int
 	for {
 		attempts++
@@ -51,8 +49,13 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 				Dur("duration", dur).
 				Msg("Request successful")
 			return resp, respDat, nil
-		} else if errors.Is(err, ErrClientHTTPRequestPending) {
-			return resp, respDat, err
+		} else if IsClientHTTPError(err) {
+			// The request never left the user's device, so retrying it server-side is
+			// pointless (and would ask the client to run the same request again).
+			log.Err(err).
+				Dur("duration", dur).
+				Msg("Request failed on the login client")
+			return nil, nil, err
 		} else if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			log.Error().
 				Err(err).
@@ -66,14 +69,11 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 				Msg("Request failed, giving up")
 			return nil, nil, fmt.Errorf("%w: %w", ErrMaxRetriesReached, err)
 		} else if errors.Is(err, ErrRedirectAttempted) {
-			location := resp.Header.Get("Location")
-			redirectLog := c.Logger.Err(err).
-				Str("location", location).
-				Dur("duration", dur)
-			if !c.IsClientHTTPEnabled() {
-				redirectLog = redirectLog.Str("request_body", string(payload))
-			}
-			redirectLog.Msg("Redirect attempted")
+			c.Logger.Err(err).
+				Str("location", resp.Header.Get("Location")).
+				Str("request_body", string(payload)).
+				Dur("duration", dur).
+				Msg("Redirect attempted")
 			return resp, nil, err
 		} else if ctx.Err() != nil {
 			return resp, nil, ctx.Err()
@@ -115,13 +115,10 @@ func (c *Client) makeRequestDirect(ctx context.Context, url string, method strin
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrResponseReadFailed, err)
 	}
-	responseLog := c.Logger.Trace().Int("status_code", response.StatusCode)
-	if c.IsClientHTTPEnabled() {
-		responseLog = responseLog.Int("response_bytes", len(responseBody))
-	} else {
-		responseLog = responseLog.Str("response_body", string(responseBody))
-	}
-	responseLog.Msg("Raw HTTP response")
+	c.Logger.Trace().
+		Int("status_code", response.StatusCode).
+		Str("response_body", string(responseBody)).
+		Msg("Raw HTTP response")
 	if response.StatusCode >= 400 {
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {

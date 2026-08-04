@@ -54,7 +54,7 @@ type TwitterLogin struct {
 	needsPINSetup     bool
 	useCookieLogin    bool
 
-	useClientHTTPLogin bool
+	loginHTTPTransport http.RoundTripper
 
 	client              *twittermeow.Client
 	webLogin            *twittermeow.WebLoginSession
@@ -67,8 +67,6 @@ type TwitterLogin struct {
 	webLoginMethods     []twittermeow.WebLoginAuthMethod
 	browserHeaders      twittermeow.BrowserHeaders
 	profile             twittermeow.CurrentUserProfile
-	clientHTTPTransport *twittermeow.ClientHTTPTransport
-	clientHTTPStage     string
 }
 
 var (
@@ -90,11 +88,6 @@ var (
 	loginFieldBrowserMobile    = "browser_sec_ch_ua_mobile"
 	loginFieldVerificationCode = "verification_code"
 	loginFieldAuthMethod       = "auth_method"
-)
-
-var (
-	LoginFlowIDClientHTTP        = "client-http"
-	LoginStepIDClientHTTPRequest = "fi.mau.twitter.login.client_http"
 )
 
 const (
@@ -270,6 +263,7 @@ func castleTokenCookieFields() []bridgev2.LoginCookieField {
 var _ bridgev2.LoginProcessCookies = (*TwitterLogin)(nil)
 var _ bridgev2.LoginProcessUserInput = (*TwitterLogin)(nil)
 var _ bridgev2.LoginProcessWithOverride = (*TwitterLogin)(nil)
+var _ bridgev2.LoginProcessWithParams = (*TwitterLogin)(nil)
 
 const (
 	pinRegex            = "^[0-9]{4}$"
@@ -337,12 +331,68 @@ func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 			Description: "Log in with your X username, email, or phone number and password",
 			ID:          LoginFlowIDPassword,
 		},
-		{
-			Name:        "Client HTTP (Beta)",
-			Description: "Log in with your X username, email, or phone number and run sign-in requests on this device",
-			ID:          LoginFlowIDClientHTTP,
-		},
 	}
+}
+
+func (t *TwitterLogin) StartWithParams(ctx context.Context, params bridgev2.LoginStartParams) (*bridgev2.LoginStep, error) {
+	if params.HTTP != nil {
+		t.loginHTTPTransport = params.HTTP
+	}
+	if params.Override != nil {
+		return t.startWithOverride(ctx, params.Override)
+	}
+	return t.start(ctx)
+}
+
+func (t *TwitterLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
+	return t.StartWithParams(ctx, bridgev2.LoginStartParams{})
+}
+
+func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2.UserLogin) (*bridgev2.LoginStep, error) {
+	return t.StartWithParams(ctx, bridgev2.LoginStartParams{Override: override})
+}
+
+func (t *TwitterLogin) log() zerolog.Logger {
+	if t.User == nil {
+		return zerolog.Nop()
+	}
+	return t.User.Log
+}
+
+func (t *TwitterLogin) newLoginClient() *twittermeow.Client {
+	log := t.log().With().Str("component", "login_twitter_client").Logger()
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, log)
+	client.SetLoginHTTPTransport(t.loginHTTPTransport) // nil resets if not provided
+	return client
+}
+
+// clientHTTPFailureInstructions is shown when the Beeper client couldn't execute a login
+// request that was proxied to it (network error, blocked request, closed webview, ...).
+const clientHTTPFailureInstructions = "The request did not complete on this device. Please try again."
+
+func (t *TwitterLogin) mapClientHTTPFailure(step *bridgev2.LoginStep, err error) (*bridgev2.LoginStep, error) {
+	if err == nil || !twittermeow.IsClientHTTPError(err) {
+		return step, err
+	}
+	log := t.log()
+	log.Warn().Err(err).Msg("Login client failed to execute a proxied X request")
+	t.resetWebLoginState()
+	return makeCredentialsStep(clientHTTPFailureInstructions), nil
+}
+
+func (t *TwitterLogin) clearWebLoginInputs() {
+	t.webLoginIdentifier = ""
+	t.webLoginPassword = ""
+	t.webLoginCastleStage = ""
+	t.webLoginAuthMethod = ""
+	t.webLoginText = ""
+	t.webLoginChallenge = nil
+	t.webLoginMethods = nil
+}
+
+func (t *TwitterLogin) resetWebLoginState() {
+	t.clearWebLoginInputs()
+	t.webLogin = nil
 }
 
 func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, flowID string) (bridgev2.LoginProcess, error) {
@@ -350,19 +400,18 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 		flowID = LoginFlowIDCookies
 	}
 	switch flowID {
-	case LoginFlowIDCookies, LoginFlowIDPassword, LoginFlowIDClientHTTP:
+	case LoginFlowIDCookies, LoginFlowIDPassword:
 	default:
 		return nil, bridgev2.ErrInvalidLoginFlowID
 	}
 	return &TwitterLogin{
-		User:               user,
-		tc:                 tc,
-		useCookieLogin:     flowID == LoginFlowIDCookies,
-		useClientHTTPLogin: flowID == LoginFlowIDClientHTTP,
+		User:           user,
+		tc:             tc,
+		useCookieLogin: flowID == LoginFlowIDCookies,
 	}, nil
 }
 
-func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
+func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 	if !t.useCookieLogin {
 		return makeCredentialsStep(""), nil
 	}
@@ -393,7 +442,8 @@ func (t *TwitterLogin) Start(_ context.Context) (*bridgev2.LoginStep, error) {
 }
 
 func (t *TwitterLogin) Cancel() {
-	t.stopClientHTTPLogin()
+	t.clearWebLoginInputs()
+	t.resetWebLoginState()
 }
 
 func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
@@ -569,12 +619,12 @@ func makePINStep(errorLine string, isSetup bool) *bridgev2.LoginStep {
 	}
 }
 
-// StartWithOverride is called when re-authenticating an existing login.
+// startWithOverride is called when re-authenticating an existing login.
 // For migration users (cookies but no encryption keys), this skips to passcode step.
-func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2.UserLogin) (*bridgev2.LoginStep, error) {
+func (t *TwitterLogin) startWithOverride(ctx context.Context, override *bridgev2.UserLogin) (*bridgev2.LoginStep, error) {
 	meta, ok := override.Metadata.(*UserLoginMetadata)
 	if !ok || meta == nil || meta.Cookies == "" {
-		return t.Start(ctx)
+		return t.start(ctx)
 	}
 
 	// Migration case: validate existing cookies and skip to passcode
@@ -585,7 +635,7 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 	if err := t.ensureClientForPIN(ctx); err != nil {
 		// Cookies expired, fall back to normal flow
 		t.User.Log.Warn().Err(err).Msg("Migration: cookies invalid, falling back to full login")
-		return t.Start(ctx)
+		return t.start(ctx)
 	}
 	t.persistClientCookiesAndUserID()
 	t.isMigration = true
@@ -598,7 +648,7 @@ func (t *TwitterLogin) StartWithOverride(ctx context.Context, override *bridgev2
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
 	if t.isWaitingForWebLoginCastleToken() {
-		return t.submitWebCastleTokenInput(ctx, cookies)
+		return t.mapClientHTTPFailure(t.submitWebCastleTokenInput(ctx, cookies))
 	}
 	cookieStruct := twitCookies.NewCookies(cookies)
 	t.Cookies = cookieStruct.String()
@@ -915,13 +965,13 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		return t.submitPINInput(ctx, input)
 	}
 	if _, ok := input[loginFieldAuthMethod]; ok {
-		return t.submitWebAuthMethodInput(ctx, input)
+		return t.mapClientHTTPFailure(t.submitWebAuthMethodInput(ctx, input))
 	}
 	if _, ok := input[loginFieldVerificationCode]; ok || t.webLoginChallenge != nil {
-		return t.submitWebVerificationInput(ctx, input)
+		return t.mapClientHTTPFailure(t.submitWebVerificationInput(ctx, input))
 	}
 	if _, ok := input[loginFieldIdentifier]; ok || input[loginFieldPassword] != "" {
-		return t.submitCredentialsInput(ctx, input)
+		return t.mapClientHTTPFailure(t.submitCredentialsInput(ctx, input))
 	}
 	return nil, ErrMissingLoginInput
 }
@@ -933,21 +983,10 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 		return nil, ErrMissingLoginInput
 	}
 
-	t.stopClientHTTPLogin()
-	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
-	t.webLogin = twittermeow.NewWebLoginSession(client)
+	t.resetWebLoginState()
+	t.webLogin = twittermeow.NewWebLoginSession(t.newLoginClient())
 	t.webLoginIdentifier = identifier
 	t.webLoginPassword = password
-	t.webLoginCastleStage = ""
-	t.webLoginAuthMethod = ""
-	t.webLoginText = ""
-	t.webLoginChallenge = nil
-	t.webLoginMethods = nil
-	if t.useClientHTTPLogin {
-		t.clientHTTPTransport = client.EnableClientHTTP()
-		t.clientHTTPStage = clientHTTPStageStart
-		return t.continueClientHTTPLogin(ctx)
-	}
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
@@ -1001,10 +1040,6 @@ func (t *TwitterLogin) submitWebCastleTokenInput(ctx context.Context, input map[
 	t.browserHeaders = client.GetBrowserHeaders()
 	client.SetCookies(castleWebviewCookies(input))
 	client.SetNextJetfuelCastleTokens(castleTokens)
-	if t.useClientHTTPLogin {
-		t.webLoginCastleStage = ""
-		return t.continueClientHTTPLogin(ctx)
-	}
 	return t.continueWebCastleLogin(ctx)
 }
 
@@ -1166,11 +1201,6 @@ func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[s
 			methodID = method.Name
 		}
 	}
-	if t.useClientHTTPLogin {
-		t.webLoginAuthMethod = methodID
-		t.clientHTTPStage = webLoginCastleStageAuthMethod
-		return t.continueClientHTTPLogin(ctx)
-	}
 	if t.webLogin.UsesJetfuel() {
 		t.webLoginAuthMethod = methodID
 		t.webLoginCastleStage = webLoginCastleStageAuthMethod
@@ -1215,11 +1245,6 @@ func (t *TwitterLogin) submitWebVerificationInput(ctx context.Context, input map
 	text := strings.TrimSpace(input[loginFieldVerificationCode])
 	if text == "" {
 		return nil, ErrMissingLoginInput
-	}
-	if t.useClientHTTPLogin {
-		t.webLoginText = text
-		t.clientHTTPStage = webLoginCastleStageText
-		return t.continueClientHTTPLogin(ctx)
 	}
 	if t.webLogin.UsesJetfuel() {
 		t.webLoginText = text
@@ -1363,6 +1388,11 @@ func webLoginFailureError(err error) error {
 	if err == nil {
 		return ErrWebLoginFailed
 	}
+	if twittermeow.IsClientHTTPError(err) {
+		// RespError can't wrap a cause, so pass the error through untouched and let
+		// mapClientHTTPFailure turn it into a retry step.
+		return err
+	}
 	return ErrWebLoginFailed.WithMessage(webLoginErrorInstructions(err))
 }
 
@@ -1378,25 +1408,12 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	t.client = client
 	t.profile = profile
 	t.persistClientCookiesAndUserID()
-	if t.useClientHTTPLogin {
-		needsPINSetup, detectErr := t.detectPINSetupNeeded(ctx)
-		if errors.Is(detectErr, twittermeow.ErrClientHTTPRequestPending) {
-			return nil, detectErr
-		} else if detectErr != nil {
-			t.User.Log.Warn().Err(detectErr).Msg("Failed to determine PIN setup state after client HTTP login, using recovery prompt")
-		} else {
-			t.needsPINSetup = needsPINSetup
-		}
-	} else {
-		t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
-	}
-	t.webLoginIdentifier = ""
-	t.webLoginPassword = ""
-	t.webLoginCastleStage = ""
-	t.webLoginAuthMethod = ""
-	t.webLoginText = ""
-	t.webLoginChallenge = nil
-	t.webLoginMethods = nil
+	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
+	// Everything from here on (the passcode steps, and then the bridge connection itself)
+	// outlives the login-scoped transport, so put the default one back.
+	client.SetLoginHTTPTransport(nil)
+	t.loginHTTPTransport = nil
+	t.clearWebLoginInputs()
 
 	return makePINStep("", t.needsPINSetup), nil
 }
