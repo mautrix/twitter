@@ -16,6 +16,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -33,6 +34,163 @@ func connectorTestHTTPResponse(body string) *http.Response {
 		StatusCode: http.StatusOK,
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestSubmitPINRejectsEmptyUserIDBeforeAPIRequest(t *testing.T) {
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+	requestCount := 0
+	transport := connectorRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		requestCount++
+		return nil, errors.New("unexpected request")
+	})
+	login := &TwitterLogin{
+		User:               &bridgev2.User{Log: zerolog.Nop()},
+		client:             client,
+		loginHTTPTransport: transport,
+	}
+
+	step, err := login.SubmitUserInput(context.Background(), map[string]string{"pin": "1234"})
+	if step != nil {
+		t.Fatalf("SubmitUserInput() step = %#v, want nil", step)
+	}
+	if !errors.Is(err, ErrMissingUserID) {
+		t.Fatalf("SubmitUserInput() error = %v, want ErrMissingUserID", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("proxied API request count = %d, want 0", requestCount)
+	}
+}
+
+func TestMigrationMissingUserIDFallsBackToCredentials(t *testing.T) {
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+	login := &TwitterLogin{
+		User:   &bridgev2.User{Log: zerolog.Nop()},
+		client: client,
+	}
+	override := &bridgev2.UserLogin{UserLogin: &database.UserLogin{
+		Metadata: &UserLoginMetadata{Cookies: "auth_token=fake"},
+	}}
+
+	step, err := login.startWithOverride(context.Background(), override)
+	if err != nil {
+		t.Fatalf("startWithOverride() error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDCredentials {
+		t.Fatalf("startWithOverride() step = %#v, want credentials step", step)
+	}
+	if login.client != nil {
+		t.Fatal("startWithOverride() retained invalid PIN client")
+	}
+	if login.isMigration {
+		t.Fatal("startWithOverride() marked missing-ID login as migration")
+	}
+}
+
+func TestSubmitPINRoutesXChatRequestsThroughLoginHTTPAndRestoresDefault(t *testing.T) {
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetCurrentUserID("123456789")
+	defaultTransport := client.HTTP.Transport
+	publicKeysBody, err := json.Marshal(makePublicKeysResponse())
+	if err != nil {
+		t.Fatalf("marshal public keys response: %v", err)
+	}
+
+	seenGetPublicKeys := false
+	seenAddPublicKey := false
+	transport := connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case strings.Contains(req.URL.Path, "GetPublicKeys"):
+			seenGetPublicKeys = true
+			var variables struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.Unmarshal([]byte(req.URL.Query().Get("variables")), &variables); err != nil {
+				t.Errorf("decode GetPublicKeys variables: %v", err)
+			} else if len(variables.IDs) != 1 || variables.IDs[0] != "123456789" {
+				t.Errorf("GetPublicKeys IDs = %#v, want nonempty current user ID", variables.IDs)
+			}
+			return connectorTestHTTPResponse(string(publicKeysBody)), nil
+		case strings.Contains(req.URL.Path, "AddXChatPublicKey"):
+			seenAddPublicKey = true
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"errors":[{"message":"blocked"}]}`)),
+			}, nil
+		default:
+			t.Errorf("unexpected proxied request: %s %s", req.Method, req.URL.String())
+			return connectorTestHTTPResponse("{}"), nil
+		}
+	})
+	login := &TwitterLogin{
+		User:               &bridgev2.User{Log: zerolog.Nop()},
+		client:             client,
+		loginHTTPTransport: transport,
+	}
+
+	step, err := login.SubmitUserInput(context.Background(), map[string]string{"pin": "1234"})
+	if step != nil {
+		t.Fatalf("SubmitUserInput() step = %#v, want nil on X API rejection", step)
+	}
+	if err == nil || !strings.Contains(err.Error(), "failed to register xchat public key") {
+		t.Fatalf("SubmitUserInput() error = %v, want AddXChatPublicKey failure", err)
+	}
+	if !seenGetPublicKeys || !seenAddPublicKey {
+		t.Fatalf("proxied calls: GetPublicKeys=%t AddXChatPublicKey=%t, want both", seenGetPublicKeys, seenAddPublicKey)
+	}
+	if client.HTTP.Transport != defaultTransport {
+		t.Fatal("PIN failure left the login HTTP transport attached to the X client")
+	}
+	if login.loginHTTPTransport == nil {
+		t.Fatal("PIN failure discarded the login HTTP transport needed for retry")
+	}
+}
+
+func TestSubmitPINClientHTTPFailureIsRetryable(t *testing.T) {
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetCurrentUserID("123456789")
+	defaultTransport := client.HTTP.Transport
+	transport := connectorRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("error from client: browser request failed")
+	})
+	login := &TwitterLogin{
+		client:             client,
+		loginHTTPTransport: transport,
+		needsPINSetup:      true,
+	}
+
+	step, err := login.SubmitUserInput(context.Background(), map[string]string{"pin": "1234"})
+	if err != nil {
+		t.Fatalf("SubmitUserInput() error = %v, want retry step", err)
+	}
+	if step == nil || step.StepID != LoginStepJuiceboxPIN || !strings.Contains(step.Instructions, clientHTTPFailureInstructions) {
+		t.Fatalf("SubmitUserInput() step = %#v, want retryable PIN step", step)
+	}
+	if login.client != client || login.loginHTTPTransport == nil {
+		t.Fatal("retryable client HTTP failure discarded the authenticated login session")
+	}
+	if client.HTTP.Transport != defaultTransport {
+		t.Fatal("retryable client HTTP failure left login transport attached between attempts")
+	}
+}
+
+func TestFinishLoginHTTPTransportDetachesPersistentClient(t *testing.T) {
+	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+	defaultTransport := client.HTTP.Transport
+	transport := connectorRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return connectorTestHTTPResponse("{}"), nil
+	})
+	login := &TwitterLogin{client: client, loginHTTPTransport: transport}
+	login.attachLoginHTTPTransportForPIN()
+
+	login.finishLoginHTTPTransport()
+
+	if client.HTTP.Transport != defaultTransport {
+		t.Fatal("finishLoginHTTPTransport() did not restore the persistent client transport")
+	}
+	if login.loginHTTPTransport != nil {
+		t.Fatal("finishLoginHTTPTransport() retained the login-scoped transport")
 	}
 }
 

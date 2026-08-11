@@ -632,9 +632,11 @@ func (t *TwitterLogin) startWithOverride(ctx context.Context, override *bridgev2
 	if meta.BrowserHeaders != nil {
 		t.browserHeaders = *meta.BrowserHeaders
 	}
-	if err := t.ensureClientForPIN(ctx); err != nil {
+	if _, err := t.ensureClientForPIN(ctx); err != nil {
 		// Cookies expired, fall back to normal flow
-		t.User.Log.Warn().Err(err).Msg("Migration: cookies invalid, falling back to full login")
+		log := t.log()
+		log.Warn().Err(err).Msg("Migration: cookies invalid or missing user ID, falling back to full login")
+		t.resetPINClientForLoginRetry()
 		return t.start(ctx)
 	}
 	t.persistClientCookiesAndUserID()
@@ -654,13 +656,21 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	t.Cookies = cookieStruct.String()
 
 	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
+	client.SetLoginHTTPTransport(t.loginHTTPTransport)
 
 	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
+		client.SetLoginHTTPTransport(nil)
 		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
 	}
 	t.client = client
 	t.profile = profile
+	if _, err = t.ensureClientForPIN(ctx); err != nil {
+		log := t.log()
+		log.Warn().Err(err).Msg("Cookie login did not resolve an X user ID, requesting fresh cookies")
+		t.resetPINClientForLoginRetry()
+		return t.start(ctx)
+	}
 	t.persistClientCookiesAndUserID()
 
 	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state, using recovery prompt")
@@ -680,25 +690,59 @@ func parsePINInput(input map[string]string) (string, error) {
 	return pin, nil
 }
 
-func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) error {
-	if t.client != nil {
-		return nil
+func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
+	if t.client == nil {
+		if t.Cookies == "" {
+			return "", fmt.Errorf("cookies must be submitted before passcode")
+		}
+		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
+		t.client = twittermeow.NewClient(cookieStruct, nil, t.log().With().Str("component", "login_twitter_client").Logger())
+		t.client.SetLoginHTTPTransport(t.loginHTTPTransport)
+		if t.browserHeaders.UserAgent != "" {
+			t.client.SetBrowserHeaders(t.browserHeaders)
+		}
+		profile, err := t.client.LoadMessagesPage(ctx)
+		if err != nil {
+			t.client.SetLoginHTTPTransport(nil)
+			return "", fmt.Errorf("failed to load messages page: %w", err)
+		}
+		t.profile = profile
 	}
 
-	if t.Cookies == "" {
-		return fmt.Errorf("cookies must be submitted before passcode")
+	currentUserID := strings.TrimSpace(t.client.GetCurrentUserID())
+	if currentUserID == "" {
+		t.client.SetLoginHTTPTransport(nil)
+		return "", ErrMissingUserID
 	}
-	cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
-	t.client = twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
-	if t.browserHeaders.UserAgent != "" {
-		t.client.SetBrowserHeaders(t.browserHeaders)
+	t.client.SetCurrentUserID(currentUserID)
+	return currentUserID, nil
+}
+
+func (t *TwitterLogin) resetPINClientForLoginRetry() {
+	if t.client != nil {
+		t.client.SetLoginHTTPTransport(nil)
 	}
-	profile, err := t.client.LoadMessagesPage(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to load messages page: %w", err)
+	t.client = nil
+	t.profile = twittermeow.CurrentUserProfile{}
+	t.isMigration = false
+}
+
+func (t *TwitterLogin) attachLoginHTTPTransportForPIN() func() {
+	if t.client == nil || t.loginHTTPTransport == nil {
+		return func() {}
 	}
-	t.profile = profile
-	return nil
+	client := t.client
+	client.SetLoginHTTPTransport(t.loginHTTPTransport)
+	return func() {
+		client.SetLoginHTTPTransport(nil)
+	}
+}
+
+func (t *TwitterLogin) finishLoginHTTPTransport() {
+	if t.client != nil {
+		t.client.SetLoginHTTPTransport(nil)
+	}
+	t.loginHTTPTransport = nil
 }
 
 func (t *TwitterLogin) persistClientCookiesAndUserID() {
@@ -962,7 +1006,13 @@ func (t *TwitterLogin) recoverJuiceboxPIN(
 
 func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
 	if _, ok := input["pin"]; ok {
-		return t.submitPINInput(ctx, input)
+		step, err := t.submitPINInput(ctx, input)
+		if err != nil && twittermeow.IsClientHTTPError(err) {
+			log := t.log()
+			log.Warn().Err(err).Msg("Login client failed to execute a proxied X request during PIN setup")
+			return makePINStep(clientHTTPFailureInstructions, t.needsPINSetup), nil
+		}
+		return step, err
 	}
 	if _, ok := input[loginFieldAuthMethod]; ok {
 		return t.mapClientHTTPFailure(t.submitWebAuthMethodInput(ctx, input))
@@ -1407,12 +1457,17 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	}
 	t.client = client
 	t.profile = profile
+	if _, err = t.ensureClientForPIN(ctx); err != nil {
+		log := t.log()
+		log.Warn().Err(err).Msg("Native login did not resolve an X user ID, restarting login")
+		t.resetPINClientForLoginRetry()
+		t.resetWebLoginState()
+		return makeCredentialsStep("Couldn't read your X account ID. Please enter your login details again."), nil
+	}
 	t.persistClientCookiesAndUserID()
 	t.refreshPINSetupState(ctx, "Failed to determine PIN setup state after native login, using recovery prompt")
-	// Everything from here on (the passcode steps, and then the bridge connection itself)
-	// outlives the login-scoped transport, so put the default one back.
-	client.SetLoginHTTPTransport(nil)
-	t.loginHTTPTransport = nil
+	// Keep the login-scoped transport available through PIN setup. In particular,
+	// first-time setup must route AddXChatPublicKey through the user's device.
 	t.clearWebLoginInputs()
 
 	return makePINStep("", t.needsPINSetup), nil
@@ -1448,13 +1503,16 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 		return nil, err
 	}
 
-	if err = t.ensureClientForPIN(ctx); err != nil {
+	currentUserID, err := t.ensureClientForPIN(ctx)
+	if err != nil {
 		return nil, err
 	}
+	restoreDefaultTransport := t.attachLoginHTTPTransportForPIN()
+	defer restoreDefaultTransport()
 	t.persistClientCookiesAndUserID()
 
 	// Get recovery config from X API
-	publicKeysResp, err := t.client.GetPublicKeys(ctx, []string{t.client.GetCurrentUserID()})
+	publicKeysResp, err := t.client.GetPublicKeys(ctx, []string{currentUserID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get public keys: %w", err)
 	}
@@ -1466,6 +1524,7 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 
 	keyData, hasJuiceboxCandidates, selectionErr := t.selectRegisteredJuiceboxKey(ctx, publicKeysResp)
 	needsPINSetup := !hasJuiceboxCandidates
+	t.needsPINSetup = needsPINSetup
 	if needsPINSetup {
 		keys, signingKeyVersion, err = t.bootstrapJuiceboxPIN(ctx, pin)
 		if err != nil {
@@ -1522,10 +1581,9 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 		t.User.Log.Info().Msg("Migration: flagged for full encrypted room backfill")
 	}
 
-	currentUserID := strings.TrimSpace(t.client.GetCurrentUserID())
-	if currentUserID == "" {
-		return nil, ErrMissingUserID
-	}
+	// The client becomes persistent in NewLogin below, so detach the login-scoped
+	// transport before exposing it to the long-lived bridge client.
+	t.finishLoginHTTPTransport()
 
 	remoteProfile := &status.RemoteProfile{
 		Username: strings.TrimSpace(t.profile.ScreenName),
