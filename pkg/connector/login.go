@@ -350,7 +350,7 @@ func wrapTwitterLoginError(err error) error {
 	if err == nil {
 		return nil
 	}
-	mapped := ErrLoginUnknown
+	mapped := ErrLoginUnknown.WithInternalError(err)
 	switch {
 	case errors.Is(err, twittermeow.ErrAccountTemporarilyLocked):
 		mapped = ErrLoginAccountLocked
