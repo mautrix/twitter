@@ -576,7 +576,8 @@ func TestSubmitJetfuelCredentialsFallsBackToCombinedAfterIdentifierNoAction(t *t
 func TestUnsupportedJetfuelResponseLoggingOmitsResponseValues(t *testing.T) {
 	t.Setenv("TWITTER_JETFUEL_VIEWER_CONTEXT", "0")
 	var logs bytes.Buffer
-	client := NewClient(cookies.NewCookies(nil), nil, zerolog.New(&logs).Level(zerolog.DebugLevel))
+	logger := zerolog.New(&logs).Level(zerolog.DebugLevel).With().Str("login_id", "test-login-id").Logger()
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 	client.SetNextJetfuelCastleTokens([]string{"castle-secret-marker"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return jetfuelTestResponse("response-secret-marker\x00opaque_field"), nil
@@ -585,7 +586,7 @@ func TestUnsupportedJetfuelResponseLoggingOmitsResponseValues(t *testing.T) {
 	session.backend = webLoginBackendJetfuel
 	session.jetfuel = &jetfuelLoginState{}
 
-	result, err := session.SubmitIdentifier(context.Background(), "identifier-secret-marker")
+	result, err := session.SubmitIdentifier(logger.WithContext(context.Background()), "identifier-secret-marker")
 	if result != nil {
 		t.Fatalf("SubmitIdentifier() result = %#v, want nil", result)
 	}
@@ -602,6 +603,61 @@ func TestUnsupportedJetfuelResponseLoggingOmitsResponseValues(t *testing.T) {
 		if !strings.Contains(logged, field) {
 			t.Fatalf("sanitized diagnostics missing %q: %s", field, logged)
 		}
+	}
+	for _, field := range []string{"\"login_id\":\"test-login-id\"", "\"action\":\"/onboarding/web/actions/begin_login\"", "\"error_kind\":\"unsupported_response\""} {
+		if !strings.Contains(logged, field) {
+			t.Fatalf("sanitized diagnostics missing %q: %s", field, logged)
+		}
+	}
+	const knownAction = "/onboarding/web/actions/finish_login_email_verification"
+	if got := diagnosticJetfuelAction(knownAction); got != knownAction {
+		t.Fatalf("diagnosticJetfuelAction() = %q, want %q", got, knownAction)
+	}
+	if got := diagnosticJetfuelAction("/onboarding/web/actions/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"); got != "" {
+		t.Fatalf("diagnosticJetfuelAction() exposed session-shaped path %q", got)
+	}
+}
+
+func TestUnparsedJetfuelResponsesReturnUnsupported(t *testing.T) {
+	const verificationAction = "/onboarding/web/actions/finish_login_email_verification"
+	for _, stage := range []string{"combined_credentials", "begin_two_factor", "text"} {
+		t.Run(stage, func(t *testing.T) {
+			client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+			client.SetNextJetfuelCastleTokens([]string{"first-token", "second-token"})
+			requests := 0
+			client.HTTP = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				requests++
+				if stage == "begin_two_factor" && requests == 1 {
+					return jetfuelTestResponse(endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH), nil
+				}
+				return jetfuelTestResponse("unparsed"), nil
+			})}
+			session := NewWebLoginSession(client)
+			session.backend = webLoginBackendJetfuel
+			session.jetfuel = &jetfuelLoginState{}
+
+			var result *WebLoginResult
+			var err error
+			switch stage {
+			case "combined_credentials":
+				result, err = session.SubmitCombinedCredentials(context.Background(), "user", "password")
+			case "begin_two_factor":
+				session.jetfuel.passwordAction = endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH
+				result, err = session.SubmitPassword(context.Background(), "password")
+			case "text":
+				session.jetfuel.verificationAction = verificationAction
+				result, err = session.SubmitText(context.Background(), "123456")
+			}
+			if err != nil {
+				t.Fatalf("submit error = %v", err)
+			}
+			if result == nil || result.Status != WebLoginStatusUnsupported {
+				t.Fatalf("submit result = %#v, want unsupported", result)
+			}
+			if session.jetfuel != nil {
+				t.Fatal("unsupported response retained Jetfuel state")
+			}
+		})
 	}
 }
 
