@@ -9,7 +9,6 @@ import (
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -54,10 +53,13 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 
 	collect := func(results []response.XChatUserResult) {
 		for _, r := range results {
-			if r.Result != nil {
-				users[r.RestID] = twittermeow.ConvertXChatUserToUser(r.Result)
-			} else if r.RestID != "" {
-				missingIDs = append(missingIDs, r.RestID)
+			userID, user := xchatUserFromResult(r)
+			if userID == "" {
+				continue
+			}
+			mergeXChatUser(users, userID, user)
+			if !hasCompleteXChatUserProfile(user) {
+				missingIDs = append(missingIDs, userID)
 			}
 		}
 	}
@@ -67,15 +69,18 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 	collect(data.ConversationDetail.GroupAdminsResults)
 
 	if err := tc.ensureUsersInCacheByID(ctx, missingIDs); err != nil {
-		return nil, nil, err
+		// Profile metadata is useful for room naming, but it must not prevent a
+		// newly received message from creating/syncing its portal. The member-list
+		// builder retries the lookup and can update metadata on a later resync.
+		zerolog.Ctx(ctx).Warn().
+			Err(err).
+			Int("missing_users", len(missingIDs)).
+			Msg("Failed to prefetch users for XChat conversation data")
 	}
 
 	tc.userCacheLock.RLock()
 	for _, id := range missingIDs {
-		if users[id] != nil {
-			continue
-		}
-		if u := tc.userCache[id]; u != nil {
+		if u := tc.userCache[id]; hasXChatUserDisplayInfo(u) {
 			users[id] = u
 		}
 	}
@@ -125,7 +130,10 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	}
 
 	// Sync channel (creates portal if needed)
-	tc.syncXChatChannel(ctx, item, users)
+	if err := tc.syncXChatChannel(ctx, item, users); err != nil {
+		log.Warn().Err(err).Msg("Failed to sync channel for fetched conversation data")
+		return portal, err
+	}
 
 	// Process messages/read events to backfill and register any keys embedded there
 	bootstrapCtx := context.WithValue(ctx, ensurePortalContextKey{}, true)

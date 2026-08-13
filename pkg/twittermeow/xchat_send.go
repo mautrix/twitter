@@ -318,15 +318,11 @@ func (c *Client) RefreshConversationKeys(ctx context.Context, conversationID str
 
 	item := resp.Data.GetInboxPageConversationData.Data
 
-	// Process key change events to store conversation keys
-	if err := c.processKeyChangeEventsFromItem(ctx, conversationID, &item); err != nil {
-		return err
-	}
-
-	// Notify callback to sync room data (members, name, avatar, etc.)
+	// Sync room data even if one key event was malformed: the response may still
+	// contain complete member/profile data and other usable keys.
+	keyErr := c.processKeyChangeEventsFromItem(ctx, conversationID, &item)
 	c.notifyConversationDataRefresh(ctx, conversationID, item)
-
-	return nil
+	return keyErr
 }
 
 func (c *Client) notifyConversationDataRefresh(ctx context.Context, conversationID string, item response.XChatInboxItem) {
@@ -339,6 +335,9 @@ func (c *Client) notifyConversationDataRefresh(ctx context.Context, conversation
 }
 
 func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversationID string, item *response.XChatInboxItem) error {
+	if conversationID == "" {
+		return errors.New("conversation ID is empty")
+	}
 	if item == nil || len(item.LatestConversationKeyChangeEvents) == 0 {
 		return nil
 	}
@@ -347,18 +346,33 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
 	}
+	if signingKey == nil || signingKey.DecryptKeyB64 == "" {
+		return errors.New("own XChat decryption key is missing")
+	}
 	ownUserID := c.GetCurrentUserID()
 	if ownUserID == "" {
 		return fmt.Errorf("current user ID is empty")
 	}
 
-	for _, encoded := range item.LatestConversationKeyChangeEvents {
+	var eventErrs []error
+	for index, encoded := range item.LatestConversationKeyChangeEvents {
 		data, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
+			eventErrs = append(eventErrs, fmt.Errorf("decode conversation key event %d: %w", index, err))
 			continue
 		}
 		var evt payload.MessageEvent
 		if err := payload.Decode(data, &evt); err != nil {
+			eventErrs = append(eventErrs, fmt.Errorf("decode conversation key event %d thrift: %w", index, err))
+			continue
+		}
+		if evt.Detail == nil {
+			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d has no detail", index))
+			continue
+		}
+		eventConversationID := ptr.Val(evt.ConversationId)
+		if eventConversationID != "" && eventConversationID != conversationID {
+			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d belongs to a different conversation", index))
 			continue
 		}
 		ckce := evt.Detail.ConversationKeyChangeEvent
@@ -379,27 +393,34 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 
 		convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 		if err != nil {
+			eventErrs = append(eventErrs, fmt.Errorf("unwrap conversation key event %d: %w", index, err))
+			continue
+		}
+		keyVersion := ptr.Val(ckce.ConversationKeyVersion)
+		if keyVersion == "" {
+			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d has no key version", index))
 			continue
 		}
 		keyCreatedAt := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
 		if keyCreatedAt.IsZero() {
 			c.Logger.Warn().
 				Str("conversation_id", conversationID).
-				Str("key_version", ptr.Val(ckce.ConversationKeyVersion)).
+				Str("key_version", keyVersion).
 				Str("created_at_msec", ptr.Val(evt.CreatedAtMsec)).
 				Msg("Skipping conversation key update without valid XChat timestamp")
+			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d has no valid timestamp", index))
 			continue
 		}
 
 		err = c.keyManager.PutConversationKey(ctx, &crypto.ConversationKey{
 			ConversationID: conversationID,
-			KeyVersion:     ptr.Val(ckce.ConversationKeyVersion),
+			KeyVersion:     keyVersion,
 			Key:            convKeyBytes,
 			CreatedAt:      keyCreatedAt,
 		})
 		if err != nil {
-			return err
+			eventErrs = append(eventErrs, fmt.Errorf("store conversation key event %d: %w", index, err))
 		}
 	}
-	return nil
+	return errors.Join(eventErrs...)
 }

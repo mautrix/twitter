@@ -235,7 +235,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			txnID = eventID
 		}
 
-		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventEdit,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -258,7 +258,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				return tc.convertToMatrix(ctx, portal, intent, data), nil
 			},
 			ConvertEditFunc: tc.convertEditToMatrix,
-		}).Success
+		}))
 
 	case *types.Message:
 		isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
@@ -290,7 +290,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}
 		clientMsgID := evt.RequestID
 
-		return tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventMessage,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -347,19 +347,19 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				// This is typically the remote echo for a pending outgoing message; don't bridge again.
 				return bridgev2.UpsertResult{SaveParts: true, ContinueMessageHandling: false}, nil
 			},
-		}).Success
+		}))
 
 	case *types.MessageReactionCreate:
 		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)
-		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(wrappedEvt))
 
 	case *types.MessageReactionDelete:
 		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
-		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(wrappedEvt))
 
 	case *types.ConversationRead:
 		senderID := conversationReadSenderID(evt, ParseUserLoginID(tc.userLogin.ID))
@@ -373,7 +373,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		if lastTarget != "" {
 			targets = []networkid.MessageID{lastTarget}
 		}
-		return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
+		tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
@@ -389,7 +389,8 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Targets:             targets,
 			ReadUpTo:            readUpTo,
 			ReadUpToStreamOrder: readUpToStreamOrder,
-		}).Success
+		})
+		return true
 
 	case *types.MessageDelete:
 		allSuccess := true
@@ -408,7 +409,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				},
 				TargetMessage: MakeMessageID(deletedMsg.MessageID),
 			}
-			allSuccess = tc.userLogin.QueueRemoteEvent(messageDeleteRemoteEvent).Success && allSuccess
+			allSuccess = xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(messageDeleteRemoteEvent)) && allSuccess
 		}
 		return allSuccess
 
@@ -426,7 +427,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			OnlyForMe: true,
 		}
 		log.Info().Any("data", evt).Msg("Deleted conversation")
-		return tc.userLogin.QueueRemoteEvent(portalDeleteRemoteEvent).Success
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(portalDeleteRemoteEvent))
 
 	case *types.ConversationNameUpdate:
 		if ctx == nil {
@@ -465,13 +466,13 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				},
 			},
 		}
-		return tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent).Success
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(portalUpdateRemoteEvent))
 
 	case *types.ConversationAvatarUpdate:
 		chatInfo := &bridgev2.ChatInfo{
 			Avatar: tc.makeGroupAvatar(evt.ConversationID, evt.ConversationAvatarImageHttps, evt.ConversationKeyVersion),
 		}
-		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
 				Type:        bridgev2.RemoteEventChatInfoChange,
 				Sender:      tc.MakeEventSender(evt.ByUserID),
@@ -482,15 +483,15 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			ChatInfoChange: &bridgev2.ChatInfoChange{
 				ChatInfo: chatInfo,
 			},
-		}).Success
+		}))
 
 	case *types.ParticipantsJoin:
 		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipJoin)
-		return tc.userLogin.QueueRemoteEvent(changeEvt).Success
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
 	case *types.ParticipantsLeave:
 		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipLeave)
-		return tc.userLogin.QueueRemoteEvent(changeEvt).Success
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
@@ -547,7 +548,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				return false
 			}
 
-			return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+			return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 				EventMeta: simplevent.EventMeta{
 					Type:         bridgev2.RemoteEventChatResync,
 					PortalKey:    portalKey,
@@ -559,7 +560,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				CheckNeedsBackfillFunc: func(ctx context.Context, latestMessage *database.Message) (bool, error) {
 					return true, nil
 				},
-			}).Success
+			}))
 		}
 		return true
 
@@ -579,7 +580,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			return false
 		}
 
-		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
 				Type:         bridgev2.RemoteEventChatResync,
 				PortalKey:    tc.MakePortalKeyFromID(evt.ConversationID),
@@ -588,12 +589,11 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				StreamOrder:  methods.ParseSnowflakeInt(evt.ID),
 			},
 			ChatInfo: chatInfo,
-		}).Success
+		}))
 
 	default:
 		log.Debug().
 			Type("event_data_type", rawEvt).
-			Any("event_data", rawEvt).
 			Msg("Received unhandled XChat event")
 		return true
 	}
@@ -897,10 +897,10 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 	tc.userCacheLock.Lock()
 	for userID, user := range inbox.Users {
 		cached := tc.userCache[userID]
-		if cached == nil || cached.Name != user.Name || cached.ScreenName != user.ScreenName || cached.ProfileImageURLHTTPS != user.ProfileImageURLHTTPS {
-			updates[userID] = user
+		merged := mergeXChatUser(tc.userCache, userID, user)
+		if merged != nil && (cached == nil || cached.Name != merged.Name || cached.ScreenName != merged.ScreenName || cached.ProfileImageURLHTTPS != merged.ProfileImageURLHTTPS) {
+			updates[userID] = merged
 		}
-		tc.userCache[userID] = user
 	}
 	tc.userCacheLock.Unlock()
 

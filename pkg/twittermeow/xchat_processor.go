@@ -3,11 +3,11 @@ package twittermeow
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -27,19 +27,35 @@ type XChatEventHandler func(ctx context.Context, evt types.TwitterEvent) bool
 // SequenceIDCallback is called with the sequence ID of each processed event.
 type SequenceIDCallback func(seqID string)
 
+// XChatGapHandler backfills a conversation before the current live event is
+// emitted when the processor detects a reconnect or a sequence discontinuity.
+type XChatGapHandler func(ctx context.Context, conversationID, previousSequenceID, currentSequenceID string) error
+
 // XChatEventProcessor processes XChat websocket events and converts them
 // to TwitterEvent types for the bridge.
 type XChatEventProcessor struct {
 	client             *Client
 	eventHandler       XChatEventHandler
 	sequenceIDCallback SequenceIDCallback
+	gapHandler         XChatGapHandler
 	log                zerolog.Logger
+
+	sequenceStateLock          sync.Mutex
+	lastConversationSequence   map[string]string
+	reconnectGeneration        uint64
+	catchupGeneration          map[string]uint64
+	unresolvedConversationGaps map[string]struct{}
+	maxHandledSequenceID       string
+	checkpointPublicationHolds int
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 	return &XChatEventProcessor{
-		client: client,
-		log:    client.Logger.With().Str("component", "xchat_processor").Logger(),
+		client:                     client,
+		log:                        client.Logger.With().Str("component", "xchat_processor").Logger(),
+		lastConversationSequence:   make(map[string]string),
+		catchupGeneration:          make(map[string]uint64),
+		unresolvedConversationGaps: make(map[string]struct{}),
 	}
 }
 
@@ -51,27 +67,207 @@ func (p *XChatEventProcessor) SetEventHandler(handler XChatEventHandler) {
 // SetSequenceIDCallback sets a callback that will be called with each processed event's sequence ID.
 // This can be used to track the max sequence ID for incremental inbox fetching.
 func (p *XChatEventProcessor) SetSequenceIDCallback(callback SequenceIDCallback) {
+	p.sequenceStateLock.Lock()
 	p.sequenceIDCallback = callback
+	p.sequenceStateLock.Unlock()
 }
 
-// trackSequenceID reports the sequence ID to the callback if set.
-func (p *XChatEventProcessor) trackSequenceID(seqID string) {
-	if seqID != "" && p.sequenceIDCallback != nil {
-		p.sequenceIDCallback(seqID)
+// MaxHandledSequenceID returns the highest event sequence that completed
+// handling during this connection, even while a gap blocks publication.
+func (p *XChatEventProcessor) MaxHandledSequenceID() string {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	return p.maxHandledSequenceID
+}
+
+// SetGapHandler sets the synchronous conversation catch-up hook.
+func (p *XChatEventProcessor) SetGapHandler(handler XChatGapHandler) {
+	p.gapHandler = handler
+}
+
+// MarkReconnected makes the next live event in each active conversation verify
+// that conversation's forward history before emitting the event.
+func (p *XChatEventProcessor) MarkReconnected() {
+	p.sequenceStateLock.Lock()
+	p.reconnectGeneration++
+	p.sequenceStateLock.Unlock()
+}
+
+func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousSequenceID string) bool {
+	if conversationID == "" {
+		return false
 	}
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if _, unresolved := p.unresolvedConversationGaps[conversationID]; unresolved {
+		return true
+	}
+	if p.catchupGeneration[conversationID] < p.reconnectGeneration {
+		return true
+	}
+	lastSequenceID := p.lastConversationSequence[conversationID]
+	return previousSequenceID != "" && lastSequenceID != "" &&
+		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) > 0
+}
+
+func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
+	if conversationID == "" {
+		return
+	}
+	p.sequenceStateLock.Lock()
+	p.catchupGeneration[conversationID] = p.reconnectGeneration
+	delete(p.unresolvedConversationGaps, conversationID)
+	p.sequenceStateLock.Unlock()
+}
+
+// MarkConversationCaughtUp clears a previously blocked per-conversation gap
+// after an inbox retry or explicit history repair succeeds.
+func (p *XChatEventProcessor) MarkConversationCaughtUp(conversationID string) {
+	p.markConversationCaughtUp(conversationID)
+}
+
+func (p *XChatEventProcessor) markConversationGapUnresolved(conversationID string) {
+	if conversationID == "" || p.gapHandler == nil {
+		return
+	}
+	p.sequenceStateLock.Lock()
+	p.unresolvedConversationGaps[conversationID] = struct{}{}
+	p.sequenceStateLock.Unlock()
+}
+
+// MarkConversationGapUnresolved keeps the global inbox checkpoint behind a
+// conversation that could not be imported from an inbox page.
+func (p *XChatEventProcessor) MarkConversationGapUnresolved(conversationID string) {
+	p.markConversationGapUnresolved(conversationID)
+}
+
+// SequenceCheckpointBlocked reports whether at least one conversation still
+// has history that must be repaired before the global inbox checkpoint moves.
+func (p *XChatEventProcessor) SequenceCheckpointBlocked() bool {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	return len(p.unresolvedConversationGaps) > 0
+}
+
+// ConversationGapUnresolved reports whether this conversation is preventing
+// publication of the global inbox checkpoint.
+func (p *XChatEventProcessor) ConversationGapUnresolved(conversationID string) bool {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	_, unresolved := p.unresolvedConversationGaps[conversationID]
+	return unresolved
+}
+
+// ResetSequenceState clears connection-local ordering state before a full
+// reconnect. The persisted inbox checkpoint remains the source of truth.
+func (p *XChatEventProcessor) ResetSequenceState() {
+	p.sequenceStateLock.Lock()
+	p.lastConversationSequence = make(map[string]string)
+	p.catchupGeneration = make(map[string]uint64)
+	p.unresolvedConversationGaps = make(map[string]struct{})
+	p.reconnectGeneration = 0
+	p.maxHandledSequenceID = ""
+	p.checkpointPublicationHolds = 0
+	p.sequenceStateLock.Unlock()
+}
+
+func (p *XChatEventProcessor) beginCheckpointBatch() {
+	p.sequenceStateLock.Lock()
+	p.checkpointPublicationHolds++
+	p.sequenceStateLock.Unlock()
+}
+
+func (p *XChatEventProcessor) finishCheckpointBatch(success bool) {
+	p.sequenceStateLock.Lock()
+	if p.checkpointPublicationHolds > 0 {
+		p.checkpointPublicationHolds--
+	}
+	checkpointSequenceID := ""
+	callback := p.sequenceIDCallback
+	if success && p.checkpointPublicationHolds == 0 && len(p.unresolvedConversationGaps) == 0 && callback != nil {
+		checkpointSequenceID = p.maxHandledSequenceID
+	}
+	p.sequenceStateLock.Unlock()
+	if checkpointSequenceID != "" {
+		callback(checkpointSequenceID)
+	}
+}
+
+// recordHandledSequence records successful per-conversation progress, but only
+// publishes the global maximum after all known conversation gaps are repaired.
+func (p *XChatEventProcessor) recordHandledSequence(conversationID, sequenceID string) {
+	p.sequenceStateLock.Lock()
+	if conversationID != "" && sequenceID != "" &&
+		compareXChatSequenceIDs(sequenceID, p.lastConversationSequence[conversationID]) > 0 {
+		p.lastConversationSequence[conversationID] = sequenceID
+	}
+	if sequenceID != "" && compareXChatSequenceIDs(sequenceID, p.maxHandledSequenceID) > 0 {
+		p.maxHandledSequenceID = sequenceID
+	}
+	checkpointSequenceID := ""
+	callback := p.sequenceIDCallback
+	if p.checkpointPublicationHolds == 0 && len(p.unresolvedConversationGaps) == 0 && callback != nil {
+		checkpointSequenceID = p.maxHandledSequenceID
+	}
+	p.sequenceStateLock.Unlock()
+	if checkpointSequenceID != "" {
+		callback(checkpointSequenceID)
+	}
+}
+
+func compareXChatSequenceIDs(a, b string) int {
+	a, aValid := normalizeXChatSequenceID(a)
+	b, bValid := normalizeXChatSequenceID(b)
+	if !aValid {
+		if !bValid {
+			return 0
+		}
+		return -1
+	} else if !bValid {
+		return 1
+	}
+	if len(a) < len(b) {
+		return -1
+	} else if len(a) > len(b) {
+		return 1
+	}
+	return strings.Compare(a, b)
+}
+
+func normalizeXChatSequenceID(sequenceID string) (string, bool) {
+	if sequenceID == "" {
+		return "0", true
+	}
+	for _, char := range sequenceID {
+		if char < '0' || char > '9' {
+			return "", false
+		}
+	}
+	sequenceID = strings.TrimLeft(sequenceID, "0")
+	if sequenceID == "" {
+		return "0", true
+	}
+	return sequenceID, true
 }
 
 // ProcessMessage handles a decoded payload.Message from the websocket.
 // It may emit zero or more TwitterEvent objects via the event handler.
-func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.Message) error {
+func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.Message) (err error) {
 	if msg == nil {
 		return nil
 	}
-
+	p.beginCheckpointBatch()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("panic processing XChat message (%T)", recovered)
+		}
+		p.finishCheckpointBatch(err == nil)
+	}()
 	// Handle single MessageEvent
 	if msg.MessageEvent != nil {
 		if err := p.processMessageEvent(ctx, msg.MessageEvent); err != nil {
 			p.log.Err(err).Msg("Failed to process MessageEvent")
+			return err
 		}
 	}
 
@@ -79,6 +275,7 @@ func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.M
 	if msg.MessageInstruction != nil {
 		if err := p.processInstruction(ctx, msg.MessageInstruction); err != nil {
 			p.log.Err(err).Msg("Failed to process MessageInstruction")
+			return err
 		}
 	}
 
@@ -87,6 +284,7 @@ func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.M
 		for _, evt := range msg.BatchedMessageEvents.MessageEvents {
 			if err := p.processMessageEvent(ctx, evt); err != nil {
 				p.log.Err(err).Msg("Failed to process batched MessageEvent")
+				return err
 			}
 		}
 	}
@@ -96,16 +294,55 @@ func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.M
 
 // processMessageEvent processes an individual MessageEvent and dispatches the appropriate TwitterEvent.
 func (p *XChatEventProcessor) processMessageEvent(ctx context.Context, evt *payload.MessageEvent) error {
+	return p.processMessageEventWithGapCatchup(ctx, evt, true)
+}
+
+func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
+	ctx context.Context,
+	evt *payload.MessageEvent,
+	allowGapCatchup bool,
+) (err error) {
 	if evt == nil {
 		return nil
 	}
 
-	// Track the sequence ID for incremental fetching
-	p.trackSequenceID(ptr.Val(evt.SequenceId))
-
+	// Advance the incremental catch-up checkpoint only after the event has been
+	// processed successfully. Advancing before decryption/queueing can make a
+	// failed event permanently invisible to the next reconnect catch-up.
+	sequenceID := ptr.Val(evt.SequenceId)
+	conversationID := ptr.Val(evt.ConversationId)
+	previousSequenceID := ptr.Val(evt.PreviousSequenceId)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
+		}
+		if err == nil {
+			p.recordHandledSequence(conversationID, sequenceID)
+		} else {
+			p.markConversationGapUnresolved(conversationID)
+		}
+	}()
+	if allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil {
+		p.log.Info().
+			Str("conversation_id", conversationID).
+			Str("previous_sequence_id", previousSequenceID).
+			Str("current_sequence_id", sequenceID).
+			Msg("Detected XChat conversation gap, running forward catch-up")
+		if catchupErr := p.gapHandler(ctx, conversationID, previousSequenceID, sequenceID); catchupErr != nil {
+			// A historical gap must remain retryable, but it must not block the
+			// current websocket event. Otherwise a transient Matrix/backfill
+			// failure turns into a continuous live-message outage.
+			p.markConversationGapUnresolved(conversationID)
+			p.log.Warn().Err(catchupErr).
+				Msg("XChat conversation catch-up failed; continuing with live event")
+		} else {
+			p.markConversationCaughtUp(conversationID)
+		}
+	}
 	// Store conversation token if present
 	if err := p.storeConversationToken(ctx, evt); err != nil {
 		p.log.Warn().Err(err).Msg("Failed to store conversation token")
+		return fmt.Errorf("store XChat conversation token: %w", err)
 	}
 
 	detail := evt.Detail
@@ -203,11 +440,11 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 
 	if len(contentsBytes) == 0 {
-		p.log.Warn().
+		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Str("conversation_id", conversationID).
-			Msg("MessageCreateEvent has no contents")
-		return nil
+			Msg("MessageCreateEvent has no contents, emitting ConversationCreate")
+		return p.emitConversationCreate(ctx, evt)
 	}
 
 	var contents *payload.MessageEntryContents
@@ -216,15 +453,25 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	if isEncryptedMessageCreateEvent(mce) {
 		// Encrypted message - decrypt using conversation key
 		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+		if err == nil && (convKey == nil || len(convKey.Key) == 0) {
+			err = crypto.ErrKeyNotFound
+		}
 		if errors.Is(err, crypto.ErrKeyNotFound) {
 			// Try to fetch missing keys
-			if refreshErr := p.client.RefreshConversationKeys(ctx, conversationID); refreshErr != nil {
+			refreshErr := p.client.RefreshConversationKeys(ctx, conversationID)
+			if refreshErr != nil {
 				p.log.Warn().Err(refreshErr).
 					Str("conversation_id", conversationID).
 					Msg("Failed to refresh conversation keys")
-			} else {
-				// Retry after refresh
-				convKey, err = p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+			}
+			// A refresh can store the requested key even if another key-change event
+			// on the same response was malformed, so always retry the local lookup.
+			convKey, err = p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+			if err == nil && (convKey == nil || len(convKey.Key) == 0) {
+				err = crypto.ErrKeyNotFound
+			}
+			if err != nil && refreshErr != nil {
+				err = errors.Join(err, refreshErr)
 			}
 		}
 		if err != nil {
@@ -235,7 +482,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Str("key_version", keyVersion).
 				Int("contents_len", len(contentsBytes)).
 				Msg("Failed to get conversation key, skipping message")
-			return nil
+			return fmt.Errorf("get XChat conversation key %s: %w", keyVersion, err)
 		}
 
 		debugLog := p.log.With().
@@ -250,9 +497,8 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
-				Str("contents_hex_prefix", truncateBytes(contentsBytes, 32)).
 				Msg("Failed to decrypt message contents, skipping")
-			return nil
+			return fmt.Errorf("decrypt XChat message contents: %w", err)
 		}
 	} else {
 		// No conversation key version - parse as plaintext Thrift.
@@ -263,9 +509,8 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
-				Str("contents_hex_prefix", truncateBytes(contentsBytes, 32)).
 				Msg("Failed to parse message contents, skipping")
-			return nil
+			return fmt.Errorf("parse plaintext XChat message contents: %w", err)
 		}
 	}
 
@@ -295,10 +540,14 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		Str("conversation_id", conversationID).
 		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
 
+	return p.emitConversationCreate(ctx, evt)
+}
+
+func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *payload.MessageEvent) error {
 	return p.emitEvent(ctx, &types.ConversationCreate{
 		ID:             ptr.Val(evt.SequenceId),
 		Time:           ptr.Val(evt.CreatedAtMsec),
-		ConversationID: conversationID,
+		ConversationID: ptr.Val(evt.ConversationId),
 		RequestID:      ptr.Val(evt.MessageId),
 	})
 }
@@ -372,6 +621,9 @@ func (p *XChatEventProcessor) processGroupChangeEvent(ctx context.Context, evt *
 func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, evt *payload.MessageEvent, ckce *payload.ConversationKeyChangeEvent) error {
 	conversationID := ptr.Val(evt.ConversationId)
 	newKeyVersion := ptr.Val(ckce.ConversationKeyVersion)
+	if newKeyVersion == "" {
+		return errors.New("XChat conversation key change has no key version")
+	}
 
 	p.log.Info().
 		Str("sequence_id", ptr.Val(evt.SequenceId)).
@@ -387,13 +639,16 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 			Msg("Failed to get own signing key for key unwrap")
 		return err
 	}
+	if signingKey == nil || signingKey.DecryptKeyB64 == "" {
+		return errors.New("own XChat decryption key is missing")
+	}
 
 	ownUserID := p.client.GetCurrentUserID()
 	if ownUserID == "" {
 		p.log.Warn().
 			Str("conversation_id", conversationID).
 			Msg("Current user ID is empty while handling key change; cannot unwrap key")
-		return nil
+		return errors.New("current user ID is empty while handling XChat key change")
 	}
 
 	var ourEncryptedKey string
@@ -516,7 +771,7 @@ func (p *XChatEventProcessor) processInstruction(ctx context.Context, inst *payl
 
 	case inst.DisplayTemporaryPasscodeInstruction != nil:
 		p.log.Debug().
-			Str("token", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.Token)).
+			Bool("has_token", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.Token) != "").
 			Str("public_key_version", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.LatestPublicKeyVersion)).
 			Msg("Received DisplayTemporaryPasscodeInstruction")
 		return nil
@@ -543,19 +798,13 @@ func (p *XChatEventProcessor) storeConversationToken(ctx context.Context, evt *p
 func (p *XChatEventProcessor) emitEvent(ctx context.Context, evt types.TwitterEvent) error {
 	if p.eventHandler == nil {
 		p.log.Warn().Type("event_type", evt).Msg("No event handler set, dropping event")
-		return nil
+		return errors.New("xchat event handler is not configured")
 	}
 
-	p.eventHandler(ctx, evt)
+	if !p.eventHandler(ctx, evt) {
+		return fmt.Errorf("xchat event handler rejected %T", evt)
+	}
 	return nil
-}
-
-// truncateBytes returns a hex representation of the first n bytes for logging.
-func truncateBytes(b []byte, n int) string {
-	if len(b) <= n {
-		return hex.EncodeToString(b)
-	}
-	return hex.EncodeToString(b[:n]) + "..."
 }
 
 // DecodeMessageEvent decodes a base64-encoded thrift MessageEvent string.
@@ -608,19 +857,20 @@ func DecodeSendMessageMutationMessageEvent(encoded string) (*payload.MessageEven
 }
 
 type decodedInboxMessageEvent struct {
-	seq int64
-	evt *payload.MessageEvent
+	sequenceID string
+	evt        *payload.MessageEvent
 }
 
-func (p *XChatEventProcessor) decodeAndSortInboxEvents(conversationID string, encodedEvents []string) []decodedInboxMessageEvent {
+func (p *XChatEventProcessor) decodeAndSortInboxEvents(conversationID string, encodedEvents []string) ([]decodedInboxMessageEvent, error) {
 	if len(encodedEvents) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	seen := make(map[string]struct{}, len(encodedEvents))
 	out := make([]decodedInboxMessageEvent, 0, len(encodedEvents))
+	var decodeErrs []error
 
-	for _, encodedEvt := range encodedEvents {
+	for index, encodedEvt := range encodedEvents {
 		if encodedEvt == "" {
 			continue
 		}
@@ -631,6 +881,14 @@ func (p *XChatEventProcessor) decodeAndSortInboxEvents(conversationID string, en
 				Err(err).
 				Str("conversation_id", conversationID).
 				Msg("Failed to decode inbox message event")
+			decodeErrs = append(decodeErrs, fmt.Errorf("decode inbox message event %d: %w", index, err))
+			continue
+		}
+		eventConversationID := ptr.Val(evt.ConversationId)
+		if eventConversationID == "" && conversationID != "" {
+			evt.ConversationId = ptr.Ptr(conversationID)
+		} else if conversationID != "" && eventConversationID != conversationID {
+			decodeErrs = append(decodeErrs, fmt.Errorf("inbox message event %d belongs to a different conversation", index))
 			continue
 		}
 
@@ -644,68 +902,80 @@ func (p *XChatEventProcessor) decodeAndSortInboxEvents(conversationID string, en
 		}
 		seen[seenKey] = struct{}{}
 
-		var seq int64
-		if seqID != "" {
-			seq, _ = strconv.ParseInt(seqID, 10, 64)
-		}
-		out = append(out, decodedInboxMessageEvent{seq: seq, evt: evt})
+		out = append(out, decodedInboxMessageEvent{sequenceID: seqID, evt: evt})
 	}
 
 	slices.SortStableFunc(out, func(a, b decodedInboxMessageEvent) int {
 		switch {
-		case a.seq == 0 && b.seq != 0:
+		case a.sequenceID == "" && b.sequenceID != "":
 			return 1
-		case a.seq != 0 && b.seq == 0:
+		case a.sequenceID != "" && b.sequenceID == "":
 			return -1
-		case a.seq < b.seq:
-			return -1
-		case a.seq > b.seq:
-			return 1
 		default:
-			return 0
+			return compareXChatSequenceIDs(a.sequenceID, b.sequenceID)
 		}
 	})
 
-	return out
+	return out, errors.Join(decodeErrs...)
 }
 
 // ProcessKeyChangeEvents processes key change events from an XChatInboxItem.
 // This should be called BEFORE syncing the channel, as keys are needed for decryption.
-func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *response.XChatInboxItem) error {
+func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *response.XChatInboxItem) (err error) {
 	conversationID := item.ConversationDetail.ConversationID
+	p.beginCheckpointBatch()
+	defer func() {
+		if err != nil {
+			p.markConversationGapUnresolved(conversationID)
+		}
+		p.finishCheckpointBatch(err == nil)
+	}()
 
 	encodedEvents := make([]string, 0, len(item.LatestConversationKeyChangeEvents)+len(item.EncodedMessageEvents))
 	encodedEvents = append(encodedEvents, item.LatestConversationKeyChangeEvents...)
 	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
 
-	for _, decoded := range p.decodeAndSortInboxEvents(conversationID, encodedEvents) {
+	decodedEvents, decodeErr := p.decodeAndSortInboxEvents(conversationID, encodedEvents)
+	for _, decoded := range decodedEvents {
 		detail := decoded.evt.Detail
 		if detail == nil || detail.ConversationKeyChangeEvent == nil {
 			continue
 		}
-		if err := p.processMessageEvent(ctx, decoded.evt); err != nil {
+		if err := p.processMessageEventWithGapCatchup(ctx, decoded.evt, false); err != nil {
 			p.log.Warn().
 				Err(err).
 				Str("conversation_id", conversationID).
 				Msg("Failed to process key change event from inbox")
+			return errors.Join(decodeErr, err)
 		}
 	}
 
-	return nil
+	return decodeErr
 }
 
 // ProcessMessageAndReadEvents processes message and read events from an XChatInboxItem.
 // This should be called AFTER syncing the channel, as portals must exist for message handling.
-func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, item *response.XChatInboxItem) error {
+func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, item *response.XChatInboxItem) (err error) {
 	conversationID := item.ConversationDetail.ConversationID
+	p.beginCheckpointBatch()
+	defer func() {
+		if err != nil {
+			p.markConversationGapUnresolved(conversationID)
+		}
+		p.finishCheckpointBatch(err == nil)
+	}()
 
 	processedSeqIDs := make(map[string]struct{})
 
-	encodedEvents := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents))
+	encodedEvents := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents)+1)
 	encodedEvents = append(encodedEvents, item.LatestMessageEvents...)
 	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
+	if item.LatestNotifiableMessageCreateEvent != "" {
+		encodedEvents = append(encodedEvents, item.LatestNotifiableMessageCreateEvent)
+	}
 
-	for _, decoded := range p.decodeAndSortInboxEvents(conversationID, encodedEvents) {
+	decodedEvents, decodeErr := p.decodeAndSortInboxEvents(conversationID, encodedEvents)
+	for _, decoded := range decodedEvents {
 		seqID := ptr.Val(decoded.evt.SequenceId)
 		if seqID != "" {
 			if _, ok := processedSeqIDs[seqID]; ok {
@@ -719,11 +989,12 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 			continue
 		}
 
-		if err := p.processMessageEvent(ctx, decoded.evt); err != nil {
+		if err := p.processMessageEventWithGapCatchup(ctx, decoded.evt, false); err != nil {
 			p.log.Warn().
 				Err(err).
 				Str("conversation_id", conversationID).
 				Msg("Failed to process message event from inbox")
+			return errors.Join(decodeErr, err)
 		}
 	}
 
@@ -744,19 +1015,29 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 		if ptr.Val(evt.SenderId) == "" && readEvt.ParticipantID.RestID != "" {
 			evt.SenderId = ptr.Ptr(readEvt.ParticipantID.RestID)
 		}
+		if ptr.Val(evt.ConversationId) == "" {
+			evt.ConversationId = ptr.Ptr(conversationID)
+		} else if ptr.Val(evt.ConversationId) != conversationID {
+			p.log.Warn().
+				Str("conversation_id", conversationID).
+				Str("participant_id", readEvt.ParticipantID.RestID).
+				Msg("Ignoring inbox read event for a different conversation")
+			continue
+		}
 		if seqID := ptr.Val(evt.SequenceId); seqID != "" {
 			if _, ok := processedSeqIDs[seqID]; ok {
 				continue
 			}
 			processedSeqIDs[seqID] = struct{}{}
 		}
-		if err := p.processMessageEvent(ctx, evt); err != nil {
+		if err := p.processMessageEventWithGapCatchup(ctx, evt, false); err != nil {
 			p.log.Warn().
 				Err(err).
 				Str("conversation_id", conversationID).
 				Msg("Failed to process read event from initial inbox")
+			return errors.Join(decodeErr, err)
 		}
 	}
 
-	return nil
+	return decodeErr
 }

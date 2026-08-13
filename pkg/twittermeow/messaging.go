@@ -46,7 +46,6 @@ func makeXChatQueryRequest[T any](c *Client, ctx context.Context, url string, va
 	}
 
 	c.Logger.Debug().
-		Str("url", requestURL).
 		Int("query_length", len(query)).
 		Msg(opName + " payload")
 
@@ -58,14 +57,14 @@ func makeXChatQueryRequest[T any](c *Client, ctx context.Context, url string, va
 	})
 	if err != nil {
 		c.Logger.Debug().
-			Str("response_body", string(respBody)).
+			Int("response_bytes", len(respBody)).
 			Err(err).
 			Msg(opName + " failed")
 		return nil, err
 	}
 
 	c.Logger.Trace().
-		Str("response_body", string(respBody)).
+		Int("response_bytes", len(respBody)).
 		Msg(opName + " response")
 
 	var resp T
@@ -673,15 +672,27 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 }
 
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
-	return makeXChatQueryRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
+	resp, err := makeXChatQueryRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
+	if err == nil && len(resp.Errors) > 0 {
+		err = fmt.Errorf("GetInitialXChatPage returned %d GraphQL errors", len(resp.Errors))
+	}
+	return resp, err
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
-	return makeXChatQueryRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
+	resp, err := makeXChatQueryRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
+	if err == nil && len(resp.Errors) > 0 {
+		err = fmt.Errorf("GetInboxPageRequest returned %d GraphQL errors", len(resp.Errors))
+	}
+	return resp, err
 }
 
 func (c *Client) GetConversationData(ctx context.Context, variables *payload.GetInboxPageConversationDataQueryVariables) (*response.GetInboxPageConversationDataResponse, error) {
-	return makeXChatQueryRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
+	resp, err := makeXChatQueryRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
+	if err == nil && len(resp.Errors) > 0 {
+		err = fmt.Errorf("GetConversationData returned %d GraphQL errors", len(resp.Errors))
+	}
+	return resp, err
 }
 
 func (c *Client) GetUsersByIdsForXChat(ctx context.Context, variables *payload.GetUsersByIdsForXChatVariables) (*response.GetUsersByIdsForXChatResponse, error) {

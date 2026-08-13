@@ -1,5 +1,9 @@
 package response
 
+type XChatGraphQLError struct {
+	Message string `json:"message,omitempty"`
+}
+
 // XChatGetAuthTokenResponse models the GraphQL response for fetching an XChat auth token.
 type XChatGetAuthTokenResponse struct {
 	Data struct {
@@ -8,6 +12,7 @@ type XChatGetAuthTokenResponse struct {
 			Token    string `json:"token,omitempty"`
 		} `json:"user_get_x_chat_auth_token"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 // GetUsersByIdsForXChatResponse models the GraphQL response for fetching XChat member/user data.
@@ -52,6 +57,7 @@ type GetInitialXChatPageQueryResponse struct {
 	Data struct {
 		GetInboxPage XChatInboxPage `json:"get_initial_chat_page"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 // GetInboxPageRequestQueryResponse models the GraphQL response for fetching subsequent inbox pages.
@@ -59,6 +65,7 @@ type GetInboxPageRequestQueryResponse struct {
 	Data struct {
 		GetInboxPage XChatInboxPage `json:"get_inbox_page"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 // GetInboxPageConversationDataResponse models fetching a single conversation's data by ID.
@@ -69,6 +76,7 @@ type GetInboxPageConversationDataResponse struct {
 			Data     XChatInboxItem `json:"data"`
 		} `json:"get_inbox_page_conversation_data"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 type XChatInboxPage struct {
