@@ -317,7 +317,54 @@ var (
 		Err:        "X login failed.",
 		StatusCode: http.StatusBadGateway,
 	}
+	ErrLoginBadCookies = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.BAD_COOKIES",
+		Err:        "X rejected those cookies. Please log in again and export a fresh set.",
+		StatusCode: http.StatusUnauthorized,
+	}
+	ErrLoginAccountSuspended = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.ACCOUNT_SUSPENDED",
+		Err:        "This X account is suspended or inactive.",
+		StatusCode: http.StatusForbidden,
+	}
+	ErrLoginAccountLocked = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.ACCOUNT_LOCKED",
+		Err:        "X has temporarily locked this account. Open x.com, complete the checks it shows, then try again.",
+		StatusCode: http.StatusForbidden,
+	}
+	ErrLoginRateLimited = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.RATE_LIMITED",
+		Err:        "X is rate limiting the sign-in. Please wait a few minutes and try again.",
+		StatusCode: http.StatusTooManyRequests,
+	}
+	ErrLoginUnknown = bridgev2.RespError{
+		ErrCode:    "M_UNKNOWN",
+		Err:        "Internal error logging in to X",
+		StatusCode: http.StatusInternalServerError,
+	}
 )
+
+// wrapTwitterLoginError translates a twittermeow error into one the client can act on,
+// keeping the original in the chain with %w so logs are unaffected.
+func wrapTwitterLoginError(err error) error {
+	if err == nil {
+		return nil
+	}
+	mapped := ErrLoginUnknown.WithInternalError(err)
+	switch {
+	case errors.Is(err, twittermeow.ErrAccountTemporarilyLocked):
+		mapped = ErrLoginAccountLocked
+	case errors.Is(err, twittermeow.ErrUserSuspended), errors.Is(err, twittermeow.ErrNotActive):
+		mapped = ErrLoginAccountSuspended
+	case errors.Is(err, twittermeow.ErrRatelimitExceeded):
+		mapped = ErrLoginRateLimited
+	case errors.Is(err, twittermeow.ErrCouldNotAuthenticate),
+		errors.Is(err, twittermeow.ErrCSRFMismatch),
+		twittermeow.IsAuthError(err):
+		mapped = ErrLoginBadCookies
+	}
+	return fmt.Errorf("%w: %w", mapped, err)
+}
 
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
@@ -661,7 +708,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
 		client.SetLoginHTTPTransport(nil)
-		return nil, fmt.Errorf("failed to load messages page after submitting cookies: %w", err)
+		return nil, wrapTwitterLoginError(err)
 	}
 	t.client = client
 	t.profile = profile
@@ -681,11 +728,11 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 func parsePINInput(input map[string]string) (string, error) {
 	pin, ok := input["pin"]
 	if !ok {
-		return "", fmt.Errorf("passcode input is required")
+		return "", ErrMissingLoginInput
 	}
 	pin = strings.TrimSpace(pin)
 	if pin == "" {
-		return "", fmt.Errorf("passcode cannot be empty")
+		return "", ErrMissingLoginInput
 	}
 	return pin, nil
 }
@@ -704,7 +751,7 @@ func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
 		profile, err := t.client.LoadMessagesPage(ctx)
 		if err != nil {
 			t.client.SetLoginHTTPTransport(nil)
-			return "", fmt.Errorf("failed to load messages page: %w", err)
+			return "", wrapTwitterLoginError(err)
 		}
 		t.profile = profile
 	}
@@ -1453,7 +1500,7 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	client := t.webLogin.Client()
 	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load authenticated X messages page after login: %w", err)
+		return nil, wrapTwitterLoginError(err)
 	}
 	t.client = client
 	t.profile = profile
