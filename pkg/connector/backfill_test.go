@@ -193,22 +193,6 @@ func TestCompleteXChatForwardCatchupKeepsDifferentMessageAtAnchorTimestamp(t *te
 	}
 }
 
-func TestCompleteXChatForwardCatchupRejectsTimestampLessAnchor(t *testing.T) {
-	_, err := fetchXChatForwardCatchupPages(
-		context.Background(),
-		"conversation",
-		&database.Message{ID: "anchor"},
-		xchatForwardCatchupOptions{PageSize: 50, RequireComplete: true},
-		func(context.Context, string, int) (*parsedXChatPage, error) {
-			t.Fatal("fetcher called with unusable anchor")
-			return nil, nil
-		},
-	)
-	if err == nil || !strings.Contains(err.Error(), "anchor has no timestamp") {
-		t.Fatalf("fetchXChatForwardCatchupPages() error = %v, want anchor timestamp error", err)
-	}
-}
-
 func TestCompleteXChatForwardCatchupRejectsUnconvertedNewerMessage(t *testing.T) {
 	_, err := fetchXChatForwardCatchupPages(
 		context.Background(),

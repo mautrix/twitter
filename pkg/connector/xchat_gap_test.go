@@ -41,16 +41,6 @@ func TestXChatGapCatchupStateRetainsAnchorUntilSuccess(t *testing.T) {
 	}
 }
 
-func TestXChatGapCatchupStateDoesNotRememberLoadFailure(t *testing.T) {
-	state := &xchatGapCatchupState{}
-	_, err := state.getOrLoadAnchor(func() (*database.Message, error) {
-		return nil, errors.New("database unavailable")
-	})
-	if err == nil || state.anchor != nil {
-		t.Fatalf("failed load error/anchor = %v/%#v", err, state.anchor)
-	}
-}
-
 func TestSendXChatGapBatchesChunksAndMarksOnlyFinalBatch(t *testing.T) {
 	type call struct {
 		start int

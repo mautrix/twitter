@@ -157,10 +157,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	// A replacement Connect call cancels the previous socket context. Wait for
 	// any in-flight socket handoff to release shared inbox checkpoint state.
 	tc.xchatInboxSyncLock.Lock()
-	tc.xchatInboxSyncLock.Unlock()
 	if ctx.Err() != nil {
+		tc.xchatInboxSyncLock.Unlock()
 		return
 	}
+	tc.xchatInboxSyncLock.Unlock()
 	log := zerolog.Ctx(ctx)
 
 	if tc.client == nil {
@@ -367,7 +368,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	setMaxSeqID(catchupResult.MaxSequenceID)
 	processor.SetSequenceIDCallback(setMaxSeqID)
 	msgPullVersion := cloneXChatInt(catchupResult.MessagePullVersion)
-	inboxSyncComplete := !catchupResult.CheckpointBlocked
 	if catchupResult.CheckpointBlocked {
 		fetchLog.Warn().Msg("XChat inbox import finished with an unresolved conversation gap; checkpoint remains pending")
 	}
@@ -472,7 +472,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			tc.userLogin.RemoteProfile = *remoteProfile
 		}
 	}
-	inboxSyncComplete = !processor.SequenceCheckpointBlocked()
+	inboxSyncComplete := !processor.SequenceCheckpointBlocked()
 	if meta.PendingEncryptedSync && inboxSyncComplete {
 		meta.PendingEncryptedSync = false
 		log.Info().Msg("Post-migration: encrypted room sync completed")
@@ -650,8 +650,6 @@ func (tc *TwitterClient) FullReconnect() {
 	tc.Connect(tc.userLogin.Log.WithContext(tc.connector.br.BackgroundCtx))
 }
 
-// collectAndCacheUserResults caches usable inline XChat profiles and returns
-// IDs whose display metadata still needs to be fetched.
 // Must be called with userCacheLock held.
 func (tc *TwitterClient) collectAndCacheUserResults(results []response.XChatUserResult) []string {
 	var missingIDs []string

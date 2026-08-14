@@ -80,7 +80,6 @@ func (p *XChatEventProcessor) MaxHandledSequenceID() string {
 	return p.maxHandledSequenceID
 }
 
-// SetGapHandler sets the synchronous conversation catch-up hook.
 func (p *XChatEventProcessor) SetGapHandler(handler XChatGapHandler) {
 	p.gapHandler = handler
 }
@@ -120,8 +119,6 @@ func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
 	p.sequenceStateLock.Unlock()
 }
 
-// MarkConversationCaughtUp clears a previously blocked per-conversation gap
-// after an inbox retry or explicit history repair succeeds.
 func (p *XChatEventProcessor) MarkConversationCaughtUp(conversationID string) {
 	p.markConversationCaughtUp(conversationID)
 }

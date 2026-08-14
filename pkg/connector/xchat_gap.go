@@ -128,7 +128,9 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 		return nil
 	}
 
-	resp.Messages = portal.Internal().CutoffMessages(
+	//lint:ignore SA1019 Gap repair needs synchronous backfill completion, which the public queue API does not provide.
+	portalInternal := portal.Internal()
+	resp.Messages = portalInternal.CutoffMessages(
 		ctx,
 		resp.Messages,
 		resp.AggressiveDeduplication,
@@ -154,7 +156,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 		if final {
 			completeCallback = resp.CompleteCallback
 		}
-		return portal.Internal().SendBackfill(
+		return portalInternal.SendBackfill(
 			ctx,
 			tc.userLogin,
 			resp.Messages[start:end],

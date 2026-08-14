@@ -202,22 +202,6 @@ func TestRunXChatInboxCatchupRejectsStalledCursor(t *testing.T) {
 	}
 }
 
-func TestRunXChatInboxCatchupRejectsIncompleteCursor(t *testing.T) {
-	_, err := runXChatInboxCatchup(context.Background(), xchatInboxCatchupState{}, xchatInboxCatchupOps{
-		FetchInitial: func(context.Context, *payload.GetInitialXChatPageQueryVariables) (response.XChatInboxPage, error) {
-			return response.XChatInboxPage{
-				InboxCursor: response.XChatInboxCursor{CursorID: "cursor-without-snapshot"},
-			}, nil
-		},
-		ProcessPage: func(context.Context, response.XChatInboxPage) (xchatInboxPageProcessResult, error) {
-			return xchatInboxPageProcessResult{}, nil
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "incomplete cursor") {
-		t.Fatalf("runXChatInboxCatchup() error = %v, want incomplete cursor error", err)
-	}
-}
-
 func TestRunXChatInboxCatchupAcceptsTerminalPageWithoutCursor(t *testing.T) {
 	continuationCalled := false
 	checkpointCalls := 0

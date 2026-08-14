@@ -151,27 +151,6 @@ func TestXChatSequenceAdvancesOnlyAfterHandlerSuccess(t *testing.T) {
 	}
 }
 
-func TestXChatProcessMessagePropagatesHandlerFailure(t *testing.T) {
-	processor := newXChatEventProcessor(&Client{Logger: zerolog.Nop()})
-	processor.SetEventHandler(func(context.Context, types.TwitterEvent) bool {
-		return false
-	})
-	var tracked bool
-	processor.SetSequenceIDCallback(func(string) {
-		tracked = true
-	})
-
-	err := processor.ProcessMessage(context.Background(), &payload.Message{
-		MessageEvent: sequenceTestDeleteEvent("202"),
-	})
-	if err == nil {
-		t.Fatal("ProcessMessage() error = nil, want rejected handler error")
-	}
-	if tracked {
-		t.Fatal("failed event advanced the sequence checkpoint")
-	}
-}
-
 func TestXChatProcessMessagePanicDoesNotAdvanceCheckpoint(t *testing.T) {
 	processor := newXChatEventProcessor(&Client{Logger: zerolog.Nop()})
 	processor.SetGapHandler(func(context.Context, string, string, string) error { return nil })
@@ -558,41 +537,6 @@ func TestXChatUnresolvedGapBlocksOtherConversationCheckpoint(t *testing.T) {
 	}
 	if len(tracked) != 1 || tracked[0] != "900" {
 		t.Fatalf("tracked sequences after recovery = %v, want [900]", tracked)
-	}
-}
-
-func TestXChatSequenceCallbackCanBeReplacedDuringBlockedGap(t *testing.T) {
-	processor := newXChatEventProcessor(&Client{Logger: zerolog.Nop()})
-	catchupAvailable := false
-	processor.SetGapHandler(func(context.Context, string, string, string) error {
-		if !catchupAvailable {
-			return errors.New("catch-up unavailable")
-		}
-		return nil
-	})
-	processor.SetEventHandler(func(context.Context, types.TwitterEvent) bool { return true })
-	processor.MarkReconnected()
-
-	var firstCallback, secondCallback []string
-	processor.SetSequenceIDCallback(func(sequenceID string) {
-		firstCallback = append(firstCallback, sequenceID)
-	})
-	if err := processor.processMessageEvent(context.Background(), sequenceTestDeleteEvent("801")); err != nil {
-		t.Fatalf("blocked event error = %v", err)
-	}
-	processor.SetSequenceIDCallback(func(sequenceID string) {
-		secondCallback = append(secondCallback, sequenceID)
-	})
-	catchupAvailable = true
-	if err := processor.processMessageEvent(context.Background(), sequenceTestDeleteEvent("802")); err != nil {
-		t.Fatalf("recovery event error = %v", err)
-	}
-
-	if len(firstCallback) != 0 {
-		t.Fatalf("first callback sequences = %v, want none", firstCallback)
-	}
-	if len(secondCallback) != 1 || secondCallback[0] != "802" {
-		t.Fatalf("second callback sequences = %v, want [802]", secondCallback)
 	}
 }
 

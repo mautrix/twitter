@@ -138,8 +138,6 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 			if token == "" || forceRefresh {
 				newToken, err := xc.tokenProvider(ctx, forceRefresh)
 				if err == nil && newToken == "" {
-					// GetXChatToken may have returned a cached empty response. Force
-					// the next attempt to bypass that cache.
 					forceRefresh = true
 					err = errors.New("xchat token is empty")
 				}
