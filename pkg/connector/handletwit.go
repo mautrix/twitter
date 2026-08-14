@@ -235,7 +235,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			txnID = eventID
 		}
 
-		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventEdit,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -258,7 +258,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				return tc.convertToMatrix(ctx, portal, intent, data), nil
 			},
 			ConvertEditFunc: tc.convertEditToMatrix,
-		}))
+		})
 
 	case *types.Message:
 		isFromMe := MakeUserLoginID(evt.MessageData.SenderID) == tc.userLogin.ID
@@ -290,7 +290,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}
 		clientMsgID := evt.RequestID
 
-		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.Message[*types.MessageData]{
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventMessage,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -347,19 +347,19 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				// This is typically the remote echo for a pending outgoing message; don't bridge again.
 				return bridgev2.UpsertResult{SaveParts: true, ContinueMessageHandling: false}, nil
 			},
-		}))
+		})
 
 	case *types.MessageReactionCreate:
 		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReaction)
-		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(wrappedEvt))
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, wrappedEvt)
 
 	case *types.MessageReactionDelete:
 		reaction := (*types.MessageReaction)(evt)
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		wrappedEvt := tc.wrapReaction(reaction, portalKey, bridgev2.RemoteEventReactionRemove)
-		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(wrappedEvt))
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, wrappedEvt)
 
 	case *types.ConversationRead:
 		senderID := conversationReadSenderID(evt, ParseUserLoginID(tc.userLogin.ID))

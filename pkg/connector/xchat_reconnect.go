@@ -107,11 +107,10 @@ func runXChatInboxCatchup(
 	}
 
 	checkpoint := func() error {
-		if result.CheckpointBlocked {
-			return nil
+		if !result.CheckpointBlocked {
+			result.MaxSequenceID = pendingMaxSequenceID
+			result.MessagePullVersion = cloneXChatInt(pendingMessagePullVersion)
 		}
-		result.MaxSequenceID = pendingMaxSequenceID
-		result.MessagePullVersion = cloneXChatInt(pendingMessagePullVersion)
 		if ops.Checkpoint != nil {
 			return ops.Checkpoint(ctx, cursor, result.MaxSequenceID, result.MessagePullVersion)
 		}

@@ -2,11 +2,13 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -96,7 +98,10 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	lock := tc.getEnsurePortalLock(conversationID)
 	lock.Lock()
 	defer lock.Unlock()
+	return tc.ensurePortalForConversationLocked(ctx, conversationID, requiredKeyVersion)
+}
 
+func (tc *TwitterClient) ensurePortalForConversationLocked(ctx context.Context, conversationID, requiredKeyVersion string) (*bridgev2.Portal, error) {
 	portalKey := tc.MakePortalKeyFromID(conversationID)
 	log := zerolog.Ctx(ctx).With().
 		Str("conversation_id", conversationID).
@@ -146,6 +151,69 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	}
 
 	return portal, nil
+}
+
+func isStalePortalMembershipError(err error) bool {
+	if err == nil || (!errors.Is(err, mautrix.MNotFound) && !errors.Is(err, mautrix.MForbidden)) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "user is not in the room")
+}
+
+func (tc *TwitterClient) recreateStaleXChatPortal(ctx context.Context, conversationID, failedRoomID string) error {
+	lock := tc.getEnsurePortalLock(conversationID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	portal, err := tc.connector.br.GetPortalByKey(ctx, tc.MakePortalKeyFromID(conversationID))
+	if err != nil {
+		return err
+	}
+	if portal.MXID != "" {
+		if string(portal.MXID) != failedRoomID {
+			return nil
+		}
+		if err = portal.Delete(ctx); err != nil {
+			return fmt.Errorf("delete stale XChat portal: %w", err)
+		}
+	}
+	_, err = tc.ensurePortalForConversationLocked(ctx, conversationID, "")
+	return err
+}
+
+func (tc *TwitterClient) queueXChatRemoteEventWithPortalRepair(
+	ctx context.Context,
+	conversationID string,
+	evt bridgev2.RemoteEvent,
+) bool {
+	failedRoomID := ""
+	if ctx != nil {
+		portal, portalErr := tc.connector.br.GetExistingPortalByKey(ctx, tc.MakePortalKeyFromID(conversationID))
+		if portalErr == nil && portal != nil {
+			failedRoomID = string(portal.MXID)
+		}
+	}
+	result := tc.userLogin.QueueRemoteEvent(evt)
+	if xchatRemoteEventHandled(result) {
+		return true
+	}
+	if ctx == nil || failedRoomID == "" || ctx.Value(ensurePortalContextKey{}) != nil || !isStalePortalMembershipError(result.Error) {
+		return false
+	}
+
+	log := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Logger()
+	log.Warn().Msg("Recreating stale XChat portal room after Matrix membership failure")
+	if err := tc.recreateStaleXChatPortal(ctx, conversationID, failedRoomID); err != nil {
+		log.Warn().Err(err).Msg("Failed to recreate stale XChat portal room")
+		return false
+	}
+
+	result = tc.userLogin.QueueRemoteEvent(evt)
+	if !xchatRemoteEventHandled(result) {
+		log.Warn().Err(result.Error).Msg("XChat event failed after recreating stale portal room")
+		return false
+	}
+	return true
 }
 
 func (tc *TwitterClient) getEnsurePortalLock(conversationID string) *sync.Mutex {

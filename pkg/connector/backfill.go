@@ -457,9 +457,6 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("GetConversationPageQuery returned %d errors", len(resp.Errors))
-	}
 
 	page := resp.Data.GetConversationPage
 	result := &parsedXChatPage{

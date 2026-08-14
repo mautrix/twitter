@@ -542,10 +542,9 @@ func nextXChatInboxCursor(page response.XChatInboxPage) *payload.XChatCursor {
 }
 
 func validatedNextXChatInboxCursor(page response.XChatInboxPage) (*payload.XChatCursor, error) {
-	// Terminal pages may omit both cursor fields without setting pull_finished.
-	// A page with only one field is still malformed and must not be checkpointed.
-	if page.InboxCursor.PullFinished ||
-		(page.InboxCursor.CursorID == "" && page.InboxCursor.GraphSnapshotID == "") {
+	// Terminal pages may omit the continuation cursor without setting pull_finished,
+	// while still echoing the graph snapshot ID.
+	if page.InboxCursor.PullFinished || page.InboxCursor.CursorID == "" {
 		return nil, nil
 	}
 	cursor := nextXChatInboxCursor(page)

@@ -23,6 +23,32 @@ type FormEncoder interface {
 	Encode() ([]byte, error)
 }
 
+func decodeXChatQueryResponse[T any](body []byte, opName string) (*T, error) {
+	var errorResponse struct {
+		Errors []response.XChatGraphQLError `json:"errors,omitempty"`
+	}
+	if err := json.Unmarshal(body, &errorResponse); err != nil {
+		return nil, err
+	}
+	if len(errorResponse.Errors) > 0 {
+		var graphQLError error = errorResponse.Errors[0]
+		if len(errorResponse.Errors) > 1 {
+			errs := make([]error, len(errorResponse.Errors))
+			for i := range errorResponse.Errors {
+				errs[i] = errorResponse.Errors[i]
+			}
+			graphQLError = errors.Join(errs...)
+		}
+		return nil, fmt.Errorf("%s returned GraphQL errors: %w", opName, graphQLError)
+	}
+
+	var resp T
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // makeXChatQueryRequest is a generic helper for XChat API GET requests that
 // pass GraphQL variables in URL query params.
 func makeXChatQueryRequest[T any](c *Client, ctx context.Context, url string, variables FormEncoder, opName string) (*T, error) {
@@ -67,8 +93,7 @@ func makeXChatQueryRequest[T any](c *Client, ctx context.Context, url string, va
 		Int("response_bytes", len(respBody)).
 		Msg(opName + " response")
 
-	var resp T
-	return &resp, json.Unmarshal(respBody, &resp)
+	return decodeXChatQueryResponse[T](respBody, opName)
 }
 
 func (c *Client) MarkConversationRead(ctx context.Context, params *payload.MarkConversationReadQuery) error {
@@ -672,27 +697,15 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 }
 
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
-	resp, err := makeXChatQueryRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
-	if err == nil && len(resp.Errors) > 0 {
-		err = fmt.Errorf("GetInitialXChatPage returned %d GraphQL errors", len(resp.Errors))
-	}
-	return resp, err
+	return makeXChatQueryRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
-	resp, err := makeXChatQueryRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
-	if err == nil && len(resp.Errors) > 0 {
-		err = fmt.Errorf("GetInboxPageRequest returned %d GraphQL errors", len(resp.Errors))
-	}
-	return resp, err
+	return makeXChatQueryRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
 }
 
 func (c *Client) GetConversationData(ctx context.Context, variables *payload.GetInboxPageConversationDataQueryVariables) (*response.GetInboxPageConversationDataResponse, error) {
-	resp, err := makeXChatQueryRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
-	if err == nil && len(resp.Errors) > 0 {
-		err = fmt.Errorf("GetConversationData returned %d GraphQL errors", len(resp.Errors))
-	}
-	return resp, err
+	return makeXChatQueryRequest[response.GetInboxPageConversationDataResponse](c, ctx, endpoints.GET_INBOX_PAGE_CONV_DATA_QUERY_URL, variables, "GetConversationData")
 }
 
 func (c *Client) GetUsersByIdsForXChat(ctx context.Context, variables *payload.GetUsersByIdsForXChatVariables) (*response.GetUsersByIdsForXChatResponse, error) {

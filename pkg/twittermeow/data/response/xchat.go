@@ -4,6 +4,10 @@ type XChatGraphQLError struct {
 	Message string `json:"message,omitempty"`
 }
 
+func (err XChatGraphQLError) Error() string {
+	return err.Message
+}
+
 // XChatGetAuthTokenResponse models the GraphQL response for fetching an XChat auth token.
 type XChatGetAuthTokenResponse struct {
 	Data struct {
@@ -22,9 +26,7 @@ type GetUsersByIdsForXChatResponse struct {
 			Results []XChatMemberResult `json:"results,omitempty"`
 		} `json:"get_member_results"`
 	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message,omitempty"`
-	} `json:"errors,omitempty"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 type XChatMemberResult struct {
@@ -39,9 +41,7 @@ type GetConversationPageQueryResponse struct {
 	Data struct {
 		GetConversationPage XChatConversationPage `json:"get_conversation_page"`
 	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message,omitempty"`
-	} `json:"errors,omitempty"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 type XChatConversationPage struct {

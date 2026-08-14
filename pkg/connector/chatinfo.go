@@ -304,9 +304,6 @@ func (tc *TwitterClient) fetchUsersByIDAndCache(ctx context.Context, ids []strin
 		if err != nil {
 			return err
 		}
-		if len(resp.Errors) > 0 {
-			return fmt.Errorf("GetUsersByIdsForXChat returned %d GraphQL errors", len(resp.Errors))
-		}
 
 		tc.userCacheLock.Lock()
 		for _, r := range resp.Data.GetMemberResults.Results {
@@ -524,6 +521,9 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 }
 
 func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
+	if strings.HasPrefix(avatarURL, "http://") && isPublicCDNURL(avatarURL) {
+		avatarURL = "https://" + strings.TrimPrefix(avatarURL, "http://")
+	}
 	return &bridgev2.Avatar{
 		ID: networkid.AvatarID(avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
