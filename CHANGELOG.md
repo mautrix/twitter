@@ -1,3 +1,11 @@
+# v26.08
+
+* Updated Docker image to Alpine 3.24.
+* Added native password login support.
+  * The password login still requires a hidden webview, so it can only be used
+    with mautrix-manager, not bot commands.
+* Fixed various message bridging issues.
+
 # v26.06
 
 * Added forward backfilling to fill gaps in encrypted chat history.
