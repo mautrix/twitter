@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -102,15 +103,13 @@ func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Porta
 
 func (tc *TwitterClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	userID := ParseUserID(ghost.ID)
+	fetchErr := tc.ensureUsersInCacheByID(ctx, []string{userID})
 	userInfo := tc.getCachedUserInfo(userID)
 	if userInfo == nil {
-		if err := tc.ensureUsersInCacheByID(ctx, []string{userID}); err != nil {
-			return nil, err
+		if fetchErr != nil {
+			return nil, fetchErr
 		}
-		userInfo = tc.getCachedUserInfo(userID)
-		if userInfo == nil {
-			return nil, fmt.Errorf("failed to find user info in cache by id: %s", ghost.ID)
-		}
+		return nil, fmt.Errorf("failed to find user info in cache by id: %s", ghost.ID)
 	}
 	return userInfo, nil
 }
@@ -168,6 +167,92 @@ func (tc *TwitterClient) currentUserID() string {
 	return currentUserID
 }
 
+func xchatUserFromResult(result response.XChatUserResult) (string, *types.User) {
+	userID := strings.TrimSpace(result.RestID)
+	if result.Result == nil {
+		return userID, nil
+	}
+	user := twittermeow.ConvertXChatUserToUser(result.Result)
+	if user == nil {
+		return userID, nil
+	}
+	if userID == "" {
+		userID = strings.TrimSpace(user.IDStr)
+	}
+	if userID != "" {
+		user.IDStr = userID
+	}
+	return userID, user
+}
+
+func hasXChatUserDisplayInfo(user *types.User) bool {
+	return user != nil && (strings.TrimSpace(user.ScreenName) != "" || strings.TrimSpace(user.Name) != "")
+}
+
+func hasCompleteXChatUserProfile(user *types.User) bool {
+	return user != nil && strings.TrimSpace(user.ScreenName) != "" && strings.TrimSpace(user.Name) != ""
+}
+
+func xchatUserProfileQuality(user *types.User) int {
+	if user == nil {
+		return 0
+	}
+	quality := 0
+	if strings.TrimSpace(user.ScreenName) != "" {
+		quality += 2
+	}
+	if strings.TrimSpace(user.Name) != "" {
+		quality++
+	}
+	return quality
+}
+
+func mergeXChatUser(users map[string]*types.User, userID string, user *types.User) *types.User {
+	existing := users[userID]
+	if userID == "" || user == nil {
+		return existing
+	}
+	if existing == nil {
+		users[userID] = user
+		return user
+	}
+	if hasCompleteXChatUserProfile(user) {
+		users[userID] = user
+		return user
+	}
+	// XChat can split a member's core data across duplicate result sets. Fill
+	// missing fields without allowing a partial result to erase known metadata.
+	merged := *existing
+	if merged.IDStr == "" {
+		merged.IDStr = userID
+	}
+	if merged.ScreenName == "" {
+		merged.ScreenName = user.ScreenName
+	}
+	if merged.Name == "" {
+		merged.Name = user.Name
+	}
+	if merged.ProfileImageURL == "" {
+		merged.ProfileImageURL = user.ProfileImageURL
+	}
+	if merged.ProfileImageURLHTTPS == "" {
+		merged.ProfileImageURLHTTPS = user.ProfileImageURLHTTPS
+	}
+	users[userID] = &merged
+	return &merged
+}
+
+func preferXChatUserResult(existing, candidate response.XChatUserResult) response.XChatUserResult {
+	_, existingUser := xchatUserFromResult(existing)
+	_, candidateUser := xchatUserFromResult(candidate)
+	if (existing.Result == nil && candidate.Result != nil) ||
+		(!hasCompleteXChatUserProfile(existingUser) && hasCompleteXChatUserProfile(candidateUser)) ||
+		xchatUserProfileQuality(candidateUser) > xchatUserProfileQuality(existingUser) {
+		return candidate
+	}
+	return existing
+}
+
 func (tc *TwitterClient) ensureUsersInCacheByID(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -185,7 +270,7 @@ func (tc *TwitterClient) ensureUsersInCacheByID(ctx context.Context, ids []strin
 			continue
 		}
 		uniq[id] = struct{}{}
-		if _, ok := tc.userCache[id]; !ok {
+		if cached, ok := tc.userCache[id]; !ok || !hasCompleteXChatUserProfile(cached) {
 			missing = append(missing, id)
 		}
 	}
@@ -212,31 +297,38 @@ func (tc *TwitterClient) fetchUsersByIDAndCache(ctx context.Context, ids []strin
 
 	// Keep request sizes reasonable (GraphQL variables can get large quickly).
 	const batchSize = 100
+	var profileErrs []error
 	for i := 0; i < len(ids); i += batchSize {
 		batch := ids[i:min(i+batchSize, len(ids))]
 		resp, err := tc.client.GetUsersByIdsForXChat(ctx, payload.NewGetUsersByIdsForXChatVariables(batch))
 		if err != nil {
 			return err
 		}
-		if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
-			return fmt.Errorf("GetUsersByIdsForXChat error: %s", resp.Errors[0].Message)
-		}
 
 		tc.userCacheLock.Lock()
 		for _, r := range resp.Data.GetMemberResults.Results {
-			if r.MemberResults == nil || r.MemberResults.Result == nil {
+			if r.MemberResults == nil {
 				continue
 			}
-			user := twittermeow.ConvertXChatUserToUser(r.MemberResults.Result)
-			if user == nil || user.IDStr == "" {
+			userID, user := xchatUserFromResult(*r.MemberResults)
+			if userID == "" || user == nil {
 				continue
 			}
-			tc.userCache[user.IDStr] = user
+			mergeXChatUser(tc.userCache, userID, user)
+		}
+		unresolved := 0
+		for _, userID := range batch {
+			if !hasCompleteXChatUserProfile(tc.userCache[userID]) {
+				unresolved++
+			}
 		}
 		tc.userCacheLock.Unlock()
+		if unresolved > 0 {
+			profileErrs = append(profileErrs, fmt.Errorf("GetUsersByIdsForXChat did not return complete profiles for %d of %d users", unresolved, len(batch)))
+		}
 	}
 
-	return nil
+	return errors.Join(profileErrs...)
 }
 
 func parseDMParticipantIDs(conversationID string) (string, []string, bool) {
@@ -265,7 +357,7 @@ func (tc *TwitterClient) cacheUserForID(userID string, user *types.User) *types.
 		return nil
 	}
 	tc.userCacheLock.Lock()
-	tc.userCache[userID] = user
+	user = mergeXChatUser(tc.userCache, userID, user)
 	tc.userCacheLock.Unlock()
 	return user
 }
@@ -356,11 +448,11 @@ func (tc *TwitterClient) buildChatMembersFromUserIDs(ctx context.Context, conver
 	tc.userCacheLock.RLock()
 	for _, id := range ids {
 		if inbox != nil && inbox.Users != nil {
-			if u := inbox.Users[id]; u != nil {
+			if u := inbox.Users[id]; hasCompleteXChatUserProfile(u) {
 				continue
 			}
 		}
-		if tc.userCache[id] != nil {
+		if hasCompleteXChatUserProfile(tc.userCache[id]) {
 			continue
 		}
 		missing = append(missing, id)
@@ -381,12 +473,12 @@ func (tc *TwitterClient) buildChatMembersFromUserIDs(ctx context.Context, conver
 	for _, id := range ids {
 		var userInfo *bridgev2.UserInfo
 		if inbox != nil && inbox.Users != nil {
-			if u := inbox.Users[id]; u != nil {
+			if u := inbox.Users[id]; hasXChatUserDisplayInfo(u) {
 				userInfo = tc.connector.wrapUserInfo(tc.client, u)
 			}
 		}
 		if userInfo == nil {
-			if u := tc.userCache[id]; u != nil {
+			if u := tc.userCache[id]; hasXChatUserDisplayInfo(u) {
 				userInfo = tc.connector.wrapUserInfo(tc.client, u)
 			}
 		}
@@ -414,6 +506,9 @@ func (tc *TwitterClient) buildChatMembersFromUserIDs(ctx context.Context, conver
 }
 
 func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.User) *bridgev2.UserInfo {
+	if user == nil {
+		return nil
+	}
 	avatarURL := user.ProfileImageURL
 	if avatarURL == "" {
 		avatarURL = user.ProfileImageURLHTTPS
@@ -426,6 +521,9 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 }
 
 func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
+	if strings.HasPrefix(avatarURL, "http://") && isPublicCDNURL(avatarURL) {
+		avatarURL = "https://" + strings.TrimPrefix(avatarURL, "http://")
+	}
 	return &bridgev2.Avatar{
 		ID: networkid.AvatarID(avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
@@ -615,7 +713,7 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 		if resp.ConversationTimeline.Users != nil {
 			tc.userCacheLock.Lock()
 			for userID, user := range resp.ConversationTimeline.Users {
-				tc.userCache[userID] = user
+				mergeXChatUser(tc.userCache, userID, user)
 			}
 			tc.userCacheLock.Unlock()
 		}

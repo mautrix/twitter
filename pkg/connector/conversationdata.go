@@ -2,14 +2,15 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -54,10 +55,13 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 
 	collect := func(results []response.XChatUserResult) {
 		for _, r := range results {
-			if r.Result != nil {
-				users[r.RestID] = twittermeow.ConvertXChatUserToUser(r.Result)
-			} else if r.RestID != "" {
-				missingIDs = append(missingIDs, r.RestID)
+			userID, user := xchatUserFromResult(r)
+			if userID == "" {
+				continue
+			}
+			mergeXChatUser(users, userID, user)
+			if !hasCompleteXChatUserProfile(user) {
+				missingIDs = append(missingIDs, userID)
 			}
 		}
 	}
@@ -67,15 +71,18 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 	collect(data.ConversationDetail.GroupAdminsResults)
 
 	if err := tc.ensureUsersInCacheByID(ctx, missingIDs); err != nil {
-		return nil, nil, err
+		// Profile metadata is useful for room naming, but it must not prevent a
+		// newly received message from creating/syncing its portal. The member-list
+		// builder retries the lookup and can update metadata on a later resync.
+		zerolog.Ctx(ctx).Warn().
+			Err(err).
+			Int("missing_users", len(missingIDs)).
+			Msg("Failed to prefetch users for XChat conversation data")
 	}
 
 	tc.userCacheLock.RLock()
 	for _, id := range missingIDs {
-		if users[id] != nil {
-			continue
-		}
-		if u := tc.userCache[id]; u != nil {
+		if u := tc.userCache[id]; hasXChatUserDisplayInfo(u) {
 			users[id] = u
 		}
 	}
@@ -91,7 +98,10 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	lock := tc.getEnsurePortalLock(conversationID)
 	lock.Lock()
 	defer lock.Unlock()
+	return tc.ensurePortalForConversationLocked(ctx, conversationID, requiredKeyVersion)
+}
 
+func (tc *TwitterClient) ensurePortalForConversationLocked(ctx context.Context, conversationID, requiredKeyVersion string) (*bridgev2.Portal, error) {
 	portalKey := tc.MakePortalKeyFromID(conversationID)
 	log := zerolog.Ctx(ctx).With().
 		Str("conversation_id", conversationID).
@@ -125,7 +135,10 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	}
 
 	// Sync channel (creates portal if needed)
-	tc.syncXChatChannel(ctx, item, users)
+	if err := tc.syncXChatChannel(ctx, item, users); err != nil {
+		log.Warn().Err(err).Msg("Failed to sync channel for fetched conversation data")
+		return portal, err
+	}
 
 	// Process messages/read events to backfill and register any keys embedded there
 	bootstrapCtx := context.WithValue(ctx, ensurePortalContextKey{}, true)
@@ -138,6 +151,69 @@ func (tc *TwitterClient) ensurePortalForConversation(ctx context.Context, conver
 	}
 
 	return portal, nil
+}
+
+func isStalePortalMembershipError(err error) bool {
+	if err == nil || (!errors.Is(err, mautrix.MNotFound) && !errors.Is(err, mautrix.MForbidden)) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "user is not in the room")
+}
+
+func (tc *TwitterClient) recreateStaleXChatPortal(ctx context.Context, conversationID, failedRoomID string) error {
+	lock := tc.getEnsurePortalLock(conversationID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	portal, err := tc.connector.br.GetPortalByKey(ctx, tc.MakePortalKeyFromID(conversationID))
+	if err != nil {
+		return err
+	}
+	if portal.MXID != "" {
+		if string(portal.MXID) != failedRoomID {
+			return nil
+		}
+		if err = portal.Delete(ctx); err != nil {
+			return fmt.Errorf("delete stale XChat portal: %w", err)
+		}
+	}
+	_, err = tc.ensurePortalForConversationLocked(ctx, conversationID, "")
+	return err
+}
+
+func (tc *TwitterClient) queueXChatRemoteEventWithPortalRepair(
+	ctx context.Context,
+	conversationID string,
+	evt bridgev2.RemoteEvent,
+) bool {
+	failedRoomID := ""
+	if ctx != nil {
+		portal, portalErr := tc.connector.br.GetExistingPortalByKey(ctx, tc.MakePortalKeyFromID(conversationID))
+		if portalErr == nil && portal != nil {
+			failedRoomID = string(portal.MXID)
+		}
+	}
+	result := tc.userLogin.QueueRemoteEvent(evt)
+	if xchatRemoteEventHandled(result) {
+		return true
+	}
+	if ctx == nil || failedRoomID == "" || ctx.Value(ensurePortalContextKey{}) != nil || !isStalePortalMembershipError(result.Error) {
+		return false
+	}
+
+	log := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Logger()
+	log.Warn().Msg("Recreating stale XChat portal room after Matrix membership failure")
+	if err := tc.recreateStaleXChatPortal(ctx, conversationID, failedRoomID); err != nil {
+		log.Warn().Err(err).Msg("Failed to recreate stale XChat portal room")
+		return false
+	}
+
+	result = tc.userLogin.QueueRemoteEvent(evt)
+	if !xchatRemoteEventHandled(result) {
+		log.Warn().Err(result.Error).Msg("XChat event failed after recreating stale portal room")
+		return false
+	}
+	return true
 }
 
 func (tc *TwitterClient) getEnsurePortalLock(conversationID string) *sync.Mutex {

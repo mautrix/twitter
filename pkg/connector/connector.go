@@ -34,6 +34,14 @@ var _ bridgev2.NetworkConnector = (*TwitterConnector)(nil)
 
 func (tc *TwitterConnector) Init(bridge *bridgev2.Bridge) {
 	tc.br = bridge
+	// XChat checkpoints must reflect completed Matrix handling, not admission to
+	// an in-memory portal queue. Synchronous portal handling preserves per-room
+	// ordering while making QueueRemoteEvent's result authoritative.
+	bridgev2.PortalEventBuffer = 0
+}
+
+func xchatRemoteEventHandled(result bridgev2.EventHandlingResult) bool {
+	return result.Success && !result.Queued
 }
 
 func (tc *TwitterConnector) Start(_ context.Context) error {

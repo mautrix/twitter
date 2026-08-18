@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"time"
 
@@ -28,7 +29,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
@@ -57,17 +57,20 @@ func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType databa
 	if chatInfo.Avatar != nil {
 		return true
 	}
+	if chatInfo.Members != nil && (chatInfo.Members.IsFull || len(chatInfo.Members.MemberMap) > 0) {
+		return true
+	}
 	return chatInfo.Type != nil && portalRoomType != *chatInfo.Type
 }
 
 // syncXChatChannel syncs a single conversation from XChat inbox data.
 // Creates the portal synchronously if it doesn't exist.
-func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) {
+func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) error {
 	log := zerolog.Ctx(ctx)
 
 	conv := tc.xchatItemToConversation(ctx, item, users)
-	if conv == nil {
-		return
+	if conv == nil || conv.ConversationID == "" {
+		return fmt.Errorf("convert XChat inbox item to conversation")
 	}
 
 	portalKey := tc.MakePortalKey(conv)
@@ -77,14 +80,14 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			log.Warn().Err(err).
 				Str("conversation_id", conv.ConversationID).
 				Msg("Failed to check for REST group portal alias")
-			return
+			return fmt.Errorf("check REST group portal alias: %w", err)
 		} else if restPortal != nil {
 			result, _, err := tc.connector.br.ReIDPortal(ctx, restKey, portalKey)
 			if err != nil {
 				log.Warn().Err(err).
 					Str("conversation_id", conv.ConversationID).
 					Msg("Failed to reconcile REST group portal into XChat portal")
-				return
+				return fmt.Errorf("reconcile REST group portal alias: %w", err)
 			}
 			if result != bridgev2.ReIDResultNoOp {
 				log.Info().
@@ -102,7 +105,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		log.Warn().Err(err).
 			Str("conversation_id", conv.ConversationID).
 			Msg("Failed to get/create portal")
-		return
+		return fmt.Errorf("get or create XChat portal: %w", err)
 	}
 	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
 
@@ -129,7 +132,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			log.Warn().Err(err).
 				Str("conversation_id", conv.ConversationID).
 				Msg("Failed to create Matrix room")
-			return
+			return fmt.Errorf("create Matrix room for XChat portal: %w", err)
 		}
 		// Register backfill task for the newly created room
 		if chatInfo.CanBackfill {
@@ -150,7 +153,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			// so apply the update directly instead.
 			portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
 		} else {
-			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 				EventMeta: simplevent.EventMeta{
 					Type:      bridgev2.RemoteEventChatInfoChange,
 					PortalKey: portal.PortalKey,
@@ -160,6 +163,12 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 					ChatInfo: chatInfo,
 				},
 			})
+			if !xchatRemoteEventHandled(result) {
+				if result.Error != nil {
+					return fmt.Errorf("update XChat portal info: %w", result.Error)
+				}
+				return fmt.Errorf("update XChat portal info did not finish handling")
+			}
 		}
 	}
 
@@ -167,6 +176,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		Str("conversation_id", conv.ConversationID).
 		Stringer("portal_mxid", portal.MXID).
 		Msg("XChat channel synced")
+	return nil
 }
 
 // xchatItemToConversation converts an XChatInboxItem to a types.Conversation.
@@ -189,8 +199,12 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 
 	// Build participants list
 	for _, p := range detail.ParticipantsResults {
+		userID, _ := xchatUserFromResult(p)
+		if userID == "" {
+			continue
+		}
 		conv.Participants = append(conv.Participants, types.Participant{
-			UserID: p.RestID,
+			UserID: userID,
 		})
 	}
 
@@ -233,41 +247,36 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	memberByID := make(map[string]response.XChatUserResult, len(memberResults))
 	memberOrder := make([]string, 0, len(memberResults))
 	for _, r := range memberResults {
-		if r.RestID == "" {
+		userID, _ := xchatUserFromResult(r)
+		if userID == "" {
 			continue
 		}
-		if existing, ok := memberByID[r.RestID]; ok {
-			if existing.Result == nil && r.Result != nil {
-				memberByID[r.RestID] = r
-			}
+		r.RestID = userID
+		if existing, ok := memberByID[userID]; ok {
+			memberByID[userID] = preferXChatUserResult(existing, r)
 			continue
 		}
-		memberByID[r.RestID] = r
-		memberOrder = append(memberOrder, r.RestID)
+		memberByID[userID] = r
+		memberOrder = append(memberOrder, userID)
 	}
 
 	memberMap := make(bridgev2.ChatMemberMap, len(memberByID))
 	for _, restID := range memberOrder {
 		p := memberByID[restID]
+		_, bestUser := xchatUserFromResult(p)
+		if users != nil {
+			if candidate := users[p.RestID]; xchatUserProfileQuality(candidate) > xchatUserProfileQuality(bestUser) {
+				bestUser = candidate
+			}
+		}
+		tc.userCacheLock.RLock()
+		if candidate := tc.userCache[p.RestID]; xchatUserProfileQuality(candidate) > xchatUserProfileQuality(bestUser) {
+			bestUser = candidate
+		}
+		tc.userCacheLock.RUnlock()
 		var userInfo *bridgev2.UserInfo
-		// First try inline Result from participants_results
-		if p.Result != nil {
-			user := twittermeow.ConvertXChatUserToUser(p.Result)
-			userInfo = tc.connector.wrapUserInfo(tc.client, user)
-		}
-		// Then try users map if provided
-		if userInfo == nil && users != nil {
-			if user, ok := users[p.RestID]; ok {
-				userInfo = tc.connector.wrapUserInfo(tc.client, user)
-			}
-		}
-		// Finally fall back to user cache
-		if userInfo == nil {
-			tc.userCacheLock.RLock()
-			if user, ok := tc.userCache[p.RestID]; ok {
-				userInfo = tc.connector.wrapUserInfo(tc.client, user)
-			}
-			tc.userCacheLock.RUnlock()
+		if hasXChatUserDisplayInfo(bestUser) {
+			userInfo = tc.connector.wrapUserInfo(tc.client, bestUser)
 		}
 		log.Debug().
 			Str("rest_id", p.RestID).
@@ -323,10 +332,32 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	if conv != nil {
 		messageRequest = ptr.Ptr(!conv.Trusted)
 	}
+	membersAreFull := len(detail.GroupMembersResults) > 0 && len(memberMap) > 0
+	for _, memberResult := range detail.GroupMembersResults {
+		if memberID, _ := xchatUserFromResult(memberResult); memberID == "" {
+			membersAreFull = false
+			break
+		}
+	}
+	if !isGroup {
+		_, participantIDs, parsed := parseDMParticipantIDs(conversationID)
+		if parsed {
+			expectedMembers := make(map[string]struct{}, len(participantIDs))
+			for _, participantID := range participantIDs {
+				expectedMembers[participantID] = struct{}{}
+			}
+			membersAreFull = len(memberMap) >= len(expectedMembers)
+		} else {
+			membersAreFull = len(memberMap) >= 2
+		}
+	}
 
 	info := &bridgev2.ChatInfo{
 		Members: &bridgev2.ChatMemberList{
-			IsFull:           true,
+			// A missing group_members_results field is a partial response, not an
+			// authoritative empty group. Treating it as full would remove existing
+			// Matrix members during a transient/compact API response.
+			IsFull:           membersAreFull,
 			TotalMemberCount: len(memberMap),
 			MemberMap:        memberMap,
 		},

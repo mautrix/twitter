@@ -40,9 +40,6 @@ func (c *Client) GetCurrentUserProfile(ctx context.Context) (CurrentUserProfile,
 	if err != nil {
 		return CurrentUserProfile{}, err
 	}
-	if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
-		return CurrentUserProfile{}, fmt.Errorf("GetUsersByIdsForXChat error: %s", resp.Errors[0].Message)
-	}
 	if len(resp.Data.GetMemberResults.Results) != 1 {
 		return CurrentUserProfile{}, fmt.Errorf("expected 1 user result for %s, got %d", currentUserID, len(resp.Data.GetMemberResults.Results))
 	}
@@ -203,5 +200,11 @@ func (c *Client) GenerateXChatToken(ctx context.Context) (*response.XChatGetAuth
 	}
 
 	var out response.XChatGetAuthTokenResponse
-	return &out, json.Unmarshal(respBody, &out)
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Errors) > 0 {
+		return nil, fmt.Errorf("GenerateXChatToken returned %d GraphQL errors", len(out.Errors))
+	}
+	return &out, nil
 }

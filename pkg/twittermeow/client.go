@@ -36,6 +36,11 @@ type StreamEventHandler func(evt response.StreamEvent)
 // The callback receives the conversation ID and the inbox item containing the latest conversation data.
 type ConversationDataCallback func(ctx context.Context, conversationID string, item *response.XChatInboxItem)
 
+// XChatConnectHandler repairs any events that may have been missed before a
+// websocket connection. It runs after each socket is established and before
+// that socket starts consuming live frames.
+type XChatConnectHandler func(ctx context.Context) error
+
 // XChatTokenTTL is how long an XChat token is considered valid.
 const XChatTokenTTL = 5 * time.Minute
 
@@ -57,6 +62,8 @@ type Client struct {
 	xchatEventHandler         XChatEventHandler
 	onCursorChanged           func(ctx context.Context)
 	onConversationDataRefresh ConversationDataCallback
+	onXChatConnect            XChatConnectHandler
+	xchatConnectHandlerMu     sync.RWMutex
 
 	currentUserID  string
 	jot            *JotClient
@@ -157,16 +164,23 @@ func (c *Client) GetXChatToken(ctx context.Context) (string, error) {
 	defer c.xchatTokenMu.Unlock()
 
 	if c.xchatToken != nil && time.Since(c.xchatToken.FetchedAt) < XChatTokenTTL {
-		return c.xchatToken.Token, nil
+		if token := strings.TrimSpace(c.xchatToken.Token); token != "" {
+			return token, nil
+		}
+		c.xchatToken = nil
 	}
 
 	resp, err := c.GenerateXChatToken(ctx)
 	if err != nil {
 		return "", err
 	}
+	token := strings.TrimSpace(resp.Data.UserGetXChatAuthToken.Token)
+	if token == "" {
+		return "", errors.New("generated XChat token is empty")
+	}
 
 	c.xchatToken = &cachedXChatToken{
-		Token:     resp.Data.UserGetXChatAuthToken.Token,
+		Token:     token,
 		FetchedAt: time.Now(),
 	}
 	return c.xchatToken.Token, nil
@@ -179,7 +193,10 @@ func (c *Client) refreshXChatToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	token := resp.Data.UserGetXChatAuthToken.Token
+	token := strings.TrimSpace(resp.Data.UserGetXChatAuthToken.Token)
+	if token == "" {
+		return "", errors.New("generated XChat token is empty")
+	}
 	c.xchatTokenMu.Lock()
 	c.xchatToken = &cachedXChatToken{
 		Token:     token,
@@ -297,6 +314,26 @@ func (c *Client) SetXChatEventHandler(handler XChatEventHandler) {
 // This is called when conversation data is fetched on-demand (e.g., during key refresh).
 func (c *Client) SetConversationDataCallback(callback ConversationDataCallback) {
 	c.onConversationDataRefresh = callback
+}
+
+// SetXChatConnectHandler sets the catch-up hook that runs before each newly
+// established websocket starts consuming live frames.
+func (c *Client) SetXChatConnectHandler(handler XChatConnectHandler) {
+	c.xchatConnectHandlerMu.Lock()
+	c.onXChatConnect = handler
+	c.xchatConnectHandlerMu.Unlock()
+}
+
+func (c *Client) getXChatConnectHandler() XChatConnectHandler {
+	c.xchatConnectHandlerMu.RLock()
+	defer c.xchatConnectHandlerMu.RUnlock()
+	return c.onXChatConnect
+}
+
+// SetXChatGapHandler sets the per-conversation recovery hook used by the event
+// processor after reconnects and sequence discontinuities.
+func (c *Client) SetXChatGapHandler(handler XChatGapHandler) {
+	c.xchatProcessor.SetGapHandler(handler)
 }
 
 func (c *Client) fetchScript(ctx context.Context, url string) ([]byte, error) {

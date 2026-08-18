@@ -2,10 +2,11 @@ package twittermeow
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,9 @@ const (
 	initialReconnectDelay      = 1 * time.Second
 	maxReconnectDelay          = 5 * time.Minute
 	reconnectBackoffMultiplier = 2.0
+	stableConnectionDuration   = 30 * time.Second
+	xchatPingInterval          = 30 * time.Second
+	xchatPingTimeout           = 10 * time.Second
 )
 
 var ErrXChatWebsocketNotConnected = errors.New("xchat websocket not connected")
@@ -59,20 +63,29 @@ type xchatWebsocketClient struct {
 	shouldStop atomic.Pointer[context.CancelFunc]
 	conn       atomic.Pointer[websocket.Conn]
 	writeMu    sync.Mutex
+
+	tokenProvider     func(context.Context, bool) (string, error)
+	connectionRunner  func(context.Context, string, zerolog.Logger, func(context.Context) error) (bool, error)
+	initialRetryDelay time.Duration
+	maximumRetryDelay time.Duration
 }
 
 func (c *Client) newXChatWebsocketClient() *xchatWebsocketClient {
-	return &xchatWebsocketClient{client: c}
+	xc := &xchatWebsocketClient{
+		client:            c,
+		initialRetryDelay: initialReconnectDelay,
+		maximumRetryDelay: maxReconnectDelay,
+	}
+	xc.tokenProvider = xc.getToken
+	xc.connectionRunner = xc.runConnection
+	return xc
 }
 
 func (c *Client) StartXChatWebsocket(ctx context.Context) error {
-	token, err := c.GenerateXChatToken(ctx)
-
-	if err != nil {
-		return err
+	if c.xchat == nil {
+		return errors.New("xchat websocket not initialized")
 	}
-
-	return c.xchat.start(ctx, token.Data.UserGetXChatAuthToken.Token)
+	return c.xchat.start(ctx)
 }
 
 func (c *Client) SendXChatPayload(ctx context.Context, msg *payload.Message) error {
@@ -89,29 +102,32 @@ func (c *Client) stopXChatWebsocket() {
 	}
 }
 
-func (xc *xchatWebsocketClient) start(ctx context.Context, initialToken string) error {
-	if initialToken == "" {
-		return fmt.Errorf("xchat token must not be empty")
-	}
-
+func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	if old := xc.shouldStop.Swap(&cancel); old != nil {
 		(*old)()
 	}
 
 	log := xc.client.Logger.With().Str("component", "xchat_websocket").Logger()
+	ready := make(chan struct{})
 
 	go func() {
 		defer func() {
-			if xc.shouldStop.Load() == &cancel {
-				xc.shouldStop.Swap(nil)
-			}
+			xc.shouldStop.CompareAndSwap(&cancel, nil)
 		}()
 
-		token := initialToken
-		reconnectDelay := initialReconnectDelay
+		var readyOnce sync.Once
+		var token string
+		initialRetryDelay := xc.initialRetryDelay
+		if initialRetryDelay <= 0 {
+			initialRetryDelay = initialReconnectDelay
+		}
+		reconnectDelay := initialRetryDelay
+		maximumRetryDelay := xc.maximumRetryDelay
+		if maximumRetryDelay <= 0 {
+			maximumRetryDelay = maxReconnectDelay
+		}
 		forceRefresh := false
-
 		for {
 			// Check if we should stop before attempting connection
 			if ctx.Err() != nil {
@@ -119,26 +135,49 @@ func (xc *xchatWebsocketClient) start(ctx context.Context, initialToken string) 
 				return
 			}
 
-			if forceRefresh {
-				newToken, err := xc.client.refreshXChatToken(ctx)
+			if token == "" || forceRefresh {
+				newToken, err := xc.tokenProvider(ctx, forceRefresh)
+				if err == nil && newToken == "" {
+					forceRefresh = true
+					err = errors.New("xchat token is empty")
+				}
 				if err != nil {
-					log.Err(err).Msg("Failed to generate new XChat token after close frame, will retry")
-					reconnectDelay = min(time.Duration(float64(reconnectDelay)*reconnectBackoffMultiplier), maxReconnectDelay)
-					select {
-					case <-ctx.Done():
+					log.Err(err).
+						Bool("force_refresh", forceRefresh).
+						Dur("retry_in", reconnectDelay).
+						Msg("Failed to get XChat token, will retry")
+					if !waitForXChatReconnect(ctx, reconnectDelay) {
 						log.Debug().Msg("XChat websocket stopping during reconnect wait")
 						return
-					case <-time.After(reconnectDelay):
 					}
+					reconnectDelay = nextXChatReconnectDelay(reconnectDelay, maximumRetryDelay)
 					continue
 				}
 				token = newToken
-				reconnectDelay = initialReconnectDelay
 				forceRefresh = false
 			}
 
 			// Run connection (blocks until disconnect)
-			closeReceived, err := xc.runConnection(ctx, token, log)
+			readyThisAttempt := false
+			var connectedAt time.Time
+			refreshToken, err := xc.runConnectionAttempt(ctx, token, log, func(connectionCtx context.Context) error {
+				if connectHandler := xc.client.getXChatConnectHandler(); connectHandler != nil {
+					log.Info().Msg("Running XChat socket handoff catch-up")
+					if err := connectHandler(connectionCtx); err != nil {
+						return fmt.Errorf("socket handoff catch-up failed: %w", err)
+					}
+					log.Info().Msg("Finished XChat socket handoff catch-up")
+				}
+				if xc.client.xchatProcessor != nil {
+					xc.client.xchatProcessor.MarkReconnected()
+				}
+				readyThisAttempt = true
+				connectedAt = time.Now()
+				readyOnce.Do(func() {
+					close(ready)
+				})
+				return nil
+			})
 
 			// Check if intentionally stopped
 			if ctx.Err() != nil {
@@ -146,38 +185,93 @@ func (xc *xchatWebsocketClient) start(ctx context.Context, initialToken string) 
 				return
 			}
 
-			// Log disconnect, wait with backoff before reconnecting
-			log.Warn().Err(err).Dur("retry_in", reconnectDelay).Msg("XChat websocket disconnected, will reconnect")
+			// A successful handshake followed by an immediate close is not a
+			// healthy connection. Only reset backoff after a stable live period.
+			waitDelay, nextDelay := xchatReconnectBackoff(
+				reconnectDelay,
+				initialRetryDelay,
+				maximumRetryDelay,
+				readyThisAttempt,
+				connectedAt,
+				time.Now(),
+			)
+			log.Warn().Err(err).Dur("retry_in", waitDelay).Msg("XChat websocket disconnected, will reconnect")
 
-			select {
-			case <-ctx.Done():
+			if !waitForXChatReconnect(ctx, waitDelay) {
 				log.Debug().Msg("XChat websocket stopping during reconnect wait")
 				return
-			case <-time.After(reconnectDelay):
 			}
+			reconnectDelay = nextDelay
 
-			if closeReceived {
+			if refreshToken {
 				forceRefresh = true
+				token = ""
 				continue
 			}
 
-			// Get fresh token before reconnecting (tokens expire)
-			newToken, err := xc.client.GetXChatToken(ctx)
-			if err != nil {
-				log.Err(err).Msg("Failed to get new XChat token for reconnect, using previous token")
-				// Increase delay since we couldn't get a new token
-				reconnectDelay = min(time.Duration(float64(reconnectDelay)*reconnectBackoffMultiplier), maxReconnectDelay)
-			} else {
-				token = newToken
-				// Reset delay on successful token fetch
-				reconnectDelay = initialReconnectDelay
-			}
+			token = ""
 		}
 	}()
 
-	log.Info().Msg("Initialized XChat Websocket Connection")
+	select {
+	case <-ready:
+		log.Info().Msg("Initialized XChat Websocket Connection")
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
-	return nil
+func (xc *xchatWebsocketClient) runConnectionAttempt(
+	ctx context.Context,
+	token string,
+	log zerolog.Logger,
+	onConnected func(context.Context) error,
+) (refreshToken bool, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Error().
+				Bytes("stack", debug.Stack()).
+				Str("panic_type", fmt.Sprintf("%T", recovered)).
+				Msg("XChat connection attempt panicked")
+			refreshToken = false
+			err = fmt.Errorf("xchat connection attempt panicked (%T)", recovered)
+		}
+	}()
+	return xc.connectionRunner(ctx, token, log, onConnected)
+}
+
+func (xc *xchatWebsocketClient) getToken(ctx context.Context, forceRefresh bool) (string, error) {
+	if forceRefresh {
+		return xc.client.refreshXChatToken(ctx)
+	}
+	return xc.client.GetXChatToken(ctx)
+}
+
+func waitForXChatReconnect(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func nextXChatReconnectDelay(current, maximum time.Duration) time.Duration {
+	return min(time.Duration(float64(current)*reconnectBackoffMultiplier), maximum)
+}
+
+func xchatReconnectBackoff(
+	current, initial, maximum time.Duration,
+	connected bool,
+	connectedAt, disconnectedAt time.Time,
+) (wait, next time.Duration) {
+	if connected && !connectedAt.IsZero() && disconnectedAt.Sub(connectedAt) >= stableConnectionDuration {
+		return initial, initial
+	}
+	return current, nextXChatReconnectDelay(current, maximum)
 }
 
 func (xc *xchatWebsocketClient) send(ctx context.Context, msg *payload.Message) error {
@@ -199,8 +293,14 @@ func (xc *xchatWebsocketClient) send(ctx context.Context, msg *payload.Message) 
 }
 
 // runConnection handles a single WebSocket connection lifecycle.
-// It returns when the connection is lost for any reason and whether a close frame was received.
-func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string, log zerolog.Logger) (bool, error) {
+// It returns when the connection is lost and whether the next attempt should
+// force-refresh the short-lived XChat token.
+func (xc *xchatWebsocketClient) runConnection(
+	ctx context.Context,
+	token string,
+	log zerolog.Logger,
+	onConnected func(context.Context) error,
+) (bool, error) {
 	wsURL, err := url.Parse(endpoints.XCHAT_WEBSOCKET_URL)
 	if err != nil {
 		return false, fmt.Errorf("failed to parse websocket URL: %w", err)
@@ -225,6 +325,8 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 	if err != nil {
 		if resp != nil {
 			log.Err(err).Int("status", resp.StatusCode).Msg("Failed to dial XChat websocket")
+			return resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden,
+				fmt.Errorf("dial failed with HTTP %d: %w", resp.StatusCode, err)
 		} else {
 			log.Err(err).Msg("Failed to dial XChat websocket")
 		}
@@ -235,16 +337,15 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 	log.Info().Msg("Connected to XChat websocket")
 	xc.conn.Store(conn)
 	defer func() {
-		if xc.conn.Load() == conn {
-			xc.conn.Store(nil)
-		}
+		xc.conn.CompareAndSwap(conn, nil)
 	}()
 
-	// Create a context for the ping goroutine that we can cancel on read error
+	// Start keepalives before catch-up: a large inbox repair must not make the
+	// newly established socket look idle and get disconnected before reads begin.
 	pingCtx, pingCancel := context.WithCancel(ctx)
 	defer pingCancel()
 
-	pingTicker := time.NewTicker(30 * time.Second)
+	pingTicker := time.NewTicker(xchatPingInterval)
 	defer pingTicker.Stop()
 
 	go func() {
@@ -263,11 +364,14 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 					log.Err(err).Msg("Failed to encode XChat Ping Instruction")
 					continue
 				}
+				writeCtx, writeCancel := context.WithTimeout(pingCtx, xchatPingTimeout)
 				xc.writeMu.Lock()
-				err = conn.Write(pingCtx, websocket.MessageBinary, data)
+				err = conn.Write(writeCtx, websocket.MessageBinary, data)
 				xc.writeMu.Unlock()
+				writeCancel()
 				if err != nil {
 					log.Warn().Err(err).Msg("Failed to send XChat ping frame")
+					pingCancel()
 					return
 				}
 				log.Debug().Int("bytes", len(data)).Msg("Sent XChat ping frame")
@@ -275,8 +379,14 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 		}
 	}()
 
+	if onConnected != nil {
+		if err := onConnected(pingCtx); err != nil {
+			return false, fmt.Errorf("xchat connected hook failed: %w", err)
+		}
+	}
+
 	for {
-		msgType, data, err := conn.Read(ctx)
+		msgType, data, err := conn.Read(pingCtx)
 		if err != nil {
 			status := websocket.CloseStatus(err)
 			closeReceived := status != -1
@@ -297,7 +407,7 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 			Msg("Received XChat websocket message")
 
 		if msgType != websocket.MessageBinary {
-			log.Debug().Str("text", string(data)).Msg("Skipping non-binary XChat websocket frame")
+			log.Debug().Int("bytes", len(data)).Msg("Skipping non-binary XChat websocket frame")
 			continue
 		}
 		if len(data) == 0 {
@@ -307,22 +417,26 @@ func (xc *xchatWebsocketClient) runConnection(ctx context.Context, token string,
 
 		decoded, err := decodeXChatPayload(data)
 		if err != nil {
-			prefixLen := min(64, len(data))
 			log.Warn().
 				Err(err).
 				Int("bytes", len(data)).
-				Str("hex_prefix", hex.EncodeToString(data[:prefixLen])).
 				Msg("Failed to decode XChat websocket payload")
-			continue
+			return false, fmt.Errorf("decode XChat websocket payload: %w", err)
 		}
-
+		batchedEventCount := 0
+		if decoded.BatchedMessageEvents != nil {
+			batchedEventCount = len(decoded.BatchedMessageEvents.MessageEvents)
+		}
 		log.Trace().
-			Any("payload", decoded).
+			Bool("has_message_event", decoded.MessageEvent != nil).
+			Bool("has_instruction", decoded.MessageInstruction != nil).
+			Int("batched_event_count", batchedEventCount).
 			Msg("Decoded XChat websocket payload")
 
 		// Process the message through the XChat processor
-		if err := xc.client.xchatProcessor.ProcessMessage(ctx, decoded); err != nil {
+		if err := xc.client.xchatProcessor.ProcessMessage(pingCtx, decoded); err != nil {
 			log.Err(err).Msg("Failed to process XChat message")
+			return false, fmt.Errorf("process XChat websocket payload: %w", err)
 		}
 	}
 }
