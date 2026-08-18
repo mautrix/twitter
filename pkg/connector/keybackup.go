@@ -24,7 +24,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 
@@ -47,6 +49,17 @@ type FirstTimePINBootstrapData struct {
 	SigningPublicKeySPKI       string
 	IdentityPublicKeySignature string
 	RawSecret                  []byte
+}
+
+type serializedRoundTripper struct {
+	mu        sync.Mutex
+	transport http.RoundTripper
+}
+
+func (s *serializedRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.transport.RoundTrip(req)
 }
 
 func generatePrivateScalarAndPublicSPKI() (string, string, *ecdsa.PrivateKey, error) {
@@ -134,6 +147,7 @@ func GenerateFirstTimePINBootstrapData() (*FirstTimePINBootstrapData, error) {
 func newJuiceboxClient(
 	configJSON string,
 	authTokens map[string]string,
+	transport http.RoundTripper,
 	logger zerolog.Logger,
 ) (*juiceboxgo.Client, error) {
 	config, err := juiceboxgo.ConfigurationFromJSON(configJSON)
@@ -145,7 +159,11 @@ func newJuiceboxClient(
 	for k, v := range authTokens {
 		typedAuthTokens[strings.ToLower(k)] = juiceboxgo.AuthToken(v)
 	}
-	client, err := juiceboxgo.NewClient(config, typedAuthTokens, nil, logger)
+	var httpClient *http.Client
+	if transport != nil {
+		httpClient = &http.Client{Transport: &serializedRoundTripper{transport: transport}}
+	}
+	client, err := juiceboxgo.NewClient(config, typedAuthTokens, httpClient, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create juicebox client: %w", err)
 	}
@@ -196,7 +214,7 @@ func parseRecoveredKeyBackupData(secret []byte, logger zerolog.Logger) (*KeyBack
 }
 
 // RegisterSecretToJuicebox stores a freshly generated 64-byte secret using a first-time PIN.
-func RegisterSecretToJuicebox(ctx context.Context, configJSON string, authTokens map[string]string, pin string, userInfo string, rawSecret []byte, maxGuessCount int, logger zerolog.Logger) error {
+func RegisterSecretToJuicebox(ctx context.Context, configJSON string, authTokens map[string]string, pin string, userInfo string, rawSecret []byte, maxGuessCount int, transport http.RoundTripper, logger zerolog.Logger) error {
 	if len(rawSecret) != 64 {
 		return fmt.Errorf("invalid raw secret size: expected 64 bytes, got %d", len(rawSecret))
 	}
@@ -210,7 +228,7 @@ func RegisterSecretToJuicebox(ctx context.Context, configJSON string, authTokens
 		return fmt.Errorf("no auth tokens available for registration")
 	}
 
-	client, err := newJuiceboxClient(configJSON, authTokens, logger)
+	client, err := newJuiceboxClient(configJSON, authTokens, transport, logger)
 	if err != nil {
 		return err
 	}
@@ -226,12 +244,12 @@ func RegisterSecretToJuicebox(ctx context.Context, configJSON string, authTokens
 // RecoverKeysFromJuicebox retrieves encryption keys using PIN from Juicebox.
 // Called once during login as alternative to manual key entry.
 // authTokens is a map of realm ID (hex string) to pre-fetched JWT auth token.
-func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens map[string]string, pin string, userInfo string, logger zerolog.Logger) (*KeyBackupData, error) {
+func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens map[string]string, pin string, userInfo string, transport http.RoundTripper, logger zerolog.Logger) (*KeyBackupData, error) {
 	logger.Debug().
 		Int("config_json_len", len(configJSON)).
 		Msg("Creating Juicebox configuration from JSON")
 
-	client, err := newJuiceboxClient(configJSON, authTokens, logger)
+	client, err := newJuiceboxClient(configJSON, authTokens, transport, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -252,8 +270,8 @@ func RecoverKeysFromJuicebox(ctx context.Context, configJSON string, authTokens 
 }
 
 // CheckJuiceboxRegistration checks for a recoverable registration without evaluating a PIN.
-func CheckJuiceboxRegistration(ctx context.Context, configJSON string, authTokens map[string]string, logger zerolog.Logger) error {
-	client, err := newJuiceboxClient(configJSON, authTokens, logger)
+func CheckJuiceboxRegistration(ctx context.Context, configJSON string, authTokens map[string]string, transport http.RoundTripper, logger zerolog.Logger) error {
+	client, err := newJuiceboxClient(configJSON, authTokens, transport, logger)
 	if err != nil {
 		return err
 	}

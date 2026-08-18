@@ -125,7 +125,7 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		c.logger.Debug().Err(err).Msg("HTTP request failed")
-		return nil, types.ErrTransient
+		return nil, fmt.Errorf("%w: %w", types.ErrTransient, err)
 	}
 	defer resp.Body.Close()
 
@@ -359,7 +359,7 @@ func (c *Client) sendClientRequest(ctx context.Context, req *requests.ClientRequ
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		c.logger.Debug().Err(err).Msg("HTTP request failed")
-		return nil, types.ErrTransient
+		return nil, fmt.Errorf("%w: %w", types.ErrTransient, err)
 	}
 	defer resp.Body.Close()
 
