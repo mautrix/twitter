@@ -31,7 +31,10 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 
 	// Convert attachments
 	if len(contents.Attachments) > 0 {
-		msgData.Attachment = convertXChatAttachments(contents.Attachments)
+		msgData.Attachments = convertXChatAttachments(contents.Attachments)
+		if len(msgData.Attachments) > 0 {
+			msgData.Attachment = msgData.Attachments[0]
+		}
 		msgData.OriginalAttachments = contents.Attachments
 	}
 
@@ -135,19 +138,16 @@ func convertXChatEntities(entities []*payload.RichTextEntity) *types.Entities {
 	return result
 }
 
-// convertXChatAttachments converts XChat MessageAttachment to types.Attachment
-func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.Attachment {
-	if len(attachments) == 0 {
-		return nil
-	}
-
-	result := &types.Attachment{}
+// convertXChatAttachments converts XChat MessageAttachments to ordered types.Attachments.
+func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.Attachment {
+	result := make([]*types.Attachment, 0, len(attachments))
 
 	for _, att := range attachments {
 		if att == nil {
 			continue
 		}
 
+		converted := &types.Attachment{}
 		if att.Media != nil {
 			media := att.Media
 			legacyURL := ptr.Val(media.LegacyMediaUrlHttps)
@@ -173,32 +173,32 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 			switch mediaType {
 			case payload.MediaTypeImage:
 				info.Type = "photo"
-				result.Photo = &info
+				converted.Photo = &info
 			case payload.MediaTypeGif:
 				info.Type = "animated_gif"
-				result.AnimatedGif = &info
+				converted.AnimatedGif = &info
 			case payload.MediaTypeVideo:
 				info.Type = "video"
-				result.Video = &info
+				converted.Video = &info
 			case payload.MediaTypeAudio:
 				info.Type = "audio"
 				info.AudioOnly = true
-				result.Video = &info
+				converted.Video = &info
 			default:
 				info.Type = "photo"
-				result.Photo = &info
+				converted.Photo = &info
 			}
 		}
 
 		if att.Post != nil {
-			result.Tweet = &types.AttachmentTweet{
+			converted.Tweet = &types.AttachmentTweet{
 				ExpandedURL: ptr.Val(att.Post.PostUrl),
 			}
 		}
 
 		if att.Url != nil {
 			// URL attachments are typically cards
-			result.Card = &types.AttachmentCard{
+			converted.Card = &types.AttachmentCard{
 				BindingValues: types.AttachmentCardBinding{
 					CardURL: types.AttachmentCardBindingValue{
 						StringValue: ptr.Val(att.Url.Url),
@@ -210,9 +210,11 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) *types.At
 			}
 			// Store hash key for banner image download
 			if att.Url.BannerImageMediaHashKey != nil {
-				result.URLBannerMediaHashKey = ptr.Val(att.Url.BannerImageMediaHashKey.MediaHashKey)
+				converted.URLBannerMediaHashKey = ptr.Val(att.Url.BannerImageMediaHashKey.MediaHashKey)
 			}
 		}
+
+		result = append(result, converted)
 	}
 
 	return result
