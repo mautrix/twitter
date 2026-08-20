@@ -25,7 +25,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/http"
-	"sync"
 
 	"github.com/bwesterb/go-ristretto"
 	"github.com/rs/zerolog"
@@ -160,7 +159,7 @@ func (c *Client) Register(ctx context.Context, pinBytes Pin, secret Secret, user
 }
 
 func (c *Client) registerPhase1(ctx context.Context, threshold int) error {
-	return c.runParallelRegisterRequestsWithThreshold(threshold, func(_ int, r Realm) error {
+	return c.runRegisterRequestsWithThreshold(threshold, func(_ int, r Realm) error {
 		client := c.realmClients[r.ID]
 		resp, err := client.MakeRequest(ctx, &requests.SecretsRequest{Register1: true})
 		if err != nil {
@@ -173,19 +172,13 @@ func (c *Client) registerPhase1(ctx context.Context, threshold int) error {
 	})
 }
 
-func (c *Client) runParallelRegisterRequestsWithThreshold(threshold int, run func(i int, r Realm) error) error {
+func (c *Client) runRegisterRequestsWithThreshold(threshold int, run func(i int, r Realm) error) error {
 	results := make(chan error, len(c.config.Realms))
-	var wg sync.WaitGroup
 
 	for i, r := range c.config.Realms {
-		wg.Add(1)
-		go func(i int, r Realm) {
-			defer wg.Done()
-			results <- run(i, r)
-		}(i, r)
+		results <- run(i, r)
 	}
 
-	wg.Wait()
 	close(results)
 
 	return waitForThresholdSuccess(results, threshold)
@@ -214,7 +207,7 @@ func (c *Client) registerPhase2(
 	var verifyingKeyFixed [32]byte
 	copy(verifyingKeyFixed[:], verifyingKey)
 
-	return c.runParallelRegisterRequestsWithThreshold(threshold, func(i int, r Realm) error {
+	return c.runRegisterRequestsWithThreshold(threshold, func(i int, r Realm) error {
 		var oprfPublicKey ristretto.Point
 		oprfPublicKey.ScalarMultBase(&oprfPrivateKeyShares[i])
 		oprfPublicKeyBytes := oprfPublicKey.Bytes()
@@ -400,12 +393,9 @@ func (c *Client) recoverWithConfiguration(ctx context.Context, pinBytes Pin, use
 // Delete removes any secret stored on the currently configured realms.
 func (c *Client) Delete(ctx context.Context) error {
 	results := make(chan error, len(c.config.Realms))
-	var wg sync.WaitGroup
 
 	for _, r := range c.config.Realms {
-		wg.Add(1)
-		go func(r Realm) {
-			defer wg.Done()
+		func(r Realm) {
 			client := c.realmClients[r.ID]
 			resp, err := client.MakeRequest(ctx, &requests.SecretsRequest{Delete: true})
 			if err != nil {
@@ -420,7 +410,6 @@ func (c *Client) Delete(ctx context.Context) error {
 		}(r)
 	}
 
-	wg.Wait()
 	close(results)
 
 	var errs []error
@@ -444,12 +433,9 @@ func (c *Client) recoverPhase1(ctx context.Context, config *Configuration, realm
 	}
 
 	results := make(chan phase1Result, len(config.Realms))
-	var wg sync.WaitGroup
 
 	for _, r := range config.Realms {
-		wg.Add(1)
-		go func(r Realm) {
-			defer wg.Done()
+		func(r Realm) {
 			client := realmClients[r.ID]
 			resp, err := client.MakeRequest(ctx, &requests.SecretsRequest{Recover1: true})
 			if err != nil {
@@ -476,7 +462,6 @@ func (c *Client) recoverPhase1(ctx context.Context, config *Configuration, realm
 		}(r)
 	}
 
-	wg.Wait()
 	close(results)
 
 	// Collect successful results
@@ -531,12 +516,9 @@ func (c *Client) recoverPhase2(ctx context.Context, config *Configuration, realm
 	}
 
 	results := make(chan phase2Result, len(realms))
-	var wg sync.WaitGroup
 
 	for _, r := range realms {
-		wg.Add(1)
-		go func(r Realm) {
-			defer wg.Done()
+		func(r Realm) {
 			client := realmClients[r.ID]
 
 			req := &requests.SecretsRequest{
@@ -651,7 +633,6 @@ func (c *Client) recoverPhase2(ctx context.Context, config *Configuration, realm
 		}(r)
 	}
 
-	wg.Wait()
 	close(results)
 
 	// Collect results grouped by (commitment, verifyingKey)
@@ -748,12 +729,9 @@ func (c *Client) recoverPhase3(ctx context.Context, config *Configuration, realm
 	}
 
 	results := make(chan phase3Result, len(realms))
-	var wg sync.WaitGroup
 
 	for _, r := range realms {
-		wg.Add(1)
-		go func(r Realm) {
-			defer wg.Done()
+		func(r Realm) {
 			client := realmClients[r.ID]
 
 			unlockKeyTag := crypto.DeriveUnlockKeyTag([32]byte(unlockKey), [16]byte(r.ID))
@@ -836,7 +814,6 @@ func (c *Client) recoverPhase3(ctx context.Context, config *Configuration, realm
 		}(r)
 	}
 
-	wg.Wait()
 	close(results)
 
 	// Collect results grouped by encrypted secret

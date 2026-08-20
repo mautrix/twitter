@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/rs/zerolog"
 
@@ -49,17 +48,6 @@ type FirstTimePINBootstrapData struct {
 	SigningPublicKeySPKI       string
 	IdentityPublicKeySignature string
 	RawSecret                  []byte
-}
-
-type serializedRoundTripper struct {
-	mu        sync.Mutex
-	transport http.RoundTripper
-}
-
-func (s *serializedRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.transport.RoundTrip(req)
 }
 
 func generatePrivateScalarAndPublicSPKI() (string, string, *ecdsa.PrivateKey, error) {
@@ -161,7 +149,7 @@ func newJuiceboxClient(
 	}
 	var httpClient *http.Client
 	if transport != nil {
-		httpClient = &http.Client{Transport: &serializedRoundTripper{transport: transport}}
+		httpClient = &http.Client{Transport: transport}
 	}
 	client, err := juiceboxgo.NewClient(config, typedAuthTokens, httpClient, logger)
 	if err != nil {
