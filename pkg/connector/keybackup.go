@@ -56,7 +56,10 @@ func generatePrivateScalarAndPublicSPKI() (string, string, *ecdsa.PrivateKey, er
 		return "", "", nil, fmt.Errorf("failed to generate P-256 key pair: %w", err)
 	}
 
-	scalarBytes := key.D.FillBytes(make([]byte, 32))
+	scalarBytes, err := key.Bytes()
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to encode P-256 private key: %w", err)
+	}
 	scalarB64 := base64.StdEncoding.EncodeToString(scalarBytes)
 	spkiB64, err := twcrypto.EncodePublicKeySPKI(&key.PublicKey)
 	if err != nil {
