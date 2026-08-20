@@ -41,7 +41,13 @@ import (
 )
 
 func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
-	meta, ok := existing[0].Metadata.(*MessageMetadata)
+	existingPart := existing[0]
+	for _, part := range existing[1:] {
+		if part.PartID < existingPart.PartID {
+			existingPart = part
+		}
+	}
+	meta, ok := existingPart.Metadata.(*MessageMetadata)
 	if !ok || meta == nil {
 		meta = &MessageMetadata{}
 	}
@@ -51,7 +57,7 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, data.EditCount)
 	}
 	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
-	editPart := tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existing[0])
+	editPart := tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existingPart)
 	editPart.Part.Metadata = &MessageMetadata{EditCount: data.EditCount}
 	return &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{editPart},
@@ -74,47 +80,71 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		Content: twitterfmt.Parse(ctx, portal, msg),
 	}
 
-	parts := make([]*bridgev2.ConvertedMessagePart, 0)
+	parts := make([]*bridgev2.ConvertedMessagePart, 0, len(msg.Attachments)+1)
+	firstMediaPart := -1
 
-	if msg.Attachment != nil {
-		convertedAttachmentPart, indices, err := tc.twitterAttachmentToMatrix(ctx, portal, intent, msg)
+	for _, attachment := range normalizedMessageAttachments(msg) {
+		if attachment == nil {
+			continue
+		}
+		convertedAttachmentPart, indices, err := tc.twitterAttachmentToMatrix(ctx, portal, intent, msg, attachment)
 		if err != nil {
 			zerolog.Ctx(ctx).Err(err).Msg("Failed to convert attachment")
 			parts = append(parts, &bridgev2.ConvertedMessagePart{
-				ID:   "",
 				Type: event.EventMessage,
 				Content: &event.MessageEventContent{
 					MsgType: event.MsgNotice,
 					Body:    "Failed to convert attachment from Twitter",
 				},
 			})
+		} else if attachment.Card != nil || attachment.Tweet != nil {
+			textPart.Content.BeeperLinkPreviews = append(textPart.Content.BeeperLinkPreviews, convertedAttachmentPart.Content.BeeperLinkPreviews...)
 		} else {
-			if msg.Attachment.Card != nil || msg.Attachment.Tweet != nil {
-				textPart.Content.BeeperLinkPreviews = convertedAttachmentPart.Content.BeeperLinkPreviews
-			} else {
-				parts = append(parts, convertedAttachmentPart)
-				removeEntityLinkFromText(textPart, indices)
+			if firstMediaPart < 0 {
+				firstMediaPart = len(parts)
 			}
+			parts = append(parts, convertedAttachmentPart)
+			removeEntityLinkFromText(textPart, indices)
 		}
 	}
 
 	if len(textPart.Content.Body) > 0 || len(textPart.Content.BeeperLinkPreviews) > 0 {
-		parts = append(parts, textPart)
+		captionPart := firstMediaPart
+		if captionPart < 0 && len(parts) > 0 {
+			captionPart = 0
+		}
+		if captionPart >= 0 {
+			parts[captionPart] = bridgev2.MergeCaption(textPart, parts[captionPart])
+		} else {
+			parts = append(parts, textPart)
+		}
 	}
 
-	for _, part := range parts {
+	for i, part := range parts {
+		if i == 0 {
+			part.ID = ""
+		} else {
+			part.ID = networkid.PartID(strconv.Itoa(i))
+		}
 		part.DBMetadata = &MessageMetadata{
 			EditCount: msg.EditCount,
 		}
 	}
 
-	cm := &bridgev2.ConvertedMessage{
+	return &bridgev2.ConvertedMessage{
 		ReplyTo: replyTo,
 		Parts:   parts,
 	}
-	cm.MergeCaption()
+}
 
-	return cm
+func normalizedMessageAttachments(msg *types.MessageData) []*types.Attachment {
+	if len(msg.Attachments) > 0 {
+		return msg.Attachments
+	}
+	if msg.Attachment != nil {
+		return []*types.Attachment{msg.Attachment}
+	}
+	return nil
 }
 
 func removeEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []int) {
@@ -252,8 +282,7 @@ func (tc *TwitterClient) lookupUserIDByScreenName(screenName string) (string, in
 	return "", 0
 }
 
-func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) (*bridgev2.ConvertedMessagePart, []int, error) {
-	attachment := msg.Attachment
+func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData, attachment *types.Attachment) (*bridgev2.ConvertedMessagePart, []int, error) {
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
 	var mimeType string

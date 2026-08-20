@@ -14,6 +14,10 @@ type MessageData struct {
 	EditCount              int         `json:"edit_count,omitempty"`
 	ConversationKeyVersion string      `json:"conversation_key_version,omitempty"`
 
+	// Attachments holds the ordered attachments from XChat messages.
+	// Attachment is kept for compatibility with legacy REST messages.
+	Attachments []*Attachment `json:"-"`
+
 	// OriginalAttachments holds the raw payload attachments for reply preview storage.
 	// Populated during XChat message conversion and used to store in DB metadata.
 	OriginalAttachments []*payload.MessageAttachment `json:"-"`
