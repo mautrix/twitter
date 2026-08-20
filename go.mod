@@ -1,8 +1,8 @@
 module go.mau.fi/mautrix-twitter
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.27.0
 
 tool go.mau.fi/util/cmd/maubuild
 
@@ -19,21 +19,21 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.19.0
-	go.mau.fi/util v0.10.0
+	go.mau.fi/util v0.10.1-0.20260820140024-eb612d936fde
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sync v0.22.0
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.30.0
+	maunium.net/go/mautrix v0.30.1-0.20260820142923-ae00f2c62e1e
 )
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/icholy/digest v1.1.0 // indirect
-	github.com/klauspost/compress v1.18.1 // indirect
+	github.com/icholy/digest v1.2.0 // indirect
+	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/kr/text v0.1.0 // indirect
 	github.com/lib/pq v1.12.3 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -41,8 +41,8 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.49 // indirect
 	github.com/petermattis/goid v0.0.0-20260816044145-ed329add6b1b // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.56.0 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
+	github.com/quic-go/quic-go v0.61.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
@@ -61,4 +61,4 @@ require (
 	maunium.net/go/mauflag v1.0.0 // indirect
 )
 
-replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20251116110214-7c681754bd16
+replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20260808092153-100cef0a2fbd
