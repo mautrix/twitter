@@ -899,7 +899,7 @@ func selectRegisteredJuiceboxKey(
 func (t *TwitterLogin) selectRegisteredJuiceboxKey(ctx context.Context, data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool, error) {
 	logger := t.User.Log.With().Str("component", "juicebox").Logger()
 	return selectRegisteredJuiceboxKey(ctx, data, func(ctx context.Context, configJSON string, authTokens map[string]string) error {
-		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, logger)
+		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, t.loginHTTPTransport, logger)
 	})
 }
 
@@ -937,6 +937,8 @@ func handleRecoverPasscodeError(err error) (*bridgev2.LoginStep, error, bool) {
 
 func mapCommonJuiceboxError(err error) error {
 	switch {
+	case twittermeow.IsClientHTTPError(err):
+		return nil
 	case errors.Is(err, juiceboxgo.ErrRateLimitExceeded):
 		return ErrJuiceboxRateLimited
 	case errors.Is(err, juiceboxgo.ErrInvalidAuth):
@@ -1002,6 +1004,7 @@ func (t *TwitterLogin) bootstrapJuiceboxPIN(ctx context.Context, pin string) (*K
 		"",
 		bootstrapData.RawSecret,
 		addResp.Data.UserAddPublicKey.TokenMap.MaxGuessCount,
+		t.loginHTTPTransport,
 		juiceboxLogger,
 	)
 	if err != nil {
@@ -1033,7 +1036,7 @@ func (t *TwitterLogin) recoverJuiceboxPIN(
 		Int("auth_tokens_count", len(authTokens)).
 		Msg("Juicebox recovery parameters")
 
-	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", juiceboxLogger)
+	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", t.loginHTTPTransport, juiceboxLogger)
 	if err != nil {
 		if retryStep, handledErr, handled := handleRecoverPasscodeError(err); handled {
 			return nil, "", retryStep, handledErr
@@ -1056,7 +1059,7 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 		step, err := t.submitPINInput(ctx, input)
 		if err != nil && twittermeow.IsClientHTTPError(err) {
 			log := t.log()
-			log.Warn().Err(err).Msg("Login client failed to execute a proxied X request during PIN setup")
+			log.Warn().Err(err).Msg("Login client failed to execute a proxied request during PIN setup")
 			return makePINStep(clientHTTPFailureInstructions, t.needsPINSetup), nil
 		}
 		return step, err
