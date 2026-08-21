@@ -619,8 +619,7 @@ func TestUnsupportedJetfuelResponseLoggingOmitsResponseValues(t *testing.T) {
 }
 
 func TestUnparsedJetfuelResponsesReturnUnsupported(t *testing.T) {
-	const verificationAction = "/onboarding/web/actions/finish_login_email_verification"
-	for _, stage := range []string{"combined_credentials", "begin_two_factor", "text"} {
+	for _, stage := range []string{"combined_credentials", "begin_two_factor"} {
 		t.Run(stage, func(t *testing.T) {
 			client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 			client.SetNextJetfuelCastleTokens([]string{"first-token", "second-token"})
@@ -644,9 +643,6 @@ func TestUnparsedJetfuelResponsesReturnUnsupported(t *testing.T) {
 			case "begin_two_factor":
 				session.jetfuel.passwordAction = endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH
 				result, err = session.SubmitPassword(context.Background(), "password")
-			case "text":
-				session.jetfuel.verificationAction = verificationAction
-				result, err = session.SubmitText(context.Background(), "123456")
 			}
 			if err != nil {
 				t.Fatalf("submit error = %v", err)
@@ -658,6 +654,56 @@ func TestUnparsedJetfuelResponsesReturnUnsupported(t *testing.T) {
 				t.Fatal("unsupported response retained Jetfuel state")
 			}
 		})
+	}
+}
+
+func TestSubmitJetfuelTextTreatsActionlessResponseAsRejectedCode(t *testing.T) {
+	const verificationAction = "/onboarding/web/actions/finish_login_email_verification"
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"first-token", "second-token"})
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return jetfuelTestResponse("unparsed"), nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{verificationAction: verificationAction}
+
+	result, err := session.SubmitText(context.Background(), "123456")
+	if result != nil {
+		t.Fatalf("SubmitText() result = %#v, want nil", result)
+	}
+	var webErr *WebLoginError
+	if !errors.As(err, &webErr) {
+		t.Fatalf("SubmitText() error = %v, want *WebLoginError", err)
+	}
+	if !strings.Contains(strings.ToLower(webErr.Message), "incorrect code") {
+		t.Fatalf("SubmitText() error message = %q, want an incorrect code error", webErr.Message)
+	}
+	if session.jetfuel == nil || session.jetfuel.verificationAction != verificationAction {
+		t.Fatalf("rejected code discarded the Jetfuel session: %#v", session.jetfuel)
+	}
+}
+
+func TestSubmitJetfuelTextReturnsUnsupportedForUnknownAction(t *testing.T) {
+	const verificationAction = "/onboarding/web/actions/finish_login_email_verification"
+	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+	client.SetNextJetfuelCastleTokens([]string{"first-token", "second-token"})
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return jetfuelTestResponse("/onboarding/web/actions/brand_new_step"), nil
+	})}
+	session := NewWebLoginSession(client)
+	session.backend = webLoginBackendJetfuel
+	session.jetfuel = &jetfuelLoginState{verificationAction: verificationAction}
+
+	result, err := session.SubmitText(context.Background(), "123456")
+	if err != nil {
+		t.Fatalf("SubmitText() error = %v", err)
+	}
+	if result == nil || result.Status != WebLoginStatusUnsupported {
+		t.Fatalf("SubmitText() result = %#v, want unsupported", result)
+	}
+	if session.jetfuel != nil {
+		t.Fatal("unsupported response retained Jetfuel state")
 	}
 }
 

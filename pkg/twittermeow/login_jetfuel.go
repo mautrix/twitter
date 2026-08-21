@@ -462,6 +462,10 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
+	if parsed.isActionlessRejection() {
+		wls.logUnsupportedJetfuelResponse(ctx, "text_code_rejected", wls.jetfuel.verificationAction, parsed)
+		return nil, &WebLoginError{Message: "Incorrect code. Enter the latest code X sent you."}
+	}
 	return wls.handleUnsupportedJetfuelResponse(ctx, "text", wls.jetfuel.verificationAction, parsed)
 }
 
@@ -897,6 +901,11 @@ func (jfr jetfuelLoginResponse) hasField(field string) bool {
 // Require parsed structure so an empty or opaque transport response does not trigger another password POST.
 func (jfr jetfuelLoginResponse) canReplayPasswordWithoutAction() bool {
 	return len(jfr.raw) > 0 && len(jfr.paths) > 0 && len(jfr.fields) > 0
+}
+
+// X answers a rejected verification code with a small structured body that carries no next action.
+func (jfr jetfuelLoginResponse) isActionlessRejection() bool {
+	return len(jfr.raw) > 0 && len(jfr.paths) == 0 && len(jfr.fields) > 0
 }
 
 func (jfr jetfuelLoginResponse) passwordAction() string {
