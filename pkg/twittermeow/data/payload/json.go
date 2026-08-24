@@ -195,7 +195,7 @@ type AddXChatPublicKeyMutationPayload struct {
 }
 
 const (
-	addXChatPublicKeyMutationOperationName = "AddXChatPublicKey"
+	addXChatPublicKeyMutationOperationName = "AddXChatPublicKeyMutation"
 )
 
 // NewAddXChatPublicKeyMutationPayload creates a new AddXChatPublicKeyMutationPayload with default extensions.
