@@ -326,18 +326,67 @@ func (wls *WebLoginSession) logUnsupportedJetfuelResponse(
 	if contextLogger := zerolog.Ctx(ctx); contextLogger != nil && contextLogger.GetLevel() != zerolog.Disabled {
 		logger = *contextLogger
 	}
+	responseActions := diagnosticJetfuelActions(parsed.paths)
+	state := wls.jetfuel
 	logger.Warn().
 		Str("stage", stage).
 		Str("action", diagnosticJetfuelAction(action)).
 		Str("error_kind", "unsupported_response").
+		Str("response_class", diagnosticJetfuelResponseClass(parsed)).
+		Strs("response_actions", responseActions).
 		Int("response_bytes", len(parsed.raw)).
 		Int("string_count", len(parsed.strings)).
 		Int("path_count", len(parsed.paths)).
 		Int("field_count", len(parsed.fields)).
+		Int("response_auth_method_count", len(parsed.authMethods())).
+		Bool("response_has_session_token", parsed.uuidValue("session_token") != "").
+		Bool("response_has_prelude_dispatch_id", parsed.uuidValue("prelude_dispatch_id") != "").
+		Bool("response_has_user_id", parsed.numericValue("user_id") != "").
 		Bool("has_completion_marker", parsed.isComplete()).
 		Bool("has_login_error", parsed.loginError() != nil).
 		Bool("has_auth_cookie", wls.client.IsLoggedIn()).
+		Bool("state_password_replay_used", state != nil && state.passwordReplayUsed).
+		Bool("state_has_session_token", state != nil && state.sessionToken != "").
+		Bool("state_has_prelude_dispatch_id", state != nil && state.preludeDispatchID != "").
+		Bool("state_has_user_id", state != nil && state.userID != "").
 		Msg("Jetfuel response did not expose a supported next action")
+}
+
+func diagnosticJetfuelResponseClass(parsed jetfuelLoginResponse) string {
+	switch {
+	case len(parsed.raw) == 0:
+		return "empty"
+	case parsed.isComplete():
+		return "complete"
+	case parsed.loginError() != nil:
+		return "login_error"
+	case parsed.isAuthMethodChoice():
+		return "auth_method_choice"
+	case parsed.beginTwoFactorAction() != "":
+		return "begin_two_factor"
+	case parsed.verificationAction() != "":
+		return "verification"
+	case parsed.passwordAction() != "":
+		return "password"
+	case parsed.canReplayPasswordWithoutAction():
+		return "structured_actionless"
+	case parsed.isActionlessRejection():
+		return "field_only_actionless"
+	case len(parsed.paths) > 0:
+		return "unknown_action"
+	default:
+		return "opaque"
+	}
+}
+
+func diagnosticJetfuelActions(paths []string) []string {
+	actions := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if action := diagnosticJetfuelAction(path); action != "" {
+			actions = append(actions, action)
+		}
+	}
+	return actions
 }
 
 func diagnosticJetfuelAction(action string) string {
