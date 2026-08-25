@@ -268,7 +268,7 @@ var _ bridgev2.LoginProcessWithParams = (*TwitterLogin)(nil)
 const (
 	pinRegex            = "^[0-9]{4}$"
 	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat"
-	passcodeBodySetup   = "No PIN code is registered yet. Register by creating your PIN code below or using the X app."
+	passcodeBodySetup   = "No PIN code is registered yet. Create your X Chat PIN below."
 )
 
 var (
