@@ -752,20 +752,23 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bri
 }
 
 func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, tweet *types.AttachmentTweet) *event.BeeperLinkPreview {
-	// Handle XChat Post attachments with empty Status (only URL available)
-	if tweet.Status.FullText == "" && tweet.ExpandedURL != "" {
-		return &event.BeeperLinkPreview{
-			LinkPreview: event.LinkPreview{
-				CanonicalURL: tweet.ExpandedURL,
-				Title:        "Post on X",
-			},
+	matchedURL := tweet.ExpandedURL
+	if tweet.Status.FullText == "" && matchedURL != "" {
+		resolved, err := tc.client.GetTweetPreview(ctx, matchedURL)
+		if err != nil {
+			zerolog.Ctx(ctx).Warn().Msg("Failed to fetch rich preview for XChat post attachment")
+		} else {
+			tweet = resolved
 		}
 	}
 
 	linkPreview := event.LinkPreview{
 		CanonicalURL: tweet.ExpandedURL,
-		Title:        tweet.Status.User.Name + " on X",
+		Title:        "Post on X",
 		Description:  tweet.Status.FullText,
+	}
+	if tweet.Status.User.Name != "" {
+		linkPreview.Title = tweet.Status.User.Name + " on X"
 	}
 	medias := tweet.Status.Entities.Media
 	if len(medias) > 0 {
@@ -797,5 +800,6 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	}
 	return &event.BeeperLinkPreview{
 		LinkPreview: linkPreview,
+		MatchedURL:  matchedURL,
 	}
 }

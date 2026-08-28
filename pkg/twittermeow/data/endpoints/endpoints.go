@@ -63,6 +63,7 @@ const (
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"
 	VIEWER_CONTEXT_URL   = API_BASE_URL + "/1.1/graphql/viewer_context.json"
+	TWEET_OEMBED_URL     = "https://publish.twitter.com/oembed"
 
 	GUEST_ACTIVATE_URL                  = API_BASE_URL + "/1.1/guest/activate.json"
 	ONBOARDING_TASK_URL                 = API_BASE_URL + "/1.1/onboarding/task.json"
