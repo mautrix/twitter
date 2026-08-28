@@ -51,6 +51,7 @@ func isXChatPortalForLogin(portal *bridgev2.Portal, loginID networkid.UserLoginI
 	return ok && meta.IsXChatConversation()
 }
 
+// TODO: Remove this repair after affected bridges have been reconnected
 func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context) error {
 	if tc.xchatRequestsRepaired {
 		return nil
