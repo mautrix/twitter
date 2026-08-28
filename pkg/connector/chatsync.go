@@ -27,7 +27,9 @@ import (
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -40,6 +42,60 @@ const (
 	ConversationTypeOneToOne = "ONE_TO_ONE"
 	ConversationTypeGroupDM  = "GROUP_DM"
 )
+
+func isXChatPortalForLogin(portal *bridgev2.Portal, loginID networkid.UserLoginID) bool {
+	if portal == nil || portal.Portal == nil || (portal.Receiver != "" && portal.Receiver != loginID) {
+		return false
+	}
+	meta, ok := portal.Metadata.(*PortalMetadata)
+	return ok && meta.IsXChatConversation()
+}
+
+func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context) error {
+	if tc.xchatRequestsRepaired {
+		return nil
+	}
+	portals, err := tc.connector.br.GetAllPortals(ctx)
+	if err != nil {
+		return fmt.Errorf("get existing portals for XChat message-request repair: %w", err)
+	}
+	sender := tc.userLogin.User.DoublePuppet(ctx)
+	xchatRooms, repaired := 0, 0
+	for _, portal := range portals {
+		if !isXChatPortalForLogin(portal, tc.userLogin.ID) {
+			continue
+		}
+		xchatRooms++
+
+		wasMessageRequest := portal.MessageRequest
+		portal.MessageRequest = false
+		internals := (*bridgev2.PortalInternals)(portal)
+		stateKey, bridgeInfo := internals.GetBridgeInfo()
+		for _, eventType := range []event.Type{event.StateBridge, event.StateHalfShotBridge} {
+			if portal.MXID == "" {
+				break
+			}
+			if !internals.SendRoomMeta(ctx, sender, time.Now(), eventType, stateKey, &bridgeInfo, true, nil) {
+				portal.MessageRequest = wasMessageRequest
+				return fmt.Errorf("repair XChat message-request room state")
+			}
+		}
+		if !wasMessageRequest {
+			continue
+		}
+		if err = portal.Save(ctx); err != nil {
+			portal.MessageRequest = wasMessageRequest
+			return fmt.Errorf("save repaired XChat portal: %w", err)
+		}
+		repaired++
+	}
+	tc.xchatRequestsRepaired = true
+	zerolog.Ctx(ctx).Info().
+		Int("xchat_rooms", xchatRooms).
+		Int("repaired_rooms", repaired).
+		Msg("Reconciled XChat message-request state")
+	return nil
+}
 
 func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType database.RoomType) bool {
 	if chatInfo == nil {
@@ -545,13 +601,15 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
 	log := zerolog.Ctx(ctx)
 
-	portalKey := tc.MakePortalKey(conv)
-
-	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+	_, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
 	if err != nil {
 		log.Warn().Err(err).
 			Str("conversation_id", conv.ConversationID).
 			Msg("Failed to get/create portal for untrusted conversation")
+		return
+	}
+	if isXChatPortalForLogin(portal, tc.userLogin.ID) {
+		log.Debug().Msg("Skipping REST message-request sync for XChat conversation")
 		return
 	}
 
@@ -592,7 +650,6 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 			tc.connector.br.WakeupBackfillQueue()
 		}
 	}
-
 	// Process messages for this conversation from inbox entries
 	if inbox != nil {
 		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox)
