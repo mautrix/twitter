@@ -61,6 +61,7 @@ type TwitterClient struct {
 
 	xchatInboxSyncLock    sync.Mutex
 	xchatGapCatchupStates sync.Map
+	xchatRequestsRepaired bool
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -254,13 +255,9 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	if err := tc.reconcileExistingGroupPortalAliases(ctx); err != nil {
 		log.Warn().Err(err).Msg("Failed to reconcile existing REST/XChat group portal aliases")
 	}
-
-	// Start REST API sync for untrusted conversations in parallel
-	go func() {
-		tc.syncUntrustedChannels(ctx)
-		// Start REST API polling for untrusted conversation updates
-		tc.client.StartPolling(ctx)
-	}()
+	if err := tc.repairExistingXChatMessageRequests(ctx); err != nil {
+		log.Warn().Err(err).Msg("Failed to repair existing XChat message-request state")
+	}
 
 	// Set up XChat processor and sequence ID tracking
 	processor := tc.client.GetXChatProcessor()
@@ -431,6 +428,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	log.Info().
 		Int("conversations", int(totalItems.Load())).
 		Msg("Finished fetching XChat inbox")
+
+	go func() {
+		tc.syncUntrustedChannels(ctx)
+		tc.client.StartPolling(ctx)
+	}()
 
 	if ctx.Err() != nil {
 		return
