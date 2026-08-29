@@ -229,6 +229,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				return false
 			}
 		}
+		if !tc.syncXChatTrust(ctx, evt.ConversationID, evt.Trusted, methods.ParseMsecTimestamp(evt.Time), streamOrder) {
+			return false
+		}
 
 		txnID := evt.RequestID
 		if txnID == "" {
@@ -282,6 +285,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 					Msg("Failed to ensure portal and key exist before handling XChat message")
 				return false
 			}
+		}
+		if !tc.syncXChatTrust(ctx, evt.ConversationID, evt.Trusted, methods.ParseMsecTimestamp(evt.Time), streamOrder) {
+			return false
 		}
 
 		txnID := evt.RequestID
@@ -536,6 +542,15 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Msg("Failed to ensure portal for ConversationCreate event")
 			return false
 		}
+		if !tc.syncXChatTrust(
+			ctx,
+			evt.ConversationID,
+			evt.Trusted,
+			methods.ParseMsecTimestamp(evt.Time),
+			methods.ParseSnowflakeInt(evt.ID),
+		) {
+			return false
+		}
 
 		// If the portal was just created or doesn't have a room yet, trigger a resync
 		// to ensure it gets created and backfilled
@@ -579,6 +594,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Msg("Failed to get chat info for trusted conversation")
 			return false
 		}
+		applyXChatTrustToChatInfo(chatInfo, true)
 
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{

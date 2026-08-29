@@ -58,6 +58,7 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 		SequenceID:             seqID,
 		RequestID:              ptr.Val(evt.MessageId),
 		ConversationID:         ptr.Val(evt.ConversationId),
+		Trusted:                evt.IsTrusted,
 		ConversationKeyVersion: keyVersion,
 		MessageData:            msgData,
 	}
@@ -96,6 +97,7 @@ func convertXChatMessageEdit(evt *payload.MessageEvent, edit *payload.MessageEdi
 		SequenceID:             ptr.Val(evt.SequenceId),
 		RequestID:              ptr.Val(evt.MessageId),
 		ConversationID:         ptr.Val(evt.ConversationId),
+		Trusted:                evt.IsTrusted,
 		ConversationKeyVersion: keyVersion,
 		MessageData:            msgData,
 	})
