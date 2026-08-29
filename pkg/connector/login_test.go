@@ -215,7 +215,7 @@ func TestSubmitUserInputRejectsMissingRequiredCredentialFields(t *testing.T) {
 	}
 }
 
-func TestHandleWebLoginCredentialsErrorRetriesOnlyCredentialErrors(t *testing.T) {
+func TestHandleWebLoginCredentialsErrorRetriesRecoverableErrors(t *testing.T) {
 	step, err := handleWebLoginCredentialsError(&twittermeow.WebLoginError{
 		Code:    32,
 		Message: "Wrong password",
@@ -231,12 +231,11 @@ func TestHandleWebLoginCredentialsErrorRetriesOnlyCredentialErrors(t *testing.T)
 		Code:    399,
 		Message: "We've temporarily limited your login. Please try again later.",
 	})
-	if step != nil {
-		t.Fatalf("handleWebLoginCredentialsError(temporary limit) step = %#v, want nil", step)
+	if err != nil {
+		t.Fatalf("handleWebLoginCredentialsError(temporary limit) error = %v", err)
 	}
-	var respErr bridgev2.RespError
-	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
-		t.Fatalf("handleWebLoginCredentialsError(temporary limit) error = %#v, want ErrWebLoginFailed response", err)
+	if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, "Wait a bit") {
+		t.Fatalf("handleWebLoginCredentialsError(temporary limit) step = %#v, want retryable credentials step", step)
 	}
 }
 
@@ -376,7 +375,7 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 	}
 }
 
-func TestWebCastleLoginStartsCombinedAndReturnsCode399AsFailure(t *testing.T) {
+func TestWebCastleLoginStartsCombinedAndReturnsCode399AsRetry(t *testing.T) {
 	t.Setenv("TWITTER_JETFUEL_VIEWER_CONTEXT", "0")
 	const mainPageHTML = `<html><head><meta name="twitter-site-verification" content="verification-token"></head><body><script>
 {"country": "US", "responsive_web_castle_public_key":{"value":"test-public-key"}}
@@ -444,12 +443,11 @@ gt=123456789
 	logger := zerolog.New(&logs).With().Str("login_id", "test-login").Logger()
 	ctx := logger.WithContext(context.Background())
 	step, err = login.continueWebCastleLogin(ctx)
-	if step != nil {
-		t.Fatalf("continueWebCastleLogin() step = %#v, want nil", step)
+	if err != nil {
+		t.Fatalf("continueWebCastleLogin() error = %v", err)
 	}
-	var respErr bridgev2.RespError
-	if !errors.As(err, &respErr) || respErr.ErrCode != ErrWebLoginFailed.ErrCode {
-		t.Fatalf("continueWebCastleLogin() error = %#v, want ErrWebLoginFailed", err)
+	if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, "Wait a bit") {
+		t.Fatalf("continueWebCastleLogin() step = %#v, want retryable credentials step", step)
 	}
 	if login.webLoginCastleStage != "" {
 		t.Fatalf("Castle stage = %q, want cleared", login.webLoginCastleStage)
