@@ -51,6 +51,7 @@ type PortalMetadata struct {
 
 	// Server token for XChat API
 	ConversationToken string `json:"conversation_token,omitempty"`
+	XChatTrusted      *bool  `json:"xchat_trusted,omitempty"`
 }
 
 // CanUseXChat returns true if this conversation has encryption keys

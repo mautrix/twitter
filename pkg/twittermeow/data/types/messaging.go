@@ -30,6 +30,7 @@ type Message struct {
 	SequenceID             string            `json:"sequence_id,omitempty"`
 	RequestID              string            `json:"request_id,omitempty"`
 	ConversationID         string            `json:"conversation_id,omitempty"`
+	Trusted                *bool             `json:"trusted,omitempty"`
 	ConversationKeyVersion string            `json:"conversation_key_version,omitempty"`
 	MessageData            MessageData       `json:"message_data,omitempty"`
 	MessageReactions       []MessageReaction `json:"message_reactions,omitempty"`
@@ -92,6 +93,7 @@ type ConversationCreate struct {
 	AffectsSort    bool   `json:"affects_sort,omitempty"`
 	ConversationID string `json:"conversation_id,omitempty"`
 	RequestID      string `json:"request_id,omitempty"`
+	Trusted        *bool  `json:"trusted,omitempty"`
 }
 
 type ConversationDelete struct {
