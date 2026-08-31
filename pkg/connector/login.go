@@ -1454,6 +1454,9 @@ func isWebLoginCredentialsInputError(err error) bool {
 	if !errors.As(err, &webErr) {
 		return false
 	}
+	if webErr.Code == 399 {
+		return true
+	}
 	msg := strings.ToLower(strings.TrimSpace(webErr.Message))
 	if webErr.Code != 32 {
 		return false
