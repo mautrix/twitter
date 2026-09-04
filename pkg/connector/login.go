@@ -266,6 +266,7 @@ var _ bridgev2.LoginProcessWithOverride = (*TwitterLogin)(nil)
 var _ bridgev2.LoginProcessWithParams = (*TwitterLogin)(nil)
 
 const (
+	pinLength           = 4
 	pinRegex            = "^[0-9]{4}$"
 	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat"
 	passcodeBodySetup   = "No PIN code is registered yet. Create your X Chat PIN below."
@@ -656,10 +657,12 @@ func makePINStep(errorLine string, isSetup bool) *bridgev2.LoginStep {
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
-					Type:    bridgev2.LoginInputFieldType2FACode,
-					ID:      "pin",
-					Name:    fieldName,
-					Pattern: pinRegex,
+					Type:      bridgev2.LoginInputFieldType2FACode,
+					ID:        "pin",
+					Name:      fieldName,
+					Pattern:   pinRegex,
+					MinLength: pinLength,
+					MaxLength: pinLength,
 				},
 			},
 		},
