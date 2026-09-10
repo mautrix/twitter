@@ -17,8 +17,8 @@
 package connector
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -285,7 +285,7 @@ func (tc *TwitterClient) lookupUserIDByScreenName(screenName string) (string, in
 func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData, attachment *types.Attachment) (*bridgev2.ConvertedMessagePart, []int, error) {
 	var attachmentInfo *types.AttachmentInfo
 	var attachmentURL string
-	var mimeType string
+	var guessedMime string
 	var msgType event.MessageType
 	extraInfo := map[string]any{}
 	canUseXChat := portal.Metadata.(*PortalMetadata).CanUseXChat()
@@ -300,7 +300,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 	if attachment.Photo != nil {
 		attachmentInfo = attachment.Photo
-		mimeType = "image/jpeg" // attachment doesn't include this specifically
+		guessedMime = "image/jpeg" // attachment doesn't include this specifically
 		msgType = event.MsgImage
 		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
@@ -312,12 +312,11 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			extraInfo["fi.mau.autoplay"] = true
 			extraInfo["fi.mau.hide_controls"] = true
 			extraInfo["fi.mau.no_audio"] = true
-			// Use image/gif MIME type for proper client handling
-			mimeType = "image/gif"
+			guessedMime = "image/gif"
 			msgType = event.MsgImage
 		} else {
 			attachmentInfo = attachment.Video
-			mimeType = "video/mp4"
+			guessedMime = "video/mp4"
 			msgType = event.MsgVideo
 		}
 
@@ -378,7 +377,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 
 	content := event.MessageEventContent{
 		Info: &event.FileInfo{
-			MimeType: mimeType,
+			MimeType: guessedMime,
 			Width:    attachmentInfo.OriginalInfo.Width,
 			Height:   attachmentInfo.OriginalInfo.Height,
 			Duration: attachmentInfo.VideoInfo.DurationMillis,
@@ -391,7 +390,6 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	}
 
 	audioOnly := attachment.Video != nil && attachment.Video.AudioOnly
-	detectMime := attachment.AnimatedGif == nil
 
 	useXChatMedia := attachmentInfo.MediaHashKey != ""
 	if useXChatMedia && !canUseXChat {
@@ -412,12 +410,12 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		Bool("use_xchat_path", useXChatMedia).
 		Msg("Media download decision")
 
-	handled, err := tc.tryHandleXChatMedia(ctx, portal, intent, msg, attachmentInfo, attachmentURL, audioOnly, detectMime, &content, &mimeType, canUseXChat)
+	handled, err := tc.tryHandleXChatMedia(ctx, portal, intent, msg, attachmentInfo, attachmentURL, audioOnly, &content, canUseXChat)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !handled {
-		if err := tc.handleLegacyMedia(ctx, portal, intent, attachmentInfo, attachmentURL, audioOnly, detectMime, &content, &mimeType); err != nil {
+		if err := tc.handleLegacyMedia(ctx, portal, intent, attachmentInfo, attachmentURL, audioOnly, &content); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -519,29 +517,6 @@ func applyMediaInfo(attachment *types.Attachment, info *types.AttachmentInfo) {
 	}
 }
 
-func updateContentMime(content *event.MessageEventContent, mimeType *string, contentType string) bool {
-	if contentType == "" {
-		return false
-	}
-	if idx := strings.Index(contentType, ";"); idx != -1 {
-		contentType = strings.TrimSpace(contentType[:idx])
-	}
-	if contentType == "" {
-		return false
-	}
-	*mimeType = contentType
-	content.Info.MimeType = contentType
-	switch {
-	case strings.HasPrefix(contentType, "image/"):
-		content.MsgType = event.MsgImage
-	case strings.HasPrefix(contentType, "video/"):
-		content.MsgType = event.MsgVideo
-	case strings.HasPrefix(contentType, "audio/"):
-		content.MsgType = event.MsgAudio
-	}
-	return true
-}
-
 func directMediaUserID(portal *bridgev2.Portal, loginID networkid.UserLoginID) networkid.UserLoginID {
 	if portal.Receiver != "" {
 		return portal.Receiver
@@ -549,33 +524,51 @@ func directMediaUserID(portal *bridgev2.Portal, loginID networkid.UserLoginID) n
 	return loginID
 }
 
-func (tc *TwitterClient) uploadMediaReader(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, content *event.MessageEventContent, size int64, audioOnly bool, mimeType *string, reader io.Reader) error {
+func (tc *TwitterClient) uploadMediaReader(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	intent bridgev2.MatrixAPI,
+	content *event.MessageEventContent,
+	size int64,
+	audioOnly bool,
+	cb func(io.Writer) error,
+) error {
 	var err error
-	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, size, audioOnly, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-		n, err := io.Copy(file, reader)
+	content.URL, content.File, err = intent.UploadMediaStream(ctx, portal.MXID, size, true, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+		err := cb(file)
 		if err != nil {
 			return nil, err
 		}
 		if audioOnly && ffmpeg.Supported() {
 			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
 			if err == nil {
-				*mimeType = "audio/ogg"
-				content.Info.MimeType = *mimeType
+				content.Info.MimeType = "audio/ogg"
 				content.Info.Width = 0
 				content.Info.Height = 0
+				content.Info.Size = 0
 				content.MsgType = event.MsgAudio
 				content.Body += ".ogg"
 				return &bridgev2.FileStreamResult{
 					ReplacementFile: outFile,
-					MimeType:        *mimeType,
+					MimeType:        content.Info.MimeType,
 					FileName:        content.Body,
 				}, nil
 			}
 			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to convert voice message to ogg")
-		} else {
-			content.Info.Size = int(n)
 		}
-		addFileExtension(&content.Body, *mimeType)
+		realFile, ok := file.(*os.File)
+		if ok {
+			prefix := make([]byte, 512)
+			n, err := realFile.ReadAt(prefix, 0)
+			if err != nil {
+				return nil, err
+			}
+			mime := http.DetectContentType(prefix[:n])
+			if mime != "application/octet-stream" {
+				content.Info.MimeType = mime
+			}
+		}
+		addFileExtension(&content.Body, content.Info.MimeType)
 		return &bridgev2.FileStreamResult{
 			MimeType: content.Info.MimeType,
 			FileName: content.Body,
@@ -584,7 +577,19 @@ func (tc *TwitterClient) uploadMediaReader(ctx context.Context, portal *bridgev2
 	return err
 }
 
-func (tc *TwitterClient) tryHandleXChatMedia(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData, attachmentInfo *types.AttachmentInfo, attachmentURL string, audioOnly bool, detectMime bool, content *event.MessageEventContent, mimeType *string, canUseXChat bool) (bool, error) {
+var ErrFailedToDownload = errors.New("failed to download XChat media")
+
+func (tc *TwitterClient) tryHandleXChatMedia(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	intent bridgev2.MatrixAPI,
+	msg *types.MessageData,
+	attachmentInfo *types.AttachmentInfo,
+	attachmentURL string,
+	audioOnly bool,
+	content *event.MessageEventContent,
+	canUseXChat bool,
+) (bool, error) {
 	if attachmentInfo.MediaHashKey == "" {
 		return false, nil
 	}
@@ -609,7 +614,7 @@ func (tc *TwitterClient) tryHandleXChatMedia(ctx context.Context, portal *bridge
 		if err != nil {
 			return true, fmt.Errorf("failed to generate direct media URI: %w", err)
 		}
-		addFileExtension(&content.Body, *mimeType)
+		addFileExtension(&content.Body, content.Info.MimeType)
 		return true, nil
 	}
 
@@ -620,33 +625,36 @@ func (tc *TwitterClient) tryHandleXChatMedia(ctx context.Context, portal *bridge
 		return false, nil
 	}
 
-	decryptedData, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion)
+	err := tc.uploadMediaReader(ctx, portal, intent, content, -1, audioOnly, func(writer io.Writer) error {
+		size, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion, writer)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrFailedToDownload, err)
+		}
+		content.Info.Size = size
+		return nil
+	})
 	if err != nil {
-		if attachmentURL == "" {
-			return true, fmt.Errorf("failed to download XChat media: %w", err)
+		if errors.Is(err, ErrFailedToDownload) && attachmentURL != "" {
+			zerolog.Ctx(ctx).Warn().Err(err).
+				Str("conversation_id", conversationID).
+				Msg("Failed to download XChat media, falling back to legacy URL")
+			return false, nil
 		}
-		zerolog.Ctx(ctx).Warn().Err(err).
-			Str("conversation_id", conversationID).
-			Msg("Failed to download XChat media, falling back to legacy URL")
-		return false, nil
-	}
-
-	content.Info.Size = len(decryptedData)
-	if detectMime {
-		detectedMime := http.DetectContentType(decryptedData)
-		if detectedMime != "" && detectedMime != "application/octet-stream" {
-			updateContentMime(content, mimeType, detectedMime)
-		}
-	}
-
-	if err := tc.uploadMediaReader(ctx, portal, intent, content, int64(len(decryptedData)), audioOnly, mimeType, bytes.NewReader(decryptedData)); err != nil {
 		return true, err
 	}
 
 	return true, nil
 }
 
-func (tc *TwitterClient) handleLegacyMedia(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachmentInfo *types.AttachmentInfo, attachmentURL string, audioOnly bool, detectMime bool, content *event.MessageEventContent, mimeType *string) error {
+func (tc *TwitterClient) handleLegacyMedia(
+	ctx context.Context,
+	portal *bridgev2.Portal,
+	intent bridgev2.MatrixAPI,
+	attachmentInfo *types.AttachmentInfo,
+	attachmentURL string,
+	audioOnly bool,
+	content *event.MessageEventContent,
+) error {
 	if attachmentURL == "" {
 		return fmt.Errorf("no media URL available (media_url_https=%q, media_url=%q, expanded_url=%q, url=%q)", attachmentInfo.MediaURLHTTPS, attachmentInfo.MediaURL, attachmentInfo.ExpandedURL, attachmentInfo.URL)
 	}
@@ -656,23 +664,25 @@ func (tc *TwitterClient) handleLegacyMedia(ctx context.Context, portal *bridgev2
 	if err != nil {
 		return err
 	}
-
-	if detectMime {
-		if updateContentMime(content, mimeType, fileResp.Header.Get("content-type")) {
-			zerolog.Ctx(ctx).Debug().
-				Str("content_type", *mimeType).
-				Msg("Got mime type from HTTP response")
-		}
-	}
+	defer func() {
+		_ = fileResp.Body.Close()
+	}()
 
 	if tc.connector.directMedia {
 		userID := directMediaUserID(portal, tc.userLogin.ID)
 		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
-		addFileExtension(&content.Body, *mimeType)
+		addFileExtension(&content.Body, content.Info.MimeType)
 		return err
 	}
 
-	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, mimeType, fileResp.Body)
+	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, func(writer io.Writer) error {
+		n, err := io.Copy(writer, fileResp.Body)
+		if err != nil {
+			return err
+		}
+		content.Info.Size = int(n)
+		return nil
+	})
 }
 
 func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*http.Response, error) {
@@ -725,26 +735,21 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bri
 
 	// Download banner image if available (XChat encrypted only)
 	if attachment.URLBannerMediaHashKey != "" && portal.Metadata.(*PortalMetadata).CanUseXChat() {
-		conversationID := ParsePortalID(portal.ID)
-		decryptedData, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachment.URLBannerMediaHashKey, keyVersion)
-		if err != nil {
-			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to download URL attachment banner image")
-		} else {
-			preview.ImageType = "image/jpeg"
-			preview.ImageSize = event.IntOrString(len(decryptedData))
-			preview.ImageURL, _, err = intent.UploadMediaStream(ctx, portal.MXID, int64(len(decryptedData)), false, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-				_, err := io.Copy(file, bytes.NewReader(decryptedData))
-				if err != nil {
-					return nil, err
-				}
-				return &bridgev2.FileStreamResult{
-					MimeType: "image/jpeg",
-					FileName: "banner.jpeg",
-				}, nil
-			})
+		var err error
+		preview.ImageURL, _, err = intent.UploadMediaStream(ctx, portal.MXID, -1, false, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
+			size, err := tc.client.DownloadXChatMedia(ctx, ParsePortalID(portal.ID), attachment.URLBannerMediaHashKey, keyVersion, file)
 			if err != nil {
-				zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to upload URL attachment banner image to Matrix")
+				return nil, err
 			}
+			preview.ImageType = "image/jpeg"
+			preview.ImageSize = event.IntOrString(size)
+			return &bridgev2.FileStreamResult{
+				MimeType: "image/jpeg",
+				FileName: "banner.jpeg",
+			}, nil
+		})
+		if err != nil {
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to upload URL attachment banner image to Matrix")
 		}
 	}
 

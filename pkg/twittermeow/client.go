@@ -1,10 +1,12 @@
 package twittermeow
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -574,18 +576,19 @@ func (c *Client) disableRedirects() {
 }
 
 type apiRequestOpts struct {
-	URL            string
-	Referer        string
-	Origin         string
-	Method         string
-	Body           []byte
-	ContentType    types.ContentType
-	WithClientUUID bool
-	Headers        map[string]string
+	URL              string
+	Referer          string
+	Origin           string
+	Method           string
+	Body             []byte
+	ContentType      types.ContentType
+	WithClientUUID   bool
+	Headers          map[string]string
+	DontReadResponse bool
 }
 
-func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOpts) (*http.Response, []byte, error) {
-	clientTransactionID, err := crypto.SignTransaction(c.session.AnimationToken, c.session.VerificationToken, apiRequestOpts.URL, apiRequestOpts.Method)
+func (c *Client) makeAPIRequest(ctx context.Context, opts apiRequestOpts) (*http.Response, []byte, error) {
+	clientTransactionID, err := crypto.SignTransaction(c.session.AnimationToken, c.session.VerificationToken, opts.URL, opts.Method)
 	if err != nil {
 		c.Logger.Trace().Err(err).Msg("Failed to create client transaction ID")
 		clientTransactionID = base64.RawStdEncoding.EncodeToString([]byte("e:"))
@@ -598,7 +601,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 		"sec-fetch-mode":          "cors",
 		"sec-fetch-site":          "same-origin",
 	}
-	for k, v := range apiRequestOpts.Headers {
+	for k, v := range opts.Headers {
 		extraHeaders[k] = v
 	}
 
@@ -607,14 +610,25 @@ func (c *Client) makeAPIRequest(ctx context.Context, apiRequestOpts apiRequestOp
 		WithCookies:         true,
 		WithXTwitterHeaders: true,
 		WithXCsrfToken:      true,
-		Referer:             apiRequestOpts.Referer,
-		Origin:              apiRequestOpts.Origin,
+		Referer:             opts.Referer,
+		Origin:              opts.Origin,
 		Extra:               extraHeaders,
-		WithXClientUUID:     apiRequestOpts.WithClientUUID,
+		WithXClientUUID:     opts.WithClientUUID,
 	}
 	headers := c.buildHeaders(headerOpts)
+	var payload io.Reader
+	if opts.Body != nil {
+		payload = bytes.NewReader(opts.Body)
+	}
 
-	return c.MakeRequest(ctx, apiRequestOpts.URL, apiRequestOpts.Method, headers, apiRequestOpts.Body, apiRequestOpts.ContentType)
+	return c.MakeRequestFull(ctx, MakeRequestParams{
+		URL:          opts.URL,
+		Method:       opts.Method,
+		Headers:      headers,
+		Payload:      payload,
+		ContentType:  opts.ContentType,
+		DontReadBody: opts.DontReadResponse,
+	})
 }
 
 func (c *Client) SetActiveConversation(conversationID string) {
@@ -623,8 +637,8 @@ func (c *Client) SetActiveConversation(conversationID string) {
 
 // FetchRaw performs an authenticated request to the given URL and returns the response and body.
 // Useful for downloading blobs that still require the standard auth headers (cookies, bearer, etc).
-func (c *Client) FetchRaw(ctx context.Context, url string) (*http.Response, []byte, error) {
-	return c.makeAPIRequest(ctx, apiRequestOpts{
+func (c *Client) FetchRaw(ctx context.Context, url string) (*http.Response, error) {
+	resp, _, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            url,
 		Method:         http.MethodGet,
 		Origin:         endpoints.BASE_URL,
@@ -632,6 +646,8 @@ func (c *Client) FetchRaw(ctx context.Context, url string) (*http.Response, []by
 		Headers: map[string]string{
 			"accept": "*/*",
 		},
-		ContentType: types.ContentTypeNone,
+		ContentType:      types.ContentTypeNone,
+		DontReadResponse: true,
 	})
+	return resp, err
 }

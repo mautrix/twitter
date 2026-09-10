@@ -1,8 +1,8 @@
 package crypto
 
 import (
-	"errors"
 	"fmt"
+	"io"
 
 	"github.com/openziti/secretstream"
 )
@@ -72,42 +72,43 @@ func SecretstreamEncrypt(plaintext, key []byte) ([]byte, error) {
 
 // SecretstreamDecrypt decrypts secretstream ciphertext (header || encrypted_chunks).
 // Returns the decrypted plaintext.
-func SecretstreamDecrypt(ciphertext, key []byte) ([]byte, error) {
+func SecretstreamDecrypt(ciphertext io.Reader, key []byte, writeTo io.Writer) (int, error) {
 	if len(key) != secretboxKeySize {
-		return nil, fmt.Errorf("secretstream key must be %d bytes", secretboxKeySize)
+		return 0, fmt.Errorf("secretstream key must be %d bytes", secretboxKeySize)
 	}
 
-	if len(ciphertext) < SecretstreamHeaderBytes {
-		return nil, errors.New("secretstream ciphertext too short for header")
+	header := make([]byte, SecretstreamHeaderBytes)
+	_, err := io.ReadFull(ciphertext, header)
+	if err != nil {
+		return 0, fmt.Errorf("read secretstream header: %w", err)
 	}
 
-	header := ciphertext[:SecretstreamHeaderBytes]
 	dec, err := secretstream.NewDecryptor(key, header)
 	if err != nil {
-		return nil, fmt.Errorf("create decryptor: %w", err)
+		return 0, fmt.Errorf("create decryptor: %w", err)
 	}
 
-	var plaintext []byte
 	const encryptedChunkSize = SecretstreamChunkSize + SecretstreamABytes
-
-	offset := SecretstreamHeaderBytes // skip header
-	for offset < len(ciphertext) {
-		end := offset + encryptedChunkSize
-		if end > len(ciphertext) {
-			end = len(ciphertext)
+	buf := make([]byte, encryptedChunkSize)
+	var size int
+	for {
+		// This will return ErrUnexpectedEOF on the last chunk, but we ignore it because n won't be 0
+		n, err := io.ReadFull(ciphertext, buf)
+		if err != nil && n == 0 {
+			return 0, fmt.Errorf("read chunk at %d: %w", size, err)
 		}
-
-		chunk, tag, err := dec.Pull(ciphertext[offset:end])
+		chunk, tag, err := dec.Pull(buf[:n])
 		if err != nil {
-			return nil, fmt.Errorf("decrypt chunk at offset %d: %w", offset, err)
+			return 0, fmt.Errorf("decrypt chunk at %d: %w", size, err)
 		}
-		plaintext = append(plaintext, chunk...)
-
+		_, err = writeTo.Write(chunk)
+		if err != nil {
+			return 0, fmt.Errorf("write decrypted chunk at %d: %w", size, err)
+		}
+		size += n
 		if tag == secretstream.TagFinal {
 			break
 		}
-		offset = end
 	}
-
-	return plaintext, nil
+	return size, nil
 }

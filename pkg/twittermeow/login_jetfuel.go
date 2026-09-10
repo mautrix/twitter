@@ -742,7 +742,13 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 	if method == http.MethodPost {
 		contentType = types.ContentTypeForm
 	}
-	resp, respBody, err := c.makeRequestDirect(ctx, fullURL, method, headers, body, contentType)
+	resp, respBody, err := c.makeRequestDirect(ctx, MakeRequestParams{
+		URL:         fullURL,
+		Method:      method,
+		Headers:     headers,
+		Payload:     bytes.NewReader(body),
+		ContentType: contentType,
+	})
 	if resp != nil {
 		c.cookies.UpdateFromResponse(resp)
 	}
@@ -811,7 +817,13 @@ func (c *Client) sendJetfuelViewerContextEvent(ctx context.Context) error {
 			"x-client-transaction-id": txID,
 		},
 	})
-	resp, _, err := c.makeRequestDirect(ctx, endpoints.VIEWER_CONTEXT_URL, http.MethodPost, headers, []byte(form.Encode()), types.ContentTypeForm)
+	resp, _, err := c.makeRequestDirect(ctx, MakeRequestParams{
+		URL:         endpoints.VIEWER_CONTEXT_URL,
+		Method:      http.MethodPost,
+		Headers:     headers,
+		Payload:     bytes.NewReader([]byte(form.Encode())),
+		ContentType: types.ContentTypeForm,
+	})
 	if resp != nil {
 		c.cookies.UpdateFromResponse(resp)
 	}

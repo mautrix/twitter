@@ -1,11 +1,9 @@
 package connector
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
+	"os"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -69,15 +67,13 @@ func (tc *TwitterConnector) downloadEncryptedMedia(ctx context.Context, info *En
 	}
 	client := ul.Client.(*TwitterClient)
 
-	// Use existing DownloadXChatMedia which handles decryption
-	decrypted, err := client.client.DownloadXChatMedia(ctx, info.ConversationID, info.MediaHashKey, info.KeyVersion)
-	if err != nil {
-		return nil, fmt.Errorf("download and decrypt XChat media: %w", err)
-	}
-
-	return &mediaproxy.GetMediaResponseData{
-		Reader:        io.NopCloser(bytes.NewReader(decrypted)),
-		ContentType:   http.DetectContentType(decrypted),
-		ContentLength: int64(len(decrypted)),
+	return &mediaproxy.GetMediaResponseFile{
+		Callback: func(w *os.File) (*mediaproxy.FileMeta, error) {
+			_, err := client.client.DownloadXChatMedia(ctx, info.ConversationID, info.MediaHashKey, info.KeyVersion, w)
+			if err != nil {
+				return nil, fmt.Errorf("download and decrypt XChat media: %w", err)
+			}
+			return &mediaproxy.FileMeta{}, nil
+		},
 	}, nil
 }

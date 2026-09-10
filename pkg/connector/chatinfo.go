@@ -17,9 +17,8 @@
 package connector
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -37,37 +36,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
-
-// previewString returns a truncated string preview for logging.
-func previewString(b []byte, max int) string {
-	if len(b) == 0 {
-		return ""
-	}
-	if len(b) > max {
-		b = b[:max]
-	}
-	return string(b)
-}
-
-// previewBase64 returns a truncated base64 preview for logging.
-func previewBase64(b []byte, maxChars int) string {
-	if len(b) == 0 {
-		return ""
-	}
-	enc := base64.StdEncoding.EncodeToString(b)
-	if len(enc) > maxChars {
-		return enc[:maxChars]
-	}
-	return enc
-}
-
-// previewHex returns a truncated hex preview for logging.
-func previewHex(b []byte, maxBytes int) string {
-	if len(b) > maxBytes {
-		b = b[:maxBytes]
-	}
-	return hex.EncodeToString(b)
-}
 
 // getLatestConversationKey retrieves the latest conversation key for a conversation.
 func (tc *TwitterClient) getLatestConversationKey(ctx context.Context, conversationID string) *crypto.ConversationKey {
@@ -630,45 +598,33 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 	return &bridgev2.Avatar{
 		ID: networkid.AvatarID(avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
-			logger := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Str("url", avatarURL).Logger()
+			log := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Str("url", avatarURL).Logger()
 
-			resp, body, err := tc.client.FetchRaw(ctx, avatarURL)
+			resp, err := tc.client.FetchRaw(ctx, avatarURL)
 			if err != nil {
-				logger.Warn().Err(err).Msg("Failed to download group avatar")
+				log.Warn().Err(err).Msg("Failed to download group avatar")
 				return nil, err
 			}
-
-			if resp != nil {
-				logger.Info().
-					Int("status_code", resp.StatusCode).
-					Int("body_len", len(body)).
-					Str("content_type", resp.Header.Get("content-type")).
-					Str("body_prefix_str", previewString(body, 200)).
-					Str("body_prefix_b64", previewBase64(body, 50)).
-					Msg("Fetched group avatar")
-			}
-
-			if len(body) == 0 {
-				return body, nil
-			}
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			convKey := tc.getLatestConversationKey(ctx, conversationID)
 			if convKey == nil || len(convKey.Key) == 0 {
-				logger.Warn().Msg("No conversation key available for group avatar; returning raw bytes")
-				return body, nil
+				log.Warn().Msg("No conversation key available for group avatar; returning raw bytes")
+				return io.ReadAll(resp.Body)
 			}
 
-			pt, err := crypto.SecretstreamDecrypt(body, convKey.Key)
+			var buf bytes.Buffer
+			_, err = crypto.SecretstreamDecrypt(resp.Body, convKey.Key, &buf)
 			if err != nil {
-				logger.Warn().
-					Err(err).
+				log.Warn().Err(err).
 					Str("key_version", convKey.KeyVersion).
-					Str("body_prefix_hex", previewHex(body, 16)).
-					Msg("Failed to decrypt group avatar; returning raw bytes")
-				return body, nil
+					Msg("Failed to decrypt group avatar")
+				return nil, fmt.Errorf("failed to decrypt group avatar: %w", err)
 			}
-			logger.Info().Msg("Successfully decrypted group avatar")
-			return pt, nil
+			log.Debug().Msg("Successfully decrypted group avatar")
+			return buf.Bytes(), nil
 		},
 		Remove: false,
 	}

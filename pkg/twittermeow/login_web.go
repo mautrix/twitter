@@ -1,6 +1,7 @@
 package twittermeow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -468,21 +469,27 @@ func (c *Client) sendOnboardingTask(ctx context.Context, url string, payload onb
 		c.Logger.Trace().Err(err).Msg("Failed to create X login client transaction ID")
 		txID = "e:"
 	}
-	resp, respBody, err := c.makeRequestDirect(ctx, url, http.MethodPost, c.buildHeaders(HeaderOpts{
-		WithNonAuthBearer:   true,
-		WithCookies:         true,
-		WithXTwitterHeaders: true,
-		WithXGuestToken:     true,
-		Origin:              endpoints.BASE_URL,
-		Referer:             endpoints.BASE_FLOW_LOGIN_URL,
-		Extra: map[string]string{
-			"x-client-transaction-id": txID,
-			"accept":                  "*/*",
-			"sec-fetch-dest":          "empty",
-			"sec-fetch-mode":          "cors",
-			"sec-fetch-site":          "same-site",
-		},
-	}), body, types.ContentTypeJSON)
+	resp, respBody, err := c.makeRequestDirect(ctx, MakeRequestParams{
+		URL:    url,
+		Method: http.MethodPost,
+		Headers: c.buildHeaders(HeaderOpts{
+			WithNonAuthBearer:   true,
+			WithCookies:         true,
+			WithXTwitterHeaders: true,
+			WithXGuestToken:     true,
+			Origin:              endpoints.BASE_URL,
+			Referer:             endpoints.BASE_FLOW_LOGIN_URL,
+			Extra: map[string]string{
+				"x-client-transaction-id": txID,
+				"accept":                  "*/*",
+				"sec-fetch-dest":          "empty",
+				"sec-fetch-mode":          "cors",
+				"sec-fetch-site":          "same-site",
+			},
+		}),
+		Payload:     bytes.NewReader(body),
+		ContentType: types.ContentTypeJSON,
+	})
 	if resp != nil {
 		c.cookies.UpdateFromResponse(resp)
 	}

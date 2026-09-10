@@ -27,21 +27,43 @@ var (
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
+	var pl io.Reader
+	if payload != nil {
+		pl = bytes.NewReader(payload)
+	}
+	return c.MakeRequestFull(ctx, MakeRequestParams{
+		URL:         url,
+		Method:      method,
+		Headers:     headers,
+		Payload:     pl,
+		ContentType: contentType,
+	})
+}
+
+type MakeRequestParams struct {
+	URL          string
+	Method       string
+	Headers      http.Header
+	Payload      io.Reader
+	ContentType  types.ContentType
+	DontReadBody bool
+}
+
+func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
 	log := zerolog.Ctx(ctx).With().
-		Str("url", url).
-		Str("method", method).
-		Str("request_body", string(payload)).
+		Str("url", params.URL).
+		Str("method", params.Method).
 		Str("function", "MakeRequest").
 		Logger()
 	var attempts int
 	for {
 		attempts++
 		start := time.Now()
-		resp, respDat, err := c.makeRequestDirect(ctx, url, method, headers, payload, contentType)
+		resp, respDat, err := c.makeRequestDirect(ctx, params)
 		dur := time.Since(start)
 		if err == nil {
 			logLevel := zerolog.DebugLevel
-			if strings.Contains(url, "dm/user_updates.json") {
+			if strings.Contains(params.URL, "dm/user_updates.json") {
 				// Don't spam log full of user_updates requests
 				logLevel = zerolog.TraceLevel
 			}
@@ -71,7 +93,6 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 		} else if errors.Is(err, ErrRedirectAttempted) {
 			c.Logger.Err(err).
 				Str("location", resp.Header.Get("Location")).
-				Str("request_body", string(payload)).
 				Dur("duration", dur).
 				Msg("Redirect attempted")
 			return resp, nil, err
@@ -86,21 +107,22 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 	}
 }
 
-func (c *Client) makeRequestDirect(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	newRequest, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(payload))
+func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
+	newRequest, err := http.NewRequestWithContext(ctx, params.Method, params.URL, params.Payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}
 
-	if contentType != types.ContentTypeNone {
-		headers.Set("content-type", string(contentType))
+	if params.ContentType != types.ContentTypeNone {
+		params.Headers.Set("content-type", string(params.ContentType))
 	}
 
-	newRequest.Header = headers
+	newRequest.Header = params.Headers
 
 	response, err := c.HTTP.Do(newRequest)
+	dontCloseBody := false
 	defer func() {
-		if response != nil && response.Body != nil {
+		if response != nil && response.Body != nil && !dontCloseBody {
 			_ = response.Body.Close()
 		}
 	}()
@@ -111,9 +133,14 @@ func (c *Client) makeRequestDirect(ctx context.Context, url string, method strin
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestFailed, err)
 	}
 
-	responseBody, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrResponseReadFailed, err)
+	var responseBody []byte
+	if !params.DontReadBody || response.StatusCode >= 300 || response.StatusCode < 200 {
+		responseBody, err = io.ReadAll(response.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: %w", ErrResponseReadFailed, err)
+		}
+	} else {
+		dontCloseBody = true
 	}
 	c.Logger.Trace().
 		Int("status_code", response.StatusCode).

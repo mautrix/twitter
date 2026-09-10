@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -410,20 +411,21 @@ func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, m
 // DownloadXChatMedia downloads and decrypts encrypted media from XChat.
 // The media is fetched from ton.x.com and decrypted using secretstream with the conversation key.
 // If keyVersion is empty, the latest conversation key will be used.
-func (c *Client) DownloadXChatMedia(ctx context.Context, conversationID, mediaHashKey, keyVersion string) ([]byte, error) {
-	// Get the conversation key for decryption
+func (c *Client) DownloadXChatMedia(
+	ctx context.Context,
+	conversationID, mediaHashKey, keyVersion string,
+	into io.Writer,
+) (size int, err error) {
 	var convKey *crypto.ConversationKey
-	var err error
 	if keyVersion != "" {
 		convKey, err = c.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
 	} else {
 		convKey, err = c.keyManager.GetLatestConversationKey(ctx, conversationID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get conversation key: %w", err)
+		return 0, fmt.Errorf("get conversation key: %w", err)
 	}
 
-	// Construct download URL
 	downloadURL := endpoints.TON_UPLOAD_BASE_URL + "/i/ton/data/xchat_media/" + conversationID + "/" + mediaHashKey
 
 	c.Logger.Info().
@@ -445,20 +447,21 @@ func (c *Client) DownloadXChatMedia(ctx context.Context, conversationID, mediaHa
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	resp, respBody, err := c.MakeRequest(ctx, downloadURL, http.MethodGet, headers, nil, types.ContentTypeNone)
+	resp, _, err := c.MakeRequestFull(ctx, MakeRequestParams{
+		URL:          downloadURL,
+		Method:       http.MethodGet,
+		Headers:      headers,
+		DontReadBody: true,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("download request: %w", err)
+		return 0, fmt.Errorf("download request: %w", err)
 	}
 
-	if resp.StatusCode > 204 {
-		return nil, fmt.Errorf("download failed (status_code=%d, response_body=%s)", resp.StatusCode, string(respBody))
-	}
-
-	// Decrypt using secretstream (XChaCha20-Poly1305)
-	plaintext, err := crypto.SecretstreamDecrypt(respBody, convKey.Key)
+	size, err = crypto.SecretstreamDecrypt(resp.Body, convKey.Key, into)
+	_ = resp.Body.Close()
 	if err != nil {
-		return nil, fmt.Errorf("decrypt media: %w", err)
+		return 0, fmt.Errorf("decrypt media: %w", err)
 	}
 
-	return plaintext, nil
+	return size, nil
 }
