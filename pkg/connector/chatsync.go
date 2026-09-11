@@ -51,6 +51,96 @@ func isXChatPortalForLogin(portal *bridgev2.Portal, loginID networkid.UserLoginI
 	return ok && meta.IsXChatConversation()
 }
 
+func xchatInboxItemTrust(item *response.XChatInboxItem) *bool {
+	defer func() { _ = recover() }()
+	if item == nil {
+		return nil
+	}
+	encodedEvents := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents)+len(item.LatestConversationKeyChangeEvents)+1)
+	encodedEvents = append(encodedEvents, item.LatestMessageEvents...)
+	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
+	encodedEvents = append(encodedEvents, item.LatestConversationKeyChangeEvents...)
+	if item.LatestNotifiableMessageCreateEvent != "" {
+		encodedEvents = append(encodedEvents, item.LatestNotifiableMessageCreateEvent)
+	}
+
+	var trusted *bool
+	latestSequenceID := ""
+	for _, encoded := range encodedEvents {
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			continue
+		}
+		var evt payload.MessageEvent
+		if err = payload.Decode(decoded, &evt); err != nil || evt.IsTrusted == nil {
+			continue
+		}
+		sequenceID := ptr.Val(evt.SequenceId)
+		if trusted != nil && (sequenceID == "" && latestSequenceID != "" ||
+			sequenceID != "" && latestSequenceID != "" && compareIntStrings(sequenceID, latestSequenceID) < 0) {
+			continue
+		}
+		value := *evt.IsTrusted
+		trusted = &value
+		latestSequenceID = sequenceID
+	}
+	return trusted
+}
+
+func applyXChatTrustToChatInfo(info *bridgev2.ChatInfo, trusted bool) {
+	info.MessageRequest = ptr.Ptr(!trusted)
+	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
+		meta, ok := portal.Metadata.(*PortalMetadata)
+		if !ok || meta == nil || (meta.XChatTrusted != nil && *meta.XChatTrusted == trusted) {
+			return false
+		}
+		meta.XChatTrusted = ptr.Ptr(trusted)
+		return true
+	})
+}
+
+func (tc *TwitterClient) syncXChatTrust(
+	ctx context.Context,
+	conversationID string,
+	trusted *bool,
+	timestamp time.Time,
+	streamOrder int64,
+) bool {
+	if trusted == nil {
+		return true
+	}
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	portalKey := tc.MakePortalKeyFromID(conversationID)
+	portal, err := tc.connector.br.GetPortalByKey(ctx, portalKey)
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to get XChat portal for trust update")
+		return false
+	}
+	meta, _ := portal.Metadata.(*PortalMetadata)
+	messageRequest := !*trusted
+	if meta != nil && meta.XChatTrusted != nil && *meta.XChatTrusted == *trusted && portal.MessageRequest == messageRequest {
+		return true
+	}
+
+	chatInfo := &bridgev2.ChatInfo{}
+	applyXChatTrustToChatInfo(chatInfo, *trusted)
+	if current := bridgev2.GetRemoteEventFromContext(ctx); current != nil && current.GetPortalKey().ID == portalKey.ID {
+		portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, timestamp)
+		return true
+	}
+	return tc.queueXChatRemoteEventWithPortalRepair(ctx, conversationID, &simplevent.ChatInfoChange{
+		EventMeta: simplevent.EventMeta{
+			Type:        bridgev2.RemoteEventChatInfoChange,
+			PortalKey:   portalKey,
+			Timestamp:   timestamp,
+			StreamOrder: streamOrder,
+		},
+		ChatInfoChange: &bridgev2.ChatInfoChange{ChatInfo: chatInfo},
+	})
+}
+
 // TODO: Remove this repair after affected bridges have been reconnected
 func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context) error {
 	if tc.xchatRequestsRepaired {
@@ -68,8 +158,13 @@ func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context)
 		}
 		xchatRooms++
 
+		meta := portal.Metadata.(*PortalMetadata)
+		messageRequest := false
+		if meta.XChatTrusted != nil {
+			messageRequest = !*meta.XChatTrusted
+		}
 		wasMessageRequest := portal.MessageRequest
-		portal.MessageRequest = false
+		portal.MessageRequest = messageRequest
 		internals := (*bridgev2.PortalInternals)(portal)
 		stateKey, bridgeInfo := internals.GetBridgeInfo()
 		for _, eventType := range []event.Type{event.StateBridge, event.StateHalfShotBridge} {
@@ -81,7 +176,7 @@ func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context)
 				return fmt.Errorf("repair XChat message-request room state")
 			}
 		}
-		if !wasMessageRequest {
+		if wasMessageRequest == messageRequest {
 			continue
 		}
 		if err = portal.Save(ctx); err != nil {
@@ -101,6 +196,9 @@ func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context)
 func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType database.RoomType) bool {
 	if chatInfo == nil {
 		return false
+	}
+	if chatInfo.MessageRequest != nil || chatInfo.ExtraUpdates != nil {
+		return true
 	}
 
 	// DM room title/avatar are member-derived, so always emit ChatInfoChange
@@ -242,8 +340,11 @@ func (tc *TwitterClient) xchatItemToConversation(ctx context.Context, item *resp
 
 	conv := &types.Conversation{
 		ConversationID: detail.ConversationID,
-		Trusted:        true, // XChat conversations are always trusted
+		Trusted:        true,
 		Muted:          detail.IsMuted,
+	}
+	if trusted := xchatInboxItemTrust(item); trusted != nil {
+		conv.Trusted = *trusted
 	}
 
 	// Determine conversation type based on conversation ID and metadata.
@@ -384,11 +485,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		}
 	}
 
-	// MessageRequest is true for untrusted conversations (message requests)
-	var messageRequest *bool
-	if conv != nil {
-		messageRequest = ptr.Ptr(!conv.Trusted)
-	}
+	trusted := xchatInboxItemTrust(item)
 	membersAreFull := len(detail.GroupMembersResults) > 0 && len(memberMap) > 0
 	for _, memberResult := range detail.GroupMembersResults {
 		if memberID, _ := xchatUserFromResult(memberResult); memberID == "" {
@@ -418,8 +515,10 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 			TotalMemberCount: len(memberMap),
 			MemberMap:        memberMap,
 		},
-		CanBackfill:    true,
-		MessageRequest: messageRequest,
+		CanBackfill: true,
+	}
+	if trusted != nil {
+		applyXChatTrustToChatInfo(info, *trusted)
 	}
 
 	if isGroup {

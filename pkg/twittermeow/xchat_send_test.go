@@ -11,8 +11,16 @@ import (
 	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
+
+func TestConvertXChatMessagePreservesTrust(t *testing.T) {
+	trusted := false
+	if got := convertXChatMessageToTwitterMessage(&payload.MessageEvent{IsTrusted: &trusted}, &payload.MessageContents{}, ""); got.Trusted == nil || *got.Trusted {
+		t.Fatalf("Trusted = %v", got.Trusted)
+	}
+}
 
 func TestRefreshConversationKeysDoesNotBlockOnConversationDataCallback(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())

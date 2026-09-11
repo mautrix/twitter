@@ -546,6 +546,7 @@ func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *p
 		Time:           ptr.Val(evt.CreatedAtMsec),
 		ConversationID: ptr.Val(evt.ConversationId),
 		RequestID:      ptr.Val(evt.MessageId),
+		Trusted:        evt.IsTrusted,
 	})
 }
 
