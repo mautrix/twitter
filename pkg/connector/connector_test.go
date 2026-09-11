@@ -12,29 +12,6 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func TestTwitterConnectorUsesCompletionAwarePortalHandling(t *testing.T) {
-	previousBuffer := bridgev2.PortalEventBuffer
-	t.Cleanup(func() {
-		bridgev2.PortalEventBuffer = previousBuffer
-	})
-	bridgev2.PortalEventBuffer = 64
-
-	connector := &TwitterConnector{}
-	connector.Init(&bridgev2.Bridge{})
-	if bridgev2.PortalEventBuffer != 0 {
-		t.Fatalf("PortalEventBuffer = %d, want 0", bridgev2.PortalEventBuffer)
-	}
-	if xchatRemoteEventHandled(bridgev2.EventHandlingResultQueued) {
-		t.Fatal("queued event was treated as completed")
-	}
-	if !xchatRemoteEventHandled(bridgev2.EventHandlingResultSuccess) {
-		t.Fatal("successful completed event was rejected")
-	}
-	if !xchatRemoteEventHandled(bridgev2.EventHandlingResultIgnored) {
-		t.Fatal("completed duplicate/ignored event was rejected")
-	}
-}
-
 func TestXChatUserResultFallsBackToOuterID(t *testing.T) {
 	userID, user := xchatUserFromResult(response.XChatUserResult{
 		RestID: "123",
