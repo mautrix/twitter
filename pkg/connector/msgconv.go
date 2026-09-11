@@ -37,6 +37,7 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/connector/twitterfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -51,17 +52,109 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	if !ok || meta == nil {
 		meta = &MessageMetadata{}
 	}
-	if data.EditCount == 0 {
-		data.EditCount = meta.EditCount + 1
-	} else if meta.EditCount >= data.EditCount {
-		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, data.EditCount)
+	editData := *data
+	if editData.EditCount == 0 {
+		editData.EditCount = meta.EditCount + 1
+	} else if meta.EditCount >= editData.EditCount {
+		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, editData.EditCount)
 	}
-	data.Text = strings.TrimPrefix(data.Text, "Edited: ")
-	editPart := tc.convertToMatrix(ctx, portal, intent, data).Parts[0].ToEditPart(existingPart)
-	editPart.Part.Metadata = &MessageMetadata{EditCount: data.EditCount}
+	originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch original X message for edit: %w", err)
+	}
+	editData = mergeXChatEditData(originalData, &editData)
+	editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
+	converted := tc.convertToMatrix(ctx, portal, intent, &editData)
+	if len(converted.Parts) == 0 || converted.Parts[0].Content == nil {
+		return nil, fmt.Errorf("failed to convert edit: no message content")
+	}
+	editPart := converted.Parts[0].ToEditPart(existingPart)
+	updatedMeta := *meta
+	updatedMeta.EditCount = editData.EditCount
+	editPart.Part.Metadata = &updatedMeta
 	return &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{editPart},
 	}, nil
+}
+
+func (tc *TwitterClient) fetchOriginalXChatMessage(ctx context.Context, conversationID, messageID string) (*types.MessageData, error) {
+	const eventLimit = 10
+	cursor, err := xchatEditHistoryCursor(messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	settings := payload.DefaultGetConversationPageQuerySettings()
+	settings.ConversationEventLimit = eventLimit
+
+	minKeyVersion := xchatBackfillMaxInt
+	if km := tc.client.GetKeyManager(); km != nil {
+		if ck, err := km.GetLatestConversationKey(ctx, conversationID); err == nil && ck != nil && ck.KeyVersion != "" {
+			minKeyVersion = ck.KeyVersion
+		}
+	}
+
+	vars := payload.NewGetConversationPageQueryVariables(conversationID, cursor, minKeyVersion, settings)
+	resp, err := tc.client.GetConversationPage(ctx, vars)
+	if err != nil {
+		return nil, err
+	}
+	page := resp.Data.GetConversationPage
+
+	// Store supplemental keys first so the target message can be decrypted.
+	for _, encoded := range page.MissingConversationKeyChangeEvents {
+		evt, decodeErr := twittermeow.DecodeMessageEvent(encoded)
+		if decodeErr == nil && normalizeXChatBackfillEventConversation(evt, conversationID) &&
+			evt.Detail != nil && evt.Detail.ConversationKeyChangeEvent != nil {
+			_ = tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent)
+		}
+	}
+
+	for _, encoded := range page.EncodedMessageEvents {
+		evt, decodeErr := twittermeow.DecodeMessageEvent(encoded)
+		if decodeErr != nil || !normalizeXChatBackfillEventConversation(evt, conversationID) || evt.Detail == nil {
+			continue
+		}
+		if evt.Detail.ConversationKeyChangeEvent != nil {
+			_ = tc.storeConversationKeyFromChangeEvent(ctx, evt, evt.Detail.ConversationKeyChangeEvent)
+			continue
+		}
+		if evt.Detail.MessageCreateEvent == nil {
+			continue
+		}
+		msg, _, _, _ := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
+		if msg != nil && msg.SequenceID == messageID {
+			return &msg.MessageData, nil
+		}
+	}
+	return nil, fmt.Errorf("original message not found in targeted conversation history")
+}
+
+func xchatEditHistoryCursor(messageID string) (string, error) {
+	sequenceID, err := strconv.ParseUint(messageID, 10, 63)
+	if err != nil || sequenceID == 1<<63-1 {
+		return "", fmt.Errorf("original XChat message ID is not a valid sequence ID")
+	}
+	return strconv.FormatUint(sequenceID+1, 10), nil
+}
+
+func mergeXChatEditData(original, edit *types.MessageData) types.MessageData {
+	merged := *original
+	merged.ID = edit.ID
+	merged.Time = edit.Time
+	merged.Text = edit.Text
+	merged.Entities = edit.Entities
+	merged.EditCount = edit.EditCount
+	if edit.SenderID != "" {
+		merged.SenderID = edit.SenderID
+	}
+	if edit.RecipientID != "" {
+		merged.RecipientID = edit.RecipientID
+	}
+	if edit.ConversationKeyVersion != "" {
+		merged.ConversationKeyVersion = edit.ConversationKeyVersion
+	}
+	return merged
 }
 
 func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) *bridgev2.ConvertedMessage {
