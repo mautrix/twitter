@@ -18,8 +18,6 @@ package connector
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -177,7 +175,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
-	if err := tc.restoreXChatFailedEvents(ctx); err != nil {
+	if err := tc.restoreXChatFailedEvents(); err != nil {
 		log.Err(err).Msg("Failed to load pending XChat event failures")
 		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateUnknownError, Error: "twitter-failed-events-load-failed"})
 		return
@@ -623,37 +621,21 @@ func (tc *TwitterClient) saveXChatInboxCheckpoint(ctx context.Context, cursor *p
 	return nil
 }
 
-func (tc *TwitterClient) restoreXChatFailedEvents(ctx context.Context) error {
+func (tc *TwitterClient) restoreXChatFailedEvents() error {
 	if tc.xchatFailuresLoaded {
 		return nil
 	}
-	// Keep failures separate from whole-login saves, including SDK space creation.
-	kv := tc.connector.br.DB.KV
-	key := "twitter_xchat_failed_events/" + string(tc.userLogin.ID)
-	var raw string
-	err := kv.QueryRow(ctx, "SELECT value FROM kv_store WHERE bridge_id=$1 AND key=$2", kv.BridgeID, key).Scan(&raw)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	var failed map[string]string
-	if err == nil && json.Unmarshal([]byte(raw), &failed) != nil {
-		return errors.New("invalid persisted XChat event failures")
-	}
-	err = tc.client.GetXChatProcessor().SetFailedEventPersistence(failed, func(ctx context.Context, pending map[string]string) error {
-		encoded, err := json.Marshal(pending)
-		if err != nil {
-			return err
-		}
-		_, err = kv.Exec(ctx, `INSERT INTO kv_store (bridge_id, key, value) VALUES ($1, $2, $3)
-			ON CONFLICT (bridge_id, key) DO UPDATE SET value=$3`, kv.BridgeID, key, string(encoded))
-		return err
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	err := tc.client.GetXChatProcessor().SetFailedEventPersistence(meta.XChatFailedEvents, func(ctx context.Context, pending map[string]string) error {
+		meta.XChatFailedEvents = pending
+		return tc.userLogin.Save(ctx)
 	})
 	if err != nil {
 		return err
 	}
 	tc.xchatFailuresLoaded = true
-	if len(failed) > 0 {
-		tc.userLogin.Log.Warn().Int("pending_failed_events", len(failed)).Msg("Restored pending XChat event failures; inbox checkpoint remains blocked")
+	if len(meta.XChatFailedEvents) > 0 {
+		tc.userLogin.Log.Warn().Int("pending_failed_events", len(meta.XChatFailedEvents)).Msg("Restored pending XChat event failures; inbox checkpoint remains blocked")
 	}
 	return nil
 }
