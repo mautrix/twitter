@@ -151,7 +151,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		count = 50
 	}
 
-	parsed, err := tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, minSeqID, count)
+	parsed, err := tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, minSeqID, count, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversat
 		MaxMessages: count,
 		MaxPages:    xchatForwardCatchupMaxPages,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
-		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize)
+		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
 	})
 }
 
@@ -248,7 +248,7 @@ func (tc *TwitterClient) fetchCompleteXChatForwardCatchup(ctx context.Context, c
 		PageSize:        pageSize,
 		RequireComplete: true,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
-		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize)
+		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
 	})
 }
 
@@ -439,7 +439,7 @@ func normalizeXChatBackfillEventConversation(evt *payload.MessageEvent, conversa
 	return eventConversationID == conversationID
 }
 
-func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Portal, conversationID, minSeqID string, count int) (*parsedXChatPage, error) {
+func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Portal, conversationID, minSeqID string, count int, anchor *database.Message) (*parsedXChatPage, error) {
 	settings := payload.DefaultGetConversationPageQuerySettings()
 	if count < settings.ConversationEventLimit {
 		settings.ConversationEventLimit = count
@@ -537,15 +537,7 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 			continue
 		}
 
-		converted := tc.convertToMatrix(ctx, portal, tc.connector.br.Bot, &msg.MessageData)
-		if converted == nil || len(converted.Parts) == 0 {
-			convertFailedCount++
-			result.unconvertedMessages = append(result.unconvertedMessages, xchatUnconvertedMessage{
-				timestamp: ts,
-			})
-			continue
-		}
-
+		originalTS := ts
 		msgID := msg.SequenceID
 		if msgID == "" {
 			msgID = msg.ID
@@ -556,6 +548,22 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 		}
 		if ts.IsZero() && msgID != "" {
 			ts = methods.ParseSnowflake(msgID)
+		}
+		// Forward catch-up must not download media for messages it will discard.
+		if anchor != nil && !ts.IsZero() && (MakeMessageID(msgID) == anchor.ID || ts.Before(anchor.Timestamp)) {
+			if ptr.Val(evt.SequenceId) == "" {
+				advanceCursor(msgID)
+			}
+			continue
+		}
+
+		converted := tc.convertToMatrix(ctx, portal, tc.connector.br.Bot, &msg.MessageData)
+		if converted == nil || len(converted.Parts) == 0 {
+			convertFailedCount++
+			result.unconvertedMessages = append(result.unconvertedMessages, xchatUnconvertedMessage{
+				timestamp: originalTS,
+			})
+			continue
 		}
 
 		if streamOrder == 0 && msgID != "" {

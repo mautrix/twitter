@@ -18,6 +18,8 @@ package connector
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -62,6 +64,7 @@ type TwitterClient struct {
 	xchatInboxSyncLock    sync.Mutex
 	xchatGapCatchupStates sync.Map
 	xchatRequestsRepaired bool
+	xchatFailuresLoaded   bool
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -174,6 +177,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
+	if err := tc.restoreXChatFailedEvents(ctx); err != nil {
+		log.Err(err).Msg("Failed to load pending XChat event failures")
+		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateUnknownError, Error: "twitter-failed-events-load-failed"})
+		return
+	}
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
 
 	// Migration detection: user has valid cookies but is missing encryption keys.
@@ -427,6 +435,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 	log.Info().
 		Int("conversations", int(totalItems.Load())).
+		Int("items", catchupResult.Items).
 		Msg("Finished fetching XChat inbox")
 
 	go func() {
@@ -524,6 +533,9 @@ func (tc *TwitterClient) syncOwnAvatarFromUser(ctx context.Context, user *types.
 }
 
 func xchatInboxCursorFromMetadata(cursor *XChatInboxCursorData) *payload.XChatCursor {
+	if cursor != nil && cursor.MaxLocalSequenceID != "" {
+		return &payload.XChatCursor{MaxLocalSequenceID: cursor.MaxLocalSequenceID}
+	}
 	if cursor == nil || cursor.CursorID == "" || cursor.GraphSnapshotID == "" {
 		return nil
 	}
@@ -544,6 +556,15 @@ func nextXChatInboxCursor(page response.XChatInboxPage) *payload.XChatCursor {
 }
 
 func validatedNextXChatInboxCursor(page response.XChatInboxPage) (*payload.XChatCursor, error) {
+	if cursor := page.MessageEventsCursor; cursor != nil {
+		if cursor.PullFinished {
+			return nil, nil
+		}
+		if cursor.MaxLocalSequenceID == "" {
+			return nil, errors.New("XChat message events page has an incomplete cursor")
+		}
+		return &payload.XChatCursor{MaxLocalSequenceID: cursor.MaxLocalSequenceID}, nil
+	}
 	// Terminal pages may omit the continuation cursor without setting pull_finished,
 	// while still echoing the graph snapshot ID.
 	if page.InboxCursor.PullFinished || page.InboxCursor.CursorID == "" {
@@ -565,6 +586,8 @@ func (tc *TwitterClient) saveXChatInboxCheckpoint(ctx context.Context, cursor *p
 		meta.XChatInboxCursor = nil
 	} else {
 		meta.XChatInboxCursor = &XChatInboxCursorData{
+			MaxLocalSequenceID: cursor.MaxLocalSequenceID,
+
 			CursorID:        cursor.CursorId,
 			GraphSnapshotID: cursor.GraphSnapshotId,
 		}
@@ -596,6 +619,41 @@ func (tc *TwitterClient) saveXChatInboxCheckpoint(ctx context.Context, cursor *p
 			Str("cursor_id", cursor.CursorId).
 			Str("graph_snapshot_id", cursor.GraphSnapshotId).
 			Msg("Saved XChat inbox import checkpoint")
+	}
+	return nil
+}
+
+func (tc *TwitterClient) restoreXChatFailedEvents(ctx context.Context) error {
+	if tc.xchatFailuresLoaded {
+		return nil
+	}
+	// Keep failures separate from whole-login saves, including SDK space creation.
+	kv := tc.connector.br.DB.KV
+	key := "twitter_xchat_failed_events/" + string(tc.userLogin.ID)
+	var raw string
+	err := kv.QueryRow(ctx, "SELECT value FROM kv_store WHERE bridge_id=$1 AND key=$2", kv.BridgeID, key).Scan(&raw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var failed map[string]string
+	if err == nil && json.Unmarshal([]byte(raw), &failed) != nil {
+		return errors.New("invalid persisted XChat event failures")
+	}
+	err = tc.client.GetXChatProcessor().SetFailedEventPersistence(failed, func(ctx context.Context, pending map[string]string) error {
+		encoded, err := json.Marshal(pending)
+		if err != nil {
+			return err
+		}
+		_, err = kv.Exec(ctx, `INSERT INTO kv_store (bridge_id, key, value) VALUES ($1, $2, $3)
+			ON CONFLICT (bridge_id, key) DO UPDATE SET value=$3`, kv.BridgeID, key, string(encoded))
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	tc.xchatFailuresLoaded = true
+	if len(failed) > 0 {
+		tc.userLogin.Log.Warn().Int("pending_failed_events", len(failed)).Msg("Restored pending XChat event failures; inbox checkpoint remains blocked")
 	}
 	return nil
 }

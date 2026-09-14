@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -39,6 +40,10 @@ type XChatEventProcessor struct {
 	sequenceIDCallback SequenceIDCallback
 	gapHandler         XChatGapHandler
 	log                zerolog.Logger
+	failedEventLock    sync.Mutex
+	failedEvents       map[string]string
+	persistFailure     func(context.Context, map[string]string) error
+	persistenceErr     error
 
 	sequenceStateLock          sync.Mutex
 	lastConversationSequence   map[string]string
@@ -56,7 +61,78 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		lastConversationSequence:   make(map[string]string),
 		catchupGeneration:          make(map[string]uint64),
 		unresolvedConversationGaps: make(map[string]struct{}),
+		failedEvents:               make(map[string]string),
 	}
+}
+
+// SetFailedEventPersistence restores durable failures before the first connection.
+// They survive ordering-state resets and only clear when that exact event succeeds.
+func (p *XChatEventProcessor) SetFailedEventPersistence(failed map[string]string, persist func(context.Context, map[string]string) error) error {
+	for sequence, conversation := range failed {
+		if _, valid := normalizeXChatSequenceID(sequence); !valid || sequence == "" || conversation == "" {
+			return errors.New("invalid persisted XChat event identity")
+		}
+	}
+	p.failedEventLock.Lock()
+	defer p.failedEventLock.Unlock()
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	p.failedEvents = maps.Clone(failed)
+	p.persistFailure = persist
+	p.persistenceErr = nil
+	return nil
+}
+
+var ErrXChatFailurePersistence = errors.New("failed to persist XChat event failure state")
+
+func (p *XChatEventProcessor) FailedEventPersistenceError() error {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	return p.persistenceErr
+}
+
+func (p *XChatEventProcessor) updateFailedEvent(ctx context.Context, conversationID, sequenceID string, failed bool) error {
+	p.failedEventLock.Lock()
+	defer p.failedEventLock.Unlock()
+	p.sequenceStateLock.Lock()
+	if p.persistFailure == nil {
+		p.sequenceStateLock.Unlock()
+		return nil
+	}
+	previous, pending := p.failedEvents[sequenceID]
+	if !failed && !pending {
+		p.sequenceStateLock.Unlock()
+		return nil
+	}
+	_, validSequence := normalizeXChatSequenceID(sequenceID)
+	if !validSequence || conversationID == "" || sequenceID == "" || pending && previous != conversationID {
+		p.sequenceStateLock.Unlock()
+		return fmt.Errorf("%w: invalid event identity", ErrXChatFailurePersistence)
+	}
+	next := maps.Clone(p.failedEvents)
+	if failed {
+		if next == nil {
+			next = make(map[string]string)
+		}
+		next[sequenceID] = conversationID
+		p.failedEvents = next
+	} else {
+		delete(next, sequenceID)
+	}
+	persist := p.persistFailure
+	p.sequenceStateLock.Unlock()
+	err := persist(ctx, next)
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if err != nil {
+		p.persistenceErr = fmt.Errorf("%w: %w", ErrXChatFailurePersistence, err)
+		return p.persistenceErr
+	}
+	p.persistenceErr = nil
+	if !failed {
+		p.failedEvents = next
+	}
+	return nil
 }
 
 // SetEventHandler sets the handler for processed XChat events.
@@ -143,7 +219,7 @@ func (p *XChatEventProcessor) MarkConversationGapUnresolved(conversationID strin
 func (p *XChatEventProcessor) SequenceCheckpointBlocked() bool {
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
-	return len(p.unresolvedConversationGaps) > 0
+	return len(p.unresolvedConversationGaps) > 0 || len(p.failedEvents) > 0
 }
 
 // ConversationGapUnresolved reports whether this conversation is preventing
@@ -181,7 +257,7 @@ func (p *XChatEventProcessor) finishCheckpointBatch(success bool) {
 	}
 	checkpointSequenceID := ""
 	callback := p.sequenceIDCallback
-	if success && p.checkpointPublicationHolds == 0 && len(p.unresolvedConversationGaps) == 0 && callback != nil {
+	if success && p.checkpointPublicationHolds == 0 && len(p.unresolvedConversationGaps) == 0 && len(p.failedEvents) == 0 && callback != nil {
 		checkpointSequenceID = p.maxHandledSequenceID
 	}
 	p.sequenceStateLock.Unlock()
@@ -203,7 +279,7 @@ func (p *XChatEventProcessor) recordHandledSequence(conversationID, sequenceID s
 	}
 	checkpointSequenceID := ""
 	callback := p.sequenceIDCallback
-	if p.checkpointPublicationHolds == 0 && len(p.unresolvedConversationGaps) == 0 && callback != nil {
+	if p.checkpointPublicationHolds == 0 && len(p.unresolvedConversationGaps) == 0 && len(p.failedEvents) == 0 && callback != nil {
 		checkpointSequenceID = p.maxHandledSequenceID
 	}
 	p.sequenceStateLock.Unlock()
@@ -312,6 +388,11 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
+		}
+		if ctx.Err() != nil {
+			err = errors.Join(err, ctx.Err())
+		} else {
+			err = errors.Join(err, p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil))
 		}
 		if err == nil {
 			p.recordHandledSequence(conversationID, sequenceID)
@@ -915,6 +996,41 @@ func (p *XChatEventProcessor) decodeAndSortInboxEvents(conversationID string, en
 	})
 
 	return out, errors.Join(decodeErrs...)
+}
+
+// ProcessEncodedMessageEvents handles an incremental inbox page as one checkpoint batch.
+func (p *XChatEventProcessor) ProcessEncodedMessageEvents(ctx context.Context, encodedEvents []string) (err error) {
+	decoded, err := p.decodeAndSortInboxEvents("", encodedEvents)
+	if err != nil {
+		return err
+	}
+	for _, item := range decoded {
+		sequence := ptr.Val(item.evt.SequenceId)
+		if _, valid := normalizeXChatSequenceID(sequence); !valid || sequence == "" || ptr.Val(item.evt.ConversationId) == "" {
+			return errors.New("incremental inbox event has an invalid identity")
+		}
+	}
+	p.beginCheckpointBatch()
+	defer func() { p.finishCheckpointBatch(err == nil) }()
+	p.sequenceStateLock.Lock()
+	canIsolateFailure := p.persistFailure != nil
+	p.sequenceStateLock.Unlock()
+	failed := 0
+	for _, item := range decoded {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if eventErr := p.ProcessMessage(ctx, &payload.Message{MessageEvent: item.evt}); eventErr != nil {
+			if !canIsolateFailure || ctx.Err() != nil || errors.Is(eventErr, ErrXChatFailurePersistence) {
+				return eventErr
+			}
+			failed++
+		}
+	}
+	if failed > 0 {
+		p.log.Warn().Int("failed_event_count", failed).Msg("XChat inbox event failures remain pending; continuing other events")
+	}
+	return errors.Join(ctx.Err(), p.FailedEventPersistenceError())
 }
 
 // ProcessKeyChangeEvents processes key change events from an XChatInboxItem.

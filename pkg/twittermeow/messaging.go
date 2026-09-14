@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -696,12 +697,61 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 	return c.sendMessageMutation(ctx, pl)
 }
 
+func (c *Client) getXChatInboxPage(ctx context.Context, url string, variables FormEncoder, opName, responseKey string) (*response.XChatInboxPage, error) {
+	body, err := makeXChatQueryRequest[json.RawMessage](c, ctx, url, variables, opName)
+	if err != nil {
+		return nil, err
+	}
+	pageBody := gjson.GetBytes(*body, "data."+responseKey)
+	if !pageBody.IsObject() {
+		return nil, fmt.Errorf("%s returned no inbox page", opName)
+	}
+	var page response.XChatInboxPage
+	if err := json.Unmarshal([]byte(pageBody.Raw), &page); err != nil {
+		return nil, fmt.Errorf("%s returned an invalid inbox page: %w", opName, err)
+	}
+	if page.ErrorCode != "" {
+		return nil, fmt.Errorf("%s returned an inbox error: %s", opName, page.ErrorCode)
+	}
+	isSnapshot := page.Typename == "XChatGetInboxPageResponse" && pageBody.Get("items").IsArray()
+	isDelta := page.Typename == "XChatGetMessageEventsPageResponse" && pageBody.Get("encoded_message_events").IsArray() && page.MessageEventsCursor != nil
+	if !isSnapshot && !isDelta {
+		return nil, fmt.Errorf("%s returned an unsupported inbox page shape", opName)
+	}
+	cursorPresent, pullFinished := page.InboxCursor.CursorID != "", page.InboxCursor.PullFinished
+	if cursor := page.MessageEventsCursor; cursor != nil {
+		cursorPresent, pullFinished = cursor.MaxLocalSequenceID != "", cursor.PullFinished
+	}
+	c.Logger.Debug().Str("operation", opName).
+		Int("response_bytes", len(*body)).Int("item_count", len(page.Items)).
+		Int("event_count", len(page.EncodedMessageEvents)).
+		Bool("cursor_present", cursorPresent).Bool("pull_finished", pullFinished).
+		Msg("Validated XChat inbox response")
+	return &page, nil
+}
+
 func (c *Client) GetInitialXChatPage(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (*response.GetInitialXChatPageQueryResponse, error) {
-	return makeXChatQueryRequest[response.GetInitialXChatPageQueryResponse](c, ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage")
+	page, err := c.getXChatInboxPage(ctx, endpoints.GET_INITIAL_XCHAT_PAGE_QUERY_URL, variables, "GetInitialXChatPage", "get_initial_chat_page")
+	if err != nil {
+		return nil, err
+	}
+	result := &response.GetInitialXChatPageQueryResponse{}
+	result.Data.GetInboxPage = *page
+	return result, nil
 }
 
 func (c *Client) GetInboxPageRequest(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (*response.GetInboxPageRequestQueryResponse, error) {
-	return makeXChatQueryRequest[response.GetInboxPageRequestQueryResponse](c, ctx, endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, variables, "GetInboxPageRequest")
+	url, opName, responseKey := endpoints.GET_INBOX_PAGE_REQUEST_QUERY_URL, "GetInboxPageRequest", "get_inbox_page"
+	if variables.ContinueCursor != nil && variables.ContinueCursor.MaxLocalSequenceID != "" {
+		url, opName, responseKey = endpoints.GET_MESSAGE_EVENTS_PAGE_QUERY_URL, "GetMessageEventsPage", "get_message_events_page"
+	}
+	page, err := c.getXChatInboxPage(ctx, url, variables, opName, responseKey)
+	if err != nil {
+		return nil, err
+	}
+	result := &response.GetInboxPageRequestQueryResponse{}
+	result.Data.GetInboxPage = *page
+	return result, nil
 }
 
 func (c *Client) GetConversationData(ctx context.Context, variables *payload.GetInboxPageConversationDataQueryVariables) (*response.GetInboxPageConversationDataResponse, error) {

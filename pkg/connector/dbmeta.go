@@ -92,6 +92,8 @@ type UserLoginMetadata struct {
 }
 
 type XChatInboxCursorData struct {
+	MaxLocalSequenceID string `json:"max_local_sequence_id,omitempty"`
+
 	CursorID        string `json:"cursor_id,omitempty"`
 	GraphSnapshotID string `json:"graph_snapshot_id,omitempty"`
 }

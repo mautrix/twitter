@@ -47,6 +47,7 @@ const (
 	DELETE_CONVERSATION_MUTATION_URL   = API_BASE_URL + "/graphql/9nsAnKrQvpifR3UmdtIdOg/ConversationDeletion"
 	GET_INITIAL_XCHAT_PAGE_QUERY_URL   = API_BASE_URL + "/graphql/Gl7r1aY59L7jLBjVC98lqg/GetInitialXChatPageQuery"
 	GET_INBOX_PAGE_REQUEST_QUERY_URL   = API_BASE_URL + "/graphql/wmieJEOHm6twV06EXwRdiA/GetInboxPageRequestQuery"
+	GET_MESSAGE_EVENTS_PAGE_QUERY_URL  = API_BASE_URL + "/graphql/OaSNyAhxUZ9AaW2z9cC26A/GetMessageEventsPageQuery"
 	GET_INBOX_PAGE_CONV_DATA_QUERY_URL = API_BASE_URL + "/graphql/uQEDp5FgdqNiG2jT5q07Jw/GetInboxPageConversationDataRequestQuery"
 	GET_USERS_BY_IDS_FOR_XCHAT_URL     = API_BASE_URL + "/graphql/MnzVKPEXUx3X1VRCyjKlMA/GetUsersByIdsForXChat"
 	GET_CONVERSATION_PAGE_QUERY_URL    = API_BASE_URL + "/graphql/IVlXls9JTnbgQ1gxsGAfJA/GetConversationPageQuery"
