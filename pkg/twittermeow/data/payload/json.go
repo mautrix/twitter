@@ -432,6 +432,8 @@ func (p *GetInboxPageRequestQueryVariables) EncodeJSONQuery() (string, error) {
 	}
 
 	type gqlCursor struct {
+		MaxLocalSequenceID string `json:"max_local_sequence_id,omitempty"`
+
 		CursorID        string `json:"cursor_id,omitempty"`
 		GraphSnapshotID string `json:"graph_snapshot_id,omitempty"`
 	}
@@ -448,6 +450,8 @@ func (p *GetInboxPageRequestQueryVariables) EncodeJSONQuery() (string, error) {
 
 	vars := gqlVars{
 		ContinueCursor: &gqlCursor{
+			MaxLocalSequenceID: p.ContinueCursor.MaxLocalSequenceID,
+
 			CursorID:        p.ContinueCursor.CursorId,
 			GraphSnapshotID: p.ContinueCursor.GraphSnapshotId,
 		},

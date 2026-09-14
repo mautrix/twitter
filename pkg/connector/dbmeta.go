@@ -85,6 +85,7 @@ type UserLoginMetadata struct {
 	MaxUserSequenceID  string                     `json:"max_user_sequence_id,omitempty"` // Last processed sequence ID for incremental inbox fetching
 	MessagePullVersion *int                       `json:"message_pull_version,omitempty"`
 	XChatInboxCursor   *XChatInboxCursorData      `json:"xchat_inbox_cursor,omitempty"` // Next inbox page to import when a full sync is in progress
+	XChatFailedEvents  map[string]string          `json:"xchat_failed_events,omitempty"`
 
 	// Migration tracking fields
 	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration
@@ -92,6 +93,8 @@ type UserLoginMetadata struct {
 }
 
 type XChatInboxCursorData struct {
+	MaxLocalSequenceID string `json:"max_local_sequence_id,omitempty"`
+
 	CursorID        string `json:"cursor_id,omitempty"`
 	GraphSnapshotID string `json:"graph_snapshot_id,omitempty"`
 }

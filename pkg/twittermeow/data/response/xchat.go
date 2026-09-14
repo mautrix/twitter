@@ -80,6 +80,10 @@ type GetInboxPageConversationDataResponse struct {
 }
 
 type XChatInboxPage struct {
+	EncodedMessageEvents []string                  `json:"encoded_message_events,omitempty"`
+	MessageEventsCursor  *XChatMessageEventsCursor `json:"cursor,omitempty"`
+	ErrorCode            string                    `json:"error_code,omitempty"`
+
 	Typename           string           `json:"__typename,omitempty"`
 	InboxCursor        XChatInboxCursor `json:"inboxCursor"`
 	Items              []XChatInboxItem `json:"items,omitempty"`
@@ -88,6 +92,11 @@ type XChatInboxPage struct {
 	MessagePullVersion *int             `json:"message_pull_version,omitempty"`
 	Errors             []map[string]any `json:"errors,omitempty"`
 	Extensions         map[string]any   `json:"extensions,omitempty"`
+}
+
+type XChatMessageEventsCursor struct {
+	MaxLocalSequenceID string `json:"max_local_sequence_id,omitempty"`
+	PullFinished       bool   `json:"pull_finished,omitempty"`
 }
 
 type XChatInboxCursor struct {

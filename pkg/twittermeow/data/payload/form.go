@@ -284,6 +284,8 @@ func (p *QuerySettings) Encode() ([]byte, error) {
 }
 
 type XChatCursor struct {
+	MaxLocalSequenceID string `url:"max_local_sequence_id,omitempty" json:"max_local_sequence_id,omitempty"`
+
 	CursorId        string `url:"cursor_id,omitempty" json:"cursor_id,omitempty"`
 	GraphSnapshotId string `url:"graph_snapshot_id,omitempty" json:"graph_snapshot_id,omitempty"`
 }
