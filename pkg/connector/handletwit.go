@@ -420,15 +420,27 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return allSuccess
 
 	case *types.ConversationDelete:
+		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
+		deletedAt := methods.ParseMsecTimestamp(evt.Time)
+		if !deletedAt.IsZero() {
+			newerMessage, err := tc.connector.br.DB.Message.GetFirstNonFakePartAfterTime(ctx, portalKey, deletedAt)
+			if err != nil {
+				log.Err(err).Msg("Failed to check for messages newer than conversation deletion")
+				return false
+			} else if newerMessage != nil {
+				log.Debug().Msg("Ignoring conversation deletion older than a bridged message")
+				return true
+			}
+		}
 		portalDeleteRemoteEvent := &simplevent.ChatDelete{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventChatDelete,
-				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
+				PortalKey: portalKey,
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.Str("conversation_id", evt.ConversationID)
 				},
 				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
-				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+				Timestamp:   deletedAt,
 			},
 			OnlyForMe: true,
 		}
