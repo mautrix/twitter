@@ -224,9 +224,7 @@ func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType databa
 func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) error {
 	potentialGroupKey := networkid.PortalKey{ID: MakePortalID(item.ConversationDetail.ConversationID)}
 	if _, isGroup := restGroupPortalAliasKey(potentialGroupKey); isGroup {
-		lock := tc.getGroupPortalLock(item.ConversationDetail.ConversationID)
-		lock.Lock()
-		defer lock.Unlock()
+		defer tc.lockGroupPortal(item.ConversationDetail.ConversationID)()
 	}
 	log := zerolog.Ctx(ctx)
 
@@ -719,9 +717,7 @@ func isTrustedRESTGroup(conv *types.Conversation) bool {
 }
 
 func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
-	lock := tc.getGroupPortalLock(conv.ConversationID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer tc.lockGroupPortal(conv.ConversationID)()
 
 	restPortalKey := tc.MakePortalKey(conv)
 	portalKey, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
