@@ -35,6 +35,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 // Conversation type constants for Twitter DM conversations.
@@ -221,6 +222,12 @@ func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType databa
 // syncXChatChannel syncs a single conversation from XChat inbox data.
 // Creates the portal synchronously if it doesn't exist.
 func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) error {
+	potentialGroupKey := networkid.PortalKey{ID: MakePortalID(item.ConversationDetail.ConversationID)}
+	if _, isGroup := restGroupPortalAliasKey(potentialGroupKey); isGroup {
+		lock := tc.getGroupPortalLock(item.ConversationDetail.ConversationID)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	log := zerolog.Ctx(ctx)
 
 	conv := tc.xchatItemToConversation(ctx, item, users)
@@ -641,7 +648,7 @@ func isProbablyEncryptedGroupName(encName string) bool {
 	return len(decoded) >= 40
 }
 
-// syncUntrustedChannels fetches and syncs untrusted (message request) conversations via the REST API.
+// syncUntrustedChannels fetches and syncs message requests and legacy groups via the REST API.
 func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	log := zerolog.Ctx(ctx)
 
@@ -672,13 +679,18 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	// Cache users and update ghost info when needed.
 	tc.updateTwitterUserInfo(ctx, inbox)
 
-	// Process only untrusted conversations (message requests)
+	// Process message requests and accepted legacy groups that XChat did not return.
 	untrustedCount := 0
 	trustedCount := 0
+	legacyGroupCount := 0
 	for _, conv := range inbox.SortedConversations() {
 		if conv.Trusted {
 			trustedCount++
-			continue // Skip trusted - handled by XChat
+			if isTrustedRESTGroup(conv) {
+				legacyGroupCount++
+				tc.syncTrustedRESTGroup(ctx, conv, inbox)
+			}
+			continue
 		}
 		untrustedCount++
 		log.Debug().
@@ -693,8 +705,47 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	log.Info().
 		Int("untrusted_conversations", untrustedCount).
 		Int("trusted_conversations", trustedCount).
+		Int("legacy_group_conversations", legacyGroupCount).
 		Int("total_conversations", len(inbox.Conversations)).
-		Msg("Finished syncing untrusted conversations")
+		Msg("Finished syncing REST conversations")
+}
+
+func isTrustedRESTGroup(conv *types.Conversation) bool {
+	if conv == nil || !conv.Trusted || conv.Type != types.ConversationTypeGroupDM {
+		return false
+	}
+	_, isLegacyGroup := xchatGroupPortalAliasKey(networkid.PortalKey{ID: MakePortalID(conv.ConversationID)})
+	return isLegacyGroup
+}
+
+func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
+	lock := tc.getGroupPortalLock(conv.ConversationID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	restPortalKey := tc.MakePortalKey(conv)
+	portalKey, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to resolve trusted REST group portal")
+		return
+	} else if portalKey != restPortalKey || portal.MXID != "" {
+		return
+	}
+
+	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
+	if latestMessageTS.IsZero() {
+		latestMessageTS = methods.ParseSnowflake(conv.SortEventID)
+	}
+	result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+		EventMeta: simplevent.EventMeta{
+			Type: bridgev2.RemoteEventChatResync, PortalKey: portalKey,
+			CreatePortal: true, Timestamp: latestMessageTS,
+		},
+		ChatInfo: tc.conversationToChatInfo(ctx, conv, inbox), LatestMessageTS: latestMessageTS,
+	})
+	if !result.Success {
+		zerolog.Ctx(ctx).Warn().Err(result.Error).Msg("Failed to queue trusted REST group resync")
+	}
 }
 
 // syncUntrustedConversation syncs a single untrusted conversation.

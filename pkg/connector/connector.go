@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"sync"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/id"
@@ -28,6 +29,8 @@ type TwitterConnector struct {
 
 	Config      Config
 	directMedia bool
+
+	groupPortalLocks sync.Map
 }
 
 var _ bridgev2.NetworkConnector = (*TwitterConnector)(nil)

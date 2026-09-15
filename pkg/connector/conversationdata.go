@@ -221,6 +221,15 @@ func (tc *TwitterClient) getEnsurePortalLock(conversationID string) *sync.Mutex 
 	return lock.(*sync.Mutex)
 }
 
+func (tc *TwitterClient) getGroupPortalLock(conversationID string) *sync.Mutex {
+	portalKey := tc.MakePortalKeyFromID(conversationID)
+	if xchatKey, ok := xchatGroupPortalAliasKey(portalKey); ok {
+		portalKey = xchatKey
+	}
+	lock, _ := tc.connector.groupPortalLocks.LoadOrStore(portalKey, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 func (tc *TwitterClient) hasConversationKey(ctx context.Context, conversationID, keyVersion string) bool {
 	if keyVersion == "" {
 		return true
