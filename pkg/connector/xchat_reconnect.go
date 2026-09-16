@@ -191,6 +191,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 	var pageMissing []string
 	for i := range page.Items {
 		item := &page.Items[i]
+		if item.ConversationUnavailable {
+			continue
+		}
 		if item.ConversationDetail.ConversationID == "" {
 			return nil, fmt.Errorf("XChat inbox item %d has no conversation ID", i)
 		}
@@ -214,6 +217,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 	g.SetLimit(10)
 	for i := range page.Items {
 		item := &page.Items[i]
+		if item.ConversationUnavailable {
+			continue
+		}
 		g.Go(func() error {
 			conversationID := item.ConversationDetail.ConversationID
 			keyErr := processor.ProcessKeyChangeEvents(pageCtx, item)

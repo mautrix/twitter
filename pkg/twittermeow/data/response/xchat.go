@@ -1,5 +1,11 @@
 package response
 
+import (
+	"encoding/json"
+
+	"github.com/tidwall/gjson"
+)
+
 type XChatGraphQLError struct {
 	Message string `json:"message,omitempty"`
 }
@@ -107,6 +113,7 @@ type XChatInboxCursor struct {
 }
 
 type XChatInboxItem struct {
+	ConversationUnavailable            bool                        `json:"-"`
 	Typename                           string                      `json:"__typename,omitempty"`
 	LatestMessageEvents                []string                    `json:"latest_message_events,omitempty"`
 	EncodedMessageEvents               []string                    `json:"encoded_message_events,omitempty"`
@@ -115,6 +122,43 @@ type XChatInboxItem struct {
 	LatestNotifiableMessageCreateEvent string                      `json:"latest_notifiable_message_create_event,omitempty"`
 	LatestReadEventsPerParticipant     []XChatParticipantReadEvent `json:"latest_read_events_per_participant,omitempty"`
 	HasMore                            bool                        `json:"has_more,omitempty"`
+}
+
+func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
+	type plain XChatInboxItem
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*item = XChatInboxItem(decoded)
+	if item.ConversationDetail.ConversationID != "" {
+		return nil
+	}
+	raw := gjson.ParseBytes(data)
+	events := raw.Get("latest_message_events")
+	detail := raw.Get("conversation_detail")
+	if raw.Get("__typename").Str != "XChatGetInboxPageConversationData" || !events.IsArray() || !detail.IsObject() {
+		return nil
+	}
+	switch detail.Get("__typename").Str {
+	case "XChatGroupConversationDetail", "XChatDirectConversationDetail":
+	default:
+		return nil
+	}
+	conversationID := detail.Get("conversation_id")
+	if !conversationID.Exists() || (conversationID.Type != gjson.Null &&
+		(conversationID.Type != gjson.String || conversationID.Str != "")) {
+		return nil
+	}
+	for _, rawEvent := range events.Array() {
+		if rawEvent.Type != gjson.String {
+			return nil
+		}
+	}
+	// X's client omits known conversation records whose nullable ID is unavailable.
+	// Keep malformed required fields distinct so they still block the checkpoint.
+	item.ConversationUnavailable = true
+	return nil
 }
 
 type XChatConversationDetail struct {
