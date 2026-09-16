@@ -38,13 +38,13 @@ func TestXChatItemTrustControlsMessageRequest(t *testing.T) {
 			}
 			return
 		}
-		if info.MessageRequest == nil || *info.MessageRequest == *trusted {
-			t.Fatalf("MessageRequest = %v", info.MessageRequest)
+		if info.MessageRequest != nil || info.ExtraUpdates == nil {
+			t.Fatalf("trust update was not deferred: MessageRequest = %v", info.MessageRequest)
 		}
 		meta := &PortalMetadata{}
 		portal := &bridgev2.Portal{Portal: &database.Portal{Metadata: meta}}
-		if !info.ExtraUpdates(t.Context(), portal) || meta.XChatTrusted == nil || *meta.XChatTrusted != *trusted {
-			t.Fatalf("XChatTrusted = %v", meta.XChatTrusted)
+		if !info.ExtraUpdates(t.Context(), portal) || meta.XChatTrusted == nil || *meta.XChatTrusted != *trusted || portal.MessageRequest == *trusted {
+			t.Fatalf("XChatTrusted = %v, MessageRequest = %t", meta.XChatTrusted, portal.MessageRequest)
 		}
 	}
 }

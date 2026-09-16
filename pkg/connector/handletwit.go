@@ -768,6 +768,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		if chatInfo == nil {
 			return false
 		}
+		applyXChatTrustToChatInfo(chatInfo, true)
 
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
