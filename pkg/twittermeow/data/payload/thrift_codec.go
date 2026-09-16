@@ -349,6 +349,37 @@ func readValue(ctx context.Context, proto thrift.TProtocol, v reflect.Value, goT
 		}
 		v.Set(slice)
 
+	case thrift.MAP:
+		keyType, valueType, size, err := proto.ReadMapBegin(ctx)
+		if err != nil {
+			return err
+		}
+		if goType.Kind() != reflect.Map {
+			return fmt.Errorf("expected map type, got %s", goType.Kind())
+		}
+		if expected := goTypeToThriftType(goType.Key(), goType.Key()); keyType != expected {
+			return fmt.Errorf("unexpected map key type %d, expected %d", keyType, expected)
+		}
+		if expected := goTypeToThriftType(goType.Elem(), goType.Elem()); valueType != expected {
+			return fmt.Errorf("unexpected map value type %d, expected %d", valueType, expected)
+		}
+		decodedMap := reflect.MakeMapWithSize(goType, size)
+		for i := 0; i < size; i++ {
+			key := reflect.New(goType.Key()).Elem()
+			if err := readValue(ctx, proto, key, goType.Key(), keyType); err != nil {
+				return err
+			}
+			value := reflect.New(goType.Elem()).Elem()
+			if err := readValue(ctx, proto, value, goType.Elem(), valueType); err != nil {
+				return err
+			}
+			decodedMap.SetMapIndex(key, value)
+		}
+		if err := proto.ReadMapEnd(ctx); err != nil {
+			return err
+		}
+		v.Set(decodedMap)
+
 	case thrift.STRUCT:
 		return readStruct(ctx, proto, v)
 

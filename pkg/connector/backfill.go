@@ -616,6 +616,7 @@ func ensureRESTFallbackCursor(resp *bridgev2.FetchMessagesResponse) *bridgev2.Fe
 
 const (
 	xchatSkipReasonEmptyContents = "empty_contents"
+	xchatSkipReasonUserMetadata  = "user_metadata"
 	xchatSkipReasonKeyMissing    = "key_missing"
 	xchatSkipReasonDecryptFailed = "decrypt_failed"
 	xchatSkipReasonParseFailed   = "parse_failed"
@@ -644,8 +645,12 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	mce := evt.Detail.MessageCreateEvent
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	contentsBytes := mce.Contents
+	isUserMetadata := isEncryptedXChatBackfillMessage(mce) && mce.IsUserMetadata()
 
 	if len(contentsBytes) == 0 {
+		if isUserMetadata {
+			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
+		}
 		return nil, time.Time{}, 0, xchatSkipReasonEmptyContents
 	}
 
@@ -663,6 +668,14 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 			Str("conversation_id", conversationID).
 			Str("key_version", keyVersion).
 			Logger()
+
+		if isUserMetadata {
+			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
+			if err != nil {
+				return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
+			}
+			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
+		}
 
 		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
 		if err != nil {
