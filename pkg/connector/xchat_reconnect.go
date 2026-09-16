@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
@@ -101,16 +102,19 @@ func runXChatInboxCatchup(
 			pendingMessagePullVersion = cloneXChatInt(page.MessagePullVersion)
 		}
 		result.Pages++
-		result.Items += len(page.Items)
+		result.Items += len(page.Items) + len(page.EncodedMessageEvents)
 		result.CheckpointBlocked = processed.CheckpointBlocked
 		return nil
 	}
 
 	checkpoint := func() error {
-		if !result.CheckpointBlocked {
-			result.MaxSequenceID = pendingMaxSequenceID
-			result.MessagePullVersion = cloneXChatInt(pendingMessagePullVersion)
+		if result.CheckpointBlocked {
+			// Keep the cursor as well as the sequence behind the gap so a restart
+			// retries the unresolved page instead of skipping its conversation.
+			return nil
 		}
+		result.MaxSequenceID = pendingMaxSequenceID
+		result.MessagePullVersion = cloneXChatInt(pendingMessagePullVersion)
 		if ops.Checkpoint != nil {
 			return ops.Checkpoint(ctx, cursor, result.MaxSequenceID, result.MessagePullVersion)
 		}
@@ -161,7 +165,8 @@ func runXChatInboxCatchup(
 		if err != nil {
 			return result, fmt.Errorf("read XChat catch-up cursor: %w", err)
 		}
-		if nextCursor != nil && nextCursor.CursorId == requestCursor.CursorId {
+		if nextCursor != nil && ((nextCursor.CursorId != "" && nextCursor.CursorId == requestCursor.CursorId) ||
+			(nextCursor.MaxLocalSequenceID != "" && compareIntStrings(nextCursor.MaxLocalSequenceID, requestCursor.MaxLocalSequenceID) <= 0)) {
 			return result, fmt.Errorf("xchat inbox cursor did not advance from %q", requestCursor.CursorId)
 		}
 		cursor = nextCursor
@@ -179,6 +184,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 	totalItems *atomic.Int32,
 	repairTruncatedItems bool,
 ) ([]string, error) {
+	if page.MessageEventsCursor != nil {
+		return nil, tc.client.GetXChatProcessor().ProcessEncodedMessageEvents(ctx, page.EncodedMessageEvents)
+	}
 	log := zerolog.Ctx(ctx)
 	var pageMissing []string
 	for i := range page.Items {
@@ -210,6 +218,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 			conversationID := item.ConversationDetail.ConversationID
 			keyErr := processor.ProcessKeyChangeEvents(pageCtx, item)
 			if keyErr != nil {
+				if errors.Is(keyErr, twittermeow.ErrXChatFailurePersistence) {
+					return keyErr
+				}
 				log.Warn().
 					Err(keyErr).
 					Str("conversation_id", conversationID).
@@ -250,6 +261,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 
 			messageErr := processor.ProcessMessageAndReadEvents(pageCtx, item)
 			if messageErr != nil {
+				if errors.Is(messageErr, twittermeow.ErrXChatFailurePersistence) {
+					return messageErr
+				}
 				log.Warn().
 					Err(messageErr).
 					Str("conversation_id", conversationID).
@@ -261,10 +275,7 @@ func (tc *TwitterClient) processXChatInboxPage(
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return pageMissing, err
-	}
-	return pageMissing, nil
+	return pageMissing, errors.Join(g.Wait(), processor.FailedEventPersistenceError())
 }
 
 func (tc *TwitterClient) syncXChatInboxAfterConnect(

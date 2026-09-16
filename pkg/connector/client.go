@@ -62,6 +62,7 @@ type TwitterClient struct {
 	xchatInboxSyncLock    sync.Mutex
 	xchatGapCatchupStates sync.Map
 	xchatRequestsRepaired bool
+	xchatFailuresLoaded   bool
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -174,6 +175,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
+	if err := tc.restoreXChatFailedEvents(); err != nil {
+		log.Err(err).Msg("Failed to load pending XChat event failures")
+		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateUnknownError, Error: "twitter-failed-events-load-failed"})
+		return
+	}
 	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
 
 	// Migration detection: user has valid cookies but is missing encryption keys.
@@ -427,6 +433,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 	log.Info().
 		Int("conversations", int(totalItems.Load())).
+		Int("items", catchupResult.Items).
 		Msg("Finished fetching XChat inbox")
 
 	go func() {
@@ -524,6 +531,9 @@ func (tc *TwitterClient) syncOwnAvatarFromUser(ctx context.Context, user *types.
 }
 
 func xchatInboxCursorFromMetadata(cursor *XChatInboxCursorData) *payload.XChatCursor {
+	if cursor != nil && cursor.MaxLocalSequenceID != "" {
+		return &payload.XChatCursor{MaxLocalSequenceID: cursor.MaxLocalSequenceID}
+	}
 	if cursor == nil || cursor.CursorID == "" || cursor.GraphSnapshotID == "" {
 		return nil
 	}
@@ -544,6 +554,15 @@ func nextXChatInboxCursor(page response.XChatInboxPage) *payload.XChatCursor {
 }
 
 func validatedNextXChatInboxCursor(page response.XChatInboxPage) (*payload.XChatCursor, error) {
+	if cursor := page.MessageEventsCursor; cursor != nil {
+		if cursor.PullFinished {
+			return nil, nil
+		}
+		if cursor.MaxLocalSequenceID == "" {
+			return nil, errors.New("XChat message events page has an incomplete cursor")
+		}
+		return &payload.XChatCursor{MaxLocalSequenceID: cursor.MaxLocalSequenceID}, nil
+	}
 	// Terminal pages may omit the continuation cursor without setting pull_finished,
 	// while still echoing the graph snapshot ID.
 	if page.InboxCursor.PullFinished || page.InboxCursor.CursorID == "" {
@@ -565,6 +584,8 @@ func (tc *TwitterClient) saveXChatInboxCheckpoint(ctx context.Context, cursor *p
 		meta.XChatInboxCursor = nil
 	} else {
 		meta.XChatInboxCursor = &XChatInboxCursorData{
+			MaxLocalSequenceID: cursor.MaxLocalSequenceID,
+
 			CursorID:        cursor.CursorId,
 			GraphSnapshotID: cursor.GraphSnapshotId,
 		}
@@ -596,6 +617,25 @@ func (tc *TwitterClient) saveXChatInboxCheckpoint(ctx context.Context, cursor *p
 			Str("cursor_id", cursor.CursorId).
 			Str("graph_snapshot_id", cursor.GraphSnapshotId).
 			Msg("Saved XChat inbox import checkpoint")
+	}
+	return nil
+}
+
+func (tc *TwitterClient) restoreXChatFailedEvents() error {
+	if tc.xchatFailuresLoaded {
+		return nil
+	}
+	meta := tc.userLogin.Metadata.(*UserLoginMetadata)
+	err := tc.client.GetXChatProcessor().SetFailedEventPersistence(meta.XChatFailedEvents, func(ctx context.Context, pending map[string]string) error {
+		meta.XChatFailedEvents = pending
+		return tc.userLogin.Save(ctx)
+	})
+	if err != nil {
+		return err
+	}
+	tc.xchatFailuresLoaded = true
+	if len(meta.XChatFailedEvents) > 0 {
+		tc.userLogin.Log.Warn().Int("pending_failed_events", len(meta.XChatFailedEvents)).Msg("Restored pending XChat event failures; inbox checkpoint remains blocked")
 	}
 	return nil
 }

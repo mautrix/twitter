@@ -151,7 +151,6 @@ func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context)
 	if err != nil {
 		return fmt.Errorf("get existing portals for XChat message-request repair: %w", err)
 	}
-	sender := tc.userLogin.User.DoublePuppet(ctx)
 	xchatRooms, repaired := 0, 0
 	for _, portal := range portals {
 		if !isXChatPortalForLogin(portal, tc.userLogin.ID) {
@@ -172,7 +171,8 @@ func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context)
 			if portal.MXID == "" {
 				break
 			}
-			if !internals.SendRoomMeta(ctx, sender, time.Now(), eventType, stateKey, &bridgeInfo, true, nil) {
+			// Clients only trust bridge identity events from the bridge bot.
+			if !internals.SendRoomMeta(ctx, nil, time.Now(), eventType, stateKey, &bridgeInfo, true, nil) {
 				portal.MessageRequest = wasMessageRequest
 				return fmt.Errorf("repair XChat message-request room state")
 			}
