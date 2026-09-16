@@ -1,3 +1,12 @@
+# v26.09
+
+* Bumped minimum Go version to 1.26.
+* Changed media downloads to stream large files via the disk instead of storing
+  in memory.
+* Fixed various synchronization issues with encrypted chats.
+* Fixed galleries only bridging the last image.
+* Fixed images being lost if a caption is edited.
+
 # v26.08
 
 * Updated Docker image to Alpine 3.24.
