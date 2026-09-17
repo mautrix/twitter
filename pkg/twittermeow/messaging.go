@@ -718,6 +718,9 @@ func (c *Client) getXChatInboxPage(ctx context.Context, url string, variables Fo
 	if !isSnapshot && !isDelta {
 		return nil, fmt.Errorf("%s returned an unsupported inbox page shape", opName)
 	}
+	if isSnapshot {
+		c.logXChatInboxItemShape(pageBody, &page, "data."+responseKey)
+	}
 	cursorPresent, pullFinished := page.InboxCursor.CursorID != "", page.InboxCursor.PullFinished
 	if cursor := page.MessageEventsCursor; cursor != nil {
 		cursorPresent, pullFinished = cursor.MaxLocalSequenceID != "", cursor.PullFinished

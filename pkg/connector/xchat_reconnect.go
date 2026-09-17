@@ -189,8 +189,13 @@ func (tc *TwitterClient) processXChatInboxPage(
 	}
 	log := zerolog.Ctx(ctx)
 	var pageMissing []string
+	unavailableCount := 0
 	for i := range page.Items {
 		item := &page.Items[i]
+		if item.ConversationUnavailable {
+			unavailableCount++
+			continue
+		}
 		if item.ConversationDetail.ConversationID == "" {
 			return nil, fmt.Errorf("XChat inbox item %d has no conversation ID", i)
 		}
@@ -198,6 +203,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 			totalItems.Add(1)
 		}
 		pageMissing = append(pageMissing, tc.cacheUsersFromItem(item)...)
+	}
+	if unavailableCount > 0 {
+		log.Warn().Int("unavailable_conversations", unavailableCount).Msg("Skipping unavailable XChat conversations")
 	}
 
 	if len(pageMissing) > 0 {
@@ -214,6 +222,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 	g.SetLimit(10)
 	for i := range page.Items {
 		item := &page.Items[i]
+		if item.ConversationUnavailable {
+			continue
+		}
 		g.Go(func() error {
 			conversationID := item.ConversationDetail.ConversationID
 			keyErr := processor.ProcessKeyChangeEvents(pageCtx, item)
