@@ -2,9 +2,9 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/rs/zerolog"
@@ -284,6 +284,7 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 	setMaxSequenceID func(string),
 	getMessagePullVersion func() *int,
 	setMessagePullVersion func(*int),
+	drain twittermeow.XChatLiveDrain,
 ) error {
 	tc.xchatInboxSyncLock.Lock()
 	defer tc.xchatInboxSyncLock.Unlock()
@@ -300,17 +301,15 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 	}
 
 	processor := tc.client.GetXChatProcessor()
-	var stagedMaxSequenceID string
-	var stagedMaxLock sync.Mutex
-	processor.SetSequenceIDCallback(func(sequenceID string) {
-		stagedMaxLock.Lock()
-		stagedMaxSequenceID = maxXChatSequenceID(stagedMaxSequenceID, sequenceID)
-		stagedMaxLock.Unlock()
-	})
-	defer processor.SetSequenceIDCallback(setMaxSequenceID)
+	publishedSequence := maxSequenceID
+	processor.SetSequenceIDCallback(nil)
+	defer func() {
+		processor.CapHandledSequenceID(publishedSequence)
+		processor.SetSequenceIDCallback(setMaxSequenceID)
+	}()
 
 	var totalItems atomic.Int32
-	result, err := runXChatInboxCatchup(ctx, xchatInboxCatchupState{
+	result, err := runXChatPriorityCatchup(ctx, xchatInboxCatchupState{
 		MaxSequenceID:      maxSequenceID,
 		MessagePullVersion: messagePullVersion,
 		Cursor:             xchatInboxCursorFromMetadata(meta.XChatInboxCursor),
@@ -332,23 +331,26 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 		},
 		ProcessPage: func(ctx context.Context, page response.XChatInboxPage) (xchatInboxPageProcessResult, error) {
 			_, err := tc.processXChatInboxPage(ctx, page, &totalItems, true)
-			stagedMaxLock.Lock()
-			observedMax := stagedMaxSequenceID
-			stagedMaxLock.Unlock()
-			observedMax = maxXChatSequenceID(observedMax, processor.MaxHandledSequenceID())
 			return xchatInboxPageProcessResult{
-				MaxSequenceID:     observedMax,
 				CheckpointBlocked: processor.SequenceCheckpointBlocked(),
 			}, err
 		},
-		Checkpoint: tc.saveXChatInboxCheckpoint,
-	})
+	}, tc.prepareXChatSnapshotProfiles, processor.ConversationRecoveryPending, drain)
 	if err != nil {
 		return err
 	}
 
-	setMaxSequenceID(result.MaxSequenceID)
-	setMessagePullVersion(result.MessagePullVersion)
+	if !processor.SequenceCheckpointBlocked() {
+		if err = tc.saveXChatInboxCheckpoint(ctx, nil, result.MaxSequenceID, result.MessagePullVersion); err != nil {
+			return err
+		}
+		publishedSequence = result.MaxSequenceID
+	}
+	setMaxSequenceID(publishedSequence)
+	if !processor.SequenceCheckpointBlocked() {
+		setMessagePullVersion(result.MessagePullVersion)
+	}
+	result.CheckpointBlocked = processor.SequenceCheckpointBlocked()
 	completionLog := log.Info()
 	if result.CheckpointBlocked {
 		completionLog = log.Warn()
@@ -356,8 +358,168 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 	completionLog.
 		Int("pages", result.Pages).
 		Int("items", result.Items).
-		Str("max_sequence_id", result.MaxSequenceID).
+		Str("max_sequence_id", publishedSequence).
 		Bool("checkpoint_blocked", result.CheckpointBlocked).
 		Msg("XChat reconnect catch-up completed")
 	return nil
+}
+
+func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, ops xchatInboxCatchupOps, prepare func(context.Context, []response.XChatInboxPage) error, recoveryPending func(string) bool, drain twittermeow.XChatLiveDrain) (xchatInboxCatchupResult, error) {
+	var pages []response.XChatInboxPage
+	bufferedBytes, bufferedItems := 0, 0
+	fallback := drain == nil
+	collect := ops
+	collect.Checkpoint = nil
+	seen := map[payload.XChatCursor]bool{}
+	collect.FetchNext = func(ctx context.Context, vars *payload.GetInboxPageRequestQueryVariables) (response.XChatInboxPage, error) {
+		if !fallback {
+			key := *vars.ContinueCursor
+			if seen[key] {
+				return response.XChatInboxPage{}, fmt.Errorf("XChat inbox cursor cycle")
+			}
+			seen[key] = true
+		}
+		return ops.FetchNext(ctx, vars)
+	}
+	collect.ProcessPage = func(ctx context.Context, page response.XChatInboxPage) (xchatInboxPageProcessResult, error) {
+		if !fallback {
+			encoded, err := json.Marshal(page)
+			if err != nil {
+				return xchatInboxPageProcessResult{}, err
+			}
+			bufferedBytes += len(encoded)
+			bufferedItems += len(page.Items)
+			fallback = len(pages) >= 128 || bufferedBytes > 16<<20 || bufferedItems > 4096 || page.MessageEventsCursor != nil
+			for i := range page.Items {
+				fallback = fallback || !twittermeow.XChatInboxItemIsConversationScoped(&page.Items[i])
+			}
+		}
+		if fallback {
+			seen = nil
+			for _, buffered := range pages {
+				if _, err := ops.ProcessPage(ctx, buffered); err != nil {
+					return xchatInboxPageProcessResult{}, err
+				}
+			}
+			pages = nil
+			processed, err := ops.ProcessPage(ctx, page)
+			// Ignore sequence progress from on-demand history.
+			processed.MaxSequenceID = ""
+			if page.MessageEventsCursor != nil {
+				processed.MaxSequenceID = page.MessageEventsCursor.MaxLocalSequenceID
+				for _, encoded := range page.EncodedMessageEvents {
+					if event, decodeErr := twittermeow.DecodeMessageEvent(encoded); decodeErr == nil && event.SequenceId != nil {
+						processed.MaxSequenceID = maxXChatSequenceID(processed.MaxSequenceID, *event.SequenceId)
+					}
+				}
+			}
+			return processed, err
+		}
+		pages = append(pages, page)
+		return xchatInboxPageProcessResult{}, nil
+	}
+	result, err := runXChatInboxCatchup(ctx, state, collect)
+	if err != nil {
+		return result, err
+	}
+	if !fallback {
+		if err = prepare(ctx, pages); err != nil {
+			return result, err
+		}
+		pending := map[string][]response.XChatInboxItem{}
+		known := map[string]bool{}
+		order := []string{}
+		for _, page := range pages {
+			for _, item := range page.Items {
+				id := item.ConversationDetail.ConversationID
+				known[id] = true
+				if _, ok := pending[id]; !ok {
+					order = append(order, id)
+				}
+				pending[id] = append(pending[id], item)
+			}
+		}
+		apply := func(ctx context.Context, items []response.XChatInboxItem) error {
+			for _, item := range items {
+				if _, err := ops.ProcessPage(ctx, response.XChatInboxPage{Items: []response.XChatInboxItem{item}}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		applyIDs := func(ids []string) error {
+			for _, id := range ids {
+				if err := apply(ctx, pending[id]); err != nil {
+					return err
+				}
+				delete(pending, id)
+			}
+			return nil
+		}
+		before := func(message *payload.Message) error {
+			ids := twittermeow.XChatMessageConversations(message)
+			if ids == nil {
+				return applyIDs(order)
+			}
+			if err := applyIDs(ids); err != nil {
+				return err
+			}
+			for _, id := range ids {
+				if !known[id] || recoveryPending(id) {
+					return applyIDs(order)
+				}
+			}
+			return nil
+		}
+		for offset := 0; offset < len(order); offset += 10 {
+			if err = drain(before); err != nil {
+				return result, err
+			}
+			group, groupCtx := errgroup.WithContext(ctx)
+			for _, id := range order[offset:min(offset+10, len(order))] {
+				items := pending[id]
+				delete(pending, id)
+				group.Go(func() error { return apply(groupCtx, items) })
+			}
+			if err = group.Wait(); err != nil {
+				return result, err
+			}
+		}
+	}
+	if drain != nil {
+		err = drain(nil)
+	}
+	return result, err
+}
+
+// Deferred rooms must use the newest profiles from the snapshot.
+func (tc *TwitterClient) prepareXChatSnapshotProfiles(ctx context.Context, pages []response.XChatInboxPage) error {
+	var missing []string
+	strip := func(input []response.XChatUserResult) []response.XChatUserResult {
+		users := append([]response.XChatUserResult(nil), input...)
+		for i := range users {
+			if id, _ := xchatUserFromResult(users[i]); id != "" {
+				users[i].RestID = id
+				users[i].Result = nil
+			}
+		}
+		return users
+	}
+	for p := range pages {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pages[p].Items = append([]response.XChatInboxItem(nil), pages[p].Items...)
+		for i := range pages[p].Items {
+			missing = append(missing, tc.cacheUsersFromItem(&pages[p].Items[i])...)
+			detail := &pages[p].Items[i].ConversationDetail
+			detail.ParticipantsResults = strip(detail.ParticipantsResults)
+			detail.GroupMembersResults = strip(detail.GroupMembersResults)
+			detail.GroupAdminsResults = strip(detail.GroupAdminsResults)
+		}
+	}
+	if err := tc.ensureUsersInCacheByID(ctx, missing); err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to prefetch snapshot users")
+	}
+	return ctx.Err()
 }

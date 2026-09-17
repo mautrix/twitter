@@ -149,7 +149,7 @@ func (p *XChatEventProcessor) SetSequenceIDCallback(callback SequenceIDCallback)
 }
 
 // MaxHandledSequenceID returns the highest event sequence that completed
-// handling during this connection, even while a gap blocks publication.
+// handling, capped at the handoff cut while queued live frames remain.
 func (p *XChatEventProcessor) MaxHandledSequenceID() string {
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
@@ -229,6 +229,28 @@ func (p *XChatEventProcessor) ConversationGapUnresolved(conversationID string) b
 	defer p.sequenceStateLock.Unlock()
 	_, unresolved := p.unresolvedConversationGaps[conversationID]
 	return unresolved
+}
+
+func (p *XChatEventProcessor) CapHandledSequenceID(limit string) {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if compareXChatSequenceIDs(p.maxHandledSequenceID, limit) > 0 {
+		p.maxHandledSequenceID = limit
+	}
+}
+
+func (p *XChatEventProcessor) ConversationRecoveryPending(conversationID string) bool {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if _, pending := p.unresolvedConversationGaps[conversationID]; pending {
+		return true
+	}
+	for _, id := range p.failedEvents {
+		if id == conversationID {
+			return true
+		}
+	}
+	return false
 }
 
 // ResetSequenceState clears connection-local ordering state before a full
