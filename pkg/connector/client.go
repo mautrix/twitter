@@ -406,13 +406,14 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		copy := *value
 		msgPullVersion = &copy
 	}
-	tc.client.SetXChatConnectHandler(func(connectCtx context.Context) error {
+	tc.client.SetXChatConnectHandler(func(connectCtx context.Context, drain twittermeow.XChatLiveDrain) error {
 		return tc.syncXChatInboxAfterConnect(
 			connectCtx,
 			getMaxSeqID,
 			setMaxSeqID,
 			getMessagePullVersion,
 			setMessagePullVersion,
+			drain,
 		)
 	})
 
@@ -722,6 +723,8 @@ func (tc *TwitterClient) cacheUsersFromItem(item *response.XChatInboxItem) []str
 // HandleConversationDataRefresh is called when conversation data is fetched on-demand.
 // It syncs the room data (members, name, avatar, etc.) from the fetched conversation data.
 func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conversationID string, item *response.XChatInboxItem) {
+	tc.xchatInboxSyncLock.Lock()
+	defer tc.xchatInboxSyncLock.Unlock()
 	if item == nil {
 		return
 	}

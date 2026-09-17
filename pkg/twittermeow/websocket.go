@@ -16,6 +16,7 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
 
 // Reconnect configuration
@@ -65,7 +66,7 @@ type xchatWebsocketClient struct {
 	writeMu    sync.Mutex
 
 	tokenProvider     func(context.Context, bool) (string, error)
-	connectionRunner  func(context.Context, string, zerolog.Logger, func(context.Context) error) (bool, error)
+	connectionRunner  func(context.Context, string, zerolog.Logger, func(context.Context, XChatLiveDrain) error) (bool, error)
 	initialRetryDelay time.Duration
 	maximumRetryDelay time.Duration
 }
@@ -160,16 +161,16 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 			// Run connection (blocks until disconnect)
 			readyThisAttempt := false
 			var connectedAt time.Time
-			refreshToken, err := xc.runConnectionAttempt(ctx, token, log, func(connectionCtx context.Context) error {
+			refreshToken, err := xc.runConnectionAttempt(ctx, token, log, func(connectionCtx context.Context, drain XChatLiveDrain) error {
+				if xc.client.xchatProcessor != nil {
+					xc.client.xchatProcessor.MarkReconnected()
+				}
 				if connectHandler := xc.client.getXChatConnectHandler(); connectHandler != nil {
 					log.Info().Msg("Running XChat socket handoff catch-up")
-					if err := connectHandler(connectionCtx); err != nil {
+					if err := connectHandler(connectionCtx, drain); err != nil {
 						return fmt.Errorf("socket handoff catch-up failed: %w", err)
 					}
 					log.Info().Msg("Finished XChat socket handoff catch-up")
-				}
-				if xc.client.xchatProcessor != nil {
-					xc.client.xchatProcessor.MarkReconnected()
 				}
 				readyThisAttempt = true
 				connectedAt = time.Now()
@@ -226,7 +227,7 @@ func (xc *xchatWebsocketClient) runConnectionAttempt(
 	ctx context.Context,
 	token string,
 	log zerolog.Logger,
-	onConnected func(context.Context) error,
+	onConnected func(context.Context, XChatLiveDrain) error,
 ) (refreshToken bool, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -299,7 +300,7 @@ func (xc *xchatWebsocketClient) runConnection(
 	ctx context.Context,
 	token string,
 	log zerolog.Logger,
-	onConnected func(context.Context) error,
+	onConnected func(context.Context, XChatLiveDrain) error,
 ) (bool, error) {
 	wsURL, err := url.Parse(endpoints.XCHAT_WEBSOCKET_URL)
 	if err != nil {
@@ -379,49 +380,59 @@ func (xc *xchatWebsocketClient) runConnection(
 		}
 	}()
 
-	if onConnected != nil {
-		if err := onConnected(pingCtx); err != nil {
-			return false, fmt.Errorf("xchat connected hook failed: %w", err)
-		}
-	}
-
-	for {
-		msgType, data, err := conn.Read(pingCtx)
-		if err != nil {
-			status := websocket.CloseStatus(err)
-			closeReceived := status != -1
-			if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
-				log.Debug().Err(err).Uint32("status", uint32(status)).Msg("XChat websocket closed by server")
-			} else if ctx.Err() != nil {
-				log.Debug().Err(err).Msg("XChat websocket read stopped by context")
-			} else {
-				log.Error().Err(err).Uint32("status", uint32(status)).Msg("XChat websocket read failed")
+	conn.SetReadLimit(32768)
+	readCtx, cancelRead := context.WithCancelCause(pingCtx)
+	frames := make(chan []byte, 32)
+	done := make(chan struct{})
+	var readErr error
+	var refreshToken bool
+	go func() {
+		defer close(done)
+		defer close(frames)
+		for {
+			typ, data, err := conn.Read(readCtx)
+			if err != nil {
+				readErr = fmt.Errorf("read XChat websocket: %w", err)
+				status := websocket.CloseStatus(err)
+				refreshToken = status != -1
+				if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+					log.Debug().Err(err).Uint32("status", uint32(status)).Msg("XChat websocket closed by server")
+				} else if readCtx.Err() != nil {
+					log.Debug().Err(err).Msg("XChat websocket read stopped by context")
+				} else {
+					log.Error().Err(err).Uint32("status", uint32(status)).Msg("XChat websocket read failed")
+				}
+				cancelRead(readErr)
+				return
 			}
-			return closeReceived, fmt.Errorf("read failed: %w", err)
+			log.Debug().Stringer("type", typ).Int("bytes", len(data)).Msg("Received XChat websocket message")
+			if typ != websocket.MessageBinary || len(data) == 0 {
+				continue
+			}
+			select {
+			case frames <- data:
+			case <-readCtx.Done():
+				return
+			}
 		}
-
-		// Handle message. Currently we just trace-log; hook processing here as formats become known.
-		log.Debug().
-			Str("type", msgType.String()).
-			Int("bytes", len(data)).
-			Msg("Received XChat websocket message")
-
-		if msgType != websocket.MessageBinary {
-			log.Debug().Int("bytes", len(data)).Msg("Skipping non-binary XChat websocket frame")
-			continue
+	}()
+	defer func() { cancelRead(context.Canceled); <-done }()
+	result := func(err error) (bool, error) {
+		cancelRead(err)
+		<-done
+		if readErr != nil && (refreshToken || !errors.Is(readErr, context.Canceled)) {
+			return refreshToken, readErr
 		}
-		if len(data) == 0 {
-			log.Debug().Msg("Skipping empty XChat websocket frame")
-			continue
+		return false, err
+	}
+	process := func(data []byte, before func(*payload.Message) error) error {
+		if err := readCtx.Err(); err != nil {
+			return err
 		}
-
 		decoded, err := decodeXChatPayload(data)
 		if err != nil {
-			log.Warn().
-				Err(err).
-				Int("bytes", len(data)).
-				Msg("Failed to decode XChat websocket payload")
-			return false, fmt.Errorf("decode XChat websocket payload: %w", err)
+			log.Warn().Err(err).Int("bytes", len(data)).Msg("Failed to decode XChat websocket payload")
+			return err
 		}
 		batchedEventCount := 0
 		if decoded.BatchedMessageEvents != nil {
@@ -432,11 +443,44 @@ func (xc *xchatWebsocketClient) runConnection(
 			Bool("has_instruction", decoded.MessageInstruction != nil).
 			Int("batched_event_count", batchedEventCount).
 			Msg("Decoded XChat websocket payload")
-
-		// Process the message through the XChat processor
-		if err := xc.client.xchatProcessor.ProcessMessage(pingCtx, decoded); err != nil {
+		if before != nil {
+			if err = before(decoded); err != nil {
+				return err
+			}
+		}
+		err = xc.client.xchatProcessor.ProcessMessage(readCtx, decoded)
+		if err != nil {
 			log.Err(err).Msg("Failed to process XChat message")
-			return false, fmt.Errorf("process XChat websocket payload: %w", err)
+		}
+		return err
+	}
+	receive := func(before func(*payload.Message) error) error {
+		select {
+		case data, ok := <-frames:
+			if !ok {
+				return context.Cause(readCtx)
+			}
+			return process(data, before)
+		case <-readCtx.Done():
+			return context.Cause(readCtx)
+		}
+	}
+	drain := func(before func(*payload.Message) error) error {
+		for range len(frames) {
+			if err := receive(before); err != nil {
+				return err
+			}
+		}
+		return readCtx.Err()
+	}
+	if onConnected != nil {
+		if err := onConnected(readCtx, drain); err != nil {
+			return result(err)
+		}
+	}
+	for {
+		if err := receive(nil); err != nil {
+			return result(err)
 		}
 	}
 }
@@ -445,4 +489,81 @@ func (xc *xchatWebsocketClient) stop() {
 	if cancel := xc.shouldStop.Load(); cancel != nil {
 		(*cancel)()
 	}
+}
+
+// XChatLiveDrain calls before, then dispatches, for a finite FIFO prefix.
+type XChatLiveDrain func(before func(*payload.Message) error) error
+
+// XChatMessageConversations returns nil when a payload needs a global barrier.
+func XChatMessageConversations(message *payload.Message) []string {
+	return xchatMessageConversations(message, "")
+}
+
+func xchatMessageConversations(message *payload.Message, snapshotConversation string) []string {
+	if message == nil {
+		return nil
+	}
+	ids := []string{}
+	add := func(id *string) bool {
+		if id == nil || *id == "" || (snapshotConversation != "" && *id != snapshotConversation) {
+			return false
+		}
+		ids = append(ids, *id)
+		return true
+	}
+	events := []*payload.MessageEvent{}
+	if message.MessageEvent != nil {
+		events = append(events, message.MessageEvent)
+	}
+	if message.BatchedMessageEvents != nil {
+		events = append(events, message.BatchedMessageEvents.MessageEvents...)
+	}
+	if len(events) == 0 && message.MessageInstruction == nil {
+		return nil
+	}
+	for _, event := range events {
+		if event == nil || !add(event.ConversationId) {
+			return nil
+		}
+		if event.Detail == nil {
+			continue
+		}
+		if deletion := event.Detail.ConversationDeleteEvent; deletion != nil && (snapshotConversation == "" || !add(deletion.ConversationId)) {
+			return nil
+		}
+		if typing := event.Detail.MessageTypingEvent; typing != nil && typing.ConversationId != nil && !add(typing.ConversationId) {
+			return nil
+		}
+	}
+	return ids
+}
+
+func XChatInboxItemIsConversationScoped(item *response.XChatInboxItem) bool {
+	id := item.ConversationDetail.ConversationID
+	if id == "" {
+		return false
+	}
+	encoded := append([]string{}, item.LatestMessageEvents...)
+	encoded = append(encoded, item.EncodedMessageEvents...)
+	encoded = append(encoded, item.LatestConversationKeyChangeEvents...)
+	encoded = append(encoded, item.LatestNotifiableMessageCreateEvent)
+	for _, read := range item.LatestReadEventsPerParticipant {
+		encoded = append(encoded, read.LatestMarkConversationReadEvent)
+	}
+	for _, raw := range encoded {
+		if raw == "" {
+			continue
+		}
+		event, err := DecodeMessageEvent(raw)
+		if err != nil {
+			return false
+		}
+		if event.ConversationId == nil || *event.ConversationId == "" {
+			event.ConversationId = &id
+		}
+		if xchatMessageConversations(&payload.Message{MessageEvent: event}, id) == nil {
+			return false
+		}
+	}
+	return true
 }
