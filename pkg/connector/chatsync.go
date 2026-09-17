@@ -89,14 +89,23 @@ func xchatInboxItemTrust(item *response.XChatInboxItem) *bool {
 }
 
 func applyXChatTrustToChatInfo(info *bridgev2.ChatInfo, trusted bool) {
-	info.MessageRequest = ptr.Ptr(!trusted)
 	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
 		meta, ok := portal.Metadata.(*PortalMetadata)
-		if !ok || meta == nil || (meta.XChatTrusted != nil && *meta.XChatTrusted == trusted) {
+		if !ok || meta == nil {
 			return false
 		}
-		meta.XChatTrusted = ptr.Ptr(trusted)
-		return true
+		effectiveTrusted := trusted
+		if meta.XChatTrusted != nil && *meta.XChatTrusted {
+			effectiveTrusted = true
+		}
+		messageRequest := !effectiveTrusted
+		changed := portal.MessageRequest != messageRequest
+		portal.MessageRequest = messageRequest
+		if meta.XChatTrusted == nil || *meta.XChatTrusted != effectiveTrusted {
+			meta.XChatTrusted = ptr.Ptr(effectiveTrusted)
+			changed = true
+		}
+		return changed
 	})
 }
 
@@ -120,8 +129,11 @@ func (tc *TwitterClient) syncXChatTrust(
 		return false
 	}
 	meta, _ := portal.Metadata.(*PortalMetadata)
-	messageRequest := !*trusted
-	if meta != nil && meta.XChatTrusted != nil && *meta.XChatTrusted == *trusted && portal.MessageRequest == messageRequest {
+	effectiveTrusted := *trusted
+	if meta != nil && meta.XChatTrusted != nil && *meta.XChatTrusted {
+		effectiveTrusted = true
+	}
+	if meta != nil && meta.XChatTrusted != nil && *meta.XChatTrusted == effectiveTrusted && portal.MessageRequest == !effectiveTrusted {
 		return true
 	}
 
