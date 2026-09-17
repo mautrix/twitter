@@ -516,8 +516,12 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	conversationID := ptr.Val(evt.ConversationId)
 	contentsBytes := mce.Contents
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
+	isUserMetadata := isEncryptedMessageCreateEvent(mce) && mce.IsUserMetadata()
 
 	if len(contentsBytes) == 0 {
+		if isUserMetadata {
+			return errors.New("XChat user metadata event has no contents")
+		}
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Str("conversation_id", conversationID).
@@ -568,6 +572,14 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			Str("conversation_id", conversationID).
 			Str("key_version", keyVersion).
 			Logger()
+		if isUserMetadata {
+			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
+			if err != nil {
+				return fmt.Errorf("decrypt XChat user metadata: %w", err)
+			}
+			return nil
+		}
+
 		contents, err = crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
 		if err != nil {
 			p.log.Warn().
