@@ -405,7 +405,7 @@ func (xc *xchatWebsocketClient) runConnection(
 				cancelRead(readErr)
 				return
 			}
-			log.Debug().Str("type", typ.String()).Int("bytes", len(data)).Msg("Received XChat websocket message")
+			log.Debug().Stringer("type", typ).Int("bytes", len(data)).Msg("Received XChat websocket message")
 			if typ != websocket.MessageBinary || len(data) == 0 {
 				continue
 			}
