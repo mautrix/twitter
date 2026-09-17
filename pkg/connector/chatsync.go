@@ -863,13 +863,11 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 		}
 	}
 
-	messageRequest := !conv.Trusted
-
 	info := &bridgev2.ChatInfo{
-		Members:        tc.buildChatMembersFromUserIDs(ctx, conv.ConversationID, participantIDs, inbox),
-		CanBackfill:    true,
-		MessageRequest: &messageRequest,
+		Members:     tc.buildChatMembersFromUserIDs(ctx, conv.ConversationID, participantIDs, inbox),
+		CanBackfill: true,
 	}
+	applyXChatTrustToChatInfo(info, conv.Trusted)
 
 	isGroup := conv.Type == ConversationTypeGroupDM
 	if isGroup {
