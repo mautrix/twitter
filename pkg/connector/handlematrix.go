@@ -1023,8 +1023,8 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 		err = nil
 	}
 	if err == nil && msg != nil && msg.Portal != nil {
-		meta, ok := msg.Portal.Metadata.(*PortalMetadata)
-		if ok && meta.IsXChatConversation() {
+		_, ok := msg.Portal.Metadata.(*PortalMetadata)
+		if ok {
 			chatInfo := &bridgev2.ChatInfo{}
 			applyXChatTrustToChatInfo(chatInfo, true)
 			msg.Portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
