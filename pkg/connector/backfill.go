@@ -11,6 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
+	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -38,7 +39,11 @@ type restBackfillOptions struct {
 	IgnoreAnchorForQuery bool
 }
 
-func (tc *TwitterClient) GetBackfillMaxBatchCount(_ context.Context, portal *bridgev2.Portal, _ *database.BackfillTask) int {
+func (tc *TwitterClient) GetBackfillMaxBatchCount(_ context.Context, portal *bridgev2.Portal, task *database.BackfillTask) int {
+	if task != nil {
+		// The initial cap must not disable on-demand history.
+		return -1
+	}
 	overrideKey := "dm"
 	if strings.HasPrefix(ParsePortalID(portal.PortalKey.ID), "g") {
 		overrideKey = "group_dm"
@@ -93,10 +98,43 @@ func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
 	if err != nil {
 		return nil, err
 	}
+	if restResp != nil && restParams.Count > 0 && len(restResp.Messages) > restParams.Count {
+		// Preserve the protocol when the caller trims an oversized final page.
+		restResp.Cursor = networkid.PaginationCursor(restPaginationCursorPrefix + string(restResp.Messages[0].ID))
+	}
 	return ensureRESTFallbackCursor(restResp), nil
 }
 
 func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	bounded := fetchParams.Forward && fetchParams.AnchorMessage == nil || fetchParams.Task != nil && fetchParams.Task.FromQueue
+	if bounded {
+		count, err := tc.remainingInitialHistory(ctx, fetchParams.Portal, fetchParams.Task)
+		if err != nil {
+			return nil, err
+		}
+		if count <= 0 {
+			return &bridgev2.FetchMessagesResponse{HasMore: true, MoreRequiresSlowFetch: true}, nil
+		}
+		pageSize := payload.DefaultGetConversationPageQuerySettings().ConversationEventLimit
+		if fetchParams.Count <= 0 {
+			fetchParams.Count = pageSize
+		}
+		fetchParams.Count = min(fetchParams.Count, count, pageSize)
+	}
+	resp, err := tc.fetchMessages(ctx, fetchParams)
+	if err == nil && resp != nil && bounded && len(resp.Messages) > fetchParams.Count {
+		rest := !fetchParams.Portal.Metadata.(*PortalMetadata).CanBackfillXChat() || strings.HasPrefix(string(resp.Cursor), "rest_cursor:")
+		resp.Messages = resp.Messages[len(resp.Messages)-fetchParams.Count:]
+		resp.Cursor = networkid.PaginationCursor(resp.Messages[0].ID)
+		if rest {
+			resp.Cursor = networkid.PaginationCursor(restPaginationCursorPrefix + string(resp.Cursor))
+		}
+		resp.HasMore = true
+	}
+	return resp, err
+}
+
+func (tc *TwitterClient) fetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationID := ParsePortalID(fetchParams.Portal.PortalKey.ID)
 	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
 	cursorMode := parseRESTBackfillCursorMode(fetchParams.Cursor)
@@ -112,7 +150,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		return tc.fetchRESTMessagesForCursorMode(ctx, conversationID, fetchParams, cursorMode)
 	}
 
-	if fetchParams.Forward {
+	if fetchParams.Forward && fetchParams.AnchorMessage != nil {
 		return tc.fetchXChatForwardCatchup(ctx, conversationID, fetchParams)
 	}
 
@@ -427,6 +465,27 @@ type xchatUnconvertedMessage struct {
 	timestamp time.Time
 }
 
+func (tc *TwitterClient) backfillReaction(data *types.MessageReaction) *bridgev2.BackfillReaction {
+	sender := data.SenderID
+	if sender == "" {
+		sender = tc.currentUserID()
+	}
+	emoji := variationselector.FullyQualify(data.EmojiReaction)
+	if emoji == "" {
+		emoji = variationselector.FullyQualify(map[string]string{
+			"funny": "😂", "surprised": "😲", "sad": "😢", "like": "❤",
+			"excited": "🔥", "agree": "👍", "disagree": "👎",
+		}[data.ReactionKey])
+	}
+	if emoji == "" {
+		return nil
+	}
+	return &bridgev2.BackfillReaction{
+		Sender: tc.MakeEventSender(sender), Emoji: emoji, EmojiID: networkid.EmojiID(emoji),
+		Timestamp: methods.ParseSnowflake(data.ID),
+	}
+}
+
 func normalizeXChatBackfillEventConversation(evt *payload.MessageEvent, conversationID string) bool {
 	if evt == nil || conversationID == "" {
 		return false
@@ -500,6 +559,11 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 
 	var keyChangeEventCount, nonMessageEventCount, convertFailedCount int
 	skipReasonCounts := make(map[string]int)
+	type reactionKey struct{ target, sender, emoji string }
+	reactions := make(map[reactionKey]*bridgev2.BackfillReaction)
+	edits := make(map[string]*types.MessageData)
+	deleted := make(map[string]bool)
+	var decoded []*payload.MessageEvent
 
 	for _, enc := range page.EncodedMessageEvents {
 		evt, err := twittermeow.DecodeMessageEvent(enc)
@@ -507,11 +571,30 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 			result.decodeFailedCount++
 			continue
 		}
+		decoded = append(decoded, evt)
+	}
+	slices.SortFunc(decoded, func(a, b *payload.MessageEvent) int {
+		aKey := a.Detail != nil && a.Detail.ConversationKeyChangeEvent != nil
+		bKey := b.Detail != nil && b.Detail.ConversationKeyChangeEvent != nil
+		if aKey != bKey {
+			if aKey {
+				return -1
+			}
+			return 1
+		}
+		return -compareIntStrings(ptr.Val(a.SequenceId), ptr.Val(b.SequenceId))
+	})
+	for _, evt := range decoded {
 		advanceCursor(ptr.Val(evt.SequenceId))
 		advanceOldestEventTimestamp(ptr.Val(evt.CreatedAtMsec))
 		if evt.Detail == nil {
 			result.decodeFailedCount++
 			continue
+		}
+		if del := evt.Detail.MessageDeleteEvent; del != nil {
+			for _, target := range del.SequenceIds {
+				deleted[target] = true
+			}
 		}
 
 		if evt.Detail.ConversationKeyChangeEvent != nil {
@@ -526,7 +609,34 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 			continue
 		}
 
-		msg, ts, streamOrder, skipReason := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
+		msg, ts, streamOrder, skipReason, entry := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
+		if entry != nil && entry.MessageEdit != nil {
+			edit := twittermeow.ConvertXChatMessageEdit(evt, entry.MessageEdit, "")
+			if edits[edit.MessageData.ID] == nil {
+				edits[edit.MessageData.ID] = &edit.MessageData
+			}
+			edits[edit.MessageData.ID].EditCount++
+			continue
+		}
+		if entry != nil && (entry.ReactionAdd != nil || entry.ReactionRemove != nil) {
+			var reaction *types.MessageReaction
+			if entry.ReactionAdd != nil {
+				reaction = (*types.MessageReaction)(twittermeow.ConvertXChatReactionAdd(evt, entry.ReactionAdd))
+			} else {
+				reaction = (*types.MessageReaction)(twittermeow.ConvertXChatReactionRemove(evt, entry.ReactionRemove))
+			}
+			key := reactionKey{reaction.MessageID, reaction.SenderID, reaction.EmojiReaction}
+			if key.sender == "" {
+				key.sender = tc.currentUserID()
+			}
+			if _, ok := reactions[key]; !ok {
+				reactions[key] = nil
+				if entry.ReactionAdd != nil {
+					reactions[key] = tc.backfillReaction(reaction)
+				}
+			}
+			continue
+		}
 		if msg == nil {
 			skipReasonCounts[skipReason]++
 			if isCriticalXChatBackfillSkip(skipReason) {
@@ -541,6 +651,11 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 		msgID := msg.SequenceID
 		if msgID == "" {
 			msgID = msg.ID
+		}
+		if deleted[msgID] {
+			continue
+		} else if edit := edits[msgID]; edit != nil {
+			msg.MessageData.Text, msg.MessageData.Entities, msg.MessageData.EditCount = edit.Text, edit.Entities, edit.EditCount
 		}
 
 		if ts.IsZero() && msg.Time != "" {
@@ -585,6 +700,13 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 	}
 
 	sortBackfillMessages(result.messages)
+	for _, msg := range result.messages {
+		for key, reaction := range reactions {
+			if MakeMessageID(key.target) == msg.ID && reaction != nil {
+				msg.Reactions = append(msg.Reactions, reaction)
+			}
+		}
+	}
 
 	zerolog.Ctx(ctx).Debug().
 		Str("conversation_id", conversationID).
@@ -641,7 +763,7 @@ func isEncryptedXChatBackfillMessage(mce *payload.MessageCreateEvent) bool {
 	return mce != nil && ptr.Val(mce.ConversationKeyVersion) != ""
 }
 
-func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context, conversationID string, evt *payload.MessageEvent) (*types.Message, time.Time, int64, string) {
+func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context, conversationID string, evt *payload.MessageEvent) (*types.Message, time.Time, int64, string, *payload.MessageEntryContents) {
 	mce := evt.Detail.MessageCreateEvent
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	contentsBytes := mce.Contents
@@ -649,9 +771,9 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 
 	if len(contentsBytes) == 0 {
 		if isUserMetadata {
-			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
+			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed, nil
 		}
-		return nil, time.Time{}, 0, xchatSkipReasonEmptyContents
+		return nil, time.Time{}, 0, xchatSkipReasonEmptyContents, nil
 	}
 
 	var entry *payload.MessageEntryContents
@@ -660,7 +782,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 		km := tc.client.GetKeyManager()
 		convKey, err := km.GetConversationKey(ctx, conversationID, keyVersion)
 		if err != nil || convKey == nil || len(convKey.Key) == 0 {
-			return nil, time.Time{}, 0, xchatSkipReasonKeyMissing
+			return nil, time.Time{}, 0, xchatSkipReasonKeyMissing, nil
 		}
 
 		debugLog := zerolog.Ctx(ctx).With().
@@ -672,34 +794,34 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 		if isUserMetadata {
 			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
 			if err != nil {
-				return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
+				return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed, nil
 			}
-			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
+			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata, nil
 		}
 
 		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
 		if err != nil {
-			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
+			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed, nil
 		}
 		entry = decrypted
 	} else {
 		parsed, err := crypto.ParseMessageEntryContentsBytes(contentsBytes)
 		if err != nil {
-			return nil, time.Time{}, 0, xchatSkipReasonParseFailed
+			return nil, time.Time{}, 0, xchatSkipReasonParseFailed, nil
 		}
 		entry = parsed
 	}
 	if entry == nil || entry.Message == nil {
-		return nil, time.Time{}, 0, xchatSkipReasonEmptyEntry
+		return nil, time.Time{}, 0, xchatSkipReasonEmptyEntry, entry
 	}
 
 	if entry.Message.MessageText == nil && len(entry.Message.Attachments) == 0 {
-		return nil, time.Time{}, 0, xchatSkipReasonNoContent
+		return nil, time.Time{}, 0, xchatSkipReasonNoContent, nil
 	}
 
 	msg := twittermeow.ConvertXChatMessageContentsToMessage(evt, entry.Message, keyVersion)
 	if msg == nil {
-		return nil, time.Time{}, 0, xchatSkipReasonConvertFailed
+		return nil, time.Time{}, 0, xchatSkipReasonConvertFailed, nil
 	}
 
 	msgID := msg.SequenceID
@@ -709,7 +831,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 
 	ts := methods.ParseMsecTimestamp(msg.Time)
 	streamOrder := methods.ParseSnowflakeInt(msgID)
-	return msg, ts, streamOrder, ""
+	return msg, ts, streamOrder, "", entry
 }
 
 func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context, evt *payload.MessageEvent, ckce *payload.ConversationKeyChangeEvent) error {
@@ -956,6 +1078,12 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		if streamOrder == 0 && msg.ID != "" {
 			streamOrder = methods.ParseSnowflakeInt(msg.ID)
 		}
+		reactions := make([]*bridgev2.BackfillReaction, 0, len(msg.MessageReactions))
+		for _, reaction := range msg.MessageReactions {
+			if converted := tc.backfillReaction(&reaction); converted != nil {
+				reactions = append(reactions, converted)
+			}
+		}
 
 		backfillMessages = append(backfillMessages, &bridgev2.BackfillMessage{
 			ConvertedMessage: converted,
@@ -964,6 +1092,7 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 			TxnID:            networkid.TransactionID(messageIDForBridge),
 			Timestamp:        timestamp,
 			StreamOrder:      streamOrder,
+			Reactions:        reactions,
 		})
 	}
 

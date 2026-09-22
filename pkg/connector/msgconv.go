@@ -122,7 +122,7 @@ func (tc *TwitterClient) fetchOriginalXChatMessage(ctx context.Context, conversa
 		if evt.Detail.MessageCreateEvent == nil {
 			continue
 		}
-		msg, _, _, _ := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
+		msg, _, _, _, _ := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
 		if msg != nil && msg.SequenceID == messageID {
 			return &msg.MessageData, nil
 		}

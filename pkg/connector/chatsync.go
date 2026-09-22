@@ -280,6 +280,13 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		return fmt.Errorf("get or create XChat portal: %w", err)
 	}
 	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
+	tc.deferInitialHistory(ctx, portal, chatInfo)
+	if ctx.Value(initialChatListContextKey{}) != nil {
+		chatInfo.ExtraUpdates = bridgev2.MergeExtraUpdaters(chatInfo.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
+			portal.Metadata.(*PortalMetadata).InitialReadEvents = item.LatestReadEventsPerParticipant
+			return true
+		})
+	}
 
 	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
 	// Beeper scrollback relies on the backfill task existing for the portal.
@@ -348,6 +355,9 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		Str("conversation_id", conv.ConversationID).
 		Stringer("portal_mxid", portal.MXID).
 		Msg("XChat channel synced")
+	if ctx.Value(initialChatListContextKey{}) != nil {
+		return portal.Save(ctx)
+	}
 	return nil
 }
 
@@ -659,7 +669,7 @@ func isProbablyEncryptedGroupName(encName string) bool {
 }
 
 // syncUntrustedChannels fetches and syncs message requests and legacy groups via the REST API.
-func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
+func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
@@ -668,13 +678,13 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to fetch initial inbox state for untrusted conversations")
-		return
+		return err
 	}
 
 	inbox := initialInboxState.InboxInitialState
 	if inbox == nil {
 		log.Debug().Msg("No inbox data in initial state response")
-		return
+		return fmt.Errorf("missing REST inbox state")
 	}
 
 	// Set the polling cursor for REST API polling
@@ -698,7 +708,9 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 			trustedCount++
 			if isTrustedRESTGroup(conv) {
 				legacyGroupCount++
-				tc.syncTrustedRESTGroup(ctx, conv, inbox)
+				if err := tc.syncTrustedRESTGroup(ctx, conv, inbox); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -709,7 +721,9 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 			Bool("low_quality", conv.LowQuality).
 			Str("type", string(conv.Type)).
 			Msg("Processing untrusted conversation")
-		tc.syncUntrustedConversation(ctx, conv, inbox)
+		if err := tc.syncUntrustedConversation(ctx, conv, inbox); err != nil {
+			return err
+		}
 	}
 
 	log.Info().
@@ -718,6 +732,7 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 		Int("legacy_group_conversations", legacyGroupCount).
 		Int("total_conversations", len(inbox.Conversations)).
 		Msg("Finished syncing REST conversations")
+	return nil
 }
 
 func isTrustedRESTGroup(conv *types.Conversation) bool {
@@ -728,16 +743,16 @@ func isTrustedRESTGroup(conv *types.Conversation) bool {
 	return isLegacyGroup
 }
 
-func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
+func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) error {
 	defer tc.lockGroupPortal(conv.ConversationID)()
 
 	restPortalKey := tc.MakePortalKey(conv)
 	portalKey, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
 	if err != nil {
 		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to resolve trusted REST group portal")
-		return
+		return err
 	} else if portalKey != restPortalKey || portal.MXID != "" {
-		return
+		return nil
 	}
 
 	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
@@ -749,15 +764,20 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 			Type: bridgev2.RemoteEventChatResync, PortalKey: portalKey,
 			CreatePortal: true, Timestamp: latestMessageTS,
 		},
-		ChatInfo: tc.conversationToChatInfo(ctx, conv, inbox), LatestMessageTS: latestMessageTS,
+		ChatInfo: tc.deferInitialHistory(ctx, portal, tc.conversationToChatInfo(ctx, conv, inbox)), LatestMessageTS: latestMessageTS,
+		CheckNeedsBackfillFunc: func(context.Context, *database.Message) (bool, error) {
+			return ctx.Value(initialChatListContextKey{}) == nil, nil
+		},
 	})
 	if !result.Success {
 		zerolog.Ctx(ctx).Warn().Err(result.Error).Msg("Failed to queue trusted REST group resync")
+		return fmt.Errorf("trusted REST group resync failed: %v", result.Error)
 	}
+	return portal.Save(ctx)
 }
 
 // syncUntrustedConversation syncs a single untrusted conversation.
-func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
+func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) error {
 	log := zerolog.Ctx(ctx)
 
 	_, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
@@ -765,14 +785,15 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		log.Warn().Err(err).
 			Str("conversation_id", conv.ConversationID).
 			Msg("Failed to get/create portal for untrusted conversation")
-		return
+		return err
 	}
 	if isXChatPortalForLogin(portal, tc.userLogin.ID) {
 		log.Debug().Msg("Skipping REST message-request sync for XChat conversation")
-		return
+		return nil
 	}
 
 	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
+	tc.deferInitialHistory(ctx, portal, chatInfo)
 
 	// Create Matrix room if it doesn't exist
 	if portal.MXID == "" {
@@ -782,11 +803,11 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 			log.Warn().Err(err).
 				Str("conversation_id", conv.ConversationID).
 				Msg("Failed to create Matrix room for untrusted conversation")
-			return
+			return err
 		}
 	} else {
 		// Room already exists - update MessageRequest status via ChatInfoChange
-		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventChatInfoChange,
 				PortalKey: portal.PortalKey,
@@ -796,6 +817,9 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 				ChatInfo: chatInfo,
 			},
 		})
+		if !xchatRemoteEventHandled(result) {
+			return fmt.Errorf("update REST conversation info: %v", result.Error)
+		}
 	}
 
 	// Ensure untrusted conversations also have a queue backfill task once a room exists.
@@ -810,7 +834,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		}
 	}
 	// Process messages for this conversation from inbox entries
-	if inbox != nil {
+	if inbox != nil && ctx.Value(initialChatListContextKey{}) == nil {
 		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox)
 	}
 
@@ -818,6 +842,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		Str("conversation_id", conv.ConversationID).
 		Bool("trusted", conv.Trusted).
 		Msg("Synced untrusted conversation")
+	return portal.Save(ctx)
 }
 
 // processUntrustedMessages processes message entries for an untrusted conversation.

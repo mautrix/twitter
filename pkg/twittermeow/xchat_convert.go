@@ -70,8 +70,7 @@ func ConvertXChatMessageContentsToMessage(evt *payload.MessageEvent, contents *p
 	return convertXChatMessageToTwitterMessage(evt, contents, keyVersion)
 }
 
-// convertXChatMessageEdit converts an XChat MessageEdit to types.MessageEdit.
-func convertXChatMessageEdit(evt *payload.MessageEvent, edit *payload.MessageEdit, keyVersion string) *types.MessageEdit {
+func ConvertXChatMessageEdit(evt *payload.MessageEvent, edit *payload.MessageEdit, keyVersion string) *types.MessageEdit {
 	targetMsgID := ptr.Val(edit.MessageSequenceId)
 	if targetMsgID == "" {
 		targetMsgID = ptr.Val(evt.MessageId)
@@ -255,8 +254,7 @@ func convertXChatReplyPreview(preview *payload.ReplyingToPreview) types.ReplyDat
 	}
 }
 
-// convertXChatReactionAdd converts XChat MessageReactionAdd to types.MessageReactionCreate
-func convertXChatReactionAdd(evt *payload.MessageEvent, reaction *payload.MessageReactionAdd) *types.MessageReactionCreate {
+func ConvertXChatReactionAdd(evt *payload.MessageEvent, reaction *payload.MessageReactionAdd) *types.MessageReactionCreate {
 	emoji := variationselector.FullyQualify(ptr.Val(reaction.Emoji))
 	targetMsgID := ptr.Val(reaction.MessageSequenceId)
 	if targetMsgID == "" {
@@ -275,8 +273,7 @@ func convertXChatReactionAdd(evt *payload.MessageEvent, reaction *payload.Messag
 	})
 }
 
-// convertXChatReactionRemove converts XChat MessageReactionRemove to types.MessageReactionDelete
-func convertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.MessageReactionRemove) *types.MessageReactionDelete {
+func ConvertXChatReactionRemove(evt *payload.MessageEvent, reaction *payload.MessageReactionRemove) *types.MessageReactionDelete {
 	emoji := variationselector.FullyQualify(ptr.Val(reaction.Emoji))
 	targetMsgID := ptr.Val(reaction.MessageSequenceId)
 	if targetMsgID == "" {

@@ -612,15 +612,15 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	}
 
 	if contents.ReactionAdd != nil {
-		return p.emitEvent(ctx, convertXChatReactionAdd(evt, contents.ReactionAdd))
+		return p.emitEvent(ctx, ConvertXChatReactionAdd(evt, contents.ReactionAdd))
 	}
 
 	if contents.ReactionRemove != nil {
-		return p.emitEvent(ctx, convertXChatReactionRemove(evt, contents.ReactionRemove))
+		return p.emitEvent(ctx, ConvertXChatReactionRemove(evt, contents.ReactionRemove))
 	}
 
 	if contents.MessageEdit != nil {
-		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
+		return p.emitEvent(ctx, ConvertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
 	}
 
 	// Empty MessageCreateEvent - this often happens when a message request is accepted.
@@ -1060,9 +1060,16 @@ func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *
 	encodedEvents := make([]string, 0, len(item.LatestConversationKeyChangeEvents)+len(item.EncodedMessageEvents))
 	encodedEvents = append(encodedEvents, item.LatestConversationKeyChangeEvents...)
 	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
+	encodedEvents = append(encodedEvents, item.LatestMessageEvents...)
+	if item.LatestNotifiableMessageCreateEvent != "" {
+		encodedEvents = append(encodedEvents, item.LatestNotifiableMessageCreateEvent)
+	}
 
 	decodedEvents, decodeErr := p.decodeAndSortInboxEvents(conversationID, encodedEvents)
 	for _, decoded := range decodedEvents {
+		if err := p.storeConversationToken(ctx, decoded.evt); err != nil {
+			return errors.Join(decodeErr, err)
+		}
 		detail := decoded.evt.Detail
 		if detail == nil || detail.ConversationKeyChangeEvent == nil {
 			continue

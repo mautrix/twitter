@@ -253,6 +253,12 @@ func (tc *TwitterClient) processXChatInboxPage(
 					return pageCtx.Err()
 				}
 			}
+			if pageCtx.Value(initialChatListContextKey{}) != nil {
+				if keyErr == nil && syncErr == nil {
+					processor.MarkConversationCaughtUp(conversationID)
+				}
+				return errors.Join(keyErr, syncErr)
+			}
 			// Message handlers can often recover/create the portal themselves. Keep
 			// delivering the latest events after a metadata sync failure, while
 			// retaining the unresolved marker so the room sync is retried.

@@ -17,6 +17,8 @@
 package main
 
 import (
+	up "go.mau.fi/util/configupgrade"
+	"maunium.net/go/mautrix/bridgev2/bridgeconfig"
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
 
 	"go.mau.fi/mautrix-twitter/pkg/connector"
@@ -40,6 +42,12 @@ var m = mxmain.BridgeMain{
 }
 
 func main() {
+	bridgeconfig.Upgrader = up.MergeUpgraders("", bridgeconfig.Upgrader, up.SimpleUpgrader(func(helper up.Helper) {
+		helper.GetBaseNode("backfill", "max_initial_messages").Key.HeadComment = "Recent messages to import per chat after syncing the chat list.\nOmitted or -1 imports one page; 0 imports only the list. Older history is available on demand."
+		if _, configured := helper.Get(up.Int, "backfill", "max_initial_messages"); !configured {
+			helper.Set(up.Int, "-1", "backfill", "max_initial_messages")
+		}
+	}))
 	m.InitVersion(Tag, Commit, BuildTime)
 	m.Run()
 }
