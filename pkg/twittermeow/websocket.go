@@ -162,9 +162,7 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 			readyThisAttempt := false
 			var connectedAt time.Time
 			refreshToken, err := xc.runConnectionAttempt(ctx, token, log, func(connectionCtx context.Context, drain XChatLiveDrain) error {
-				if xc.client.xchatProcessor != nil {
-					xc.client.xchatProcessor.MarkReconnected()
-				}
+				xc.client.xchatProcessor.MarkReconnected()
 				if connectHandler := xc.client.getXChatConnectHandler(); connectHandler != nil {
 					log.Info().Msg("Running XChat socket handoff catch-up")
 					if err := connectHandler(connectionCtx, drain); err != nil {
@@ -494,12 +492,12 @@ func (xc *xchatWebsocketClient) stop() {
 // XChatLiveDrain calls before, then dispatches, for a finite FIFO prefix.
 type XChatLiveDrain func(before func(*payload.Message) error) error
 
-// XChatMessageConversations returns nil when a payload needs a global barrier.
-func XChatMessageConversations(message *payload.Message) []string {
-	return xchatMessageConversations(message, "")
-}
-
-func xchatMessageConversations(message *payload.Message, snapshotConversation string) []string {
+// XChatMessageConversations returns the conversation IDs affected by message.
+// A nil result means all pending inbox conversations must be processed before
+// dispatching it; an empty non-nil result requires no conversation catch-up.
+// A non-empty snapshotConversation requires every ID to match that conversation
+// and permits conversation deletion events from that snapshot.
+func XChatMessageConversations(message *payload.Message, snapshotConversation string) []string {
 	if message == nil {
 		return nil
 	}
@@ -561,7 +559,7 @@ func XChatInboxItemIsConversationScoped(item *response.XChatInboxItem) bool {
 		if event.ConversationId == nil || *event.ConversationId == "" {
 			event.ConversationId = &id
 		}
-		if xchatMessageConversations(&payload.Message{MessageEvent: event}, id) == nil {
+		if XChatMessageConversations(&payload.Message{MessageEvent: event}, id) == nil {
 			return false
 		}
 	}

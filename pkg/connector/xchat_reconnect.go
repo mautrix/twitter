@@ -364,6 +364,11 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 	return nil
 }
 
+// runXChatPriorityCatchup uses runXChatInboxCatchup to collect inbox pages, then
+// processes conversations referenced by queued live messages before dispatching
+// those messages. Remaining conversations are processed in batches between drains.
+// If the snapshot exceeds the buffer limits or cannot be safely reordered,
+// pages are processed in fetch order before draining live messages.
 func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, ops xchatInboxCatchupOps, prepare func(context.Context, []response.XChatInboxPage) error, recoveryPending func(string) bool, drain twittermeow.XChatLiveDrain) (xchatInboxCatchupResult, error) {
 	var pages []response.XChatInboxPage
 	bufferedBytes, bufferedItems := 0, 0
@@ -457,7 +462,7 @@ func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, 
 			return nil
 		}
 		before := func(message *payload.Message) error {
-			ids := twittermeow.XChatMessageConversations(message)
+			ids := twittermeow.XChatMessageConversations(message, "")
 			if ids == nil {
 				return applyIDs(order)
 			}
