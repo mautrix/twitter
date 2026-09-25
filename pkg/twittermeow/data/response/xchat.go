@@ -140,14 +140,18 @@ func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
 	if raw.Get("__typename").Str != "XChatGetInboxPageConversationData" || !events.IsArray() || !detail.IsObject() {
 		return nil
 	}
-	switch detail.Get("__typename").Str {
+	detailType := detail.Get("__typename").Str
+	switch detailType {
 	case "XChatGroupConversationDetail", "XChatDirectConversationDetail":
 	default:
-		return nil
+		// GraphQL returns only __typename for union variants not covered by the query.
+		if detailType == "" || len(detail.Map()) != 1 {
+			return nil
+		}
 	}
 	conversationID := detail.Get("conversation_id")
-	if !conversationID.Exists() || (conversationID.Type != gjson.Null &&
-		(conversationID.Type != gjson.String || conversationID.Str != "")) {
+	if conversationID.Exists() && conversationID.Type != gjson.Null &&
+		(conversationID.Type != gjson.String || conversationID.Str != "") {
 		return nil
 	}
 	for _, rawEvent := range events.Array() {
@@ -155,7 +159,7 @@ func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
 			return nil
 		}
 	}
-	// X's client omits known conversation records whose nullable ID is unavailable.
+	// X's client omits conversation records whose identity can't be decoded.
 	// Keep malformed required fields distinct so they still block the checkpoint.
 	item.ConversationUnavailable = true
 	return nil
