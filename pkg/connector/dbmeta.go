@@ -26,6 +26,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
 
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
@@ -50,8 +51,10 @@ type PortalMetadata struct {
 	ConversationKeys map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
 
 	// Server token for XChat API
-	ConversationToken string `json:"conversation_token,omitempty"`
-	XChatTrusted      *bool  `json:"xchat_trusted,omitempty"`
+	ConversationToken     string                               `json:"conversation_token,omitempty"`
+	XChatTrusted          *bool                                `json:"xchat_trusted,omitempty"`
+	InitialHistoryPending string                               `json:"initial_history_pending,omitempty"`
+	InitialReadEvents     []response.XChatParticipantReadEvent `json:"initial_read_events,omitempty"`
 }
 
 // CanUseXChat returns true if this conversation has encryption keys
@@ -86,6 +89,7 @@ type UserLoginMetadata struct {
 	MessagePullVersion *int                       `json:"message_pull_version,omitempty"`
 	XChatInboxCursor   *XChatInboxCursorData      `json:"xchat_inbox_cursor,omitempty"` // Next inbox page to import when a full sync is in progress
 	XChatFailedEvents  map[string]string          `json:"xchat_failed_events,omitempty"`
+	InitialChatSync    bool                       `json:"initial_chat_sync,omitempty"`
 
 	// Migration tracking fields
 	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration

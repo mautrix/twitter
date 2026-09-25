@@ -63,6 +63,7 @@ type TwitterClient struct {
 	xchatGapCatchupStates sync.Map
 	xchatRequestsRepaired bool
 	xchatFailuresLoaded   bool
+	initialHistoryLock    sync.Mutex
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -205,6 +206,13 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		meta.MaxUserSequenceID = "" // Reset sequence to fetch all messages
 	}
 	fullInboxSyncInProgress := meta.PendingEncryptedSync || meta.MaxUserSequenceID == "" || meta.XChatInboxCursor != nil
+	if meta.MaxUserSequenceID == "" && meta.XChatInboxCursor == nil && !meta.PendingEncryptedSync && len(meta.XChatFailedEvents) == 0 {
+		meta.InitialChatSync = true
+		if err := tc.userLogin.Save(ctx); err != nil {
+			log.Err(err).Msg("Failed to save initial chat sync state")
+			return
+		}
+	}
 
 	// Check for cached session
 	useCachedSession := tc.connector.Config.CacheSession &&
@@ -335,6 +343,9 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 				return resp.Data.GetInboxPage, nil
 			},
 			ProcessPage: func(ctx context.Context, page response.XChatInboxPage) (xchatInboxPageProcessResult, error) {
+				if meta.InitialChatSync {
+					ctx = context.WithValue(ctx, initialChatListContextKey{}, true)
+				}
 				pageMissing, err := tc.processXChatInboxPage(ctx, page, &totalItems, repairTruncatedItems)
 				for _, userID := range pageMissing {
 					missingUserIDs[userID] = struct{}{}
@@ -369,6 +380,29 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 
 	setMaxSeqID(catchupResult.MaxSequenceID)
+	syncedRESTChatList := meta.InitialChatSync
+	if meta.InitialChatSync {
+		for {
+			if err := tc.syncUntrustedChannels(context.WithValue(ctx, initialChatListContextKey{}, true)); err == nil {
+				break
+			} else {
+				log.Err(err).Msg("REST chat list sync failed, retrying")
+			}
+			if !waitForXChatInboxRetry(ctx, time.Minute) {
+				return
+			}
+		}
+		if ctx.Err() != nil || catchupResult.CheckpointBlocked {
+			return
+		}
+		meta.InitialChatSync = false
+		if err := tc.saveUserLoginState(ctx); err != nil {
+			meta.InitialChatSync = true
+			log.Err(err).Msg("Failed to finish initial chat list sync")
+			return
+		}
+		log.Info().Int("conversations", int(totalItems.Load())).Msg("Finished syncing initial chat list")
+	}
 	processor.SetSequenceIDCallback(setMaxSeqID)
 	msgPullVersion := cloneXChatInt(catchupResult.MessagePullVersion)
 	if catchupResult.CheckpointBlocked {
@@ -438,9 +472,12 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		Msg("Finished fetching XChat inbox")
 
 	go func() {
-		tc.syncUntrustedChannels(ctx)
+		if !syncedRESTChatList {
+			tc.syncUntrustedChannels(ctx)
+		}
 		tc.client.StartPolling(ctx)
 	}()
+	go tc.backfillInitialHistory(ctx)
 
 	if ctx.Err() != nil {
 		return
