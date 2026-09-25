@@ -70,6 +70,7 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 	collect(data.ConversationDetail.GroupMembersResults)
 	collect(data.ConversationDetail.GroupAdminsResults)
 
+	tc.cacheUsersFromItem(&data)
 	if err := tc.ensureUsersInCacheByID(ctx, missingIDs); err != nil {
 		// Profile metadata is useful for room naming, but it must not prevent a
 		// newly received message from creating/syncing its portal. The member-list

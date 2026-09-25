@@ -38,10 +38,8 @@ type StreamEventHandler func(evt response.StreamEvent)
 // The callback receives the conversation ID and the inbox item containing the latest conversation data.
 type ConversationDataCallback func(ctx context.Context, conversationID string, item *response.XChatInboxItem)
 
-// XChatConnectHandler repairs any events that may have been missed before a
-// websocket connection. It runs after each socket is established and before
-// that socket starts consuming live frames.
-type XChatConnectHandler func(ctx context.Context) error
+// XChatConnectHandler repairs missed events before normal live dispatch starts.
+type XChatConnectHandler func(ctx context.Context, drain XChatLiveDrain) error
 
 // XChatTokenTTL is how long an XChat token is considered valid.
 const XChatTokenTTL = 5 * time.Minute
