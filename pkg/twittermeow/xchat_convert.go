@@ -225,6 +225,16 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 			}
 		}
 
+		if att.UnifiedCard != nil {
+			converted.Card = &types.AttachmentCard{
+				BindingValues: types.AttachmentCardBinding{
+					CardURL: types.AttachmentCardBindingValue{
+						StringValue: ptr.Val(att.UnifiedCard.Url),
+					},
+				},
+			}
+		}
+
 		result = append(result, converted)
 	}
 
