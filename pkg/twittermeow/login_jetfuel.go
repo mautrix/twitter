@@ -82,6 +82,30 @@ func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, 
 	if err != nil {
 		return nil, err
 	}
+	castleInfo := parseJetfuelCastleTokenInfo(body)
+	if !castleInfo.IsValid() && !wls.client.jetfuelCastleInfo.IsValid() {
+		headers := wls.client.buildHeaders(HeaderOpts{WithCookies: true, Extra: map[string]string{
+			"upgrade-insecure-requests": "1",
+			"sec-fetch-site":            "none",
+			"sec-fetch-user":            "?1",
+			"sec-fetch-dest":            "document",
+		}})
+		documentResp, document, documentErr := wls.client.MakeRequest(ctx, endpoints.JETFUEL_BASE_URL+endpoints.JETFUEL_LOGIN_PATH, http.MethodGet, headers, nil, types.ContentTypeNone)
+		if documentResp != nil {
+			wls.client.cookies.UpdateFromResponse(documentResp)
+		}
+		if documentErr != nil {
+			if IsClientHTTPError(documentErr) {
+				return nil, documentErr
+			}
+			wls.client.Logger.Debug().Err(documentErr).Msg("Failed to fetch Jetfuel login document for Castle metadata")
+		} else {
+			castleInfo = parseJetfuelCastleTokenInfo(document)
+		}
+	}
+	if castleInfo.IsValid() {
+		wls.client.jetfuelCastleInfo = castleInfo
+	}
 	parsed := parseJetfuelLoginResponse(body)
 	if !parsed.hasPath(endpoints.JETFUEL_BEGIN_LOGIN_PATH) && !parsed.hasField("username_or_email") {
 		return nil, fmt.Errorf("%w: jetfuel login page did not expose a username action", ErrWebLoginUnexpectedSubtask)

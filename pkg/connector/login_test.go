@@ -375,16 +375,18 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 	}
 }
 
-func TestWebCastleLoginStartsCombinedAndReturnsCode399AsRetry(t *testing.T) {
+func TestWebCastleLoginUsesJetfuelDocumentMetadataAndReturnsCode399AsRetry(t *testing.T) {
 	t.Setenv("TWITTER_JETFUEL_VIEWER_CONTEXT", "0")
 	const mainPageHTML = `<html><head><meta name="twitter-site-verification" content="verification-token"></head><body><script>
-{"country": "US", "responsive_web_castle_public_key":{"value":"test-public-key"}}
+{"country": "US"}
 gt=123456789
-123:"ondemand.castle",{123:"abcdef"}
 </script></body></html>`
+	const jetfuelActionResponse = endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"
+	const jetfuelDocument = `{"responsive_web_castle_public_key":{"value":"test-public-key"}}123:"ondemand.castle",{123:"abcdef"}`
 
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
 	combinedRequestCount := 0
+	documentRequestCount := 0
 	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/i/jf/onboarding/web":
@@ -394,9 +396,18 @@ gt=123456789
 		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_LANDING_PATH:
 			return connectorTestHTTPResponse("landing"), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi/onboarding/web" && req.URL.Query().Get("mode") == "login":
-			return connectorTestHTTPResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
+			if req.Header.Get("sec-fetch-dest") == "document" {
+				documentRequestCount++
+				resp := connectorTestHTTPResponse(jetfuelDocument)
+				resp.Header.Add("Set-Cookie", "ct0=test-csrf; Path=/; Secure")
+				return resp, nil
+			}
+			return connectorTestHTTPResponse(jetfuelActionResponse), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH:
 			combinedRequestCount++
+			if req.Header.Get("x-csrf-token") != "test-csrf" || !strings.Contains(req.Header.Get("Cookie"), "ct0=test-csrf") {
+				t.Fatalf("combined request did not include CSRF cookie and header from Jetfuel document")
+			}
 			body, err := io.ReadAll(req.Body)
 			if err != nil {
 				t.Fatalf("ReadAll(combined request) error = %v", err)
@@ -419,6 +430,13 @@ gt=123456789
 	}
 	if !session.UsesJetfuel() || result == nil || result.Status != twittermeow.WebLoginStatusNeedsIdentifier {
 		t.Fatalf("Start() result = %#v, UsesJetfuel = %t", result, session.UsesJetfuel())
+	}
+	if info := client.JetfuelCastleTokenInfo(); info.PublicKey != "test-public-key" ||
+		info.ScriptURL != "https://abs.twimg.com/responsive-web/client-web/ondemand.castle.abcdefa.js" {
+		t.Fatalf("Castle metadata from Jetfuel document = %#v", info)
+	}
+	if documentRequestCount != 1 {
+		t.Fatalf("document request count = %d, want 1", documentRequestCount)
 	}
 
 	login := &TwitterLogin{

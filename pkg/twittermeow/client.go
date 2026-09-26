@@ -507,10 +507,7 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	c.session.Country = country
 	c.session.VerificationToken = verificationToken
 	c.session.loadingAnims = loadingAnims
-	c.jetfuelCastleInfo = JetfuelCastleTokenInfo{
-		ScriptURL: methods.ParseOndemandCastleURLFromScript([]byte(mainPageHTML)),
-		PublicKey: methods.ParseResponsiveWebCastlePublicKey(mainPageHTML),
-	}
+	c.jetfuelCastleInfo = parseJetfuelCastleTokenInfo([]byte(mainPageHTML))
 	if !c.jetfuelCastleInfo.IsValid() {
 		c.Logger.Debug().
 			Bool("has_script_url", c.jetfuelCastleInfo.ScriptURL != "").
