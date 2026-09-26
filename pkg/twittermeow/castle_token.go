@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 var ErrJetfuelCastleTokenRequired = errors.New("x login needs a Castle token from the client webview")
@@ -11,6 +13,13 @@ var ErrJetfuelCastleTokenRequired = errors.New("x login needs a Castle token fro
 type JetfuelCastleTokenInfo struct {
 	ScriptURL string
 	PublicKey string
+}
+
+func parseJetfuelCastleTokenInfo(page []byte) JetfuelCastleTokenInfo {
+	return JetfuelCastleTokenInfo{
+		ScriptURL: methods.ParseOndemandCastleURLFromScript(page),
+		PublicKey: methods.ParseResponsiveWebCastlePublicKey(string(page)),
+	}
 }
 
 func (info JetfuelCastleTokenInfo) IsValid() bool {
