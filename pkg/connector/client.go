@@ -119,6 +119,19 @@ const (
 	sessionMaxTimeSinceInit = 48 * time.Hour
 )
 
+func isXChatAuthError(err error) bool {
+	var apiErrors *twittermeow.TwitterErrors
+	if !errors.As(err, &apiErrors) {
+		return false
+	}
+	for _, apiError := range apiErrors.Errors {
+		if apiError.Code == 32 {
+			return true
+		}
+	}
+	return false
+}
+
 func (tc *TwitterClient) Connect(ctx context.Context) {
 	// Bridge startup waits for every NetworkAPI.Connect call, while inbox import may take minutes.
 	tc.startConnect(ctx, tc.connect)
@@ -350,6 +363,15 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			break
 		}
 		if ctx.Err() != nil {
+			return
+		}
+		if isXChatAuthError(err) {
+			fetchLog.Err(err).Msg("XChat inbox sync authentication failed")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateBadCredentials,
+				Error:      "twitter-invalid-credentials",
+				Message:    err.Error(),
+			})
 			return
 		}
 		fetchLog.Err(err).
