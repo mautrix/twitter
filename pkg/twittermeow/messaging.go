@@ -1240,6 +1240,39 @@ func (c *Client) DeleteXChatConversation(ctx context.Context, conversationID str
 		RawJSON("response", respBody).
 		Msg("DeleteXChatConversation response")
 
+	return parseDeleteConversationMutationResponse(respBody)
+}
+
+func parseDeleteConversationMutationResponse(respBody []byte) error {
+	var resp struct {
+		Data   map[string]json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return fmt.Errorf("decode delete conversation mutation response: %w", err)
+	}
+	if len(resp.Errors) > 0 {
+		return fmt.Errorf("delete conversation mutation error: %s", resp.Errors[0].Message)
+	}
+	raw, ok := resp.Data["xchat_delete_conversation"]
+	if len(resp.Data) != 1 || !ok || string(raw) == "null" {
+		return fmt.Errorf("delete conversation mutation returned no result")
+	}
+	var result struct {
+		Typename  string          `json:"__typename"`
+		ErrorCode json.RawMessage `json:"error_code"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode delete conversation mutation result: %w", err)
+	}
+	if code := string(result.ErrorCode); code != "" && code != "null" {
+		return fmt.Errorf("delete conversation mutation returned error code %s", code)
+	}
+	if result.Typename != "DeleteConversationResponse" {
+		return fmt.Errorf("delete conversation mutation returned %s", result.Typename)
+	}
 	return nil
 }
 
