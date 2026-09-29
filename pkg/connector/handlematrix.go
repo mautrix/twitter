@@ -140,8 +140,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			replyMsgID = metaCopy.XChatClientMsgID
 		}
 
-		// Fetch text, display name, and attachments from Matrix event
-		replyText, replyDisplayName, replyAttachments, ok := tc.fetchReplyInfoFromMatrix(ctx, msg.Portal, msg.ReplyTo)
+		replyText, replyDisplayName, replyAttachments, ok := tc.fetchReplyPreviewContent(ctx, msg.Portal, msg.ReplyTo, conversationID, replySeqID, sendMode)
 
 		// Get sender ID
 		var senderIDStr string
@@ -593,6 +592,21 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 	}
 
 	return messageText, senderDisplayName, attachments, true
+}
+
+func (tc *TwitterClient) fetchReplyPreviewContent(ctx context.Context, portal *bridgev2.Portal, replyTo *database.Message, conversationID, replySeqID string, sendMode messageSendMode) (text string, displayName string, attachments []*payload.MessageAttachment, ok bool) {
+	text, displayName, attachments, ok = tc.fetchReplyInfoFromMatrix(ctx, portal, replyTo)
+	if ok || sendMode == messageSendREST {
+		return
+	}
+	original, err := tc.fetchOriginalXChatMessage(ctx, conversationID, replySeqID)
+	if err != nil {
+		zerolog.Ctx(ctx).Debug().Err(err).
+			Str("reply_to_id", replySeqID).
+			Msg("Could not fetch XChat reply target content")
+		return
+	}
+	return original.Text, displayName, original.OriginalAttachments, true
 }
 
 func findAttachmentsFromMatrixContent(rawContent json.RawMessage) []*payload.MessageAttachment {
