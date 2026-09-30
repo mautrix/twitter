@@ -53,6 +53,7 @@ type jetfuelLoginState struct {
 	passwordAction     string
 	verificationAction string
 	verificationFields []string
+	verificationMethod *WebLoginAuthMethod
 	twoFactorAction    string
 	twoFactorMethods   []WebLoginAuthMethod
 	sessionToken       string
@@ -529,10 +530,14 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	if action := parsed.verificationAction(); action != "" {
 		wls.jetfuel.verificationAction = action
 		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
+		challenge := parsed.verificationChallenge()
+		if method := wls.jetfuel.verificationMethod; method != nil {
+			challenge = parsed.verificationChallengeForMethod(*method)
+		}
 		return &WebLoginResult{
 			Status:           WebLoginStatusNeedsText,
 			CurrentSubtaskID: "JetfuelVerification",
-			Challenge:        parsed.verificationChallenge(),
+			Challenge:        challenge,
 		}, nil
 	}
 	if parsed.isActionlessRejection() {
@@ -557,11 +562,16 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	}
 	if action := parsed.passwordAction(); action != "" {
 		wls.jetfuel.passwordAction = action
+		wls.jetfuel.verificationMethod = nil
 	}
 	if action := parsed.beginTwoFactorAction(); action != "" {
 		wls.jetfuel.twoFactorAction = action
+		wls.jetfuel.verificationMethod = nil
 	}
 	if action := parsed.verificationAction(); action != "" {
+		if action != wls.jetfuel.verificationAction || parsed.isPhoneNumberChallenge() {
+			wls.jetfuel.verificationMethod = nil
+		}
 		wls.jetfuel.verificationAction = action
 		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 	}
@@ -587,6 +597,7 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 	}
 	if wls.jetfuel != nil {
 		wls.jetfuel.twoFactorMethods = methods
+		wls.jetfuel.verificationMethod = nil
 	}
 	supportedMethods := supportedWebLoginAuthMethods(methods)
 	if len(supportedMethods) == 0 {
@@ -669,6 +680,7 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 	if action := parsed.verificationActionForMethod(method); action != "" {
 		wls.jetfuel.verificationAction = action
 		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
+		wls.jetfuel.verificationMethod = &method
 		return &WebLoginResult{
 			Status:           WebLoginStatusNeedsText,
 			CurrentSubtaskID: "JetfuelVerification",
