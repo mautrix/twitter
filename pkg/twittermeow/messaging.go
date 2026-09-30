@@ -1255,26 +1255,6 @@ func (c *Client) GetInitialInboxState(ctx context.Context, params *payload.DMReq
 	return &data, json.Unmarshal(respBody, &data)
 }
 
-func (c *Client) GetTrustedInboxTimeline(ctx context.Context, params *payload.DMRequestQuery) (*response.InboxTimelineResponse, error) {
-	encodedQuery, err := params.Encode()
-	if err != nil {
-		return nil, err
-	}
-	url := fmt.Sprintf("%s?%s", endpoints.TRUSTED_INBOX_TIMELINE_URL, string(encodedQuery))
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
-		Method:         http.MethodGet,
-		WithClientUUID: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	data := response.InboxTimelineResponse{}
-	return &data, json.Unmarshal(respBody, &data)
-}
-
 func (c *Client) GetDMUserUpdates(ctx context.Context, params *payload.DMRequestQuery) (*response.GetDMUserUpdatesResponse, error) {
 	encodedQuery, err := params.Encode()
 	if err != nil {
