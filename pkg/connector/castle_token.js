@@ -389,30 +389,7 @@
     }
   }
 
-  function quoteClientHint(value) {
-    return '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
-  }
-
-  function captureBrowserHeaders() {
-    const headers = {
-      browser_user_agent: String(navigator.userAgent || ""),
-    };
-    const userAgentData = navigator.userAgentData;
-    if (!userAgentData) {
-      return headers;
-    }
-    const brands = Array.from(userAgentData.brands || []);
-    if (brands.length > 0) {
-      headers.browser_sec_ch_ua = brands.map(item =>
-        quoteClientHint(item.brand) + ";v=" + quoteClientHint(item.version)
-      ).join(", ");
-    }
-    if (userAgentData.platform) {
-      headers.browser_sec_ch_ua_platform = quoteClientHint(userAgentData.platform);
-    }
-    headers.browser_sec_ch_ua_mobile = userAgentData.mobile ? "?1" : "?0";
-    return headers;
-  }
+  __MAUTRIX_TWITTER_BROWSER_HEADERS__
 
   try {
     browserLog("loading X context");

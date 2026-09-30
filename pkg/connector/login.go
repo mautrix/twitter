@@ -74,6 +74,7 @@ var (
 	LoginFlowIDPassword        = "password"
 	LoginFlowIDCookies         = "cookies"
 	LoginStepIDCredentials     = "fi.mau.twitter.login.enter_credentials"
+	LoginStepIDBrowserIdentity = "fi.mau.twitter.login.browser_identity"
 	LoginStepIDCastleToken     = "fi.mau.twitter.login.castle_token"
 	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
 	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
@@ -464,21 +465,23 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 	if !t.useCookieLogin {
 		t.waitingForBrowserIdentity = true
+		fields := make([]bridgev2.LoginCookieField, 0, len(browserHeaderFields))
+		for _, field := range browserHeaderFields {
+			fields = append(fields, bridgev2.LoginCookieField{
+				ID: field.ID, Required: field.Required, Pattern: field.Pattern,
+				Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: field.ID}},
+			})
+		}
 		return &bridgev2.LoginStep{
 			Type:         bridgev2.LoginStepTypeCookies,
-			StepID:       "fi.mau.twitter.login.browser_identity",
+			StepID:       LoginStepIDBrowserIdentity,
 			Instructions: "Preparing X login.",
 			CookiesParams: &bridgev2.LoginCookiesParams{
 				URL:               castleTokenWebviewURL,
 				ExtractJS:         browserIdentityExtractJS,
 				WaitForURLPattern: `^https://x\.com/robots\.txt$`,
 				Hidden:            true,
-				Fields: []bridgev2.LoginCookieField{{
-					ID:       loginFieldBrowserUserAgent,
-					Required: true,
-					Pattern:  `^[^\r\n]{1,1024}$`,
-					Sources:  []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: loginFieldBrowserUserAgent}},
-				}},
+				Fields:            fields,
 			},
 		}, nil
 	}
@@ -728,7 +731,8 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 			return nil, ErrWebLoginFailed.WithMessage("The X webview did not return a valid browser fingerprint. Try again.")
 		}
 		t.browserHeaders = client.GetBrowserHeaders()
-		// The credential form separates hidden windows for clients that only launch them on mount.
+		// Desktop opens a hidden webview when the cookie-step component mounts.
+		// Showing the form here lets the later Castle step mount a new component.
 		return makeCredentialsStep(""), nil
 	}
 	if t.isWaitingForWebLoginCastleToken() {

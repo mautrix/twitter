@@ -10,16 +10,39 @@ import (
 )
 
 const castleTokenJSConfigPlaceholder = "__MAUTRIX_TWITTER_CASTLE_CONFIG__"
+const browserHeadersJSPlaceholder = "__MAUTRIX_TWITTER_BROWSER_HEADERS__"
+
+const browserHeadersExtractJS = `function captureBrowserHeaders() {
+  function quoteClientHint(value) {
+    return '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+  }
+  const headers = { browser_user_agent: String(navigator.userAgent || "") };
+  const userAgentData = navigator.userAgentData;
+  if (!userAgentData) {
+    return headers;
+  }
+  const brands = Array.from(userAgentData.brands || []);
+  if (brands.length > 0) {
+    headers.browser_sec_ch_ua = brands.map(item =>
+      quoteClientHint(item.brand) + ";v=" + quoteClientHint(item.version)
+    ).join(", ");
+  }
+  if (userAgentData.platform) {
+    headers.browser_sec_ch_ua_platform = quoteClientHint(userAgentData.platform);
+  }
+  headers.browser_sec_ch_ua_mobile = userAgentData.mobile ? "?1" : "?0";
+  return headers;
+}`
 
 const browserIdentityExtractJS = `(() => {
-  let userAgent = String(navigator.userAgent || "");
+` + browserHeadersExtractJS + `
+  const result = captureBrowserHeaders();
   const chromium = Array.from(navigator.userAgentData?.brands || [])
     .find(item => item.brand === "Chromium");
   if (chromium && /^\d+$/.test(String(chromium.version))) {
-    userAgent = userAgent.replace(/\bChrome\/\d+\.\d+\.\d+\.\d+\b/,
+    result.browser_user_agent = result.browser_user_agent.replace(/\bChrome\/\d+\.\d+\.\d+\.\d+\b/,
       "Chrome/" + chromium.version + ".0.0.0");
   }
-  const result = { browser_user_agent: userAgent };
   globalThis.__BEEP_BEEP_AUTH_RESULTS__ = result;
   return result;
 })()`
@@ -50,8 +73,8 @@ func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier st
 	}
 
 	script := strings.TrimRight(castleTokenExtractJSSource, "\r\n")
-	if strings.Count(script, castleTokenJSConfigPlaceholder) != 1 {
-		panic("Castle token extraction script must contain exactly one config placeholder")
+	if strings.Count(script, castleTokenJSConfigPlaceholder) != 1 || strings.Count(script, browserHeadersJSPlaceholder) != 1 {
+		panic("Castle token extraction script must contain exactly one config and browser header placeholder")
 	}
-	return strings.Replace(script, castleTokenJSConfigPlaceholder, string(config), 1)
+	return strings.NewReplacer(castleTokenJSConfigPlaceholder, string(config), browserHeadersJSPlaceholder, browserHeadersExtractJS).Replace(script)
 }

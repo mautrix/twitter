@@ -76,11 +76,12 @@ func TestMigrationMissingUserIDFallsBackToCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startWithOverride() error = %v", err)
 	}
-	if step != nil && step.Type == bridgev2.LoginStepTypeCookies && step.CookiesParams.Hidden {
-		step, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "test-native-user-agent"})
-		if err != nil {
-			t.Fatalf("SubmitCookies() error = %v", err)
-		}
+	if step == nil || step.StepID != LoginStepIDBrowserIdentity || step.CookiesParams == nil || !step.CookiesParams.Hidden {
+		t.Fatalf("startWithOverride() step = %#v, want hidden browser identity step", step)
+	}
+	step, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "test-native-user-agent"})
+	if err != nil {
+		t.Fatalf("SubmitCookies() error = %v", err)
 	}
 	if step == nil || step.StepID != LoginStepIDCredentials {
 		t.Fatalf("startWithOverride() step = %#v, want credentials step", step)
@@ -341,7 +342,7 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 			name:       "native",
 			flowID:     LoginFlowIDPassword,
 			wantType:   bridgev2.LoginStepTypeCookies,
-			wantStepID: "fi.mau.twitter.login.browser_identity",
+			wantStepID: LoginStepIDBrowserIdentity,
 		},
 		{
 			name:        "unknown",
@@ -378,12 +379,16 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 				t.Fatalf("Start() params = user input %#v, cookies %#v", step.UserInputParams, step.CookiesParams)
 			}
 			if test.flowID == LoginFlowIDPassword {
-				step, err = process.(bridgev2.LoginProcessCookies).SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "test-native-user-agent"})
+				identity := map[string]string{
+					loginFieldBrowserUserAgent: "test-native-user-agent", loginFieldBrowserSecCHUA: `"Chromium";v="159"`,
+					loginFieldBrowserPlatform: `"Windows"`, loginFieldBrowserMobile: "?0",
+				}
+				step, err = process.(bridgev2.LoginProcessCookies).SubmitCookies(context.Background(), identity)
 				if err != nil || step == nil || step.StepID != LoginStepIDCredentials {
 					t.Fatalf("browser identity result = %#v, %v, want credentials", step, err)
 				}
-				if got := process.(*TwitterLogin).newLoginClient().GetBrowserHeaders().UserAgent; got != "test-native-user-agent" {
-					t.Fatalf("bootstrap user agent = %q, want captured browser identity", got)
+				if got := process.(*TwitterLogin).newLoginClient().GetBrowserHeaders(); got != browserHeadersFromInput(identity) {
+					t.Fatalf("bootstrap browser headers = %#v, want captured browser identity", got)
 				}
 			}
 		})
@@ -565,6 +570,9 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 	failScript := true
 	scriptRequests := 0
 	transport := connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("User-Agent") != "test-native-user-agent" || req.Header.Get("Sec-Ch-Ua") != `"Chromium";v="159"` || req.Header.Get("Sec-Ch-Ua-Platform") != `"Windows"` || req.Header.Get("Sec-Ch-Ua-Mobile") != "?0" {
+			t.Fatal("bootstrap request lost captured browser headers")
+		}
 		switch {
 		case req.Method == http.MethodGet && req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL:
 			resp := connectorTestHTTPResponse(html)
@@ -584,6 +592,14 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 		}
 	})
 	login := &TwitterLogin{loginHTTPTransport: transport}
+	_, _ = login.Start(context.Background())
+	_, err := login.SubmitCookies(context.Background(), map[string]string{
+		loginFieldBrowserUserAgent: "test-native-user-agent", loginFieldBrowserSecCHUA: `"Chromium";v="159"`,
+		loginFieldBrowserPlatform: `"Windows"`, loginFieldBrowserMobile: "?0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	input := map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"}
 	step, err := login.SubmitUserInput(context.Background(), input)
 	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, clientHTTPFailureInstructions) || scriptRequests != 1 {
@@ -803,7 +819,7 @@ func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
 		!strings.Contains(step.CookiesParams.ExtractJS, "createRequestToken") {
 		t.Fatalf("ExtractJS does not load X Castle token generator")
 	}
-	if strings.Contains(step.CookiesParams.ExtractJS, castleTokenJSConfigPlaceholder) {
+	if strings.Contains(step.CookiesParams.ExtractJS, castleTokenJSConfigPlaceholder) || strings.Contains(step.CookiesParams.ExtractJS, browserHeadersJSPlaceholder) {
 		t.Fatal("ExtractJS still contains the embedded script config placeholder")
 	}
 	if !strings.Contains(step.CookiesParams.ExtractJS, castleTokenContextURL) {
