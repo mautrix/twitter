@@ -500,6 +500,9 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	}
 	if mainPageResp.Request != nil && mainPageResp.Request.URL != nil {
 		if err := c.fetchCloudflareJSD(ctx, mainPageResp.Request.URL, mainPageHTML); err != nil {
+			if IsClientHTTPError(err) {
+				return err
+			}
 			c.Logger.Debug().Err(err).Msg("Failed to fetch Cloudflare JSD bootstrap")
 		}
 	}
@@ -533,6 +536,9 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 		var fetchErr error
 		ondemandSURL, fetchErr = c.fetchAndParseMainScript(ctx, mainScriptURL)
 		if fetchErr != nil {
+			if IsClientHTTPError(fetchErr) {
+				return fetchErr
+			}
 			zerolog.Ctx(ctx).Warn().Err(fetchErr).Msg("Failed to fetch main script")
 		}
 	}
@@ -540,6 +546,9 @@ func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Respo
 	if ondemandSURL == "" {
 		c.Logger.Warn().Msg("ondemand.s URL not found in bootstrap sources")
 	} else if indexes, err := c.fetchAndParseSScript(ctx, ondemandSURL); err != nil {
+		if IsClientHTTPError(err) {
+			return err
+		}
 		c.Logger.Warn().Err(err).Msg("Failed to fetch and parse s script")
 	} else {
 		c.session.variableIndexes = indexes

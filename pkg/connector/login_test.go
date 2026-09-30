@@ -76,6 +76,13 @@ func TestMigrationMissingUserIDFallsBackToCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startWithOverride() error = %v", err)
 	}
+	if step == nil || step.StepID != LoginStepIDBrowserIdentity || step.CookiesParams == nil || !step.CookiesParams.Hidden {
+		t.Fatalf("startWithOverride() step = %#v, want hidden browser identity step", step)
+	}
+	step, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "test-native-user-agent"})
+	if err != nil {
+		t.Fatalf("SubmitCookies() error = %v", err)
+	}
 	if step == nil || step.StepID != LoginStepIDCredentials {
 		t.Fatalf("startWithOverride() step = %#v, want credentials step", step)
 	}
@@ -334,8 +341,8 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 		{
 			name:       "native",
 			flowID:     LoginFlowIDPassword,
-			wantType:   bridgev2.LoginStepTypeUserInput,
-			wantStepID: LoginStepIDCredentials,
+			wantType:   bridgev2.LoginStepTypeCookies,
+			wantStepID: LoginStepIDBrowserIdentity,
 		},
 		{
 			name:        "unknown",
@@ -371,6 +378,19 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 			} else if step.UserInputParams == nil || step.CookiesParams != nil {
 				t.Fatalf("Start() params = user input %#v, cookies %#v", step.UserInputParams, step.CookiesParams)
 			}
+			if test.flowID == LoginFlowIDPassword {
+				identity := map[string]string{
+					loginFieldBrowserUserAgent: "test-native-user-agent", loginFieldBrowserSecCHUA: `"Chromium";v="159"`,
+					loginFieldBrowserPlatform: `"Windows"`, loginFieldBrowserMobile: "?0",
+				}
+				step, err = process.(bridgev2.LoginProcessCookies).SubmitCookies(context.Background(), identity)
+				if err != nil || step == nil || step.StepID != LoginStepIDCredentials {
+					t.Fatalf("browser identity result = %#v, %v, want credentials", step, err)
+				}
+				if got := process.(*TwitterLogin).newLoginClient().GetBrowserHeaders(); got != browserHeadersFromInput(identity) {
+					t.Fatalf("bootstrap browser headers = %#v, want captured browser identity", got)
+				}
+			}
 		})
 	}
 }
@@ -385,37 +405,49 @@ gt=123456789
 	const jetfuelDocument = `{"responsive_web_castle_public_key":{"value":"test-public-key"}}123:"ondemand.castle",{123:"abcdef"}`
 
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
-	combinedRequestCount := 0
+	identifierRequestCount := 0
 	documentRequestCount := 0
 	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/i/jf/onboarding/web":
-			resp := connectorTestHTTPResponse(mainPageHTML)
-			resp.Header.Add("Set-Cookie", "guest_id=v1%3A123456789; Path=/; Secure")
-			return resp, nil
-		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_LANDING_PATH:
-			return connectorTestHTTPResponse("landing"), nil
-		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi/onboarding/web" && req.URL.Query().Get("mode") == "login":
-			if req.Header.Get("sec-fetch-dest") == "document" {
-				documentRequestCount++
-				resp := connectorTestHTTPResponse(jetfuelDocument)
-				resp.Header.Add("Set-Cookie", "ct0=test-csrf; Path=/; Secure")
+		case req.Method == http.MethodGet && req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL:
+			if req.Header.Get("sec-fetch-dest") != "document" {
+				t.Fatal("Castle bootstrap request must use document headers")
+			}
+			documentRequestCount++
+			if documentRequestCount == 1 {
+				resp := connectorTestHTTPResponse(mainPageHTML)
+				resp.Header.Add("Set-Cookie", "guest_id=v1%3A123456789; Path=/; Secure")
 				return resp, nil
 			}
+			resp := connectorTestHTTPResponse(jetfuelDocument)
+			resp.Header.Add("Set-Cookie", "ct0=test-csrf; Path=/; Secure")
+			return resp, nil
+		case req.Method == http.MethodGet && req.URL.Path == endpoints.JETFUEL_LANDING_PATH:
+			return connectorTestHTTPResponse("landing"), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/onboarding/web" && req.URL.Query().Get("mode") == "login":
+			if req.URL.Host != "jf.x.com" {
+				t.Fatal("login action graph did not use native host")
+			}
 			return connectorTestHTTPResponse(jetfuelActionResponse), nil
-		case req.Method == http.MethodPost && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH:
-			combinedRequestCount++
+		case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH:
+			identifierRequestCount++
+			if req.URL.Host != "jf.x.com" || req.Header.Get("Referer") != "https://x.com/" || req.Header.Get("sec-fetch-site") != "same-site" || req.Header.Get("Origin") != "https://x.com" {
+				t.Fatal("identifier request did not use native host and browser headers")
+			}
 			if req.Header.Get("x-csrf-token") != "test-csrf" || !strings.Contains(req.Header.Get("Cookie"), "ct0=test-csrf") {
-				t.Fatalf("combined request did not include CSRF cookie and header from Jetfuel document")
+				t.Fatalf("identifier request did not include CSRF cookie and header from Jetfuel document")
 			}
 			body, err := io.ReadAll(req.Body)
 			if err != nil {
-				t.Fatalf("ReadAll(combined request) error = %v", err)
+				t.Fatalf("ReadAll(identifier request) error = %v", err)
 			}
-			for _, value := range []string{"username_or_email=test-user", "password=test-password", "%24castle_token=combined-token"} {
+			for _, value := range []string{"username_or_email=test-user", "%24castle_token=identifier-token"} {
 				if !strings.Contains(string(body), value) {
-					t.Fatalf("combined request body missing %q", value)
+					t.Fatalf("identifier request body missing %q", value)
 				}
+			}
+			if strings.Contains(string(body), "password=") {
+				t.Fatal("identifier request included password")
 			}
 			return connectorTestHTTPResponse("We've temporarily limited your login. Please try again later."), nil
 		default:
@@ -435,8 +467,8 @@ gt=123456789
 		info.ScriptURL != "https://abs.twimg.com/responsive-web/client-web/ondemand.castle.abcdefa.js" {
 		t.Fatalf("Castle metadata from Jetfuel document = %#v", info)
 	}
-	if documentRequestCount != 1 {
-		t.Fatalf("document request count = %d, want 1", documentRequestCount)
+	if documentRequestCount != 2 {
+		t.Fatalf("document request count = %d, want bootstrap and metadata fallback", documentRequestCount)
 	}
 
 	login := &TwitterLogin{
@@ -452,11 +484,11 @@ gt=123456789
 	if step == nil || step.StepID != LoginStepIDCastleToken {
 		t.Fatalf("continueStartedCredentialsLogin() step = %#v, want Castle token step", step)
 	}
-	if login.webLoginCastleStage != webLoginCastleStageCombined {
-		t.Fatalf("initial Castle stage = %q, want combined", login.webLoginCastleStage)
+	if login.webLoginCastleStage != webLoginCastleStageIdentifier {
+		t.Fatalf("initial Castle stage = %q, want identifier", login.webLoginCastleStage)
 	}
 
-	client.SetNextJetfuelCastleTokens([]string{"combined-token", "unused-token"})
+	client.SetNextJetfuelCastleTokens([]string{"identifier-token", "unused-token"})
 	var logs bytes.Buffer
 	logger := zerolog.New(&logs).With().Str("login_id", "test-login").Logger()
 	ctx := logger.WithContext(context.Background())
@@ -470,20 +502,116 @@ gt=123456789
 	if login.webLoginCastleStage != "" {
 		t.Fatalf("Castle stage = %q, want cleared", login.webLoginCastleStage)
 	}
-	if combinedRequestCount != 1 {
-		t.Fatalf("combined request count = %d, want 1", combinedRequestCount)
+	if identifierRequestCount != 1 {
+		t.Fatalf("identifier request count = %d, want 1", identifierRequestCount)
 	}
 	if !client.HasNextJetfuelCastleToken() {
 		t.Fatal("unused Castle token was consumed after code 399")
 	}
 	logged := logs.String()
-	for _, field := range []string{"\"login_id\":\"test-login\"", "\"stage\":\"combined\"", "\"error_kind\":\"x_response\"", "\"error_code\":399"} {
+	for _, field := range []string{"\"login_id\":\"test-login\"", "\"stage\":\"identifier\"", "\"error_kind\":\"x_response\"", "\"error_code\":399"} {
 		if !strings.Contains(logged, field) {
 			t.Fatalf("safe Castle failure log missing %q: %s", field, logged)
 		}
 	}
-	if strings.Contains(logged, "temporarily limited") || strings.Contains(logged, "test-password") || strings.Contains(logged, "combined-token") {
+	if strings.Contains(logged, "temporarily limited") || strings.Contains(logged, "test-password") || strings.Contains(logged, "identifier-token") {
 		t.Fatalf("Castle failure log leaked response or submitted values: %s", logged)
+	}
+}
+
+func TestBrowserIdentityRejectsInvalidHeadersAndClearsOnCancel(t *testing.T) {
+	for _, ua := range []string{"", "bad\r\nheader", strings.Repeat("a", 1025)} {
+		login := &TwitterLogin{}
+		requests := 0
+		transport := connectorRoundTripFunc(func(*http.Request) (*http.Response, error) { requests++; return nil, errors.New("unexpected request") })
+		step, err := login.StartWithParams(context.Background(), bridgev2.LoginStartParams{HTTP: transport})
+		if err != nil || step.Type != bridgev2.LoginStepTypeCookies || !step.CookiesParams.Hidden {
+			t.Fatalf("identity start: %v", err)
+		}
+		step, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: ua})
+		if err == nil || step != nil || requests != 0 || login.browserHeaders.UserAgent != "" {
+			t.Fatal("invalid identity accepted or issued HTTP")
+		}
+	}
+	login := &TwitterLogin{}
+	_, _ = login.Start(context.Background())
+	login.Cancel()
+	if login.waitingForBrowserIdentity || login.webLogin != nil || login.webLoginPassword != "" {
+		t.Fatal("cancel retained pending identity or password")
+	}
+}
+
+func TestCastleBrowserIdentityMismatchStopsBeforePOST(t *testing.T) {
+	login := &TwitterLogin{}
+	_, err := login.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "Mozilla/5.0 Chrome/159.0.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := login.newLoginClient()
+	requests := 0
+	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(*http.Request) (*http.Response, error) { requests++; return nil, errors.New("unexpected request") })}
+	login.webLogin = twittermeow.NewWebLoginSession(client)
+	login.webLoginIdentifier = "synthetic-user"
+	login.webLoginPassword = "synthetic-password"
+	login.webLoginCastleStage = webLoginCastleStageIdentifier
+	step, err := login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "Mozilla/5.0 Chrome/140.0.0.0", loginFieldCastleToken: strings.Repeat("A", 128)})
+	if err == nil || step != nil || requests != 0 || login.webLoginPassword != "" {
+		t.Fatal("mismatched identity accepted or retained credentials")
+	}
+}
+
+func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
+	const mainURL = "https://abs.twimg.com/responsive-web/client-web/main.abcdef.js"
+	const html = `<meta name="twitter-site-verification" content="verification-token"><script>{"country":"US","responsive_web_castle_public_key":{"value":"test-key"}};gt=123456789;{123:"ondemand.castle"};{123:"abcdef"}</script><script src="` + mainURL + `"></script>`
+	failScript := true
+	scriptRequests := 0
+	transport := connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("User-Agent") != "test-native-user-agent" || req.Header.Get("Sec-Ch-Ua") != `"Chromium";v="159"` || req.Header.Get("Sec-Ch-Ua-Platform") != `"Windows"` || req.Header.Get("Sec-Ch-Ua-Mobile") != "?0" {
+			t.Fatal("bootstrap request lost captured browser headers")
+		}
+		switch {
+		case req.Method == http.MethodGet && req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL:
+			resp := connectorTestHTTPResponse(html)
+			resp.Header.Add("Set-Cookie", "guest_id=test-guest; Path=/; Secure")
+			return resp, nil
+		case req.Method == http.MethodGet && req.URL.String() == mainURL:
+			scriptRequests++
+			if failScript {
+				return nil, errors.New("error from client: browser request failed")
+			}
+			return connectorTestHTTPResponse("script"), nil
+		case req.Method == http.MethodGet && req.URL.Host == "jf.x.com":
+			return connectorTestHTTPResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
+		default:
+			t.Fatal("unexpected request before Castle step")
+			return nil, nil
+		}
+	})
+	login := &TwitterLogin{loginHTTPTransport: transport}
+	_, _ = login.Start(context.Background())
+	_, err := login.SubmitCookies(context.Background(), map[string]string{
+		loginFieldBrowserUserAgent: "test-native-user-agent", loginFieldBrowserSecCHUA: `"Chromium";v="159"`,
+		loginFieldBrowserPlatform: `"Windows"`, loginFieldBrowserMobile: "?0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"}
+	step, err := login.SubmitUserInput(context.Background(), input)
+	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, clientHTTPFailureInstructions) || scriptRequests != 1 {
+		t.Fatalf("script failure did not return credentials retry: step=%v err=%v requests=%d", step, err, scriptRequests)
+	}
+	if login.webLogin != nil || login.webLoginPassword != "" || login.loginHTTPTransport == nil {
+		t.Fatal("retry did not clear failed bootstrap while preserving client transport")
+	}
+	failScript = false
+	step, err = login.SubmitUserInput(context.Background(), input)
+	if err != nil || step == nil || step.StepID != LoginStepIDCastleToken || scriptRequests != 2 {
+		t.Fatalf("credentials retry did not reach Castle: step=%v err=%v requests=%d", step, err, scriptRequests)
 	}
 }
 
@@ -499,15 +627,15 @@ gt=123456789
 	passwordRequestCount := 0
 	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/i/jf/onboarding/web":
+		case req.Method == http.MethodGet && req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL:
 			resp := connectorTestHTTPResponse(mainPageHTML)
 			resp.Header.Add("Set-Cookie", "guest_id=v1%3A123456789; Path=/; Secure")
 			return resp, nil
-		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_LANDING_PATH:
+		case req.Method == http.MethodGet && req.URL.Path == endpoints.JETFUEL_LANDING_PATH:
 			return connectorTestHTTPResponse("landing"), nil
-		case req.Method == http.MethodGet && req.URL.Path == "/i/jfapi/onboarding/web" && req.URL.Query().Get("mode") == "login":
+		case req.Method == http.MethodGet && req.URL.Path == "/onboarding/web" && req.URL.Query().Get("mode") == "login":
 			return connectorTestHTTPResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
-		case req.Method == http.MethodPost && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH:
+		case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH:
 			body, err := io.ReadAll(req.Body)
 			if err != nil {
 				t.Fatalf("ReadAll(identifier request) error = %v", err)
@@ -515,8 +643,11 @@ gt=123456789
 			if !strings.Contains(string(body), "%24castle_token=identifier-token") {
 				t.Fatalf("identifier request body = %q", body)
 			}
+			if !strings.Contains(string(body), "username_or_email=test-user") || strings.Contains(string(body), "password=") {
+				t.Fatal("identifier request must include username without password")
+			}
 			return connectorTestHTTPResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
-		case req.Method == http.MethodPost && req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
+		case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
 			passwordRequestCount++
 			body, err := io.ReadAll(req.Body)
 			if err != nil {
@@ -547,21 +678,23 @@ gt=123456789
 		t.Fatalf("Start() result = %#v, UsesJetfuel = %t", result, session.UsesJetfuel())
 	}
 
-	client.SetNextJetfuelCastleTokens([]string{"identifier-token"})
-	result, err = session.SubmitIdentifier(context.Background(), "test-user")
-	if err != nil || result == nil || result.Status != twittermeow.WebLoginStatusNeedsPassword {
-		t.Fatalf("SubmitIdentifier() result = %#v, error = %v", result, err)
-	}
-
-	client.SetNextJetfuelCastleTokens([]string{"first-password-token"})
 	login := &TwitterLogin{
-		User:                &bridgev2.User{Log: zerolog.Nop()},
-		webLogin:            session,
-		webLoginIdentifier:  "test-user",
-		webLoginPassword:    "test-password",
-		webLoginCastleStage: webLoginCastleStagePassword,
+		User:               &bridgev2.User{Log: zerolog.Nop()},
+		webLogin:           session,
+		webLoginIdentifier: "test-user",
+		webLoginPassword:   "test-password",
 	}
-	step, err := login.continueWebCastleLogin(context.Background())
+	step, err := login.continueStartedCredentialsLogin(context.Background(), result)
+	if err != nil || step == nil || step.StepID != LoginStepIDCastleToken || login.webLoginCastleStage != webLoginCastleStageIdentifier {
+		t.Fatalf("initial step = %#v, error = %v, want identifier Castle step", step, err)
+	}
+	client.SetNextJetfuelCastleTokens([]string{"identifier-token"})
+	step, err = login.continueWebCastleLogin(context.Background())
+	if err != nil || step == nil || step.StepID != LoginStepIDCastleToken || login.webLoginCastleStage != webLoginCastleStagePassword {
+		t.Fatalf("identifier result = %#v, error = %v, want password Castle step", step, err)
+	}
+	client.SetNextJetfuelCastleTokens([]string{"first-password-token"})
+	step, err = login.continueWebCastleLogin(context.Background())
 	if err != nil {
 		t.Fatalf("first continueWebCastleLogin() error = %v", err)
 	}
@@ -686,7 +819,7 @@ func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
 		!strings.Contains(step.CookiesParams.ExtractJS, "createRequestToken") {
 		t.Fatalf("ExtractJS does not load X Castle token generator")
 	}
-	if strings.Contains(step.CookiesParams.ExtractJS, castleTokenJSConfigPlaceholder) {
+	if strings.Contains(step.CookiesParams.ExtractJS, castleTokenJSConfigPlaceholder) || strings.Contains(step.CookiesParams.ExtractJS, browserHeadersJSPlaceholder) {
 		t.Fatal("ExtractJS still contains the embedded script config placeholder")
 	}
 	if !strings.Contains(step.CookiesParams.ExtractJS, castleTokenContextURL) {

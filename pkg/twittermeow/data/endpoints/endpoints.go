@@ -13,8 +13,8 @@ const (
 	BASE_MESSAGES_URL              = BASE_URL + "/messages"
 	BASE_LOGOUT_URL                = BASE_URL + "/logout"
 	BASE_NOTIFICATION_SETTINGS_URL = BASE_URL + "/settings/push_notifications"
-	JETFUEL_BASE_URL               = BASE_URL + "/i/jfapi"
-	JETFUEL_LOGIN_REFERER_URL      = BASE_URL + "/i/jf/onboarding/web?mode=login"
+	JETFUEL_BASE_URL               = "https://jf.x.com"
+	JETFUEL_LOGIN_DOCUMENT_URL     = BASE_URL + "/i/jfapi" + JETFUEL_LOGIN_PATH
 
 	API_BASE_HOST = "api.x.com"
 	API_BASE_URL  = "https://" + API_BASE_HOST
