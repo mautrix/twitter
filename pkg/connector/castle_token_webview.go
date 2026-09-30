@@ -11,6 +11,19 @@ import (
 
 const castleTokenJSConfigPlaceholder = "__MAUTRIX_TWITTER_CASTLE_CONFIG__"
 
+const browserIdentityExtractJS = `(() => {
+  let userAgent = String(navigator.userAgent || "");
+  const chromium = Array.from(navigator.userAgentData?.brands || [])
+    .find(item => item.brand === "Chromium");
+  if (chromium && /^\d+$/.test(String(chromium.version))) {
+    userAgent = userAgent.replace(/\bChrome\/\d+\.\d+\.\d+\.\d+\b/,
+      "Chrome/" + chromium.version + ".0.0.0");
+  }
+  const result = { browser_user_agent: userAgent };
+  globalThis.__BEEP_BEEP_AUTH_RESULTS__ = result;
+  return result;
+})()`
+
 //go:embed castle_token.js
 var castleTokenExtractJSSource string
 

@@ -69,7 +69,7 @@ type jetfuelLoginResponse struct {
 }
 
 func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, error) {
-	if err := wls.client.loadPage(ctx, endpoints.JETFUEL_LOGIN_REFERER_URL); err != nil {
+	if err := wls.client.loadPage(ctx, endpoints.JETFUEL_LOGIN_DOCUMENT_URL); err != nil {
 		return nil, fmt.Errorf("failed to load X login page: %w", err)
 	}
 	if _, err := wls.client.jetfuelGet(ctx, endpoints.JETFUEL_LANDING_PATH); err != nil {
@@ -90,7 +90,7 @@ func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, 
 			"sec-fetch-user":            "?1",
 			"sec-fetch-dest":            "document",
 		}})
-		documentResp, document, documentErr := wls.client.MakeRequest(ctx, endpoints.JETFUEL_BASE_URL+endpoints.JETFUEL_LOGIN_PATH, http.MethodGet, headers, nil, types.ContentTypeNone)
+		documentResp, document, documentErr := wls.client.MakeRequest(ctx, endpoints.JETFUEL_LOGIN_DOCUMENT_URL, http.MethodGet, headers, nil, types.ContentTypeNone)
 		if documentResp != nil {
 			wls.client.cookies.UpdateFromResponse(documentResp)
 		}
@@ -207,10 +207,6 @@ func isJetfuelPrePasswordParityError(err error) bool {
 	text := strings.ToLower(webErr.Message)
 	return webErr.Code == 399 && (strings.Contains(text, "temporarily limited") ||
 		strings.Contains(text, "official x apps") || strings.Contains(text, "use x.com"))
-}
-
-func IsWebLoginPrePasswordParityError(err error) bool {
-	return isJetfuelPrePasswordParityError(err)
 }
 
 func (wls *WebLoginSession) submitJetfuelCombinedCredentials(ctx context.Context, identifier, password string) (*WebLoginResult, error) {
@@ -744,7 +740,7 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 		"priority":                "u=1, i",
 		"sec-fetch-dest":          "empty",
 		"sec-fetch-mode":          "cors",
-		"sec-fetch-site":          "same-origin",
+		"sec-fetch-site":          "same-site",
 		"timezone":                jetfuelTimezone(),
 		"x-client-transaction-id": txID,
 		"x-jf-client-theme":       jetfuelHeaderTheme,
@@ -758,7 +754,7 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 		WithNonAuthBearer: true,
 		WithCookies:       true,
 		WithXGuestToken:   true,
-		Referer:           endpoints.JETFUEL_LOGIN_REFERER_URL,
+		Referer:           endpoints.BASE_URL + "/",
 		Extra:             extra,
 	})
 	headers.Del("x-twitter-client-language")

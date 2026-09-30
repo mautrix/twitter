@@ -44,6 +44,73 @@ func jetfuelTestResponse(body string) *http.Response {
 	}
 }
 
+func TestJetfuelFullDocumentBootstrap(t *testing.T) {
+	const verification = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+	const chunks = `{1:"ondemand.s",2:"ondemand.castle"};{1:"abcdef",2:"fedcba"}`
+	const mainURL = "https://abs.twimg.com/responsive-web/client-web/main.abcdef.js"
+	for _, failedScript := range []string{"", "cloudflare", "main", "animation"} {
+		t.Run("script_failure_"+failedScript, func(t *testing.T) {
+			html := `<meta name="twitter-site-verification" content="` + verification + `"><script>{"country":"US","responsive_web_castle_public_key":{"value":"test-key"}};gt=123456789;</script>`
+			path := "M0 0 C0 0" + strings.TrimSuffix(strings.Repeat("1 2 3 4 5 6 7 8 9 10 11C", 16), "C")
+			for range 4 {
+				html += `<svg id="loading-x-anim"><path/><path d="` + path + `"/></svg>`
+			}
+			if failedScript == "main" {
+				html += `<script src="` + mainURL + `"></script>`
+			} else {
+				html += "<script>" + chunks + "</script>"
+			}
+			if failedScript == "cloudflare" {
+				html += `<script src="/cdn-cgi/challenge-platform/test/api.js"></script>`
+			}
+			client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+			documentRequests, actionRequests, failedRequests := 0, 0, 0
+			client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL {
+					documentRequests++
+					if req.Method != http.MethodGet || req.Header.Get("sec-fetch-dest") != "document" {
+						t.Fatal("bootstrap was not a document GET")
+					}
+					resp := jetfuelTestResponse(html)
+					resp.Request = req
+					resp.Header.Add("Set-Cookie", "guest_id=test-guest; Path=/; Secure")
+					resp.Header.Add("Set-Cookie", "ct0=test-csrf; Path=/; Secure")
+					return resp, nil
+				}
+				if strings.Contains(req.URL.Path, "/cdn-cgi/") || req.URL.String() == mainURL || failedScript == "animation" && strings.Contains(req.URL.Path, "ondemand.s.") {
+					failedRequests++
+					return nil, errors.New("error from client: browser request failed")
+				}
+				if strings.Contains(req.URL.Path, "ondemand.s.") {
+					return jetfuelTestResponse(`[a(b[1],16),a(b[2],16),a(b[3],16),a(b[4],16)]`), nil
+				}
+				if req.URL.Host == "jf.x.com" && req.Method == http.MethodGet {
+					actionRequests++
+					if !strings.Contains(req.Header.Get("Cookie"), "ct0=test-csrf") {
+						t.Fatal("action request lost document cookies")
+					}
+					return jetfuelTestResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
+				}
+				t.Fatal("unexpected bootstrap request")
+				return nil, nil
+			})}
+			result, err := NewWebLoginSession(client).Start(context.Background())
+			if failedScript != "" {
+				if !IsClientHTTPError(err) || result != nil || failedRequests != 1 || actionRequests != 0 {
+					t.Fatalf("script failure was not surfaced once before actions: err=%v, failed=%d, actions=%d", err, failedRequests, actionRequests)
+				}
+				return
+			}
+			if err != nil || result == nil || result.Status != WebLoginStatusNeedsIdentifier || documentRequests != 1 || actionRequests != 2 {
+				t.Fatalf("bootstrap result=%v err=%v documents=%d actions=%d", result, err, documentRequests, actionRequests)
+			}
+			if client.session.VerificationToken != verification || client.session.AnimationToken == "" || !client.JetfuelCastleTokenInfo().IsValid() {
+				t.Fatal("full document did not initialize transaction and Castle state")
+			}
+		})
+	}
+}
+
 func TestSettingsListIdentifierPayloadShape(t *testing.T) {
 	payload := onboardingTaskRequest{
 		FlowToken: "flow-token",
@@ -524,7 +591,7 @@ func TestSubmitJetfuelCredentialsFallsBackToCombinedAfterIdentifierNoAction(t *t
 
 	requestCount := 0
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH {
+		if req.URL.Path != endpoints.JETFUEL_BEGIN_LOGIN_PATH {
 			t.Fatalf("request path = %s, want begin_login", req.URL.Path)
 		}
 		requestCount++
@@ -711,7 +778,7 @@ func TestSubmitJetfuelCombinedCredentialsReturnsPasswordAction(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 	client.SetNextJetfuelCastleTokens([]string{"combined-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH {
+		if req.URL.Path != endpoints.JETFUEL_BEGIN_LOGIN_PATH {
 			t.Fatalf("request path = %s, want begin_login", req.URL.Path)
 		}
 		form := readJetfuelTestForm(t, req)
@@ -778,7 +845,7 @@ func TestSubmitJetfuelPasswordAllowsOneBoundedReplay(t *testing.T) {
 			passwordRequestCount := 0
 			client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				form := readJetfuelTestForm(t, req)
-				if req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH {
+				if req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH {
 					if form.Get("username_or_email") != "test-user" || form.Get("password") != "test-password" {
 						t.Fatalf("combined form = %#v", form)
 					}
@@ -787,7 +854,7 @@ func TestSubmitJetfuelPasswordAllowsOneBoundedReplay(t *testing.T) {
 					}
 					return jetfuelTestResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
 				}
-				if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+				if req.URL.Path != endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
 					t.Fatalf("request path = %s, want login_enter_password", req.URL.Path)
 				}
 				passwordRequestCount++
@@ -849,10 +916,10 @@ func TestSubmitJetfuelPasswordRejectsSecondResponseDrivenReplay(t *testing.T) {
 
 	passwordRequestCount := 0
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH {
+		if req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH {
 			return jetfuelTestResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
 		}
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+		if req.URL.Path != endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
 			t.Fatalf("request path = %s, want login_enter_password", req.URL.Path)
 		}
 		passwordRequestCount++
@@ -892,10 +959,10 @@ func TestSubmitJetfuelPasswordRejectsSecondStructuredActionlessResponse(t *testi
 
 	passwordRequestCount := 0
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path == "/i/jfapi"+endpoints.JETFUEL_BEGIN_LOGIN_PATH {
+		if req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH {
 			return jetfuelTestResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
 		}
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+		if req.URL.Path != endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
 			t.Fatalf("request path = %s, want login_enter_password", req.URL.Path)
 		}
 		passwordRequestCount++
@@ -935,7 +1002,7 @@ func TestSubmitJetfuelPasswordDoesNotReplayUnstructuredResponse(t *testing.T) {
 
 	passwordRequestCount := 0
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+		if req.URL.Path != endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
 			t.Fatalf("request path = %s, want login_enter_password", req.URL.Path)
 		}
 		passwordRequestCount++
@@ -979,7 +1046,7 @@ func TestSubmitJetfuelPasswordDefersTwoFactorPreludeUntilNextCastleToken(t *test
 		paths = append(paths, req.URL.Path)
 		form := string(body)
 		switch req.URL.Path {
-		case "/i/jfapi" + endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
+		case endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
 			if !strings.Contains(form, "%24castle_token=password-castle-token") {
 				t.Fatalf("password request body = %q, want password Castle token", form)
 			}
@@ -989,7 +1056,7 @@ func TestSubmitJetfuelPasswordDefersTwoFactorPreludeUntilNextCastleToken(t *test
 				Header:     make(http.Header),
 				Body:       io.NopCloser(strings.NewReader(responseBody)),
 			}, nil
-		case "/i/jfapi" + endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH:
+		case endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH:
 			if !strings.Contains(form, "%24castle_token=twofactor-castle-token") {
 				t.Fatalf("two-factor request body = %q, want second Castle token", form)
 			}
@@ -1024,7 +1091,7 @@ func TestSubmitJetfuelPasswordDefersTwoFactorPreludeUntilNextCastleToken(t *test
 	if got := session.jetfuel.twoFactorAction; got != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 		t.Fatalf("twoFactorAction = %q, want begin two-factor action", got)
 	}
-	if len(paths) != 1 || paths[0] != "/i/jfapi"+endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
+	if len(paths) != 1 || paths[0] != endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH {
 		t.Fatalf("paths after password = %#v, want only password request", paths)
 	}
 
@@ -1036,7 +1103,7 @@ func TestSubmitJetfuelPasswordDefersTwoFactorPreludeUntilNextCastleToken(t *test
 	if result == nil || result.Status != WebLoginStatusNeedsAuthMethod {
 		t.Fatalf("SubmitPendingTwoFactor() result = %#v, want auth method chooser", result)
 	}
-	if len(paths) != 2 || paths[1] != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+	if len(paths) != 2 || paths[1] != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 		t.Fatalf("paths after pending two-factor = %#v", paths)
 	}
 }
@@ -1045,7 +1112,7 @@ func TestSubmitJetfuelAuthMethodPrefersVerificationChallenge(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 	client.SetNextJetfuelCastleTokens([]string{"castle-from-webview"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		if req.URL.Path != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
 		}
 		if got := req.Header.Get("x-jf-client-theme"); got != jetfuelHeaderTheme {
@@ -1101,7 +1168,7 @@ func TestSubmitJetfuelSMSAuthMethodReturnsPhoneChallenge(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 	client.SetNextJetfuelCastleTokens([]string{"sms-method-castle-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		if req.URL.Path != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
 		}
 		body, err := io.ReadAll(req.Body)
@@ -1156,7 +1223,7 @@ func TestSubmitJetfuelSMSAuthMethodDefaultsActionForPhoneChallenge(t *testing.T)
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 	client.SetNextJetfuelCastleTokens([]string{"sms-phone-challenge-castle-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
+		if req.URL.Path != endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
 		}
 		body, err := io.ReadAll(req.Body)
@@ -1208,7 +1275,7 @@ func TestSubmitJetfuelPhoneNumberVerificationPostsPhoneField(t *testing.T) {
 	client := NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 	client.SetNextJetfuelCastleTokens([]string{"phone-number-castle-token"})
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/i/jfapi"+endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
+		if req.URL.Path != endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH {
 			t.Fatalf("request path = %s", req.URL.Path)
 		}
 		body, err := io.ReadAll(req.Body)

@@ -54,7 +54,8 @@ type TwitterLogin struct {
 	needsPINSetup     bool
 	useCookieLogin    bool
 
-	loginHTTPTransport http.RoundTripper
+	loginHTTPTransport        http.RoundTripper
+	waitingForBrowserIdentity bool
 
 	client              *twittermeow.Client
 	webLogin            *twittermeow.WebLoginSession
@@ -411,6 +412,7 @@ func (t *TwitterLogin) newLoginClient() *twittermeow.Client {
 	log := t.log().With().Str("component", "login_twitter_client").Logger()
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, log)
 	client.SetLoginHTTPTransport(t.loginHTTPTransport) // nil resets if not provided
+	client.SetBrowserHeaders(t.browserHeaders)
 	return client
 }
 
@@ -461,7 +463,24 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 
 func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 	if !t.useCookieLogin {
-		return makeCredentialsStep(""), nil
+		t.waitingForBrowserIdentity = true
+		return &bridgev2.LoginStep{
+			Type:         bridgev2.LoginStepTypeCookies,
+			StepID:       "fi.mau.twitter.login.browser_identity",
+			Instructions: "Preparing X login.",
+			CookiesParams: &bridgev2.LoginCookiesParams{
+				URL:               castleTokenWebviewURL,
+				ExtractJS:         browserIdentityExtractJS,
+				WaitForURLPattern: `^https://x\.com/robots\.txt$`,
+				Hidden:            true,
+				Fields: []bridgev2.LoginCookieField{{
+					ID:       loginFieldBrowserUserAgent,
+					Required: true,
+					Pattern:  `^[^\r\n]{1,1024}$`,
+					Sources:  []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: loginFieldBrowserUserAgent}},
+				}},
+			},
+		}, nil
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
@@ -490,6 +509,7 @@ func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 }
 
 func (t *TwitterLogin) Cancel() {
+	t.waitingForBrowserIdentity = false
 	t.clearWebLoginInputs()
 	t.resetWebLoginState()
 }
@@ -551,7 +571,9 @@ func (t *TwitterLogin) makeWebLoginCastleTokenStep(errorLine string) *bridgev2.L
 		t.User.Log.Warn().Msg("X Castle web metadata missing from login page bootstrap")
 		return makeCredentialsStep("X did not provide the browser-token metadata needed for native login. Try again.")
 	}
-	return makeCastleTokenStep(info, t.webLoginIdentifier, errorLine)
+	step := makeCastleTokenStep(info, t.webLoginIdentifier, errorLine)
+	step.CookiesParams.UserAgent = t.browserHeaders.UserAgent
+	return step
 }
 
 func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine string) *bridgev2.LoginStep {
@@ -699,6 +721,16 @@ func (t *TwitterLogin) startWithOverride(ctx context.Context, override *bridgev2
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
+	if t.waitingForBrowserIdentity {
+		t.waitingForBrowserIdentity = false
+		client := t.newLoginClient()
+		if !client.SetBrowserHeaders(browserHeadersFromInput(cookies)) {
+			return nil, ErrWebLoginFailed.WithMessage("The X webview did not return a valid browser fingerprint. Try again.")
+		}
+		t.browserHeaders = client.GetBrowserHeaders()
+		// The credential form separates hidden windows for clients that only launch them on mount.
+		return makeCredentialsStep(""), nil
+	}
 	if t.isWaitingForWebLoginCastleToken() {
 		return t.mapClientHTTPFailure(t.submitWebCastleTokenInput(ctx, cookies))
 	}
@@ -1114,9 +1146,7 @@ func (t *TwitterLogin) continueStartedCredentialsLogin(ctx context.Context, resu
 }
 
 func (t *TwitterLogin) startWebCastleLogin() *bridgev2.LoginStep {
-	// The browser sends username and password together in begin_login. Starting with the
-	// combined form avoids advancing the same Jetfuel session with an identifier-only POST.
-	t.webLoginCastleStage = webLoginCastleStageCombined
+	t.webLoginCastleStage = webLoginCastleStageIdentifier
 	return t.makeWebLoginCastleTokenStep("")
 }
 
@@ -1137,6 +1167,10 @@ func (t *TwitterLogin) submitWebCastleTokenInput(ctx context.Context, input map[
 		return t.makeWebLoginCastleTokenStep("The X webview did not return a browser token."), nil
 	}
 	client := t.webLogin.Client()
+	if t.browserHeaders.UserAgent != "" && strings.TrimSpace(input[loginFieldBrowserUserAgent]) != t.browserHeaders.UserAgent {
+		t.clearWebLoginInputs()
+		return nil, ErrWebLoginFailed.WithMessage("The X webview could not use the detected browser fingerprint. Try again.")
+	}
 	if !client.SetBrowserHeaders(browserHeadersFromInput(input)) {
 		return t.makeWebLoginCastleTokenStep("The X webview did not return a valid browser fingerprint."), nil
 	}
@@ -1193,7 +1227,7 @@ func (t *TwitterLogin) continueWebCastleLogin(ctx context.Context) (*bridgev2.Lo
 		switch stage {
 		case webLoginCastleStageIdentifier:
 			result, err = t.webLogin.SubmitIdentifier(ctx, t.webLoginIdentifier)
-			if err != nil && twittermeow.IsWebLoginPrePasswordParityError(err) {
+			if errors.Is(err, twittermeow.ErrJetfuelIdentifierNoSupportedAction) {
 				t.webLoginCastleStage = webLoginCastleStageCombined
 				continue
 			}
