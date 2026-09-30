@@ -821,6 +821,9 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 // syncRESTConversation syncs a REST-only conversation, including accepted legacy DMs.
 func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
 	log := zerolog.Ctx(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 
 	_, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
 	if err != nil {
@@ -834,50 +837,22 @@ func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.C
 		return
 	}
 
-	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
-
-	// Create Matrix room if it doesn't exist
-	if portal.MXID == "" {
-		// FIXME this is wrong, CreateMatrixRoom should not be called manually
-		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to create Matrix room for REST conversation")
-			return
-		}
-	} else {
-		// Refresh trust for existing rooms, including old DMs stuck in requests.
-		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventChatInfoChange,
-				PortalKey: portal.PortalKey,
-				Timestamp: time.Now(),
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				ChatInfo: chatInfo,
-			},
-		})
-		if !result.Success {
-			log.Warn().Err(result.Error).Msg("Failed to queue REST conversation info")
-			return
-		}
+	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
+	if latestMessageTS.IsZero() {
+		latestMessageTS = methods.ParseSnowflake(conv.SortEventID)
 	}
-
-	// Ensure REST-only conversations have a queue backfill task once a room exists.
-	if portal.MXID != "" && chatInfo.CanBackfill {
-		// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
-		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to ensure backfill task exists for REST conversation")
-		} else {
-			tc.connector.br.WakeupBackfillQueue()
-		}
-	}
-	// Process messages for this conversation from inbox entries
-	if inbox != nil {
-		tc.processRESTMessages(ctx, conv.ConversationID, inbox)
+	result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+		EventMeta: simplevent.EventMeta{
+			Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
+			CreatePortal: true, Timestamp: latestMessageTS,
+		},
+		ChatInfo:            tc.conversationToChatInfo(ctx, conv, inbox),
+		LatestMessageTS:     latestMessageTS,
+		BundledBackfillData: conv,
+	})
+	if !result.Success {
+		log.Warn().Err(result.Error).Msg("Failed to queue REST conversation resync")
+		return
 	}
 	if streamOrder := methods.ParseSnowflakeInt(conv.LastReadEventID); streamOrder > methods.TwitterEpoch {
 		if !tc.queueRESTReadReceipt(portal.PortalKey, ParseUserLoginID(tc.userLogin.ID), conv.LastReadEventID, time.UnixMilli(streamOrder), streamOrder) {
@@ -889,30 +864,6 @@ func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.C
 		Str("conversation_id", conv.ConversationID).
 		Bool("trusted", conv.Trusted).
 		Msg("Synced REST conversation")
-}
-
-// processRESTMessages processes message entries for a REST-only conversation.
-func (tc *TwitterClient) processRESTMessages(ctx context.Context, conversationID string, inbox *response.TwitterInboxData) {
-	log := zerolog.Ctx(ctx)
-
-	for _, entry := range inbox.Entries {
-		parsed := entry.ParseWithErrorLog(log)
-		if parsed == nil {
-			continue
-		}
-
-		// Only process messages for this conversation
-		msg, ok := parsed.(*types.Message)
-		if !ok {
-			continue
-		}
-		if msg.ConversationID != conversationID {
-			continue
-		}
-
-		// Queue the message event
-		tc.HandlePollingEvent(msg, inbox)
-	}
 }
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.
