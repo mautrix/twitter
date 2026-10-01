@@ -510,12 +510,12 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	tc.HandleCursorChange(ctx)
 	tc.xchatInboxSyncLock.Unlock()
 
-	inbox, query := tc.syncInitialRESTInbox(ctx)
+	inbox, query, syncedDMs := tc.syncInitialRESTInbox(ctx)
 	if ctx.Err() == nil {
 		tc.client.StartPolling(ctx)
 	}
 	if inbox != nil {
-		tc.syncOlderTrustedRESTChannels(ctx, inbox, query)
+		tc.syncOlderTrustedRESTChannels(ctx, inbox, query, syncedDMs)
 	}
 }
 
