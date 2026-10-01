@@ -968,7 +968,7 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 	}
 
 	sortBackfillMessages(backfillMessages)
-	if fetchParams.Forward && fetchParams.Count > 0 && len(backfillMessages) > fetchParams.Count {
+	if fetchParams.Forward && fetchParams.AnchorMessage == nil && fetchParams.Count > 0 && len(backfillMessages) > fetchParams.Count {
 		backfillMessages = backfillMessages[len(backfillMessages)-fetchParams.Count:]
 	}
 

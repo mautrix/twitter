@@ -511,11 +511,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	tc.xchatInboxSyncLock.Unlock()
 
 	inbox, query := tc.syncInitialRESTInbox(ctx)
-	if inbox != nil {
-		tc.syncOlderTrustedRESTChannels(ctx, inbox, query)
-	}
 	if ctx.Err() == nil {
 		tc.client.StartPolling(ctx)
+	}
+	if inbox != nil {
+		tc.syncOlderTrustedRESTChannels(ctx, inbox, query)
 	}
 }
 

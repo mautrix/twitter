@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -694,7 +695,12 @@ func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.Tw
 	trustedCount := 0
 	legacyGroupCount := 0
 	trustedDMCount := 0
-	for _, conv := range inbox.SortedConversations() {
+	conversations := inbox.SortedConversations()
+	limit := max(tc.connector.Config.ConversationSyncLimit, 0)
+	for _, conv := range conversations[max(0, len(conversations)-limit):] {
+		if ctx.Err() != nil {
+			break
+		}
 		if conv.Trusted {
 			trustedCount++
 			if isTrustedRESTGroup(conv) {
@@ -725,16 +731,21 @@ func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.Tw
 }
 
 func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initial *response.TwitterInboxData, reqQuery *payload.DMRequestQuery) {
+	if initial == nil || reqQuery == nil {
+		return
+	}
 	log := zerolog.Ctx(ctx)
+	limit := max(tc.connector.Config.ConversationSyncLimit, 0)
 	seen := make(map[string]struct{}, len(initial.Conversations))
-	for id := range initial.Conversations {
-		seen[id] = struct{}{}
+	for _, conv := range initial.Conversations {
+		seen[NormalizeConversationID(conv.ConversationID)] = struct{}{}
 	}
 	pages := 1
 	minID := initial.InboxTimelines.Trusted.MinEntryID
 	status := initial.InboxTimelines.Trusted.Status
 	seenCursors := make(map[string]struct{})
-	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil {
+	// Bound requests too: empty or duplicate-only pages don't consume the conversation limit.
+	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil && len(seen) < limit && pages < limit {
 		if _, repeated := seenCursors[minID]; repeated {
 			log.Warn().Msg("Older trusted REST inbox cursor repeated")
 			break
@@ -756,14 +767,18 @@ func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initi
 		page := older.InboxTimeline
 		pages++
 		tc.updateTwitterUserInfo(ctx, page)
-		for _, conv := range page.SortedConversations() {
+		for _, conv := range slices.Backward(page.SortedConversations()) {
 			if ctx.Err() != nil {
 				return
 			}
-			if _, duplicate := seen[conv.ConversationID]; duplicate {
+			if len(seen) >= limit {
+				break
+			}
+			id := NormalizeConversationID(conv.ConversationID)
+			if _, duplicate := seen[id]; duplicate {
 				continue
 			}
-			seen[conv.ConversationID] = struct{}{}
+			seen[id] = struct{}{}
 			if conv.Trusted {
 				tc.syncTrustedRESTConversation(ctx, conv, page)
 			}
@@ -822,6 +837,10 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
 	log := zerolog.Ctx(ctx)
 	if ctx.Err() != nil {
+		return
+	}
+	if tc.client.GetXChatProcessor().ConversationRecoveryPending(NormalizeConversationID(conv.ConversationID)) {
+		log.Debug().Msg("Deferring REST sync for pending XChat conversation")
 		return
 	}
 
