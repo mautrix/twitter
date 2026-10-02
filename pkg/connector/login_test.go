@@ -69,22 +69,18 @@ func TestMigrationMissingUserIDFallsBackToCredentials(t *testing.T) {
 		client: client,
 	}
 	override := &bridgev2.UserLogin{UserLogin: &database.UserLogin{
-		Metadata: &UserLoginMetadata{Cookies: "auth_token=fake"},
+		Metadata: &UserLoginMetadata{Cookies: "auth_token=fake", BrowserHeaders: &twittermeow.BrowserHeaders{UserAgent: "old-device"}},
 	}}
 
 	step, err := login.startWithOverride(context.Background(), override)
 	if err != nil {
 		t.Fatalf("startWithOverride() error = %v", err)
 	}
-	if step == nil || step.StepID != LoginStepIDBrowserIdentity || step.CookiesParams == nil || !step.CookiesParams.Hidden {
-		t.Fatalf("startWithOverride() step = %#v, want hidden browser identity step", step)
-	}
-	step, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "test-native-user-agent"})
-	if err != nil {
-		t.Fatalf("SubmitCookies() error = %v", err)
-	}
 	if step == nil || step.StepID != LoginStepIDCredentials {
 		t.Fatalf("startWithOverride() step = %#v, want credentials step", step)
+	}
+	if login.browserHeaders.UserAgent != "" {
+		t.Fatal("migration fallback retained the previous device's browser identity")
 	}
 	if login.client != nil {
 		t.Fatal("startWithOverride() retained invalid PIN client")
@@ -341,8 +337,8 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 		{
 			name:       "native",
 			flowID:     LoginFlowIDPassword,
-			wantType:   bridgev2.LoginStepTypeCookies,
-			wantStepID: LoginStepIDBrowserIdentity,
+			wantType:   bridgev2.LoginStepTypeUserInput,
+			wantStepID: LoginStepIDCredentials,
 		},
 		{
 			name:        "unknown",
@@ -379,13 +375,24 @@ func TestCreateLoginAcceptsSupportedFlows(t *testing.T) {
 				t.Fatalf("Start() params = user input %#v, cookies %#v", step.UserInputParams, step.CookiesParams)
 			}
 			if test.flowID == LoginFlowIDPassword {
+				for _, input := range []map[string]string{nil, {loginFieldIdentifier: "test-user"}, {loginFieldPassword: "test-password"}} {
+					if _, err = process.(bridgev2.LoginProcessUserInput).SubmitUserInput(context.Background(), input); !errors.Is(err, ErrMissingLoginInput) {
+						t.Fatalf("missing credentials error = %v", err)
+					}
+				}
+				step, err = process.(bridgev2.LoginProcessUserInput).SubmitUserInput(context.Background(), map[string]string{
+					loginFieldIdentifier: "test-user", loginFieldPassword: "test-password",
+				})
+				if err != nil || step == nil || step.StepID != LoginStepIDBrowserIdentity || !step.CookiesParams.Hidden {
+					t.Fatalf("credentials result = %#v, %v, want hidden browser identity", step, err)
+				}
 				identity := map[string]string{
 					loginFieldBrowserUserAgent: "test-native-user-agent", loginFieldBrowserSecCHUA: `"Chromium";v="159"`,
 					loginFieldBrowserPlatform: `"Windows"`, loginFieldBrowserMobile: "?0",
 				}
 				step, err = process.(bridgev2.LoginProcessCookies).SubmitCookies(context.Background(), identity)
-				if err != nil || step == nil || step.StepID != LoginStepIDCredentials {
-					t.Fatalf("browser identity result = %#v, %v, want credentials", step, err)
+				if err != nil || step == nil || step.Type != bridgev2.LoginStepTypeDisplayAndWait || step.DisplayAndWaitParams.Type != bridgev2.LoginDisplayTypeNothing {
+					t.Fatalf("browser identity result = %#v, %v, want preparation step", step, err)
 				}
 				if got := process.(*TwitterLogin).newLoginClient().GetBrowserHeaders(); got != browserHeadersFromInput(identity) {
 					t.Fatalf("bootstrap browser headers = %#v, want captured browser identity", got)
@@ -525,8 +532,12 @@ func TestBrowserIdentityRejectsInvalidHeadersAndClearsOnCancel(t *testing.T) {
 		requests := 0
 		transport := connectorRoundTripFunc(func(*http.Request) (*http.Response, error) { requests++; return nil, errors.New("unexpected request") })
 		step, err := login.StartWithParams(context.Background(), bridgev2.LoginStartParams{HTTP: transport})
-		if err != nil || step.Type != bridgev2.LoginStepTypeCookies || !step.CookiesParams.Hidden {
-			t.Fatalf("identity start: %v", err)
+		if err != nil || step.StepID != LoginStepIDCredentials {
+			t.Fatalf("credentials start: %v", err)
+		}
+		_, err = login.SubmitUserInput(context.Background(), map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"})
+		if err != nil || requests != 0 {
+			t.Fatal("credentials submission failed or issued HTTP before browser identity")
 		}
 		step, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: ua})
 		if err == nil || step != nil || requests != 0 || login.browserHeaders.UserAgent != "" {
@@ -535,22 +546,24 @@ func TestBrowserIdentityRejectsInvalidHeadersAndClearsOnCancel(t *testing.T) {
 	}
 	login := &TwitterLogin{}
 	_, _ = login.Start(context.Background())
+	_, _ = login.SubmitUserInput(context.Background(), map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"})
 	login.Cancel()
 	if login.waitingForBrowserIdentity || login.webLogin != nil || login.webLoginPassword != "" {
 		t.Fatal("cancel retained pending identity or password")
 	}
+	_, _ = login.SubmitUserInput(context.Background(), map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"})
+	_, err := login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "test-native-user-agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.Cancel()
+	if step, err := login.Wait(context.Background()); !errors.Is(err, ErrMissingLoginInput) || step != nil || login.webLogin != nil {
+		t.Fatal("cancelled preparation bootstrapped a login")
+	}
 }
 
 func TestCastleBrowserIdentityMismatchStopsBeforePOST(t *testing.T) {
-	login := &TwitterLogin{}
-	_, err := login.Start(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = login.SubmitCookies(context.Background(), map[string]string{loginFieldBrowserUserAgent: "Mozilla/5.0 Chrome/159.0.0.0"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	login := &TwitterLogin{browserHeaders: twittermeow.BrowserHeaders{UserAgent: "Mozilla/5.0 Chrome/159.0.0.0"}}
 	client := login.newLoginClient()
 	requests := 0
 	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(*http.Request) (*http.Response, error) { requests++; return nil, errors.New("unexpected request") })}
@@ -593,6 +606,8 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 	})
 	login := &TwitterLogin{loginHTTPTransport: transport}
 	_, _ = login.Start(context.Background())
+	input := map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"}
+	_, _ = login.SubmitUserInput(context.Background(), input)
 	_, err := login.SubmitCookies(context.Background(), map[string]string{
 		loginFieldBrowserUserAgent: "test-native-user-agent", loginFieldBrowserSecCHUA: `"Chromium";v="159"`,
 		loginFieldBrowserPlatform: `"Windows"`, loginFieldBrowserMobile: "?0",
@@ -600,8 +615,7 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := map[string]string{loginFieldIdentifier: "test-user", loginFieldPassword: "test-password"}
-	step, err := login.SubmitUserInput(context.Background(), input)
+	step, err := login.Wait(context.Background())
 	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, clientHTTPFailureInstructions) || scriptRequests != 1 {
 		t.Fatalf("script failure did not return credentials retry: step=%v err=%v requests=%d", step, err, scriptRequests)
 	}
