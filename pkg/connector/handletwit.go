@@ -41,6 +41,26 @@ func conversationReadSenderID(evt *types.ConversationRead, fallback string) stri
 	return fallback
 }
 
+func (tc *TwitterClient) queueRESTReadReceipt(portalKey networkid.PortalKey, senderID, lastReadEventID string, readUpTo time.Time, streamOrder int64) bool {
+	lastTarget := MakeMessageID(lastReadEventID)
+	var targets []networkid.MessageID
+	if lastTarget != "" {
+		targets = []networkid.MessageID{lastTarget}
+	}
+	return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
+		EventMeta: simplevent.EventMeta{
+			Type:      bridgev2.RemoteEventReadReceipt,
+			PortalKey: portalKey,
+			Sender:    tc.MakeEventSender(senderID),
+			Timestamp: readUpTo,
+		},
+		LastTarget:          lastTarget,
+		Targets:             targets,
+		ReadUpTo:            readUpTo,
+		ReadUpToStreamOrder: streamOrder,
+	}).Success
+}
+
 func (tc *TwitterClient) resolvePollingPortal(
 	ctx context.Context,
 	conversationID string,
@@ -722,28 +742,12 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		return tc.userLogin.QueueRemoteEvent(wrappedEvt).Success
 	case *types.ConversationRead:
 		senderID := conversationReadSenderID(e, ParseUserLoginID(tc.userLogin.ID))
-		lastTarget := MakeMessageID(e.LastReadEventID)
 		readUpTo := methods.ParseMsecTimestamp(e.Time)
 		readUpToStreamOrder := methods.ParseSnowflakeInt(e.LastReadEventID)
 		if readUpToStreamOrder == 0 {
 			readUpToStreamOrder = methods.ParseSnowflakeInt(e.ID)
 		}
-		var targets []networkid.MessageID
-		if lastTarget != "" {
-			targets = []networkid.MessageID{lastTarget}
-		}
-		return tc.userLogin.QueueRemoteEvent(&simplevent.Receipt{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventReadReceipt,
-				PortalKey: portalKey,
-				Sender:    tc.MakeEventSender(senderID),
-				Timestamp: readUpTo,
-			},
-			LastTarget:          lastTarget,
-			Targets:             targets,
-			ReadUpTo:            readUpTo,
-			ReadUpToStreamOrder: readUpToStreamOrder,
-		}).Success
+		return tc.queueRESTReadReceipt(portalKey, senderID, e.LastReadEventID, readUpTo, readUpToStreamOrder)
 	case *types.ConversationDelete:
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatDelete{
 			EventMeta: simplevent.EventMeta{

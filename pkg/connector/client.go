@@ -459,11 +459,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		Int("items", catchupResult.Items).
 		Msg("Finished fetching XChat inbox")
 
-	go func() {
-		tc.syncUntrustedChannels(ctx)
-		tc.client.StartPolling(ctx)
-	}()
-
 	if ctx.Err() != nil {
 		return
 	}
@@ -496,7 +491,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	// checkpoints have already persisted max sequence, cursor and pull version;
 	// rewriting them here could clobber a newer reconnect checkpoint.
 	tc.xchatInboxSyncLock.Lock()
-	defer tc.xchatInboxSyncLock.Unlock()
 	if remoteProfile != nil {
 		if tc.userLogin.RemoteName != remoteProfile.Username ||
 			tc.userLogin.RemoteProfile != *remoteProfile {
@@ -514,6 +508,15 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 
 	// Save session state
 	tc.HandleCursorChange(ctx)
+	tc.xchatInboxSyncLock.Unlock()
+
+	inbox, query, syncedDMs := tc.syncInitialRESTInbox(ctx)
+	if ctx.Err() == nil {
+		tc.client.StartPolling(ctx)
+	}
+	if inbox != nil {
+		tc.syncOlderTrustedRESTChannels(ctx, inbox, query, syncedDMs)
+	}
 }
 
 func waitForXChatInboxRetry(ctx context.Context, delay time.Duration) bool {
