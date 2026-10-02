@@ -629,6 +629,14 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
 	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
+		if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
+			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+			// REST and XChat IDs cannot be ordered against each other on timestamp ties.
+			if after.timestamp.IsZero() || ts.Before(after.timestamp) ||
+				ts.Equal(after.timestamp) && ptr.Val(evt.SequenceId) == after.sequenceID {
+				return nil
+			}
+		}
 		msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
 		return p.emitEvent(ctx, msg)
 	}
@@ -1103,7 +1111,9 @@ func (p *XChatEventProcessor) ProcessKeyChangeEvents(ctx context.Context, item *
 
 // ProcessMessageAndReadEvents processes message and read events from an XChatInboxItem.
 // This should be called AFTER syncing the channel, as portals must exist for message handling.
-func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, item *response.XChatInboxItem) (err error) {
+// A zero message boundary leaves initial imports to bridgev2's bounded backfill.
+func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, item *response.XChatInboxItem, afterMessageTS time.Time, afterSequenceID string) (err error) {
+	ctx = context.WithValue(ctx, xchatSnapshotMessageBoundaryKey{}, xchatSnapshotMessageBoundary{afterMessageTS, afterSequenceID})
 	conversationID := item.ConversationDetail.ConversationID
 	p.beginCheckpointBatch()
 	defer func() {
@@ -1188,4 +1198,11 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 	}
 
 	return decodeErr
+}
+
+type xchatSnapshotMessageBoundaryKey struct{}
+
+type xchatSnapshotMessageBoundary struct {
+	timestamp  time.Time
+	sequenceID string
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"strconv"
 	"testing"
 	"time"
 
@@ -138,7 +139,7 @@ func TestProcessMessageAndReadEventsUsesParticipantSenderFallback(t *testing.T) 
 			ParticipantID:                   response.XChatParticipantID{RestID: "1892329226424225792"},
 			LatestMarkConversationReadEvent: base64.StdEncoding.EncodeToString(encoded),
 		}},
-	})
+	}, time.Time{}, "")
 	if err != nil {
 		t.Fatalf("ProcessMessageAndReadEvents: %v", err)
 	}
@@ -147,5 +148,52 @@ func TestProcessMessageAndReadEventsUsesParticipantSenderFallback(t *testing.T) 
 	}
 	if got.SenderID != "1892329226424225792" {
 		t.Fatalf("SenderID = %q, want participant fallback", got.SenderID)
+	}
+}
+
+func TestSnapshotMessagesRespectExistingHistoryBoundary(t *testing.T) {
+	for _, boundary := range []struct {
+		after        time.Time
+		id           string
+		wantMessages int
+	}{{time.Time{}, "", 0}, {time.UnixMilli(200), "2", 1}, {time.UnixMilli(200), "9", 2}} {
+		processor := newXChatEventProcessor(&Client{Logger: zerolog.Nop()})
+		messages, reactions := 0, 0
+		processor.SetEventHandler(func(_ context.Context, evt types.TwitterEvent) bool {
+			switch evt.(type) {
+			case *types.Message:
+				messages++
+			case *types.MessageReactionCreate:
+				reactions++
+			}
+			return true
+		})
+		item := &response.XChatInboxItem{ConversationDetail: response.XChatConversationDetail{ConversationID: "1:2"}}
+		for i, contents := range []*payload.MessageEntryContents{
+			{Message: &payload.MessageContents{MessageText: ptr.Ptr("older")}},
+			{Message: &payload.MessageContents{MessageText: ptr.Ptr("boundary")}},
+			{Message: &payload.MessageContents{MessageText: ptr.Ptr("newer")}},
+			{ReactionAdd: &payload.MessageReactionAdd{}},
+		} {
+			body, err := payload.Encode(&payload.MessageEntryHolder{Contents: contents})
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := payload.Encode(&payload.MessageEvent{
+				SequenceId:     ptr.Ptr(strconv.Itoa(i + 1)),
+				ConversationId: ptr.Ptr("1:2"), CreatedAtMsec: ptr.Ptr(strconv.Itoa(min(i+1, 2) * 100)),
+				Detail: &payload.MessageEventDetail{MessageCreateEvent: &payload.MessageCreateEvent{Contents: body}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			item.LatestMessageEvents = append(item.LatestMessageEvents, base64.StdEncoding.EncodeToString(encoded))
+		}
+		if err := processor.ProcessMessageAndReadEvents(t.Context(), item, boundary.after, boundary.id); err != nil {
+			t.Fatal(err)
+		}
+		if messages != boundary.wantMessages || reactions != 1 {
+			t.Fatalf("boundary=%s/%s: messages=%d reactions=%d, want %d messages and preserved reaction", boundary.after, boundary.id, messages, reactions, boundary.wantMessages)
+		}
 	}
 }
