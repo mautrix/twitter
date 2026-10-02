@@ -75,6 +75,7 @@ var (
 	LoginFlowIDCookies         = "cookies"
 	LoginStepIDCredentials     = "fi.mau.twitter.login.enter_credentials"
 	LoginStepIDBrowserIdentity = "fi.mau.twitter.login.browser_identity"
+	LoginStepIDPrepareLogin    = "fi.mau.twitter.login.prepare"
 	LoginStepIDCastleToken     = "fi.mau.twitter.login.castle_token"
 	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
 	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
@@ -442,6 +443,7 @@ func (t *TwitterLogin) clearWebLoginInputs() {
 }
 
 func (t *TwitterLogin) resetWebLoginState() {
+	t.waitingForBrowserIdentity = false
 	t.clearWebLoginInputs()
 	t.webLogin = nil
 }
@@ -464,26 +466,8 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 
 func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 	if !t.useCookieLogin {
-		t.waitingForBrowserIdentity = true
-		fields := make([]bridgev2.LoginCookieField, 0, len(browserHeaderFields))
-		for _, field := range browserHeaderFields {
-			fields = append(fields, bridgev2.LoginCookieField{
-				ID: field.ID, Required: field.Required, Pattern: field.Pattern,
-				Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: field.ID}},
-			})
-		}
-		return &bridgev2.LoginStep{
-			Type:         bridgev2.LoginStepTypeCookies,
-			StepID:       LoginStepIDBrowserIdentity,
-			Instructions: "Preparing X login.",
-			CookiesParams: &bridgev2.LoginCookiesParams{
-				URL:               castleTokenWebviewURL,
-				ExtractJS:         browserIdentityExtractJS,
-				WaitForURLPattern: `^https://x\.com/robots\.txt$`,
-				Hidden:            true,
-				Fields:            fields,
-			},
-		}, nil
+		t.browserHeaders = twittermeow.BrowserHeaders{}
+		return makeCredentialsStep(""), nil
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
@@ -512,9 +496,30 @@ func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 }
 
 func (t *TwitterLogin) Cancel() {
-	t.waitingForBrowserIdentity = false
-	t.clearWebLoginInputs()
 	t.resetWebLoginState()
+}
+
+func (t *TwitterLogin) makeBrowserIdentityStep() *bridgev2.LoginStep {
+	t.waitingForBrowserIdentity = true
+	fields := make([]bridgev2.LoginCookieField, 0, len(browserHeaderFields))
+	for _, field := range browserHeaderFields {
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID: field.ID, Required: field.Required, Pattern: field.Pattern,
+			Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: field.ID}},
+		})
+	}
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeCookies,
+		StepID:       LoginStepIDBrowserIdentity,
+		Instructions: "Preparing X login.",
+		CookiesParams: &bridgev2.LoginCookiesParams{
+			URL:               castleTokenWebviewURL,
+			ExtractJS:         browserIdentityExtractJS,
+			WaitForURLPattern: `^https://x\.com/robots\.txt$`,
+			Hidden:            true,
+			Fields:            fields,
+		},
+	}
 }
 
 func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
@@ -732,8 +737,15 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		}
 		t.browserHeaders = client.GetBrowserHeaders()
 		// Desktop opens a hidden webview when the cookie-step component mounts.
-		// Showing the form here lets the later Castle step mount a new component.
-		return makeCredentialsStep(""), nil
+		// The preparation step lets the later Castle step mount a new component.
+		return &bridgev2.LoginStep{
+			Type:         bridgev2.LoginStepTypeDisplayAndWait,
+			StepID:       LoginStepIDPrepareLogin,
+			Instructions: "Preparing X login.",
+			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
+				Type: bridgev2.LoginDisplayTypeNothing,
+			},
+		}, nil
 	}
 	if t.isWaitingForWebLoginCastleToken() {
 		return t.mapClientHTTPFailure(t.submitWebCastleTokenInput(ctx, cookies))
@@ -1123,9 +1135,23 @@ func (t *TwitterLogin) submitCredentialsInput(ctx context.Context, input map[str
 	}
 
 	t.resetWebLoginState()
-	t.webLogin = twittermeow.NewWebLoginSession(t.newLoginClient())
 	t.webLoginIdentifier = identifier
 	t.webLoginPassword = password
+	if t.browserHeaders.UserAgent == "" {
+		return t.makeBrowserIdentityStep(), nil
+	}
+	return t.startCredentialsLogin(ctx)
+}
+
+func (t *TwitterLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
+	if t.waitingForBrowserIdentity || t.webLoginIdentifier == "" || t.webLoginPassword == "" {
+		return nil, ErrMissingLoginInput
+	}
+	return t.mapClientHTTPFailure(t.startCredentialsLogin(ctx))
+}
+
+func (t *TwitterLogin) startCredentialsLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
+	t.webLogin = twittermeow.NewWebLoginSession(t.newLoginClient())
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
