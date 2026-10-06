@@ -835,7 +835,7 @@ func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conv
 		Int("missing_fetched", len(missingIDs)).
 		Msg("Syncing conversation data from refresh callback")
 
-	if err := tc.syncXChatChannel(ctx, item, users); err != nil {
+	if _, err := tc.syncXChatChannel(ctx, item, users); err != nil {
 		log.Warn().Err(err).Msg("Failed to sync conversation data from refresh callback")
 	}
 }
