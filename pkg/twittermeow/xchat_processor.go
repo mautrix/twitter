@@ -1123,8 +1123,27 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 	}
 
 	decodedEvents, decodeErr := p.decodeAndSortInboxEvents(conversationID, encodedEvents)
+	// Inbox snapshots can retain a notifiable message from before a conversation was deleted.
+	deleteSequenceID := ""
+	for _, decoded := range decodedEvents {
+		detail := decoded.evt.Detail
+		if detail == nil || detail.MessageCreateEvent != nil || detail.MessageDeleteEvent != nil ||
+			detail.MessageTypingEvent != nil || detail.GroupChangeEvent != nil || detail.ConversationKeyChangeEvent != nil ||
+			detail.ConversationDeleteEvent == nil || conversationID == "" ||
+			ptr.Val(detail.ConversationDeleteEvent.ConversationId) != conversationID {
+			continue
+		}
+		if _, valid := normalizeXChatSequenceID(decoded.sequenceID); valid && decoded.sequenceID != "" &&
+			compareXChatSequenceIDs(decoded.sequenceID, deleteSequenceID) > 0 {
+			deleteSequenceID = decoded.sequenceID
+		}
+	}
 	for _, decoded := range decodedEvents {
 		seqID := ptr.Val(decoded.evt.SequenceId)
+		if _, valid := normalizeXChatSequenceID(seqID); valid && seqID != "" && deleteSequenceID != "" &&
+			compareXChatSequenceIDs(seqID, deleteSequenceID) < 0 {
+			continue
+		}
 		if seqID != "" {
 			if _, ok := processedSeqIDs[seqID]; ok {
 				continue
@@ -1171,6 +1190,11 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 				Str("participant_id", readEvt.ParticipantID.RestID).
 				Msg("Ignoring inbox read event for a different conversation")
 			continue
+		}
+		if seqID := ptr.Val(evt.SequenceId); seqID != "" && deleteSequenceID != "" {
+			if _, valid := normalizeXChatSequenceID(seqID); valid && compareXChatSequenceIDs(seqID, deleteSequenceID) < 0 {
+				continue
+			}
 		}
 		if seqID := ptr.Val(evt.SequenceId); seqID != "" {
 			if _, ok := processedSeqIDs[seqID]; ok {
