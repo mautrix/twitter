@@ -1118,11 +1118,14 @@ func (t *TwitterLogin) SubmitUserInput(ctx context.Context, input map[string]str
 	if _, ok := input[loginFieldAuthMethod]; ok {
 		return t.mapClientHTTPFailure(t.submitWebAuthMethodInput(ctx, input))
 	}
-	if _, ok := input[loginFieldVerificationCode]; ok || t.webLoginChallenge != nil {
+	if _, ok := input[loginFieldVerificationCode]; ok {
 		return t.mapClientHTTPFailure(t.submitWebVerificationInput(ctx, input))
 	}
 	if _, ok := input[loginFieldIdentifier]; ok || input[loginFieldPassword] != "" {
 		return t.mapClientHTTPFailure(t.submitCredentialsInput(ctx, input))
+	}
+	if t.webLoginChallenge != nil {
+		return t.mapClientHTTPFailure(t.submitWebVerificationInput(ctx, input))
 	}
 	return nil, ErrMissingLoginInput
 }
@@ -1322,6 +1325,8 @@ func logWebCastleFailure(ctx context.Context, stage string, err error) {
 	switch {
 	case errors.As(err, &webErr):
 		event = event.Str("error_kind", "x_response").Int("error_code", webErr.Code)
+	case errors.Is(err, twittermeow.ErrWebLoginPasswordRejected):
+		event = event.Str("error_kind", "password_rejected")
 	case errors.Is(err, twittermeow.ErrWebLoginUnexpectedSubtask):
 		event = event.Str("error_kind", "unsupported_response")
 	default:
@@ -1517,6 +1522,9 @@ func handleWebLoginAuthMethodError(methods []twittermeow.WebLoginAuthMethod, err
 }
 
 func isWebLoginCredentialsInputError(err error) bool {
+	if errors.Is(err, twittermeow.ErrWebLoginPasswordRejected) {
+		return true
+	}
 	var webErr *twittermeow.WebLoginError
 	if !errors.As(err, &webErr) {
 		return false
@@ -1600,6 +1608,9 @@ func webLoginErrorInstructions(err error) string {
 	var webErr *twittermeow.WebLoginError
 	if errors.As(err, &webErr) {
 		return webErr.UserMessage()
+	}
+	if errors.Is(err, twittermeow.ErrWebLoginPasswordRejected) {
+		return "X didn't accept this login. Check your password and try again."
 	}
 	if errors.Is(err, twittermeow.ErrWebLoginUnexpectedSubtask) {
 		return "X returned a login challenge this bridge does not support yet."

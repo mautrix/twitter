@@ -29,6 +29,7 @@ var (
 	ErrWebLoginMissingFlowToken           = errors.New("x login response did not include a flow token")
 	ErrWebLoginMissingGuestToken          = errors.New("x guest activation response did not include a guest token")
 	ErrWebLoginUnsupportedAuthMethod      = errors.New("unsupported X login verification method")
+	ErrWebLoginPasswordRejected           = errors.New("x asked for the password again after it was submitted")
 	ErrWebLoginMissingAuthMethodState     = errors.New("x login verification method state is missing")
 )
 

@@ -59,7 +59,6 @@ type jetfuelLoginState struct {
 	sessionToken       string
 	preludeDispatchID  string
 	userID             string
-	passwordReplayUsed bool
 }
 
 type jetfuelLoginResponse struct {
@@ -271,7 +270,8 @@ func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password 
 	if wls.jetfuel.sessionToken != "" {
 		form.Set("session_token", wls.jetfuel.sessionToken)
 	}
-	body, err := wls.client.jetfuelPostForm(ctx, wls.jetfuel.passwordAction, form)
+	submittedAction := wls.jetfuel.passwordAction
+	body, err := wls.client.jetfuelPostForm(ctx, submittedAction, form)
 	if err != nil {
 		return nil, err
 	}
@@ -298,40 +298,11 @@ func (wls *WebLoginSession) submitJetfuelPassword(ctx context.Context, password 
 			Challenge:        parsed.verificationChallenge(),
 		}, nil
 	}
-	if action := parsed.passwordAction(); action != "" {
-		wls.jetfuel.passwordAction = action
-		if !wls.jetfuel.passwordReplayUsed {
-			wls.jetfuel.passwordReplayUsed = true
-			return &WebLoginResult{
-				Status:           WebLoginStatusNeedsPassword,
-				CurrentSubtaskID: "JetfuelPassword",
-				Challenge: &WebLoginChallenge{
-					SubtaskID: "JetfuelPassword",
-					Hint:      "Password",
-				},
-			}, nil
-		}
-		wls.logUnsupportedJetfuelResponse(ctx, "password_replay_limit", action, parsed)
-		return nil, fmt.Errorf("%w: jetfuel password action repeated after the allowed replay", ErrWebLoginUnexpectedSubtask)
+	if parsed.hasPath(submittedAction) {
+		wls.logUnsupportedJetfuelResponse(ctx, "password_rejected", submittedAction, parsed)
+		return nil, ErrWebLoginPasswordRejected
 	}
-	if parsed.canReplayPasswordWithoutAction() {
-		if !wls.jetfuel.passwordReplayUsed {
-			wls.jetfuel.passwordReplayUsed = true
-			wls.logUnsupportedJetfuelResponse(ctx, "password_actionless_replay", wls.jetfuel.passwordAction, parsed)
-			return &WebLoginResult{
-				Status:           WebLoginStatusNeedsPassword,
-				CurrentSubtaskID: "JetfuelPassword",
-				Challenge: &WebLoginChallenge{
-					SubtaskID: "JetfuelPassword",
-					Hint:      "Password",
-				},
-			}, nil
-		}
-		wls.logUnsupportedJetfuelResponse(ctx, "password_replay_limit", wls.jetfuel.passwordAction, parsed)
-		return nil, fmt.Errorf("%w: jetfuel password response remained actionless after the allowed replay", ErrWebLoginUnexpectedSubtask)
-	}
-	wls.logUnsupportedJetfuelResponse(ctx, "password", wls.jetfuel.passwordAction, parsed)
-	return nil, fmt.Errorf("%w: jetfuel password response did not complete or expose a supported challenge", ErrWebLoginUnexpectedSubtask)
+	return wls.handleUnsupportedJetfuelResponse(ctx, "password", submittedAction, parsed)
 }
 
 func (wls *WebLoginSession) logUnsupportedJetfuelResponse(
@@ -366,7 +337,6 @@ func (wls *WebLoginSession) logUnsupportedJetfuelResponse(
 		Bool("has_completion_marker", parsed.isComplete()).
 		Bool("has_login_error", parsed.loginError() != nil).
 		Bool("has_auth_cookie", wls.client.IsLoggedIn()).
-		Bool("state_password_replay_used", state != nil && state.passwordReplayUsed).
 		Bool("state_has_session_token", state != nil && state.sessionToken != "").
 		Bool("state_has_prelude_dispatch_id", state != nil && state.preludeDispatchID != "").
 		Bool("state_has_user_id", state != nil && state.userID != "").
@@ -389,7 +359,7 @@ func diagnosticJetfuelResponseClass(parsed jetfuelLoginResponse) string {
 		return "verification"
 	case parsed.passwordAction() != "":
 		return "password"
-	case parsed.canReplayPasswordWithoutAction():
+	case parsed.isStructuredActionless():
 		return "structured_actionless"
 	case parsed.isActionlessRejection():
 		return "field_only_actionless"
@@ -990,9 +960,7 @@ func (jfr jetfuelLoginResponse) hasField(field string) bool {
 	return slices.Contains(jfr.fields, field)
 }
 
-// X may require one fresh-token replay without repeating the password action in the response.
-// Require parsed structure so an empty or opaque transport response does not trigger another password POST.
-func (jfr jetfuelLoginResponse) canReplayPasswordWithoutAction() bool {
+func (jfr jetfuelLoginResponse) isStructuredActionless() bool {
 	return len(jfr.raw) > 0 && len(jfr.paths) > 0 && len(jfr.fields) > 0
 }
 
