@@ -17,3 +17,6 @@ cache_session: true
 # Should the bridge use "X" instead of "Twitter" in certain places,
 # such as the management room welcome message and MSC2346 bridge info?
 x: false
+
+# Log X login responses at debug level. Only action paths and field names are kept, all other text is hashed.
+log_redacted_login_responses: false

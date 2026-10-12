@@ -22,6 +22,8 @@ type Config struct {
 
 	X bool `yaml:"x"`
 
+	LogRedactedLoginResponses bool `yaml:"log_redacted_login_responses"`
+
 	displaynameTemplate *template.Template `yaml:"-"`
 }
 
@@ -48,6 +50,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Int, "conversation_sync_limit")
 	helper.Copy(up.Bool, "cache_session")
 	helper.Copy(up.Bool, "x")
+	helper.Copy(up.Bool, "log_redacted_login_responses")
 }
 
 type DisplaynameParams struct {

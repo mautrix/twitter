@@ -55,6 +55,9 @@ type Client struct {
 	session *CachedSession
 	HTTP    *http.Client
 
+	LogRedactedLoginResponses bool
+	jetfuelLoginIdentifier    string
+
 	defaultTransport http.RoundTripper
 
 	eventHandler              EventHandler
