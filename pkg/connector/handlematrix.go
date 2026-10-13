@@ -100,6 +100,7 @@ func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.Ro
 }
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
+	tc.resyncDMBlock(ctx, msg.Portal)
 	conversationID := ParsePortalID(msg.Portal.ID)
 	content := msg.Content
 	sendMode := selectMessageSendMode(msg.Portal.Metadata.(*PortalMetadata))
@@ -881,13 +882,9 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 
 func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *bridgev2.MatrixViewingChat) error {
 	conversationID := ""
-	var portalKey networkid.PortalKey
 	if chat.Portal != nil {
 		conversationID = ParsePortalID(chat.Portal.ID)
-		portalKey = chat.Portal.PortalKey
-	}
-	if prevKey := tc.viewingPortalKey.Swap(&portalKey); chat.Portal != nil && (prevKey == nil || *prevKey != portalKey) {
-		go tc.syncDMBlock(context.WithoutCancel(ctx), chat.Portal)
+		tc.resyncDMBlock(ctx, chat.Portal)
 	}
 	tc.client.SetActiveConversation(ConvertConversationIDToREST(conversationID))
 	return nil

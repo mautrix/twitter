@@ -886,6 +886,20 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 	return info
 }
 
+const dmBlockResyncInterval = 10 * time.Minute
+
+func (tc *TwitterClient) resyncDMBlock(ctx context.Context, portal *bridgev2.Portal) {
+	if portal.RoomType != database.RoomTypeDM {
+		return
+	}
+	now := time.Now()
+	if last, ok := tc.dmBlockResyncLast.Load(portal.PortalKey); ok && now.Sub(last.(time.Time)) < dmBlockResyncInterval {
+		return
+	}
+	tc.dmBlockResyncLast.Store(portal.PortalKey, now)
+	go tc.syncDMBlock(context.WithoutCancel(ctx), portal)
+}
+
 func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Portal) {
 	otherUserID := dmOtherUserID(portal.ID, ParseUserLoginID(tc.userLogin.ID))
 	if otherUserID == "" {
