@@ -629,7 +629,27 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 	}
 }
 
-func TestContinueWebCastleLoginRequestsFreshTokenForActionlessPasswordReplay(t *testing.T) {
+func TestSubmitUserInputRoutesCredentialsAfterVerificationChallenge(t *testing.T) {
+	login := &TwitterLogin{
+		User:              &bridgev2.User{Log: zerolog.Nop()},
+		webLoginChallenge: &twittermeow.WebLoginChallenge{SubtaskID: "JetfuelVerification"},
+	}
+	step, err := login.SubmitUserInput(context.Background(), map[string]string{
+		loginFieldIdentifier: "test-user",
+		loginFieldPassword:   "test-password",
+	})
+	if err != nil {
+		t.Fatalf("SubmitUserInput() error = %v", err)
+	}
+	if step == nil || step.StepID != LoginStepIDBrowserIdentity {
+		t.Fatalf("SubmitUserInput() step = %#v, want browser identity step", step)
+	}
+	if login.webLoginChallenge != nil {
+		t.Fatal("verification challenge survived a new credentials submission")
+	}
+}
+
+func TestContinueWebCastleLoginDoesNotResubmitPassword(t *testing.T) {
 	t.Setenv("TWITTER_JETFUEL_VIEWER_CONTEXT", "0")
 	const mainPageHTML = `<html><head><meta name="twitter-site-verification" content="verification-token"></head><body><script>
 {"country": "US", "responsive_web_castle_public_key":{"value":"test-public-key"}}
@@ -637,101 +657,78 @@ gt=123456789
 123:"ondemand.castle",{123:"abcdef"}
 </script></body></html>`
 
-	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
-	passwordRequestCount := 0
-	client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		switch {
-		case req.Method == http.MethodGet && req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL:
-			resp := connectorTestHTTPResponse(mainPageHTML)
-			resp.Header.Add("Set-Cookie", "guest_id=v1%3A123456789; Path=/; Secure")
-			return resp, nil
-		case req.Method == http.MethodGet && req.URL.Path == endpoints.JETFUEL_LANDING_PATH:
-			return connectorTestHTTPResponse("landing"), nil
-		case req.Method == http.MethodGet && req.URL.Path == "/onboarding/web" && req.URL.Query().Get("mode") == "login":
-			return connectorTestHTTPResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
-		case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH:
-			body, err := io.ReadAll(req.Body)
-			if err != nil {
-				t.Fatalf("ReadAll(identifier request) error = %v", err)
-			}
-			if !strings.Contains(string(body), "%24castle_token=identifier-token") {
-				t.Fatalf("identifier request body = %q", body)
-			}
-			if !strings.Contains(string(body), "username_or_email=test-user") || strings.Contains(string(body), "password=") {
-				t.Fatal("identifier request must include username without password")
-			}
-			return connectorTestHTTPResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
-		case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
-			passwordRequestCount++
-			body, err := io.ReadAll(req.Body)
-			if err != nil {
-				t.Fatalf("ReadAll(password request) error = %v", err)
-			}
-			wantToken := "first-password-token"
-			if passwordRequestCount == 2 {
-				wantToken = "replay-password-token"
-			}
-			if !strings.Contains(string(body), "%24castle_token="+wantToken) {
-				t.Fatalf("password request %d body = %q, want token %q", passwordRequestCount, body, wantToken)
-			}
-			if passwordRequestCount == 1 {
-				return connectorTestHTTPResponse("/onboarding/web/actions/persist_login_state\x00opaque_field"), nil
-			}
-			return connectorTestHTTPResponse(endpoints.JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH + "\x00challenge_response\x00Enter your verification code"), nil
-		default:
-			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
-			return nil, nil
-		}
-	})}
-	session := twittermeow.NewWebLoginSession(client)
-	result, err := session.Start(context.Background())
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	if !session.UsesJetfuel() || result == nil || result.Status != twittermeow.WebLoginStatusNeedsIdentifier {
-		t.Fatalf("Start() result = %#v, UsesJetfuel = %t", result, session.UsesJetfuel())
+	tests := []struct {
+		name             string
+		passwordResponse string
+		wantInstructions string
+	}{
+		{
+			name:             "repeated password action",
+			passwordResponse: endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password",
+			wantInstructions: "Check your password",
+		},
+		{
+			name:             "structured actionless",
+			passwordResponse: "/onboarding/web/actions/persist_login_state\x00opaque_field",
+			wantInstructions: "does not support yet",
+		},
 	}
 
-	login := &TwitterLogin{
-		User:               &bridgev2.User{Log: zerolog.Nop()},
-		webLogin:           session,
-		webLoginIdentifier: "test-user",
-		webLoginPassword:   "test-password",
-	}
-	step, err := login.continueStartedCredentialsLogin(context.Background(), result)
-	if err != nil || step == nil || step.StepID != LoginStepIDCastleToken || login.webLoginCastleStage != webLoginCastleStageIdentifier {
-		t.Fatalf("initial step = %#v, error = %v, want identifier Castle step", step, err)
-	}
-	client.SetNextJetfuelCastleTokens([]string{"identifier-token"})
-	step, err = login.continueWebCastleLogin(context.Background())
-	if err != nil || step == nil || step.StepID != LoginStepIDCastleToken || login.webLoginCastleStage != webLoginCastleStagePassword {
-		t.Fatalf("identifier result = %#v, error = %v, want password Castle step", step, err)
-	}
-	client.SetNextJetfuelCastleTokens([]string{"first-password-token"})
-	step, err = login.continueWebCastleLogin(context.Background())
-	if err != nil {
-		t.Fatalf("first continueWebCastleLogin() error = %v", err)
-	}
-	if step == nil || step.StepID != LoginStepIDCastleToken {
-		t.Fatalf("first continueWebCastleLogin() step = %#v, want Castle token step", step)
-	}
-	if login.webLoginCastleStage != webLoginCastleStagePassword {
-		t.Fatalf("Castle stage = %q, want password", login.webLoginCastleStage)
-	}
-	if passwordRequestCount != 1 {
-		t.Fatalf("password request count = %d, want 1", passwordRequestCount)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, zerolog.Nop())
+			passwordRequestCount := 0
+			client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch {
+				case req.Method == http.MethodGet && req.URL.String() == endpoints.JETFUEL_LOGIN_DOCUMENT_URL:
+					resp := connectorTestHTTPResponse(mainPageHTML)
+					resp.Header.Add("Set-Cookie", "guest_id=v1%3A123456789; Path=/; Secure")
+					return resp, nil
+				case req.Method == http.MethodGet && req.URL.Path == endpoints.JETFUEL_LANDING_PATH:
+					return connectorTestHTTPResponse("landing"), nil
+				case req.Method == http.MethodGet && req.URL.Path == "/onboarding/web" && req.URL.Query().Get("mode") == "login":
+					return connectorTestHTTPResponse(endpoints.JETFUEL_BEGIN_LOGIN_PATH + "\x00username_or_email"), nil
+				case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_BEGIN_LOGIN_PATH:
+					return connectorTestHTTPResponse(endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH + "\x00password"), nil
+				case req.Method == http.MethodPost && req.URL.Path == endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH:
+					passwordRequestCount++
+					return connectorTestHTTPResponse(tc.passwordResponse), nil
+				default:
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+					return nil, nil
+				}
+			})}
+			session := twittermeow.NewWebLoginSession(client)
+			result, err := session.Start(context.Background())
+			if err != nil {
+				t.Fatalf("Start() error = %v", err)
+			}
 
-	client.SetNextJetfuelCastleTokens([]string{"replay-password-token"})
-	step, err = login.continueWebCastleLogin(context.Background())
-	if err != nil {
-		t.Fatalf("second continueWebCastleLogin() error = %v", err)
-	}
-	if step == nil || step.StepID != LoginStepIDVerification {
-		t.Fatalf("second continueWebCastleLogin() step = %#v, want verification step", step)
-	}
-	if passwordRequestCount != 2 {
-		t.Fatalf("password request count = %d, want 2", passwordRequestCount)
+			login := &TwitterLogin{
+				User:               &bridgev2.User{Log: zerolog.Nop()},
+				webLogin:           session,
+				webLoginIdentifier: "test-user",
+				webLoginPassword:   "test-password",
+			}
+			step, err := login.continueStartedCredentialsLogin(context.Background(), result)
+			if err != nil || step == nil || step.StepID != LoginStepIDCastleToken {
+				t.Fatalf("initial step = %#v, error = %v, want identifier Castle step", step, err)
+			}
+			client.SetNextJetfuelCastleTokens([]string{"identifier-token", "password-token", "unused-token"})
+			step, err = login.continueWebCastleLogin(context.Background())
+			if err != nil {
+				t.Fatalf("continueWebCastleLogin() error = %v", err)
+			}
+			if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, tc.wantInstructions) {
+				t.Fatalf("continueWebCastleLogin() step = %#v, want credentials step containing %q", step, tc.wantInstructions)
+			}
+			if passwordRequestCount != 1 {
+				t.Fatalf("password request count = %d, want 1", passwordRequestCount)
+			}
+			if !client.HasNextJetfuelCastleToken() {
+				t.Fatal("unused Castle token was consumed; the password was resubmitted")
+			}
+		})
 	}
 }
 
