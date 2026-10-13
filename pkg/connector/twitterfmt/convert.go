@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -46,6 +47,9 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 			end, endClamped := clamp(end)
 			if end < start {
 				end = start
+			}
+			if url.ExpandedURL == "" {
+				end = urlTokenEnd(charArr, start, end)
 			}
 			rawURL := ""
 			if start < end && start >= 0 && end <= charArrLen {
@@ -156,6 +160,22 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 
 	return content
 }
+
+func urlTokenEnd(text []rune, start, fallback int) int {
+	end := start
+	for end < len(text) && !unicode.IsSpace(text[end]) && !strings.ContainsRune("<>()", text[end]) {
+		end++
+	}
+	for end > start && strings.ContainsRune(urlTokenTrim, text[end-1]) {
+		end--
+	}
+	if end == start {
+		return fallback
+	}
+	return end
+}
+
+const urlTokenTrim = ".,;:!?)]}>\"'"
 
 type EntityUnion = any
 
