@@ -20,6 +20,3 @@ x: false
 
 # Log X login responses at debug level. Only action paths and field names are kept, all other text is hashed.
 log_redacted_login_responses: false
-
-# Interval for syncing DM blocks made on X in seconds, default is 1 hour. Set 0 to only sync when connecting.
-dm_block_sync_interval_seconds: 3600

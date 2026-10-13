@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -888,64 +886,35 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 	return info
 }
 
-func (tc *TwitterClient) runDMBlockSync(ctx context.Context) {
-	interval := time.Duration(tc.connector.Config.DMBlockSyncIntervalSeconds) * time.Second
-	for {
-		if err := tc.syncDMBlocks(ctx); err != nil && ctx.Err() == nil {
-			zerolog.Ctx(ctx).Err(err).Msg("Failed to sync DM blocks")
-		}
-		if interval <= 0 {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(interval):
-		}
+func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Portal) {
+	otherUserID := dmOtherUserID(portal.ID, ParseUserLoginID(tc.userLogin.ID))
+	if otherUserID == "" {
+		return
 	}
-}
-
-func (tc *TwitterClient) syncDMBlocks(ctx context.Context) error {
-	userPortals, err := tc.userLogin.Bridge.DB.UserPortal.GetAllForLogin(ctx, tc.userLogin.UserLogin)
+	// Compare against the state before the request so a concurrent Matrix block isn't reverted.
+	wasBlocked := portal.UserBlocked
+	resp, err := tc.client.GetUsersByIdsForXChat(ctx, payload.NewGetUsersByIdsForXChatVariables([]string{otherUserID}))
 	if err != nil {
-		return fmt.Errorf("failed to get user portals: %w", err)
+		tc.userLogin.Log.Warn().Err(err).Str("portal_id", string(portal.ID)).Msg("Failed to fetch DM block status")
+		return
 	}
-	blockedPortals, err := tc.userLogin.Bridge.DB.Portal.GetAllBlockedDMsOf(ctx, tc.userLogin.ID)
-	if err != nil {
-		return fmt.Errorf("failed to get blocked DMs: %w", err)
-	}
-	selfID := ParseUserLoginID(tc.userLogin.ID)
-	portalsByUser := make(map[string]networkid.PortalKey)
-	for _, up := range userPortals {
-		if otherUserID := dmOtherUserID(up.Portal.ID, selfID); otherUserID != "" {
-			portalsByUser[otherUserID] = up.Portal
+	for _, r := range resp.Data.GetMemberResults.Results {
+		if r.ID != otherUserID || r.MemberResults == nil || r.MemberResults.Result == nil || r.MemberResults.Result.ChatPermissions == nil {
+			continue
 		}
-	}
-	for batch := range slices.Chunk(slices.Collect(maps.Keys(portalsByUser)), 100) {
-		resp, err := tc.client.GetUsersByIdsForXChat(ctx, payload.NewGetUsersByIdsForXChatVariables(batch))
-		if err != nil {
-			return err
+		blocked := r.MemberResults.Result.ChatPermissions.DMBlocking
+		if blocked == nil || *blocked == wasBlocked {
+			continue
 		}
-		for _, r := range resp.Data.GetMemberResults.Results {
-			if r.MemberResults == nil || r.MemberResults.Result == nil || r.MemberResults.Result.ChatPermissions == nil {
-				continue
-			}
-			blocked := r.MemberResults.Result.ChatPermissions.DMBlocking
-			portalKey, ok := portalsByUser[r.ID]
-			if blocked == nil || !ok || *blocked == slices.Contains(blockedPortals, portalKey) {
-				continue
-			}
-			tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-				EventMeta: simplevent.EventMeta{
-					Type:      bridgev2.RemoteEventChatInfoChange,
-					PortalKey: portalKey,
-					Timestamp: time.Now(),
-				},
-				ChatInfoChange: &bridgev2.ChatInfoChange{
-					ChatInfo: &bridgev2.ChatInfo{UserBlocked: blocked},
-				},
-			})
-		}
+		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventChatInfoChange,
+				PortalKey: portal.PortalKey,
+				Timestamp: time.Now(),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: &bridgev2.ChatInfo{UserBlocked: blocked},
+			},
+		})
 	}
-	return nil
 }

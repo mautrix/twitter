@@ -881,8 +881,13 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 
 func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *bridgev2.MatrixViewingChat) error {
 	conversationID := ""
+	var portalKey networkid.PortalKey
 	if chat.Portal != nil {
 		conversationID = ParsePortalID(chat.Portal.ID)
+		portalKey = chat.Portal.PortalKey
+	}
+	if prevKey := tc.viewingPortalKey.Swap(&portalKey); chat.Portal != nil && (prevKey == nil || *prevKey != portalKey) {
+		go tc.syncDMBlock(context.WithoutCancel(ctx), chat.Portal)
 	}
 	tc.client.SetActiveConversation(ConvertConversationIDToREST(conversationID))
 	return nil
