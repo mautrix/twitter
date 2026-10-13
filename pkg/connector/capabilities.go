@@ -42,13 +42,13 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 8
+	return 1, 9
 }
 
 const MaxTextLength = 10000
 
 var groupCaps = &event.RoomFeatures{
-	ID: "fi.mau.twitter.capabilities.2026_01_08",
+	ID: "fi.mau.twitter.capabilities.2026_10_12",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 	//	event.FmtUserLink: event.CapLevelFullySupported,
 	//},
@@ -111,17 +111,26 @@ var groupCaps = &event.RoomFeatures{
 }
 
 var dmCaps = ptr.Clone(groupCaps)
+var selfDMCaps *event.RoomFeatures
 
 func init() {
 	dmCaps.State = nil
 	dmCaps.MemberActions = nil
 	dmCaps.ID += "+dm"
+
+	selfDMCaps = ptr.Clone(dmCaps)
+	selfDMCaps.ID += "+self"
+
+	dmCaps.BlockUser = true
 }
 
 func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	baseCaps := groupCaps
 	if portal.RoomType == database.RoomTypeDM {
 		baseCaps = dmCaps
+		if isSelfConversationID(ParsePortalID(portal.ID), ParseUserLoginID(tc.userLogin.ID)) {
+			baseCaps = selfDMCaps
+		}
 	}
 
 	// Disable editing and delete-for-everyone for conversations without encryption keys.

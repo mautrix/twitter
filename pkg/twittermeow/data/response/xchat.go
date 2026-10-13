@@ -235,6 +235,7 @@ type XChatUserDMPermissions struct {
 	CanDMOnXChat      bool   `json:"can_dm_on_xchat,omitempty"`
 	HasPublicKey      bool   `json:"has_public_key,omitempty"`
 	CanBeAddedToGroup bool   `json:"can_be_added_to_group,omitempty"`
+	DMBlocking        *bool  `json:"dm_blocking,omitempty"`
 }
 
 type XChatUserCore struct {

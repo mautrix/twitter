@@ -312,6 +312,18 @@ func parseDMParticipantIDs(conversationID string) (string, []string, bool) {
 	return normalizedConversationID, parts, true
 }
 
+func dmOtherUserID(portalID networkid.PortalID, selfUserID string) string {
+	_, parts, ok := parseDMParticipantIDs(ParsePortalID(portalID))
+	if !ok || parts[0] == parts[1] {
+		return ""
+	} else if parts[0] == selfUserID {
+		return parts[1]
+	} else if parts[1] == selfUserID {
+		return parts[0]
+	}
+	return ""
+}
+
 func isSelfConversationID(conversationID, selfUserID string) bool {
 	if selfUserID == "" {
 		return false

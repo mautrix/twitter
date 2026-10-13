@@ -24,6 +24,8 @@ type Config struct {
 
 	LogRedactedLoginResponses bool `yaml:"log_redacted_login_responses"`
 
+	DMBlockSyncIntervalSeconds int `yaml:"dm_block_sync_interval_seconds"`
+
 	displaynameTemplate *template.Template `yaml:"-"`
 }
 
@@ -51,6 +53,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Bool, "cache_session")
 	helper.Copy(up.Bool, "x")
 	helper.Copy(up.Bool, "log_redacted_login_responses")
+	helper.Copy(up.Int, "dm_block_sync_interval_seconds")
 }
 
 type DisplaynameParams struct {

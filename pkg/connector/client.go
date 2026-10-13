@@ -463,6 +463,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		tc.syncUntrustedChannels(ctx)
 		tc.client.StartPolling(ctx)
 	}()
+	go tc.runDMBlockSync(ctx)
 
 	if ctx.Err() != nil {
 		return

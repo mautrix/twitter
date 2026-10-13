@@ -60,6 +60,7 @@ var (
 	_ bridgev2.RoomNameHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.TagHandlingNetworkAPI             = (*TwitterClient)(nil)
 	_ bridgev2.MuteHandlingNetworkAPI            = (*TwitterClient)(nil)
+	_ bridgev2.UserBlockingNetworkAPI            = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -1056,4 +1057,15 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 		}
 	}
 	return err
+}
+
+func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev2.MatrixBlockUser) error {
+	if msg.Content.ReportSpam {
+		return errors.New("spam reporting is not supported")
+	}
+	otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID))
+	if otherUserID == "" {
+		return errors.New("DM recipient is unknown")
+	}
+	return tc.client.SetUserDMBlocked(ctx, otherUserID, msg.Content.Block)
 }
