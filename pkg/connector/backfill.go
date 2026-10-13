@@ -968,6 +968,9 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 	}
 
 	sortBackfillMessages(backfillMessages)
+	if fetchParams.Forward && fetchParams.AnchorMessage == nil && fetchParams.Count > 0 && len(backfillMessages) > fetchParams.Count {
+		backfillMessages = backfillMessages[len(backfillMessages)-fetchParams.Count:]
+	}
 
 	hasMore := inbox.Status == types.PaginationStatusHasMore
 	forcedOlderPage := false
@@ -975,6 +978,19 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		Messages: backfillMessages,
 		HasMore:  hasMore,
 		Forward:  fetchParams.Forward,
+	}
+	if conv, ok := fetchParams.BundledData.(*types.Conversation); ok && conv != nil && len(backfillMessages) > 0 {
+		lastReadID, err := strconv.ParseUint(conv.LastReadEventID, 10, 64)
+		if err == nil && lastReadID > 0 {
+			result.MarkRead = true
+			for _, msg := range backfillMessages {
+				messageID, err := strconv.ParseUint(ParseMessageID(msg.ID), 10, 64)
+				if err != nil || messageID > lastReadID {
+					result.MarkRead = false
+					break
+				}
+			}
+		}
 	}
 	if fetchParams.Forward {
 		if hasMore && inbox.MaxEntryID != "" {
