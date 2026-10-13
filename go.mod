@@ -19,7 +19,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.0
 	github.com/tidwall/gjson v1.19.0
-	go.mau.fi/util v0.10.1
+	go.mau.fi/util v0.10.2-0.20260916101417-81654b936b92
 	golang.org/x/crypto v0.57.0
 	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1

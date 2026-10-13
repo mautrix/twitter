@@ -784,6 +784,9 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 	if resp != nil {
 		c.cookies.UpdateFromResponse(resp)
 	}
+	if c.LogRedactedLoginResponses {
+		c.logRedactedJetfuelResponse(ctx, method, path, body, resp, respBody)
+	}
 	if err != nil {
 		return respBody, err
 	}

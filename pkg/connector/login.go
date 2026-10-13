@@ -415,6 +415,9 @@ func (t *TwitterLogin) newLoginClient() *twittermeow.Client {
 	client := twittermeow.NewClient(twitCookies.NewCookies(nil), nil, log)
 	client.SetLoginHTTPTransport(t.loginHTTPTransport) // nil resets if not provided
 	client.SetBrowserHeaders(t.browserHeaders)
+	if t.tc != nil {
+		client.LogRedactedLoginResponses = t.tc.Config.LogRedactedLoginResponses
+	}
 	return client
 }
 
