@@ -494,12 +494,10 @@ func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, 
 			return result, err
 		}
 		pending := map[string][]response.XChatInboxItem{}
-		known := map[string]bool{}
 		order := []string{}
 		for _, page := range pages {
 			for _, item := range page.Items {
 				id := item.ConversationDetail.ConversationID
-				known[id] = true
 				if _, ok := pending[id]; !ok {
 					order = append(order, id)
 				}
@@ -532,7 +530,7 @@ func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, 
 				return err
 			}
 			for _, id := range ids {
-				if !known[id] || recoveryPending(id) {
+				if recoveryPending(id) {
 					return applyIDs(order)
 				}
 			}
