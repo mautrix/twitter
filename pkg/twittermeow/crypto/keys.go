@@ -16,6 +16,7 @@ var (
 	ErrInvalidKeyFormat = errors.New("invalid key format")
 	ErrKeyExpired       = errors.New("key has expired")
 	ErrSignatureInvalid = errors.New("signature verification failed")
+	ErrKeyNotForUs      = errors.New("conversation key is not encrypted for our key pair")
 )
 
 // ConversationKey represents a decrypted conversation key for XChat.

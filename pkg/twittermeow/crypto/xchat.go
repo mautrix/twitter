@@ -112,7 +112,7 @@ func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 
 	plaintext, err := gcm.Open(nil, iv, cipherAndTag, nil)
 	if err != nil {
-		return nil, fmt.Errorf("aes-gcm decrypt: %w", err)
+		return nil, fmt.Errorf("%w: aes-gcm decrypt: %w", ErrKeyNotForUs, err)
 	}
 	if len(plaintext) != 32 {
 		return nil, fmt.Errorf("unexpected conversation key length: %d", len(plaintext))

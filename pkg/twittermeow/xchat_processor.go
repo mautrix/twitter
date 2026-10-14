@@ -783,7 +783,13 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 	}
 
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
-	if err != nil {
+	if errors.Is(err, crypto.ErrKeyNotForUs) {
+		p.log.Warn().Err(err).
+			Str("conversation_id", conversationID).
+			Str("key_version", newKeyVersion).
+			Msg("Conversation key in key change event is not encrypted for our key pair")
+		return nil
+	} else if err != nil {
 		p.log.Err(err).
 			Str("conversation_id", conversationID).
 			Str("key_version", newKeyVersion).
