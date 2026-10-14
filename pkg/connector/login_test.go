@@ -29,6 +29,8 @@ func (rtf connectorRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, 
 	return rtf(req)
 }
 
+func (rtf connectorRoundTripFunc) SetFingerprint(string) {}
+
 func connectorTestHTTPResponse(body string) *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,

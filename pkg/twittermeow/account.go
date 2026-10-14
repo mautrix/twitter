@@ -92,6 +92,46 @@ func (c *Client) GetDMPermissions(ctx context.Context, params payload.GetDMPermi
 	return &data, json.Unmarshal(respBody, &data)
 }
 
+func (c *Client) SetUserDMBlocked(ctx context.Context, userID string, blocked bool) error {
+	reqURL, field := endpoints.DM_UNBLOCK_MUTATION_URL, "user_dm_unblock"
+	if blocked {
+		reqURL, field = endpoints.DM_BLOCK_MUTATION_URL, "user_dm_block"
+	}
+	body, err := (&payload.GraphQLPayload{
+		Variables: map[string][]string{"recipient_ids": {userID}},
+	}).Encode()
+	if err != nil {
+		return err
+	}
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            reqURL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		Body:           body,
+		ContentType:    types.ContentTypeJSON,
+	})
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Data map[string]*struct {
+			ErrorCode string `json:"error_code"`
+		} `json:"data"`
+		Errors []response.XChatGraphQLError `json:"errors"`
+	}
+	if err = json.Unmarshal(respBody, &resp); err != nil {
+		return err
+	} else if len(resp.Errors) > 0 {
+		return fmt.Errorf("%s returned GraphQL errors: %w", field, resp.Errors[0])
+	} else if resp.Data[field] == nil {
+		return fmt.Errorf("missing %s in response", field)
+	} else if resp.Data[field].ErrorCode != "" {
+		return fmt.Errorf("%s failed: %s", field, resp.Data[field].ErrorCode)
+	}
+	return nil
+}
+
 type WebPushConfig struct {
 	Endpoint string
 	P256DH   []byte

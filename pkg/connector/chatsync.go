@@ -885,3 +885,50 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 
 	return info
 }
+
+const dmBlockResyncInterval = 10 * time.Minute
+
+func (tc *TwitterClient) resyncDMBlock(ctx context.Context, portal *bridgev2.Portal) {
+	if portal.RoomType != database.RoomTypeDM {
+		return
+	}
+	now := time.Now()
+	if last, ok := tc.dmBlockResyncLast.Load(portal.PortalKey); ok && now.Sub(last.(time.Time)) < dmBlockResyncInterval {
+		return
+	}
+	tc.dmBlockResyncLast.Store(portal.PortalKey, now)
+	go tc.syncDMBlock(context.WithoutCancel(ctx), portal)
+}
+
+func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Portal) {
+	otherUserID := dmOtherUserID(portal.ID, ParseUserLoginID(tc.userLogin.ID))
+	if otherUserID == "" {
+		return
+	}
+	// Compare against the state before the request so a concurrent Matrix block isn't reverted.
+	wasBlocked := portal.UserBlocked
+	resp, err := tc.client.GetUsersByIdsForXChat(ctx, payload.NewGetUsersByIdsForXChatVariables([]string{otherUserID}))
+	if err != nil {
+		tc.userLogin.Log.Warn().Err(err).Str("portal_id", string(portal.ID)).Msg("Failed to fetch DM block status")
+		return
+	}
+	for _, r := range resp.Data.GetMemberResults.Results {
+		if r.ID != otherUserID || r.MemberResults == nil || r.MemberResults.Result == nil || r.MemberResults.Result.ChatPermissions == nil {
+			continue
+		}
+		blocked := r.MemberResults.Result.ChatPermissions.DMBlocking
+		if blocked == nil || *blocked == wasBlocked {
+			continue
+		}
+		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventChatInfoChange,
+				PortalKey: portal.PortalKey,
+				Timestamp: time.Now(),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: &bridgev2.ChatInfo{UserBlocked: blocked},
+			},
+		})
+	}
+}
