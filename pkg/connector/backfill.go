@@ -744,7 +744,9 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 	}
 
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
-	if err != nil {
+	if errors.Is(err, crypto.ErrKeyNotForUs) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 
