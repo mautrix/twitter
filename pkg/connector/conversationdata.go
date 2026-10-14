@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix"
@@ -136,14 +137,20 @@ func (tc *TwitterClient) ensurePortalForConversationLocked(ctx context.Context, 
 	}
 
 	// Sync channel (creates portal if needed)
-	if err := tc.syncXChatChannel(ctx, item, users); err != nil {
+	latestMessage, err := tc.syncXChatChannel(ctx, item, users)
+	if err != nil {
 		log.Warn().Err(err).Msg("Failed to sync channel for fetched conversation data")
 		return portal, err
 	}
 
 	// Process messages/read events to backfill and register any keys embedded there
 	bootstrapCtx := context.WithValue(ctx, ensurePortalContextKey{}, true)
-	if err := processor.ProcessMessageAndReadEvents(bootstrapCtx, item); err != nil {
+	var latestMessageTS time.Time
+	var latestMessageID string
+	if latestMessage != nil {
+		latestMessageTS, latestMessageID = latestMessage.Timestamp, ParseMessageID(latestMessage.ID)
+	}
+	if err := processor.ProcessMessageAndReadEvents(bootstrapCtx, item, latestMessageTS, latestMessageID); err != nil {
 		log.Warn().Err(err).Msg("Failed to process message/read events for fetched conversation data")
 	}
 

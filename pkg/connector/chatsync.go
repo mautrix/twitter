@@ -233,7 +233,7 @@ func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType databa
 
 // syncXChatChannel syncs a single conversation from XChat inbox data.
 // Creates the portal synchronously if it doesn't exist.
-func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) error {
+func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XChatInboxItem, users map[string]*types.User) (*database.Message, error) {
 	potentialGroupKey := networkid.PortalKey{ID: MakePortalID(item.ConversationDetail.ConversationID)}
 	if _, isGroup := restGroupPortalAliasKey(potentialGroupKey); isGroup {
 		defer tc.lockGroupPortal(item.ConversationDetail.ConversationID)()
@@ -242,7 +242,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 
 	conv := tc.xchatItemToConversation(ctx, item, users)
 	if conv == nil || conv.ConversationID == "" {
-		return fmt.Errorf("convert XChat inbox item to conversation")
+		return nil, fmt.Errorf("convert XChat inbox item to conversation")
 	}
 
 	portalKey := tc.MakePortalKey(conv)
@@ -252,14 +252,14 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 			log.Warn().Err(err).
 				Str("conversation_id", conv.ConversationID).
 				Msg("Failed to check for REST group portal alias")
-			return fmt.Errorf("check REST group portal alias: %w", err)
+			return nil, fmt.Errorf("check REST group portal alias: %w", err)
 		} else if restPortal != nil {
 			result, _, err := tc.connector.br.ReIDPortal(ctx, restKey, portalKey)
 			if err != nil {
 				log.Warn().Err(err).
 					Str("conversation_id", conv.ConversationID).
 					Msg("Failed to reconcile REST group portal into XChat portal")
-				return fmt.Errorf("reconcile REST group portal alias: %w", err)
+				return nil, fmt.Errorf("reconcile REST group portal alias: %w", err)
 			}
 			if result != bridgev2.ReIDResultNoOp {
 				log.Info().
@@ -277,70 +277,33 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		log.Warn().Err(err).
 			Str("conversation_id", conv.ConversationID).
 			Msg("Failed to get/create portal")
-		return fmt.Errorf("get or create XChat portal: %w", err)
+		return nil, fmt.Errorf("get or create XChat portal: %w", err)
 	}
 	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
-
-	// Ensure a backfill task exists even if we don't end up emitting a ChatInfoChange.
-	// Beeper scrollback relies on the backfill task existing for the portal.
+	var latestMessage *database.Message
 	if portal.MXID != "" {
-		if chatInfo.CanBackfill {
-			// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
-			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-				log.Warn().Err(err).
-					Str("conversation_id", conv.ConversationID).
-					Msg("Failed to ensure backfill task exists")
-			} else {
-				tc.connector.br.WakeupBackfillQueue()
-			}
+		latestMessage, err = tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
+		if err != nil {
+			return nil, fmt.Errorf("get XChat snapshot message boundary: %w", err)
 		}
 	}
 
-	// Create Matrix room if it doesn't exist
-	if portal.MXID == "" {
-		// FIXME this is wrong, CreateMatrixRoom should not be called manually
-		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to create Matrix room")
-			return fmt.Errorf("create Matrix room for XChat portal: %w", err)
-		}
-		// Register backfill task for the newly created room
-		if chatInfo.CanBackfill {
-			// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
-			if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-				log.Warn().Err(err).
-					Str("conversation_id", conv.ConversationID).
-					Msg("Failed to ensure backfill task exists for new room")
-			} else {
-				tc.connector.br.WakeupBackfillQueue()
-			}
-		}
-	} else if shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
-		if evt := bridgev2.GetRemoteEventFromContext(ctx); evt != nil && evt.GetPortalKey().ID == portal.PortalKey.ID {
-			// Already inside this portal's own event handler (e.g. RefreshConversationKeys
-			// during message conversion). Queueing another event for the same portal would
-			// self-deadlock when the portal event queue is synchronous (PortalEventBuffer=0),
-			// so apply the update directly instead.
-			portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
-		} else {
-			result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-				EventMeta: simplevent.EventMeta{
-					Type:      bridgev2.RemoteEventChatInfoChange,
-					PortalKey: portal.PortalKey,
-					Timestamp: time.Now(),
-				},
-				ChatInfoChange: &bridgev2.ChatInfoChange{
-					ChatInfo: chatInfo,
-				},
-			})
-			if !xchatRemoteEventHandled(result) {
-				if result.Error != nil {
-					return fmt.Errorf("update XChat portal info: %w", result.Error)
-				}
-				return fmt.Errorf("update XChat portal info did not finish handling")
-			}
+	if evt := bridgev2.GetRemoteEventFromContext(ctx); evt != nil && evt.GetPortalKey().ID == portal.PortalKey.ID {
+		// Key refresh can run inside this portal's synchronous event handler.
+		portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
+	} else if latestMessage == nil || shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
+		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
+				CreatePortal: true, Timestamp: time.Now(),
+			},
+			ChatInfo: chatInfo,
+			CheckNeedsBackfillFunc: func(_ context.Context, latestMessage *database.Message) (bool, error) {
+				return latestMessage == nil, nil
+			},
+		})
+		if !xchatRemoteEventHandled(result) {
+			return latestMessage, fmt.Errorf("resync XChat portal: %v", result.Error)
 		}
 	}
 
@@ -348,7 +311,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		Str("conversation_id", conv.ConversationID).
 		Stringer("portal_mxid", portal.MXID).
 		Msg("XChat channel synced")
-	return nil
+	return latestMessage, nil
 }
 
 // xchatItemToConversation converts an XChatInboxItem to a types.Conversation.
@@ -774,16 +737,33 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 
 	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
 
-	// Create Matrix room if it doesn't exist
-	if portal.MXID == "" {
-		// FIXME this is wrong, CreateMatrixRoom should not be called manually
-		err = portal.CreateMatrixRoom(ctx, tc.userLogin, chatInfo)
+	var latestMessageTS time.Time
+	var latestMessageID string
+	if portal.MXID != "" {
+		latestMessage, err := tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
 		if err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to create Matrix room for untrusted conversation")
+			log.Warn().Err(err).Msg("Failed to get message-request snapshot boundary")
 			return
+		} else if latestMessage != nil {
+			latestMessageTS = latestMessage.Timestamp
+			latestMessageID = ParseMessageID(latestMessage.ID)
 		}
+	}
+	if latestMessageTS.IsZero() {
+		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+			EventMeta: simplevent.EventMeta{
+				Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
+				CreatePortal: true, Timestamp: time.Now(),
+			},
+			ChatInfo: chatInfo,
+			CheckNeedsBackfillFunc: func(_ context.Context, latestMessage *database.Message) (bool, error) {
+				return latestMessage == nil, nil
+			},
+		})
+		if !result.Success {
+			log.Warn().Err(result.Error).Msg("Failed to create Matrix room for untrusted conversation")
+		}
+		return
 	} else {
 		// Room already exists - update MessageRequest status via ChatInfoChange
 		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
@@ -811,7 +791,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 	}
 	// Process messages for this conversation from inbox entries
 	if inbox != nil {
-		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox)
+		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox, latestMessageTS, latestMessageID)
 	}
 
 	log.Debug().
@@ -821,7 +801,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 }
 
 // processUntrustedMessages processes message entries for an untrusted conversation.
-func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversationID string, inbox *response.TwitterInboxData) {
+func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversationID string, inbox *response.TwitterInboxData, afterMessageTS time.Time, afterMessageID string) {
 	log := zerolog.Ctx(ctx)
 
 	for _, entry := range inbox.Entries {
@@ -836,6 +816,11 @@ func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversat
 			continue
 		}
 		if msg.ConversationID != conversationID {
+			continue
+		}
+		messageID, source := restMessageCanonicalID(msg)
+		messageTS, _ := restMessageCanonicalTimestamp(msg, messageID, source)
+		if messageTS.Before(afterMessageTS) || messageTS.Equal(afterMessageTS) && compareIntStrings(messageID, afterMessageID) <= 0 {
 			continue
 		}
 

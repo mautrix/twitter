@@ -2,19 +2,148 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/bridgeconfig"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
+
+func TestXChatInitialBackfillHonorsCountOrSinglePage(t *testing.T) {
+	for _, test := range []struct {
+		count  int
+		sparse bool
+	}{{3, false}, {201, false}, {0, false}, {-1, false}, {3, true}} {
+		t.Run(fmt.Sprintf("%d/sparse=%t", test.count, test.sparse), func(t *testing.T) {
+			count := test.count
+			pageSize := payload.DefaultGetConversationPageQuerySettings().ConversationEventLimit
+			wantCount := count
+			if wantCount <= 0 {
+				wantCount = pageSize
+			}
+			wantLimit := min(wantCount, pageSize)
+			wantCalls := (wantCount + pageSize - 1) / pageSize
+			wantOldest, wantNewest := 1, wantCount
+			if test.sparse {
+				wantCalls, wantOldest, wantNewest = 2, 2, 5
+			}
+			client := twittermeow.NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
+			calls := 0
+			client.HTTP = &http.Client{Transport: connectorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				var vars payload.GetConversationPageQueryVariables
+				if err := json.Unmarshal([]byte(req.URL.Query().Get("variables")), &vars); err != nil {
+					t.Fatal(err)
+				}
+				if calls > wantCalls || calls == 1 && vars.MinLocalSequenceID != xchatBackfillMaxInt || vars.QuerySettings.ConversationEventLimit != wantLimit {
+					t.Fatalf("unexpected initial page query: %#v", vars)
+				}
+				page := response.GetConversationPageQueryResponse{}
+				page.Data.GetConversationPage.HasMore = true
+				newest := wantCount - (calls-1)*pageSize
+				oldest := max(0, newest-pageSize)
+				if test.sparse {
+					newest, oldest = 5, 2
+					if calls == 2 {
+						newest, oldest = 2, 0
+					}
+				}
+				for i := newest; i > oldest; i-- {
+					contents, err := payload.Encode(&payload.MessageEntryHolder{Contents: &payload.MessageEntryContents{Message: &payload.MessageContents{MessageText: ptr.Ptr("test")}}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					detail := &payload.MessageEventDetail{MessageCreateEvent: &payload.MessageCreateEvent{Contents: contents}}
+					if test.sparse && i == 3 {
+						detail = &payload.MessageEventDetail{MarkConversationReadEvent: &payload.MarkConversationReadEvent{}}
+					}
+					encoded, err := payload.Encode(&payload.MessageEvent{
+						SequenceId: ptr.Ptr(fmt.Sprint(int64(2000000000000000000) + int64(i)*(1<<22))), ConversationId: ptr.Ptr("1:2"),
+						CreatedAtMsec: ptr.Ptr(fmt.Sprint(1700000000000 + i)), SenderId: ptr.Ptr("2"),
+						Detail: detail,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					page.Data.GetConversationPage.EncodedMessageEvents = append(page.Data.GetConversationPage.EncodedMessageEvents, base64.StdEncoding.EncodeToString(encoded))
+				}
+				body, err := json.Marshal(page)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return connectorTestHTTPResponse(string(body)), nil
+			})}
+			bridge := &bridgev2.Bridge{Config: &bridgeconfig.BridgeConfig{}}
+			portal := &bridgev2.Portal{Bridge: bridge, Portal: &database.Portal{
+				PortalKey: networkid.PortalKey{ID: MakePortalID("1:2")},
+				Metadata:  &PortalMetadata{ConversationToken: "test"},
+			}}
+			tc := &TwitterClient{client: client, connector: &TwitterConnector{br: bridge}}
+			result, err := tc.FetchMessages(t.Context(), bridgev2.FetchMessagesParams{Portal: portal, Forward: true, Count: count})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != wantCalls || !result.Forward || result.HasMore || len(result.Messages) != wantCount {
+				t.Fatalf("calls=%d forward=%v has_more=%v messages=%d, want %d pages with %d messages", calls, result.Forward, result.HasMore, len(result.Messages), wantCalls, wantCount)
+			}
+			if result.Messages[0].ID != MakeMessageID(fmt.Sprint(int64(2000000000000000000)+int64(wantOldest)*(1<<22))) || result.Messages[len(result.Messages)-1].ID != MakeMessageID(fmt.Sprint(int64(2000000000000000000)+int64(wantNewest)*(1<<22))) {
+				t.Fatalf("initial messages are not sorted oldest first: %s..%s", result.Messages[0].ID, result.Messages[len(result.Messages)-1].ID)
+			}
+		})
+	}
+}
+
+func TestXChatInitialBackfillMultiplePagesAndFailures(t *testing.T) {
+	calls := 0
+	result, err := fetchXChatForwardCatchupPages(t.Context(), "conversation", nil,
+		xchatForwardCatchupOptions{PageSize: 2, MaxMessages: 3},
+		func(_ context.Context, cursor string, _ int) (*parsedXChatPage, error) {
+			calls++
+			if calls > 2 {
+				t.Fatal("fetched beyond the initial limit")
+			}
+			newest := 5 - calls*2
+			return &parsedXChatPage{
+				messages: []*bridgev2.BackfillMessage{
+					{ID: networkid.MessageID(fmt.Sprint(newest)), Timestamp: time.Unix(int64(newest), 0)},
+					{ID: networkid.MessageID(fmt.Sprint(newest + 1)), Timestamp: time.Unix(int64(newest+1), 0)},
+				},
+				pageHasMore: true, nextCursor: fmt.Sprint(newest),
+			}, nil
+		})
+	if err != nil || calls != 2 || len(result.Messages) != 3 || result.Messages[0].ID != "2" || result.Messages[2].ID != "4" {
+		t.Fatalf("initial multi-page result = %#v, calls=%d, error=%v", result, calls, err)
+	}
+	for _, failure := range []error{errors.New("fetch failed"), context.Canceled} {
+		_, err = fetchXChatForwardCatchupPages(t.Context(), "conversation", nil,
+			xchatForwardCatchupOptions{PageSize: 2, MaxMessages: 3},
+			func(context.Context, string, int) (*parsedXChatPage, error) { return nil, failure })
+		if !errors.Is(err, failure) {
+			t.Fatalf("initial fetch error = %v, want %v", err, failure)
+		}
+	}
+	result, err = fetchXChatForwardCatchupPages(t.Context(), "conversation", nil,
+		xchatForwardCatchupOptions{PageSize: 2, MaxMessages: 3},
+		func(context.Context, string, int) (*parsedXChatPage, error) { return &parsedXChatPage{}, nil })
+	if err != nil || len(result.Messages) != 0 || !result.Forward || result.HasMore {
+		t.Fatalf("empty initial result = %#v, error=%v", result, err)
+	}
+}
 
 func TestGetBackfillMaxBatchCount(t *testing.T) {
 	tests := []struct {
