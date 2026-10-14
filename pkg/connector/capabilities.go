@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -42,10 +43,17 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 8
+	return 1, 9
 }
 
 const MaxTextLength = 10000
+
+func supportedIfFFmpeg() event.CapabilitySupportLevel {
+	if ffmpeg.Supported() {
+		return event.CapLevelPartialSupport
+	}
+	return event.CapLevelRejected
+}
 
 var groupCaps = &event.RoomFeatures{
 	ID: "fi.mau.twitter.capabilities.2026_01_08",
@@ -112,6 +120,20 @@ var groupCaps = &event.RoomFeatures{
 
 var dmCaps = ptr.Clone(groupCaps)
 
+var legacyAudioCaps = &event.FileFeatures{
+	MimeTypes: map[string]event.CapabilitySupportLevel{
+		"audio/aac":  supportedIfFFmpeg(),
+		"audio/mp4":  supportedIfFFmpeg(),
+		"audio/mpeg": supportedIfFFmpeg(),
+		"audio/ogg":  supportedIfFFmpeg(),
+		"video/mp4":  event.CapLevelFullySupported,
+	},
+	Caption:          event.CapLevelFullySupported,
+	MaxCaptionLength: MaxTextLength,
+	MaxSize:          15 * 1024 * 1024,
+	MaxDuration:      ptr.Ptr(jsontime.S(140 * time.Second)),
+}
+
 func init() {
 	dmCaps.State = nil
 	dmCaps.MemberActions = nil
@@ -131,6 +153,12 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected
 		caps.ID += "+no-edit+no-delete"
+		if !meta.IsXChatConversation() {
+			caps.File = caps.File.Clone()
+			caps.File[event.MsgAudio] = legacyAudioCaps
+			caps.File[event.CapMsgVoice] = legacyAudioCaps
+			caps.ID += "+audio"
+		}
 		return caps
 	}
 
