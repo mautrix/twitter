@@ -245,7 +245,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 				tc.userLogin.BridgeState.Send(status.BridgeState{
 					StateEvent: status.StateBadCredentials,
 					Error:      "twitter-invalid-credentials",
-					Message:    err.Error(),
+					Info:       map[string]any{"go_error": err.Error()},
 					UserAction: authErrorUserAction(err),
 				})
 			} else {
@@ -372,7 +372,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			tc.userLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateBadCredentials,
 				Error:      "twitter-invalid-credentials",
-				Message:    err.Error(),
+				Info:       map[string]any{"go_error": err.Error()},
 				UserAction: authErrorUserAction(err),
 			})
 			return
