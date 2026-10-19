@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -48,7 +49,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
 
 		if !perms.CanDM || perms.ErrorCode > 0 {
-			return nil, fmt.Errorf("not allowed to DM this Twitter user: %v", resolvedUser.IDStr)
+			return nil, bridgev2.RespError{ErrCode: "FI.MAU.TWITTER.DM_NOT_ALLOWED", Err: "You can't send direct messages to this X user", StatusCode: http.StatusForbidden}
 		}
 
 		conversationID := methods.CreateConversationID([]string{resolvedUser.IDStr, ParseUserLoginID(tc.userLogin.ID)})
