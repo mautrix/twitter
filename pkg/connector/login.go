@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -310,6 +311,11 @@ var (
 		ErrCode:    "FI.MAU.TWITTER.MISSING_USER_ID",
 		Err:        "Couldn't read your X account ID. Please try again.",
 		StatusCode: http.StatusInternalServerError,
+	}
+	ErrInvalidPIN = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.INVALID_PIN",
+		Err:        "Passcode must be 4 digits.",
+		StatusCode: http.StatusBadRequest,
 	}
 	ErrMissingLoginInput = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.MISSING_LOGIN_INPUT",
@@ -787,9 +793,13 @@ func parsePINInput(input map[string]string) (string, error) {
 	pin = strings.TrimSpace(pin)
 	if pin == "" {
 		return "", ErrMissingLoginInput
+	} else if !pinPattern.MatchString(pin) {
+		return "", ErrInvalidPIN
 	}
 	return pin, nil
 }
+
+var pinPattern = regexp.MustCompile(pinRegex)
 
 func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
 	if t.client == nil {
