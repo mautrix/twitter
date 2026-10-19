@@ -23,6 +23,7 @@ func init() {
 		"twitter-not-logged-in":       "You're not logged into X. Please log in again.",
 		"twitter-migration-reauth":    "X Chat needs a passcode update. Please log in and enter your passcode.",
 		"twitter-invalid-credentials": "Your X session has expired. Please log in again.",
+		"twitter-account-restricted":  "Your X account is suspended or locked. Check the X app for details.",
 		"twitter-load-error":          "Couldn't connect to X.",
 		"twitter-xchat-fetch-error":   "Couldn't sync X Chat.",
 	})
