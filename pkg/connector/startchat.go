@@ -47,7 +47,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
 
-		if !perms.CanDM || perms.ErrorCode > 0 {
+		if perms == nil || !perms.CanDM || perms.ErrorCode > 0 {
 			return nil, fmt.Errorf("not allowed to DM this Twitter user: %v", resolvedUser.IDStr)
 		}
 
