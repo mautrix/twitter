@@ -919,12 +919,12 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	if msg.TargetMessage == nil {
-		return errors.New("target message not found")
+		return bridgev2.ErrTargetMessageNotFound
 	}
 
 	sequenceID := ParseMessageID(msg.TargetMessage.ID)
 	if sequenceID == "" {
-		return errors.New("message sequence ID not found")
+		return fmt.Errorf("%w: message sequence ID not found", bridgev2.ErrTargetMessageNotFound)
 	}
 
 	// Unencrypted conversations only support delete-for-self through the legacy API.
