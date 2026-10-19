@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -202,10 +203,6 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	return restResp, nil
 }
 
-// xchatForwardCatchupMaxPages bounds how many conversation pages a single forward
-// catchup may fetch while walking back towards the anchor message.
-const xchatForwardCatchupMaxPages = 10
-
 type xchatForwardCatchupOptions struct {
 	PageSize        int
 	MaxMessages     int
@@ -224,18 +221,14 @@ type xchatForwardPageFetcher func(context.Context, string, int) (*parsedXChatPag
 // REST-era snowflake message ID, which is not comparable to XChat sequence IDs.
 func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	count := fetchParams.Count
-	maxPages := xchatForwardCatchupMaxPages
-	if fetchParams.AnchorMessage == nil {
-		maxPages = 0
-		pageSize := payload.DefaultGetConversationPageQuerySettings().ConversationEventLimit
-		if count <= 0 {
-			count = pageSize
-			maxPages = 1
-		}
-	}
+	pageSize := payload.DefaultGetConversationPageQuerySettings().ConversationEventLimit
 	if count <= 0 {
 		count = 50
+		if fetchParams.AnchorMessage == nil {
+			count = pageSize
+		}
 	}
+	maxPages := int(math.Ceil(float64(count) / float64(pageSize)))
 	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
 		PageSize:    count,
 		MaxMessages: count,

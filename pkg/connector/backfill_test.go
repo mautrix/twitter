@@ -40,7 +40,7 @@ func TestXChatInitialBackfillHonorsCountOrSinglePage(t *testing.T) {
 			wantCalls := (wantCount + pageSize - 1) / pageSize
 			wantOldest, wantNewest := 1, wantCount
 			if test.sparse {
-				wantCalls, wantOldest, wantNewest = 2, 2, 5
+				wantCount, wantCalls, wantOldest, wantNewest = 2, 1, 4, 5
 			}
 			client := twittermeow.NewClient(cookies.NewCookies(nil), nil, zerolog.Nop())
 			calls := 0
