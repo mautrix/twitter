@@ -892,7 +892,7 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 
 func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridgev2.MatrixDeleteChat) error {
 	if chat.Content.DeleteForEveryone {
-		return errors.New("delete for everyone is not supported")
+		return bridgev2.WrapErrorInStatus(errors.New("deleting chats for everyone is not supported on X")).WithIsCertain(true).WithErrorAsMessage().WithErrorReason(event.MessageStatusUnsupported).WithStatus(event.MessageStatusFail)
 	}
 	conversationID := ParsePortalID(chat.Portal.ID)
 	restConversationID := ConvertConversationIDToREST(conversationID)
