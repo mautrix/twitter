@@ -244,8 +244,9 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			if twittermeow.IsAuthError(err) {
 				tc.userLogin.BridgeState.Send(status.BridgeState{
 					StateEvent: status.StateBadCredentials,
-					Error:      "twitter-invalid-credentials",
-					Message:    err.Error(),
+					Error:      authErrorCode(err),
+					Info:       map[string]any{"go_error": err.Error()},
+					UserAction: authErrorUserAction(err),
 				})
 			} else {
 				tc.userLogin.BridgeState.Send(status.BridgeState{
@@ -370,8 +371,9 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			fetchLog.Err(err).Msg("XChat inbox sync authentication failed")
 			tc.userLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateBadCredentials,
-				Error:      "twitter-invalid-credentials",
-				Message:    err.Error(),
+				Error:      authErrorCode(err),
+				Info:       map[string]any{"go_error": err.Error()},
+				UserAction: authErrorUserAction(err),
 			})
 			return
 		}
@@ -839,4 +841,24 @@ func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conv
 	if err := tc.syncXChatChannel(ctx, item, users); err != nil {
 		log.Warn().Err(err).Msg("Failed to sync conversation data from refresh callback")
 	}
+}
+
+func isAccountRestrictedError(err error) bool {
+	return errors.Is(err, twittermeow.ErrUserSuspended) ||
+		errors.Is(err, twittermeow.ErrNotActive) ||
+		errors.Is(err, twittermeow.ErrAccountTemporarilyLocked)
+}
+
+func authErrorCode(err error) status.BridgeStateErrorCode {
+	if isAccountRestrictedError(err) {
+		return "twitter-account-restricted"
+	}
+	return "twitter-invalid-credentials"
+}
+
+func authErrorUserAction(err error) status.BridgeStateUserAction {
+	if isAccountRestrictedError(err) {
+		return status.UserActionOpenNative
+	}
+	return ""
 }

@@ -2,11 +2,14 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
@@ -41,14 +44,16 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 			RecipientIDs: resolvedUser.IDStr,
 			DMUsers:      true,
 		})
-		if err != nil {
+		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+			return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later"))
+		} else if err != nil {
 			return nil, fmt.Errorf("failed to get DM permissions for Twitter User: %w", err)
 		}
 
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
 
 		if perms == nil || !perms.CanDM || perms.ErrorCode > 0 {
-			return nil, fmt.Errorf("not allowed to DM this Twitter user: %v", resolvedUser.IDStr)
+			return nil, bridgev2.RespError(mautrix.MForbidden.WithMessage("You can't send direct messages to this X user"))
 		}
 
 		conversationID := methods.CreateConversationID([]string{resolvedUser.IDStr, ParseUserLoginID(tc.userLogin.ID)})

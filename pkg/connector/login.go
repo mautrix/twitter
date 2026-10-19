@@ -311,6 +311,11 @@ var (
 		Err:        "Couldn't read your X account ID. Please try again.",
 		StatusCode: http.StatusInternalServerError,
 	}
+	ErrCookiesBeforePIN = bridgev2.RespError{
+		ErrCode:    "FI.MAU.TWITTER.COOKIES_REQUIRED",
+		Err:        "Log in to X before entering your passcode.",
+		StatusCode: http.StatusBadRequest,
+	}
 	ErrMissingLoginInput = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.MISSING_LOGIN_INPUT",
 		Err:        "Missing required login input.",
@@ -794,7 +799,7 @@ func parsePINInput(input map[string]string) (string, error) {
 func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
 	if t.client == nil {
 		if t.Cookies == "" {
-			return "", fmt.Errorf("cookies must be submitted before passcode")
+			return "", ErrCookiesBeforePIN
 		}
 		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 		t.client = twittermeow.NewClient(cookieStruct, nil, t.log().With().Str("component", "login_twitter_client").Logger())

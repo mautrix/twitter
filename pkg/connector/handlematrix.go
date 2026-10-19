@@ -688,10 +688,10 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 			Any("payload", reactionPayload).
 			Msg("Reaction response")
 		if !remove && reactionResponse.Data.CreateDmReaction.Typename == "CreateDMReactionFailure" {
-			return fmt.Errorf("server rejected reaction")
+			return bridgev2.WrapErrorInStatus(errors.New("server rejected reaction")).WithMessage("X rejected the reaction").WithIsCertain(true).WithSendNotice(true).WithStatus(event.MessageStatusFail)
 		}
 		if remove && reactionResponse.Data.DeleteDmReaction.Typename == "DeleteDMReactionFailure" {
-			return fmt.Errorf("server rejected reaction removal")
+			return bridgev2.WrapErrorInStatus(errors.New("server rejected reaction removal")).WithMessage("X rejected the reaction removal").WithIsCertain(true).WithSendNotice(true).WithStatus(event.MessageStatusFail)
 		}
 		return nil
 	}
@@ -846,7 +846,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 
 	// Editing is only supported for encrypted XChat conversations
 	if !portalMeta.CanUseXChat() {
-		return errors.New("editing is not supported for unencrypted conversations")
+		return bridgev2.ErrEditsNotSupportedInPortal
 	}
 
 	targetMessageID := ParseMessageID(edit.EditTarget.ID)
@@ -892,7 +892,7 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 
 func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridgev2.MatrixDeleteChat) error {
 	if chat.Content.DeleteForEveryone {
-		return errors.New("delete for everyone is not supported")
+		return bridgev2.WrapErrorInStatus(errors.New("deleting chats for everyone is not supported on X")).WithIsCertain(true).WithErrorAsMessage().WithErrorReason(event.MessageStatusUnsupported).WithStatus(event.MessageStatusFail)
 	}
 	conversationID := ParsePortalID(chat.Portal.ID)
 	restConversationID := ConvertConversationIDToREST(conversationID)
@@ -919,12 +919,12 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bridgev2.MatrixMessageRemove) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	if msg.TargetMessage == nil {
-		return errors.New("target message not found")
+		return bridgev2.ErrTargetMessageNotFound
 	}
 
 	sequenceID := ParseMessageID(msg.TargetMessage.ID)
 	if sequenceID == "" {
-		return errors.New("message sequence ID not found")
+		return bridgev2.ErrTargetMessageNotFound
 	}
 
 	// Unencrypted conversations only support delete-for-self through the legacy API.
@@ -949,7 +949,7 @@ func xchatMessageRemovalOpts(conversationID, sequenceID string) twittermeow.Dele
 
 func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return false, errors.New("cannot set room avatar for DM")
+		return false, bridgev2.ErrRoomMetadataNotAllowed
 	}
 
 	if msg.Content.URL != "" || msg.Content.MSC3414File != nil {
@@ -987,7 +987,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 
 func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return false, errors.New("cannot set room name for DM")
+		return false, bridgev2.ErrRoomMetadataNotAllowed
 	}
 
 	updateNameParams := &payload.DMRequestQuery{
@@ -1002,10 +1002,10 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 
 func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (*bridgev2.MatrixMembershipResult, error) {
 	if msg.Type != bridgev2.Invite {
-		return nil, errors.New("unsupported membership change type")
+		return nil, bridgev2.ErrMembershipNotSupported
 	}
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return nil, errors.New("cannot change members for DM")
+		return nil, bridgev2.ErrMembershipNotSupported
 	}
 
 	var participantID string
@@ -1063,7 +1063,7 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 
 func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev2.MatrixBlockUser) error {
 	if msg.Content.ReportSpam {
-		return errors.New("spam reporting is not supported")
+		return bridgev2.WrapErrorInStatus(errors.New("reporting spam is not supported on X")).WithIsCertain(true).WithErrorAsMessage().WithErrorReason(event.MessageStatusUnsupported).WithStatus(event.MessageStatusFail)
 	}
 	otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID))
 	if otherUserID == "" {
