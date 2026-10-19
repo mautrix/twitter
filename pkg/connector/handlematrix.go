@@ -846,7 +846,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 
 	// Editing is only supported for encrypted XChat conversations
 	if !portalMeta.CanUseXChat() {
-		return errors.New("editing is not supported for unencrypted conversations")
+		return bridgev2.ErrEditsNotSupportedInPortal
 	}
 
 	targetMessageID := ParseMessageID(edit.EditTarget.ID)
