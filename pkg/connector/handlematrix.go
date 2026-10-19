@@ -949,7 +949,7 @@ func xchatMessageRemovalOpts(conversationID, sequenceID string) twittermeow.Dele
 
 func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return false, errors.New("cannot set room avatar for DM")
+		return false, bridgev2.ErrRoomMetadataNotAllowed
 	}
 
 	if msg.Content.URL != "" || msg.Content.MSC3414File != nil {
@@ -987,7 +987,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 
 func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return false, errors.New("cannot set room name for DM")
+		return false, bridgev2.ErrRoomMetadataNotAllowed
 	}
 
 	updateNameParams := &payload.DMRequestQuery{
@@ -1002,10 +1002,10 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 
 func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (*bridgev2.MatrixMembershipResult, error) {
 	if msg.Type != bridgev2.Invite {
-		return nil, errors.New("unsupported membership change type")
+		return nil, bridgev2.ErrMembershipNotSupported
 	}
 	if msg.Portal.RoomType == database.RoomTypeDM {
-		return nil, errors.New("cannot change members for DM")
+		return nil, bridgev2.ErrMembershipNotSupported
 	}
 
 	var participantID string
@@ -1063,7 +1063,7 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 
 func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev2.MatrixBlockUser) error {
 	if msg.Content.ReportSpam {
-		return errors.New("spam reporting is not supported")
+		return bridgev2.WrapErrorInStatus(errors.New("reporting spam is not supported on X")).WithIsCertain(true).WithErrorAsMessage().WithErrorReason(event.MessageStatusUnsupported).WithStatus(event.MessageStatusFail)
 	}
 	otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID))
 	if otherUserID == "" {
