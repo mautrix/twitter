@@ -2,11 +2,15 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
@@ -41,7 +45,9 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 			RecipientIDs: resolvedUser.IDStr,
 			DMUsers:      true,
 		})
-		if err != nil {
+		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+			return nil, bridgev2.RespError{ErrCode: mautrix.MLimitExceeded.ErrCode, Err: "X is rate limiting requests, try again later", StatusCode: http.StatusTooManyRequests}
+		} else if err != nil {
 			return nil, fmt.Errorf("failed to get DM permissions for Twitter User: %w", err)
 		}
 
