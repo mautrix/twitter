@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
@@ -46,7 +45,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 			DMUsers:      true,
 		})
 		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
-			return nil, bridgev2.RespError{ErrCode: mautrix.MLimitExceeded.ErrCode, Err: "X is rate limiting requests, try again later", StatusCode: http.StatusTooManyRequests}
+			return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later"))
 		} else if err != nil {
 			return nil, fmt.Errorf("failed to get DM permissions for Twitter User: %w", err)
 		}
@@ -54,7 +53,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
 
 		if perms == nil || !perms.CanDM || perms.ErrorCode > 0 {
-			return nil, bridgev2.RespError{ErrCode: "FI.MAU.TWITTER.DM_NOT_ALLOWED", Err: "You can't send direct messages to this X user", StatusCode: http.StatusForbidden}
+			return nil, bridgev2.RespError(mautrix.MForbidden.WithMessage("You can't send direct messages to this X user"))
 		}
 
 		conversationID := methods.CreateConversationID([]string{resolvedUser.IDStr, ParseUserLoginID(tc.userLogin.ID)})
