@@ -688,10 +688,10 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 			Any("payload", reactionPayload).
 			Msg("Reaction response")
 		if !remove && reactionResponse.Data.CreateDmReaction.Typename == "CreateDMReactionFailure" {
-			return fmt.Errorf("server rejected reaction")
+			return bridgev2.WrapErrorInStatus(errors.New("server rejected reaction")).WithMessage("X rejected the reaction").WithIsCertain(true).WithSendNotice(true).WithStatus(event.MessageStatusFail)
 		}
 		if remove && reactionResponse.Data.DeleteDmReaction.Typename == "DeleteDMReactionFailure" {
-			return fmt.Errorf("server rejected reaction removal")
+			return bridgev2.WrapErrorInStatus(errors.New("server rejected reaction removal")).WithMessage("X rejected the reaction removal").WithIsCertain(true).WithSendNotice(true).WithStatus(event.MessageStatusFail)
 		}
 		return nil
 	}
