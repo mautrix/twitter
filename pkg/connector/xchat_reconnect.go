@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 	"golang.org/x/sync/errgroup"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 type xchatInboxCatchupState struct {
@@ -227,6 +232,10 @@ func (tc *TwitterClient) processXChatInboxPage(
 		}
 		g.Go(func() error {
 			conversationID := item.ConversationDetail.ConversationID
+			if tc.isDeletedXChatConversationWithoutRoom(pageCtx, item) {
+				log.Debug().Str("conversation_id", conversationID).Msg("Skipping XChat conversation deleted after its last message")
+				return nil
+			}
 			keyErr := processor.ProcessKeyChangeEvents(pageCtx, item)
 			if keyErr != nil {
 				if errors.Is(keyErr, twittermeow.ErrXChatFailurePersistence) {
@@ -287,6 +296,41 @@ func (tc *TwitterClient) processXChatInboxPage(
 		})
 	}
 	return pageMissing, errors.Join(g.Wait(), processor.FailedEventPersistenceError())
+}
+
+func (tc *TwitterClient) isDeletedXChatConversationWithoutRoom(ctx context.Context, item *response.XChatInboxItem) bool {
+	var deletedAt, lastMessageAt time.Time
+	encoded := append(slices.Clone(item.LatestMessageEvents), item.EncodedMessageEvents...)
+	encoded = append(encoded, item.LatestNotifiableMessageCreateEvent)
+	for _, raw := range encoded {
+		if raw == "" {
+			continue
+		}
+		evt, err := twittermeow.DecodeMessageEvent(raw)
+		if err != nil || evt.Detail == nil {
+			continue
+		}
+		ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+		if evt.Detail.ConversationDeleteEvent != nil && ts.After(deletedAt) {
+			deletedAt = ts
+		} else if evt.Detail.MessageCreateEvent != nil && ts.After(lastMessageAt) {
+			lastMessageAt = ts
+		}
+	}
+	if deletedAt.IsZero() || lastMessageAt.After(deletedAt) {
+		return false
+	}
+	portalKeys := []networkid.PortalKey{tc.MakePortalKeyFromID(item.ConversationDetail.ConversationID)}
+	if restKey, ok := restGroupPortalAliasKey(portalKeys[0]); ok {
+		portalKeys = append(portalKeys, restKey)
+	}
+	for _, portalKey := range portalKeys {
+		portal, err := tc.connector.br.GetExistingPortalByKey(ctx, portalKey)
+		if err != nil || (portal != nil && portal.MXID != "") {
+			return false
+		}
+	}
+	return true
 }
 
 func (tc *TwitterClient) syncXChatInboxAfterConnect(
