@@ -109,6 +109,7 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 		return err
 	}
 
+	firstKey := len(meta.ConversationKeys) == 0
 	if meta.ConversationKeys == nil {
 		meta.ConversationKeys = make(map[string]*ConversationKeyData)
 	}
@@ -140,6 +141,9 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 			Str("key_version", key.KeyVersion).
 			Int("total_keys_after", len(meta.ConversationKeys)).
 			Msg("Successfully saved conversation key to portal metadata")
+		if firstKey {
+			portal.UpdateCapabilities(ctx, ks.login, true)
+		}
 	}
 	return err
 }
