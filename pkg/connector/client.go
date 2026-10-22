@@ -247,28 +247,22 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		tc.client.SetSession(meta.Session)
 	} else {
 		// Load messages page to initialize session (populates cookies, tokens, etc.)
-		_, err := tc.client.LoadMessagesPage(ctx)
+		err := tc.retryRestricted(ctx, runtimeGen, time.Second, func(ctx context.Context) error {
+			_, err := tc.client.LoadMessagesPage(ctx)
+			return err
+		})
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
 				return
 			}
 			log.Err(err).Msg("Failed to load messages page")
-			if twittermeow.IsAuthError(err) {
-				tc.userLogin.BridgeState.Send(status.BridgeState{
-					StateEvent: status.StateBadCredentials,
-					Error:      authErrorCode(err),
-					Info:       map[string]any{"go_error": err.Error()},
-					UserAction: authErrorUserAction(err),
-				})
-			} else {
-				tc.userLogin.BridgeState.Send(status.BridgeState{
-					StateEvent: status.StateUnknownError,
-					Error:      "twitter-load-error",
-					Info: map[string]any{
-						"go_error": err.Error(),
-					},
-				})
-			}
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateUnknownError,
+				Error:      "twitter-load-error",
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
+			})
 			return
 		}
 	}
@@ -327,6 +321,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	repairTruncatedItems := meta.MaxUserSequenceID != ""
 	var catchupResult xchatInboxCatchupResult
 	retryDelay := time.Second
+	inboxRestricted := false
 	for {
 		var err error
 		catchupResult, err = runXChatInboxCatchup(ctx, xchatInboxCatchupState{
@@ -368,20 +363,30 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			Checkpoint: tc.saveXChatInboxCheckpoint,
 		})
 		if err == nil {
+			if inboxRestricted {
+				tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketConnected, nil)
+			}
 			break
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		if isXChatAuthError(err) {
+		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
 			fetchLog.Err(err).Msg("XChat inbox sync authentication failed")
-			tc.userLogin.BridgeState.Send(status.BridgeState{
-				StateEvent: status.StateBadCredentials,
-				Error:      authErrorCode(err),
-				Info:       map[string]any{"go_error": err.Error()},
-				UserAction: authErrorUserAction(err),
-			})
+			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 			return
+		}
+		if twittermeow.IsAuthError(err) {
+			inboxRestricted = true
+			fetchLog.Err(err).
+				Dur("retry_in", retryDelay).
+				Msg("XChat inbox sync restricted, retrying from saved checkpoint")
+			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
+			if !waitForXChatInboxRetry(ctx, retryDelay) {
+				return
+			}
+			retryDelay = min(retryDelay*2, 180*time.Second)
+			continue
 		}
 		fetchLog.Err(err).
 			Dur("retry_in", retryDelay).
@@ -453,7 +458,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if twittermeow.IsAuthError(err) {
+		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) {
 			log.Err(err).Msg("XChat websocket authentication failed")
 			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 			return
@@ -474,7 +479,12 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		Msg("Finished fetching XChat inbox")
 
 	go func(gen uint64) {
+		// A restricted inbox fetch here must not skip polling. syncUntrustedChannels
+		// returns on that error; StartPolling still runs unless this connect was cancelled.
 		tc.syncUntrustedChannels(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 		tc.client.StartPolling(ctx, gen)
 	}(runtimeGen)
 
@@ -529,6 +539,42 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 
 	// Save session state
 	tc.HandleCursorChange(ctx)
+}
+
+// retryRestricted runs op until it succeeds. Code 32 is reported and returned.
+// Other auth errors are reported as restricted and retried with backoff.
+// A later success clears that runtime auth state.
+func (tc *TwitterClient) retryRestricted(ctx context.Context, gen uint64, initial time.Duration, op func(context.Context) error) error {
+	delay := initial
+	if delay <= 0 {
+		delay = time.Second
+	}
+	reported := false
+	for {
+		err := op(ctx)
+		if err == nil {
+			if reported {
+				tc.noteXChatRuntime(gen, twittermeow.XChatSocketConnected, nil)
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
+			tc.noteXChatRuntime(gen, twittermeow.XChatSocketBadCredentials, err)
+			return err
+		}
+		if !twittermeow.IsAuthError(err) {
+			return err
+		}
+		tc.noteXChatRuntime(gen, twittermeow.XChatSocketBadCredentials, err)
+		reported = true
+		if !waitForXChatInboxRetry(ctx, delay) {
+			return ctx.Err()
+		}
+		delay = min(delay*2, 180*time.Second)
+	}
 }
 
 func waitForXChatInboxRetry(ctx context.Context, delay time.Duration) bool {

@@ -77,7 +77,8 @@ func (pc *PollingClient) doPoll(ctx context.Context, gen uint64) {
 			log.Err(err).Msg("Failed to poll for updates")
 			authError := IsAuthError(err)
 			pc.client.eventHandler(&types.PollingError{Error: err, IsAuth: authError, Gen: gen}, nil)
-			if authError {
+			// Code 32 is permanent. Restricted accounts keep backing off until a poll succeeds.
+			if errors.Is(err, ErrCouldNotAuthenticate) {
 				return
 			}
 			failing = true
