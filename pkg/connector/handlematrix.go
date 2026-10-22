@@ -672,7 +672,8 @@ func (tc *TwitterClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2
 
 func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool, meta *PortalMetadata, conversationID, messageID, emoji string) error {
 	emoji = variationselector.FullyQualify(emoji)
-	if meta == nil || !meta.CanUseXChat() {
+	sendMode := selectMessageSendMode(meta)
+	if sendMode == messageSendREST {
 		reactionPayload := &payload.ReactionActionPayload{
 			ConversationID: ConvertConversationIDToREST(conversationID),
 			MessageID:      messageID,
@@ -696,9 +697,9 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 		return nil
 	}
 
-	// XChat reactions are sent as encrypted MessageCreateEvents (reaction_add/reaction_remove).
+	// XChat reactions are sent as MessageCreateEvents (reaction_add/reaction_remove).
 	xchatConvID := NormalizeConversationID(conversationID)
-	_, err := tc.client.SendEncryptedReaction(ctx, xchatConvID, messageID, emoji, remove)
+	_, err := tc.client.SendXChatReaction(ctx, xchatConvID, messageID, emoji, remove, sendMode == messageSendXChatEncrypted)
 	return err
 }
 
