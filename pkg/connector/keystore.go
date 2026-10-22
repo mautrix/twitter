@@ -98,7 +98,6 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 	}
 
 	ks.mu.Lock()
-	defer ks.mu.Unlock()
 
 	meta, portal, err := ks.getPortalMetadata(ctx, key.ConversationID)
 	if err != nil {
@@ -106,9 +105,11 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 			Str("conversation_id", key.ConversationID).
 			Str("key_version", key.KeyVersion).
 			Msg("Failed to get portal metadata for storing conversation key")
+		ks.mu.Unlock()
 		return err
 	}
 
+	firstKey := len(meta.ConversationKeys) == 0
 	if meta.ConversationKeys == nil {
 		meta.ConversationKeys = make(map[string]*ConversationKeyData)
 	}
@@ -140,6 +141,10 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 			Str("key_version", key.KeyVersion).
 			Int("total_keys_after", len(meta.ConversationKeys)).
 			Msg("Successfully saved conversation key to portal metadata")
+	}
+	ks.mu.Unlock()
+	if err == nil && firstKey {
+		portal.UpdateCapabilities(ctx, ks.login, true)
 	}
 	return err
 }
