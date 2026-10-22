@@ -38,7 +38,7 @@ func (c *Client) newPollingClient() *PollingClient {
 	return pc
 }
 
-func (pc *PollingClient) startPolling(ctx context.Context) {
+func (pc *PollingClient) startPolling(ctx context.Context, gen uint64) {
 	ctx, cancel := context.WithCancel(ctx)
 	if oldCancel := pc.stop.Swap(&cancel); oldCancel != nil {
 		(*oldCancel)()
@@ -50,11 +50,11 @@ func (pc *PollingClient) startPolling(ctx context.Context) {
 				pc.pollingStopped.Set()
 			}
 		}()
-		pc.doPoll(ctx)
+		pc.doPoll(ctx, gen)
 	}()
 }
 
-func (pc *PollingClient) doPoll(ctx context.Context) {
+func (pc *PollingClient) doPoll(ctx context.Context, gen uint64) {
 	tick := time.NewTicker(defaultPollingInterval)
 	defer tick.Stop()
 	log := zerolog.Ctx(ctx)
@@ -76,8 +76,9 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 		} else if err != nil {
 			log.Err(err).Msg("Failed to poll for updates")
 			authError := IsAuthError(err)
-			pc.client.eventHandler(&types.PollingError{Error: err, IsAuth: authError}, nil)
-			if authError {
+			pc.client.eventHandler(&types.PollingError{Error: err, IsAuth: authError, Gen: gen}, nil)
+			// Code 32 is permanent. Restricted accounts keep backing off until a poll succeeds.
+			if errors.Is(err, ErrCouldNotAuthenticate) {
 				return
 			}
 			failing = true
@@ -88,7 +89,7 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 			tick.Reset(backoffInterval)
 		} else if failing {
 			failing = false
-			pc.client.eventHandler(&types.PollingError{}, nil)
+			pc.client.eventHandler(&types.PollingError{Gen: gen}, nil)
 			backoffInterval = defaultPollingInterval / 2
 			tick.Reset(defaultPollingInterval)
 		}

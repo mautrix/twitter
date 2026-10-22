@@ -104,6 +104,8 @@ func (c *Client) stopXChatWebsocket() {
 }
 
 func (xc *xchatWebsocketClient) start(ctx context.Context) error {
+	// Copied before the loop so a later connect can invalidate this socket's events.
+	sessionGen := xc.client.xchatRuntimeGen.Load()
 	ctx, cancel := context.WithCancel(ctx)
 	if old := xc.shouldStop.Swap(&cancel); old != nil {
 		(*old)()
@@ -111,6 +113,9 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 
 	log := xc.client.Logger.With().Str("component", "xchat_websocket").Logger()
 	ready := make(chan struct{})
+	startupErr := make(chan error, 1)
+	// A restricted account keeps retrying. Unblock connect() once so polling still starts.
+	startupContinue := make(chan struct{}, 1)
 
 	go func() {
 		defer func() {
@@ -143,10 +148,41 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 					err = errors.New("xchat token is empty")
 				}
 				if err != nil {
+					if ctx.Err() != nil {
+						log.Debug().Err(err).Msg("XChat websocket stopping during token fetch")
+						return
+					}
+					if errors.Is(err, ErrCouldNotAuthenticate) {
+						log.Err(err).Msg("XChat token rejected")
+						xc.client.emitXChatState(sessionGen, XChatSocketBadCredentials, err)
+						xc.client.haltPolling(sessionGen)
+						select {
+						case startupErr <- err:
+						default:
+						}
+						return
+					}
+					if IsAuthError(err) {
+						log.Err(err).
+							Dur("retry_in", reconnectDelay).
+							Msg("XChat account restricted, will retry")
+						xc.client.emitXChatState(sessionGen, XChatSocketBadCredentials, err)
+						select {
+						case startupContinue <- struct{}{}:
+						default:
+						}
+						if !waitForXChatReconnect(ctx, reconnectDelay) {
+							log.Debug().Msg("XChat websocket stopping during reconnect wait")
+							return
+						}
+						reconnectDelay = nextXChatReconnectDelay(reconnectDelay, maximumRetryDelay)
+						continue
+					}
 					log.Err(err).
 						Bool("force_refresh", forceRefresh).
 						Dur("retry_in", reconnectDelay).
 						Msg("Failed to get XChat token, will retry")
+					xc.client.emitXChatState(sessionGen, XChatSocketDisconnected, err)
 					if !waitForXChatReconnect(ctx, reconnectDelay) {
 						log.Debug().Msg("XChat websocket stopping during reconnect wait")
 						return
@@ -172,6 +208,7 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 				}
 				readyThisAttempt = true
 				connectedAt = time.Now()
+				xc.client.emitXChatState(sessionGen, XChatSocketConnected, nil)
 				readyOnce.Do(func() {
 					close(ready)
 				})
@@ -182,6 +219,23 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 			if ctx.Err() != nil {
 				log.Debug().Msg("XChat websocket stopped (context cancelled)")
 				return
+			}
+			if errors.Is(err, ErrCouldNotAuthenticate) {
+				// A connection-level code 32 is often an expired XChat token.
+				// Refresh once and let the token fetch decide whether it is permanent.
+				log.Warn().Err(err).Msg("XChat connection authentication failed, refreshing token")
+				xc.client.emitXChatState(sessionGen, XChatSocketDisconnected, err)
+				forceRefresh = true
+				token = ""
+			} else if IsAuthError(err) {
+				log.Err(err).Msg("XChat account restricted, will retry")
+				xc.client.emitXChatState(sessionGen, XChatSocketBadCredentials, err)
+				select {
+				case startupContinue <- struct{}{}:
+				default:
+				}
+			} else {
+				xc.client.emitXChatState(sessionGen, XChatSocketDisconnected, err)
 			}
 
 			// A successful handshake followed by an immediate close is not a
@@ -212,12 +266,49 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 		}
 	}()
 
-	select {
-	case <-ready:
+	socketReady, err := waitForXChatStartup(ctx, ready, startupErr, startupContinue)
+	if err != nil {
+		return err
+	}
+	if socketReady {
 		log.Info().Msg("Initialized XChat Websocket Connection")
-		return nil
+	}
+	return nil
+}
+
+// waitForXChatStartup prefers a permanent token failure over the restricted-account unblock.
+// The bool is true only when the socket itself is ready.
+func waitForXChatStartup(ctx context.Context, ready <-chan struct{}, startupErr <-chan error, startupContinue <-chan struct{}) (bool, error) {
+	select {
+	case err := <-startupErr:
+		return false, err
+	default:
+	}
+	select {
+	case err := <-startupErr:
+		return false, err
+	case <-ready:
+		// A code 32 can be queued in the same moment the socket becomes ready.
+		select {
+		case err := <-startupErr:
+			return false, err
+		default:
+			return true, nil
+		}
+	case <-startupContinue:
+		select {
+		case err := <-startupErr:
+			return false, err
+		default:
+			return false, nil
+		}
 	case <-ctx.Done():
-		return ctx.Err()
+		select {
+		case err := <-startupErr:
+			return false, err
+		default:
+			return false, ctx.Err()
+		}
 	}
 }
 

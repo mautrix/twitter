@@ -33,6 +33,7 @@ func (*PollingError) isTwitterEvent()               {}
 type PollingError struct {
 	Error  error
 	IsAuth bool
+	Gen    uint64
 }
 
 type RawTwitterEvent []byte

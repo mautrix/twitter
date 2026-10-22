@@ -26,5 +26,7 @@ func init() {
 		"twitter-account-restricted":  "Your X account is suspended or locked. Check the X app for details.",
 		"twitter-load-error":          "Couldn't connect to X.",
 		"twitter-xchat-fetch-error":   "Couldn't sync X Chat.",
+		"twitter-polling-error":       "X message requests are temporarily unavailable.",
+		"twitter-xchat-disconnected":  "X Chat disconnected. Reconnecting.",
 	})
 }
