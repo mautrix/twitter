@@ -64,6 +64,13 @@ type TwitterClient struct {
 	xchatGapCatchupStates sync.Map
 	xchatRequestsRepaired bool
 	xchatFailuresLoaded   bool
+
+	runtimeMu      sync.Mutex
+	runtimeGen     uint64
+	runtimeStarted bool
+	pollingLink    runtimeLink
+	xchatLink      runtimeLink
+	runtimeSend    func(status.BridgeState)
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -80,6 +87,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)
 	client.SetConversationDataCallback(tc.HandleConversationDataRefresh)
 	client.SetXChatGapHandler(tc.catchupXChatConversationGap)
+	client.SetXChatStateHandler(tc.noteXChatRuntime)
 	// Ensure current user ID is available even if cookies omit twid
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
 	tc.matrixParser = &format.HTMLParser{
@@ -178,6 +186,10 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		return
 	}
 	tc.xchatInboxSyncLock.Unlock()
+	runtimeGen := tc.resetRuntimeSession()
+	if tc.client != nil {
+		tc.client.SetXChatRuntimeGen(runtimeGen)
+	}
 	log := zerolog.Ctx(ctx)
 
 	if tc.client == nil {
@@ -264,13 +276,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	// Full XChat inbox sync (migration / fresh login) can take a while. Mark as connected once we
 	// know credentials are valid, and let the initial sync finish in the background.
 	if fullInboxSyncInProgress {
-		tc.userLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateConnected,
-			Reason:     "sync_in_progress",
-			Info: map[string]any{
-				"sync": "in_progress",
-			},
-		})
+		tc.publishSyncInProgress(runtimeGen)
 	}
 
 	if err := tc.reconcileExistingGroupPortalAliases(ctx); err != nil {
@@ -447,6 +453,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if twittermeow.IsAuthError(err) {
+			log.Err(err).Msg("XChat websocket authentication failed")
+			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
+			return
+		}
 		log.Err(err).Msg("Failed to start XChat websocket")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
 			StateEvent: status.StateUnknownError,
@@ -462,15 +473,16 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		Int("items", catchupResult.Items).
 		Msg("Finished fetching XChat inbox")
 
-	go func() {
+	go func(gen uint64) {
 		tc.syncUntrustedChannels(ctx)
-		tc.client.StartPolling(ctx)
-	}()
+		tc.client.StartPolling(ctx, gen)
+	}(runtimeGen)
 
 	if ctx.Err() != nil {
 		return
 	}
-	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnected})
+	// Socket readiness can happen before startup finishes. Publish only from here.
+	tc.publishRuntimeState()
 
 	// Update remote profile from cached user data
 	currentUserID := tc.currentUserID()
