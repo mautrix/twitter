@@ -62,7 +62,6 @@ type TwitterClient struct {
 
 	xchatInboxSyncLock    sync.Mutex
 	xchatGapCatchupStates sync.Map
-	xchatRequestsRepaired bool
 	xchatFailuresLoaded   bool
 }
 
@@ -275,9 +274,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 
 	if err := tc.reconcileExistingGroupPortalAliases(ctx); err != nil {
 		log.Warn().Err(err).Msg("Failed to reconcile existing REST/XChat group portal aliases")
-	}
-	if err := tc.repairExistingXChatMessageRequests(ctx); err != nil {
-		log.Warn().Err(err).Msg("Failed to repair existing XChat message-request state")
 	}
 
 	// Set up XChat processor and sequence ID tracking
