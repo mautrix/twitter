@@ -564,6 +564,8 @@ func (c *Client) SendXChatReaction(ctx context.Context, conversationID, targetMe
 		signingKey, err := c.keyManager.GetOwnSigningKey(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("get signing key: %w", err)
+		} else if signingKey.SigningKey == nil || signingKey.KeyVersion == "" {
+			return nil, fmt.Errorf("complete signing key is required")
 		}
 		builder = crypto.NewMessageBuilder(nil, c.GetCurrentUserID()).
 			WithSigningKey(signingKey.SigningKey, signingKey.KeyVersion)
