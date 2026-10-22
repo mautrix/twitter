@@ -547,9 +547,9 @@ func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessag
 	return &resp, nil
 }
 
-// SendEncryptedReaction sends a reaction add/remove via the XChat protocol.
+// SendXChatReaction sends a reaction add/remove via the XChat protocol.
 // targetMessageSequenceID must be the XChat message sequence ID of the message being reacted to.
-func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove bool) (*response.SendMessageMutationResponse, error) {
+func (c *Client) SendXChatReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove, encrypted bool) (*response.SendMessageMutationResponse, error) {
 	token, err := c.ensureConversationToken(ctx, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation token: %w", err)
@@ -557,9 +557,18 @@ func (c *Client) SendEncryptedReaction(ctx context.Context, conversationID, targ
 
 	messageID := uuid.NewString()
 
-	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
-		SetMessageID(messageID).
-		SetConversationID(conversationID)
+	var builder *crypto.MessageBuilder
+	if encrypted {
+		builder = crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID())
+	} else {
+		signingKey, err := c.keyManager.GetOwnSigningKey(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("get signing key: %w", err)
+		}
+		builder = crypto.NewMessageBuilder(nil, c.GetCurrentUserID()).
+			WithSigningKey(signingKey.SigningKey, signingKey.KeyVersion)
+	}
+	builder.SetMessageID(messageID).SetConversationID(conversationID)
 
 	if remove {
 		builder.SetReactionRemove(targetMessageSequenceID, emoji)
