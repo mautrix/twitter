@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -41,6 +42,19 @@ type ConversationDataCallback func(ctx context.Context, conversationID string, i
 // XChatConnectHandler repairs missed events before normal live dispatch starts.
 type XChatConnectHandler func(ctx context.Context, drain XChatLiveDrain) error
 
+// XChatSocketState is the runtime health of the XChat websocket.
+type XChatSocketState uint8
+
+const (
+	XChatSocketConnected XChatSocketState = iota
+	XChatSocketDisconnected
+	XChatSocketBadCredentials
+)
+
+// XChatStateHandler reports socket drops, token auth failures, and recovery.
+// gen is the runtime generation captured when that socket loop started.
+type XChatStateHandler func(gen uint64, state XChatSocketState, err error)
+
 // XChatTokenTTL is how long an XChat token is considered valid.
 const XChatTokenTTL = 5 * time.Minute
 
@@ -67,6 +81,9 @@ type Client struct {
 	onConversationDataRefresh ConversationDataCallback
 	onXChatConnect            XChatConnectHandler
 	xchatConnectHandlerMu     sync.RWMutex
+	onXChatState              XChatStateHandler
+	xchatStateHandlerMu       sync.RWMutex
+	xchatRuntimeGen           atomic.Uint64
 
 	currentUserID  string
 	jot            *JotClient
@@ -239,12 +256,12 @@ func (c *Client) Disconnect() {
 // StartPolling starts the REST API polling for DM updates.
 // This is used for untrusted (message request) conversations that don't
 // receive real-time updates via XChat WebSocket.
-func (c *Client) StartPolling(ctx context.Context) {
+func (c *Client) StartPolling(ctx context.Context, gen uint64) {
 	if c.eventHandler == nil {
 		c.Logger.Warn().Msg("Cannot start polling without event handler")
 		return
 	}
-	c.polling.startPolling(c.Logger.WithContext(ctx))
+	c.polling.startPolling(c.Logger.WithContext(ctx), gen)
 }
 
 // StopPolling stops the REST API polling.
@@ -331,6 +348,28 @@ func (c *Client) getXChatConnectHandler() XChatConnectHandler {
 	c.xchatConnectHandlerMu.RLock()
 	defer c.xchatConnectHandlerMu.RUnlock()
 	return c.onXChatConnect
+}
+
+// SetXChatStateHandler sets the callback for runtime XChat socket health.
+func (c *Client) SetXChatStateHandler(handler XChatStateHandler) {
+	c.xchatStateHandlerMu.Lock()
+	c.onXChatState = handler
+	c.xchatStateHandlerMu.Unlock()
+}
+
+// SetXChatRuntimeGen selects which socket loop may report runtime state.
+// start() copies the value before launching the loop.
+func (c *Client) SetXChatRuntimeGen(gen uint64) {
+	c.xchatRuntimeGen.Store(gen)
+}
+
+func (c *Client) emitXChatState(gen uint64, state XChatSocketState, err error) {
+	c.xchatStateHandlerMu.RLock()
+	handler := c.onXChatState
+	c.xchatStateHandlerMu.RUnlock()
+	if handler != nil {
+		handler(gen, state, err)
+	}
 }
 
 // SetXChatGapHandler sets the per-conversation recovery hook used by the event

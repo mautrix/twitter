@@ -104,6 +104,8 @@ func (c *Client) stopXChatWebsocket() {
 }
 
 func (xc *xchatWebsocketClient) start(ctx context.Context) error {
+	// Copied before the loop so a later connect can invalidate this socket's events.
+	sessionGen := xc.client.xchatRuntimeGen.Load()
 	ctx, cancel := context.WithCancel(ctx)
 	if old := xc.shouldStop.Swap(&cancel); old != nil {
 		(*old)()
@@ -111,6 +113,7 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 
 	log := xc.client.Logger.With().Str("component", "xchat_websocket").Logger()
 	ready := make(chan struct{})
+	startupErr := make(chan error, 1)
 
 	go func() {
 		defer func() {
@@ -143,10 +146,24 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 					err = errors.New("xchat token is empty")
 				}
 				if err != nil {
+					if ctx.Err() != nil {
+						log.Debug().Err(err).Msg("XChat websocket stopping during token fetch")
+						return
+					}
+					if IsAuthError(err) {
+						log.Err(err).Msg("XChat token rejected")
+						xc.client.emitXChatState(sessionGen, XChatSocketBadCredentials, err)
+						select {
+						case startupErr <- err:
+						default:
+						}
+						return
+					}
 					log.Err(err).
 						Bool("force_refresh", forceRefresh).
 						Dur("retry_in", reconnectDelay).
 						Msg("Failed to get XChat token, will retry")
+					xc.client.emitXChatState(sessionGen, XChatSocketDisconnected, err)
 					if !waitForXChatReconnect(ctx, reconnectDelay) {
 						log.Debug().Msg("XChat websocket stopping during reconnect wait")
 						return
@@ -172,6 +189,7 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 				}
 				readyThisAttempt = true
 				connectedAt = time.Now()
+				xc.client.emitXChatState(sessionGen, XChatSocketConnected, nil)
 				readyOnce.Do(func() {
 					close(ready)
 				})
@@ -183,6 +201,7 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 				log.Debug().Msg("XChat websocket stopped (context cancelled)")
 				return
 			}
+			xc.client.emitXChatState(sessionGen, XChatSocketDisconnected, err)
 
 			// A successful handshake followed by an immediate close is not a
 			// healthy connection. Only reset backoff after a stable live period.
@@ -216,6 +235,8 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 	case <-ready:
 		log.Info().Msg("Initialized XChat Websocket Connection")
 		return nil
+	case err := <-startupErr:
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
