@@ -249,34 +249,41 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	} else {
 		// Load messages page to initialize session (populates cookies, tokens, etc.).
 		retryDelay := time.Second
+		restricted := false
 		for {
 			_, err := tc.client.LoadMessagesPage(ctx)
 			if err == nil {
+				if restricted {
+					tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketConnected, nil)
+				}
 				break
 			}
 			if ctx.Err() != nil {
 				return
 			}
-			if twittermeow.IsAuthError(err) {
+			if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
 				log.Err(err).Msg("Failed to load messages page")
-				tc.userLogin.BridgeState.Send(status.BridgeState{
-					StateEvent: status.StateBadCredentials,
-					Error:      authErrorCode(err),
-					Info:       map[string]any{"go_error": err.Error()},
-					UserAction: authErrorUserAction(err),
-				})
+				tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 				return
 			}
-			log.Err(err).
-				Dur("retry_in", retryDelay).
-				Msg("Failed to load messages page, retrying")
-			tc.userLogin.BridgeState.Send(status.BridgeState{
-				StateEvent: status.StateTransientDisconnect,
-				Error:      "twitter-load-error",
-				Info: map[string]any{
-					"go_error": err.Error(),
-				},
-			})
+			if twittermeow.IsAuthError(err) {
+				restricted = true
+				log.Err(err).
+					Dur("retry_in", retryDelay).
+					Msg("Account restricted while loading messages page, retrying")
+				tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
+			} else {
+				log.Err(err).
+					Dur("retry_in", retryDelay).
+					Msg("Failed to load messages page, retrying")
+				tc.userLogin.BridgeState.Send(status.BridgeState{
+					StateEvent: status.StateTransientDisconnect,
+					Error:      "twitter-load-error",
+					Info: map[string]any{
+						"go_error": err.Error(),
+					},
+				})
+			}
 			if !waitForXChatInboxRetry(ctx, retryDelay) {
 				return
 			}
@@ -335,6 +342,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	repairTruncatedItems := meta.MaxUserSequenceID != ""
 	var catchupResult xchatInboxCatchupResult
 	retryDelay := time.Second
+	inboxRestricted := false
 	for {
 		var err error
 		catchupResult, err = runXChatInboxCatchup(ctx, xchatInboxCatchupState{
@@ -376,20 +384,30 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			Checkpoint: tc.saveXChatInboxCheckpoint,
 		})
 		if err == nil {
+			if inboxRestricted {
+				tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketConnected, nil)
+			}
 			break
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		if isXChatAuthError(err) {
+		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
 			fetchLog.Err(err).Msg("XChat inbox sync authentication failed")
-			tc.userLogin.BridgeState.Send(status.BridgeState{
-				StateEvent: status.StateBadCredentials,
-				Error:      authErrorCode(err),
-				Info:       map[string]any{"go_error": err.Error()},
-				UserAction: authErrorUserAction(err),
-			})
+			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 			return
+		}
+		if twittermeow.IsAuthError(err) {
+			inboxRestricted = true
+			fetchLog.Err(err).
+				Dur("retry_in", retryDelay).
+				Msg("XChat inbox sync restricted, retrying from saved checkpoint")
+			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
+			if !waitForXChatInboxRetry(ctx, retryDelay) {
+				return
+			}
+			retryDelay = min(retryDelay*2, 180*time.Second)
+			continue
 		}
 		if errors.Is(err, errXChatInboxCursorStalled) && meta.XChatInboxCursor != nil {
 			fetchLog.Warn().Msg("Discarding stalled XChat inbox cursor, next retry starts a new inbox snapshot")
@@ -473,7 +491,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if twittermeow.IsAuthError(err) {
+		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) {
 			log.Err(err).Msg("XChat websocket authentication failed")
 			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 			return
@@ -508,6 +526,9 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 				return
 			}
 			retryDelay = min(retryDelay*2, 30*time.Minute)
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		tc.client.StartPolling(ctx, gen)
 	}(runtimeGen)
