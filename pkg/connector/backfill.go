@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -202,10 +203,6 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	return restResp, nil
 }
 
-// xchatForwardCatchupMaxPages bounds how many conversation pages a single forward
-// catchup may fetch while walking back towards the anchor message.
-const xchatForwardCatchupMaxPages = 10
-
 type xchatForwardCatchupOptions struct {
 	PageSize        int
 	MaxMessages     int
@@ -224,13 +221,18 @@ type xchatForwardPageFetcher func(context.Context, string, int) (*parsedXChatPag
 // REST-era snowflake message ID, which is not comparable to XChat sequence IDs.
 func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	count := fetchParams.Count
+	pageSize := payload.DefaultGetConversationPageQuerySettings().ConversationEventLimit
 	if count <= 0 {
 		count = 50
+		if fetchParams.AnchorMessage == nil {
+			count = pageSize
+		}
 	}
+	maxPages := int(math.Ceil(float64(count) / float64(pageSize)))
 	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
 		PageSize:    count,
 		MaxMessages: count,
-		MaxPages:    xchatForwardCatchupMaxPages,
+		MaxPages:    maxPages,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
 		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
 	})
@@ -263,13 +265,14 @@ func fetchXChatForwardCatchupPages(
 		Forward: true,
 		HasMore: false,
 	}
-	if anchorMessage == nil {
-		// Without an anchor there is no gap to fill: initial messages are processed
-		// during room creation via ProcessMessageAndReadEvents().
+	if anchorMessage == nil && options.RequireComplete {
 		return emptyResp, nil
 	}
-	anchorTS := anchorMessage.Timestamp
-	if anchorTS.IsZero() {
+	var anchorTS time.Time
+	if anchorMessage != nil {
+		anchorTS = anchorMessage.Timestamp
+	}
+	if anchorMessage != nil && anchorTS.IsZero() {
 		zerolog.Ctx(ctx).Warn().
 			Str("conversation_id", conversationID).
 			Str("anchor_message_id", string(anchorMessage.ID)).
@@ -341,7 +344,7 @@ func fetchXChatForwardCatchupPages(
 		}
 
 		for _, msg := range parsed.messages {
-			if msg.ID == anchorMessage.ID || msg.Timestamp.Before(anchorTS) {
+			if anchorMessage != nil && (msg.ID == anchorMessage.ID || msg.Timestamp.Before(anchorTS)) {
 				continue
 			}
 			if _, seen := seenIDs[msg.ID]; seen {
@@ -352,7 +355,7 @@ func fetchXChatForwardCatchupPages(
 			collected = append(collected, msg)
 		}
 
-		if !parsed.oldestEventTS.IsZero() && parsed.oldestEventTS.Before(anchorTS) {
+		if anchorMessage != nil && !parsed.oldestEventTS.IsZero() && parsed.oldestEventTS.Before(anchorTS) {
 			reachedAnchor = true
 			break
 		}

@@ -251,7 +251,7 @@ func (tc *TwitterClient) processXChatInboxPage(
 				}
 			}
 
-			syncErr := tc.syncXChatChannel(pageCtx, item, nil)
+			latestMessage, syncErr := tc.syncXChatChannel(pageCtx, item, nil)
 			if syncErr != nil {
 				log.Warn().
 					Err(syncErr).
@@ -262,10 +262,7 @@ func (tc *TwitterClient) processXChatInboxPage(
 					return pageCtx.Err()
 				}
 			}
-			// Message handlers can often recover/create the portal themselves. Keep
-			// delivering the latest events after a metadata sync failure, while
-			// retaining the unresolved marker so the room sync is retried.
-			repairConversationGap := keyErr == nil && syncErr == nil && ((repairTruncatedItems && item.HasMore) ||
+			repairConversationGap := latestMessage != nil && keyErr == nil && syncErr == nil && ((repairTruncatedItems && item.HasMore) ||
 				processor.ConversationGapUnresolved(conversationID))
 			if repairConversationGap {
 				if gapErr := tc.catchupXChatConversationGap(pageCtx, conversationID, "", ""); gapErr != nil {
@@ -279,7 +276,15 @@ func (tc *TwitterClient) processXChatInboxPage(
 				}
 			}
 
-			messageErr := processor.ProcessMessageAndReadEvents(pageCtx, item)
+			if syncErr != nil {
+				return syncErr
+			}
+			var latestMessageTS time.Time
+			var latestMessageID string
+			if latestMessage != nil {
+				latestMessageTS, latestMessageID = latestMessage.Timestamp, ParseMessageID(latestMessage.ID)
+			}
+			messageErr := processor.ProcessMessageAndReadEvents(pageCtx, item, latestMessageTS, latestMessageID)
 			if messageErr != nil {
 				if errors.Is(messageErr, twittermeow.ErrXChatFailurePersistence) {
 					return messageErr
