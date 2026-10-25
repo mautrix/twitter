@@ -29,7 +29,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
-	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -152,58 +151,6 @@ func (tc *TwitterClient) syncXChatTrust(
 		},
 		ChatInfoChange: &bridgev2.ChatInfoChange{ChatInfo: chatInfo},
 	})
-}
-
-// TODO: Remove this repair after affected bridges have been reconnected
-func (tc *TwitterClient) repairExistingXChatMessageRequests(ctx context.Context) error {
-	if tc.xchatRequestsRepaired {
-		return nil
-	}
-	portals, err := tc.connector.br.GetAllPortals(ctx)
-	if err != nil {
-		return fmt.Errorf("get existing portals for XChat message-request repair: %w", err)
-	}
-	xchatRooms, repaired := 0, 0
-	for _, portal := range portals {
-		if !isXChatPortalForLogin(portal, tc.userLogin.ID) {
-			continue
-		}
-		xchatRooms++
-
-		meta := portal.Metadata.(*PortalMetadata)
-		messageRequest := false
-		if meta.XChatTrusted != nil {
-			messageRequest = !*meta.XChatTrusted
-		}
-		wasMessageRequest := portal.MessageRequest
-		portal.MessageRequest = messageRequest
-		internals := (*bridgev2.PortalInternals)(portal)
-		stateKey, bridgeInfo := internals.GetBridgeInfo()
-		for _, eventType := range []event.Type{event.StateBridge, event.StateHalfShotBridge} {
-			if portal.MXID == "" {
-				break
-			}
-			// Clients only trust bridge identity events from the bridge bot.
-			if !internals.SendRoomMeta(ctx, nil, time.Now(), eventType, stateKey, &bridgeInfo, true, nil) {
-				portal.MessageRequest = wasMessageRequest
-				return fmt.Errorf("repair XChat message-request room state")
-			}
-		}
-		if wasMessageRequest == messageRequest {
-			continue
-		}
-		if err = portal.Save(ctx); err != nil {
-			portal.MessageRequest = wasMessageRequest
-			return fmt.Errorf("save repaired XChat portal: %w", err)
-		}
-		repaired++
-	}
-	tc.xchatRequestsRepaired = true
-	zerolog.Ctx(ctx).Info().
-		Int("xchat_rooms", xchatRooms).
-		Int("repaired_rooms", repaired).
-		Msg("Reconciled XChat message-request state")
-	return nil
 }
 
 func shouldEmitChatInfoUpdate(chatInfo *bridgev2.ChatInfo, portalRoomType database.RoomType) bool {
