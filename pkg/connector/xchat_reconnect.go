@@ -229,6 +229,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 	g.SetLimit(10)
 	for i := range page.Items {
 		item := &page.Items[i]
+		if pageCtx.Err() != nil {
+			break
+		}
 		if item.ConversationUnavailable {
 			continue
 		}
@@ -267,7 +270,10 @@ func (tc *TwitterClient) processXChatInboxPage(
 			repairConversationGap := latestMessage != nil && keyErr == nil && syncErr == nil && ((repairTruncatedItems && item.HasMore) ||
 				processor.ConversationGapUnresolved(conversationID))
 			if repairConversationGap {
-				if gapErr := tc.catchupXChatConversationGap(pageCtx, conversationID, "", ""); gapErr != nil {
+				if gapErr := tc.catchupXChatConversationGap(pageCtx, conversationID, "", ""); errors.Is(gapErr, twittermeow.ErrRatelimitExceeded) {
+					processor.MarkConversationGapUnresolved(conversationID)
+					return fmt.Errorf("repair XChat inbox conversation gap: %w", gapErr)
+				} else if gapErr != nil {
 					log.Warn().
 						Err(gapErr).
 						Str("conversation_id", conversationID).
