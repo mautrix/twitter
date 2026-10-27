@@ -373,6 +373,13 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			})
 			return
 		}
+		if errors.Is(err, errXChatInboxCursorStalled) && meta.XChatInboxCursor != nil {
+			fetchLog.Warn().Msg("Discarding stalled XChat inbox cursor, next retry starts a new inbox snapshot")
+			meta.XChatInboxCursor = nil
+			if saveErr := tc.saveUserLoginState(ctx); saveErr != nil {
+				fetchLog.Err(saveErr).Msg("Failed to save user login after discarding stalled XChat inbox cursor")
+			}
+		}
 		fetchLog.Err(err).
 			Dur("retry_in", retryDelay).
 			Msg("XChat inbox sync failed, retrying from saved checkpoint")
