@@ -454,6 +454,7 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	if wls.jetfuel == nil || wls.jetfuel.verificationAction == "" {
 		return nil, fmt.Errorf("%w: jetfuel verification action is missing", ErrWebLoginUnexpectedSubtask)
 	}
+	postedAction := wls.jetfuel.verificationAction
 	form := url.Values{}
 	for _, field := range wls.jetfuelVerificationFields() {
 		form.Set(field, text)
@@ -494,6 +495,10 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 		return wls.submitJetfuelBeginTwoFactor(ctx, action)
 	}
 	if action := parsed.verificationAction(); action != "" {
+		if action == postedAction && !parsed.isPhoneNumberChallenge() {
+			wls.logUnsupportedJetfuelResponse(ctx, "text_code_rejected", postedAction, parsed)
+			return nil, &WebLoginError{Message: "Incorrect code. Try again."}
+		}
 		wls.jetfuel.verificationAction = action
 		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
 		challenge := parsed.verificationChallenge()
@@ -508,7 +513,7 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	}
 	if parsed.isActionlessRejection() {
 		wls.logUnsupportedJetfuelResponse(ctx, "text_code_rejected", wls.jetfuel.verificationAction, parsed)
-		return nil, &WebLoginError{Message: "Incorrect code. Enter the latest code X sent you."}
+		return nil, &WebLoginError{Message: "Incorrect code. Try again."}
 	}
 	return wls.handleUnsupportedJetfuelResponse(ctx, "text", wls.jetfuel.verificationAction, parsed)
 }
