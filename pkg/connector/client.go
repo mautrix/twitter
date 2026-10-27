@@ -63,6 +63,8 @@ type TwitterClient struct {
 	xchatInboxSyncLock    sync.Mutex
 	xchatGapCatchupStates sync.Map
 	xchatFailuresLoaded   bool
+
+	xchatGapCatchupPausedUntil atomic.Int64
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)

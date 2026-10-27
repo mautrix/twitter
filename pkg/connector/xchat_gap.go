@@ -2,15 +2,23 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 )
 
-const defaultXChatGapCatchupMessages = 50
+const (
+	defaultXChatGapCatchupMessages = 50
+	xchatGapCatchupRateLimitPause  = 15 * time.Minute
+)
+
+var errXChatGapCatchupPaused = errors.New("xchat gap catch-up paused after a rate limit")
 
 type xchatGapCatchupState struct {
 	sync.Mutex
@@ -69,6 +77,9 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 	ctx context.Context,
 	conversationID, previousSequenceID, currentSequenceID string,
 ) error {
+	if time.Now().UnixMilli() < tc.xchatGapCatchupPausedUntil.Load() {
+		return errXChatGapCatchupPaused
+	}
 	stateValue, _ := tc.xchatGapCatchupStates.LoadOrStore(conversationID, &xchatGapCatchupState{})
 	state := stateValue.(*xchatGapCatchupState)
 	state.Lock()
@@ -116,7 +127,11 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 		AnchorMessage: latestMessage,
 		Count:         count,
 	})
-	if err != nil {
+	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+		tc.xchatGapCatchupPausedUntil.Store(time.Now().Add(xchatGapCatchupRateLimitPause).UnixMilli())
+		log.Warn().Dur("pause", xchatGapCatchupRateLimitPause).Msg("X rate limited conversation catch-up, pausing catch-up requests")
+		return err
+	} else if err != nil {
 		return err
 	}
 	if resp == nil || len(resp.Messages) == 0 {
