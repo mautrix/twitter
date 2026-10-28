@@ -854,7 +854,7 @@ func authErrorCode(err error) status.BridgeStateErrorCode {
 
 func authErrorUserAction(err error) status.BridgeStateUserAction {
 	if isAccountRestrictedError(err) {
-		return status.UserActionOpenNative
+		return status.UserActionRestart
 	}
 	return ""
 }
