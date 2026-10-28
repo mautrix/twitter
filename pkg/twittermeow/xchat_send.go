@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -391,12 +392,15 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 			continue
 		}
 
+		keyVersion := ptr.Val(ckce.ConversationKeyVersion)
 		convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
+		if errors.Is(err, crypto.ErrKeyNotForUs) && keyVersion != "" {
+			err = keyNotForUsError{keyVersion: keyVersion, err: err}
+		}
 		if err != nil {
 			eventErrs = append(eventErrs, fmt.Errorf("unwrap conversation key event %d: %w", index, err))
 			continue
 		}
-		keyVersion := ptr.Val(ckce.ConversationKeyVersion)
 		if keyVersion == "" {
 			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d has no key version", index))
 			continue
@@ -423,4 +427,29 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 		}
 	}
 	return errors.Join(eventErrs...)
+}
+
+type keyNotForUsError struct {
+	keyVersion string
+	err        error
+}
+
+func (e keyNotForUsError) Error() string {
+	return e.err.Error()
+}
+
+func (e keyNotForUsError) Unwrap() error {
+	return e.err
+}
+
+func isKeyNotForUs(err error, keyVersion string) bool {
+	switch e := err.(type) {
+	case keyNotForUsError:
+		return e.keyVersion == keyVersion
+	case interface{ Unwrap() []error }:
+		return slices.ContainsFunc(e.Unwrap(), func(err error) bool { return isKeyNotForUs(err, keyVersion) })
+	case interface{ Unwrap() error }:
+		return isKeyNotForUs(e.Unwrap(), keyVersion)
+	}
+	return false
 }

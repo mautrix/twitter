@@ -574,6 +574,15 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			if err == nil && (convKey == nil || len(convKey.Key) == 0) {
 				err = crypto.ErrKeyNotFound
 			}
+			if err != nil && isKeyNotForUs(refreshErr, keyVersion) {
+				p.log.Warn().
+					Err(refreshErr).
+					Str("sequence_id", ptr.Val(evt.SequenceId)).
+					Str("conversation_id", conversationID).
+					Str("key_version", keyVersion).
+					Msg("Conversation key for message is not encrypted for our key pair, skipping message")
+				return nil
+			}
 			if err != nil && refreshErr != nil {
 				err = errors.Join(err, refreshErr)
 			}
