@@ -108,7 +108,7 @@ func (q *fakeXChatGapAnchorQuery) GetLastNonFakePartAtOrBeforeTimeExcludingSende
 	return q.latestFromOthers, q.err
 }
 
-func (q *fakeXChatGapAnchorQuery) GetFirstNonFakePartAfterTime(context.Context, networkid.PortalKey, time.Time) (*database.Message, error) {
+func (q *fakeXChatGapAnchorQuery) GetLastNonFakePartAtOrBeforeTime(context.Context, networkid.PortalKey, time.Time) (*database.Message, error) {
 	q.oldestCalls++
 	return q.oldest, nil
 }

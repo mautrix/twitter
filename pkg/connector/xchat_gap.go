@@ -76,18 +76,18 @@ func (state *xchatGapCatchupState) clearAnchor() {
 
 type xchatGapAnchorQuery interface {
 	GetLastNonFakePartAtOrBeforeTimeExcludingSender(ctx context.Context, portal networkid.PortalKey, maxTS time.Time, sender networkid.UserID) (*database.Message, error)
-	GetFirstNonFakePartAfterTime(ctx context.Context, portal networkid.PortalKey, minTS time.Time) (*database.Message, error)
+	GetLastNonFakePartAtOrBeforeTime(ctx context.Context, portal networkid.PortalKey, maxTS time.Time) (*database.Message, error)
 }
 
 // loadXChatGapAnchor skips the user's own sends, which can be stored after
 // incoming messages that the gap is supposed to recover.
 func loadXChatGapAnchor(ctx context.Context, query xchatGapAnchorQuery, portal networkid.PortalKey, ownUserID networkid.UserID) (*database.Message, error) {
-	anchor, err := query.GetLastNonFakePartAtOrBeforeTimeExcludingSender(ctx, portal, time.Now().Add(10*time.Second), ownUserID)
+	maxTS := time.Now().Add(10 * time.Second)
+	anchor, err := query.GetLastNonFakePartAtOrBeforeTimeExcludingSender(ctx, portal, maxTS, ownUserID)
 	if err != nil || anchor != nil {
 		return anchor, err
 	}
-	// Only the user's own messages are stored, so recover everything after the oldest one.
-	return query.GetFirstNonFakePartAfterTime(ctx, portal, time.Unix(0, 0))
+	return query.GetLastNonFakePartAtOrBeforeTime(ctx, portal, maxTS)
 }
 
 func (tc *TwitterClient) catchupXChatConversationGap(
