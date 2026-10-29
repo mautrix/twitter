@@ -150,6 +150,8 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
+		} else if response.StatusCode == http.StatusTooManyRequests {
+			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrRatelimitExceeded)
 		} else if len(responseBody) == 0 {
 			return response, responseBody, fmt.Errorf("HTTP %d (no response body)", response.StatusCode)
 		} else if len(responseBody) < 512 {
