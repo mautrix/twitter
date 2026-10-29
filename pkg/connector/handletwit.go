@@ -260,7 +260,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
 				return tc.convertToMatrix(ctx, portal, intent, data), nil
 			},
-			ConvertEditFunc: tc.convertEditToMatrix,
+			ConvertEditFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
+				return tc.convertXChatEditToMatrix(ctx, portal, intent, existing, data, eventID)
+			},
 		})
 
 	case *types.Message:

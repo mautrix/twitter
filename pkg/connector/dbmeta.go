@@ -111,6 +111,7 @@ type ConversationKeyData struct {
 type MessageMetadata struct {
 	EditCount        int    `json:"edit_count,omitempty"`
 	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages
+	LastXChatEditID  string `json:"last_xchat_edit_id,omitempty"`
 }
 
 func (m *MessageMetadata) CopyFrom(other any) {
@@ -124,6 +125,7 @@ func (m *MessageMetadata) CopyFrom(other any) {
 	if m.XChatClientMsgID == "" {
 		m.XChatClientMsgID = o.XChatClientMsgID
 	}
+	m.LastXChatEditID = maxXChatSequenceID(m.LastXChatEditID, o.LastXChatEditID)
 }
 
 type PushKeys struct {
