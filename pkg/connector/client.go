@@ -233,30 +233,40 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			Msg("Connecting with cached session")
 		tc.client.SetSession(meta.Session)
 	} else {
-		// Load messages page to initialize session (populates cookies, tokens, etc.)
-		_, err := tc.client.LoadMessagesPage(ctx)
-		if err != nil {
+		// Load messages page to initialize session (populates cookies, tokens, etc.).
+		retryDelay := time.Second
+		for {
+			_, err := tc.client.LoadMessagesPage(ctx)
+			if err == nil {
+				break
+			}
 			if ctx.Err() != nil {
 				return
 			}
-			log.Err(err).Msg("Failed to load messages page")
 			if twittermeow.IsAuthError(err) {
+				log.Err(err).Msg("Failed to load messages page")
 				tc.userLogin.BridgeState.Send(status.BridgeState{
 					StateEvent: status.StateBadCredentials,
 					Error:      authErrorCode(err),
 					Info:       map[string]any{"go_error": err.Error()},
 					UserAction: authErrorUserAction(err),
 				})
-			} else {
-				tc.userLogin.BridgeState.Send(status.BridgeState{
-					StateEvent: status.StateUnknownError,
-					Error:      "twitter-load-error",
-					Info: map[string]any{
-						"go_error": err.Error(),
-					},
-				})
+				return
 			}
-			return
+			log.Err(err).
+				Dur("retry_in", retryDelay).
+				Msg("Failed to load messages page, retrying")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateTransientDisconnect,
+				Error:      "twitter-load-error",
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
+			})
+			if !waitForXChatInboxRetry(ctx, retryDelay) {
+				return
+			}
+			retryDelay = min(retryDelay*2, time.Minute)
 		}
 	}
 
