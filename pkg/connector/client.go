@@ -690,7 +690,7 @@ func (tc *TwitterClient) Disconnect() {
 }
 
 func (tc *TwitterClient) IsLoggedIn() bool {
-	return tc.client.IsLoggedIn()
+	return tc.client.IsLoggedIn() && tc.userLogin.BridgeState.GetPrevUnsent().StateEvent != status.StateBadCredentials
 }
 
 func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
