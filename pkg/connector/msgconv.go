@@ -77,6 +77,27 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	}, nil
 }
 
+func (tc *TwitterClient) convertXChatEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData, editID string) (*bridgev2.ConvertedEdit, error) {
+	if editID != "" {
+		for _, part := range existing {
+			meta, ok := part.Metadata.(*MessageMetadata)
+			if ok && meta != nil && compareIntStrings(editID, meta.LastXChatEditID) <= 0 {
+				return nil, fmt.Errorf("%w: XChat edit %s already handled", bridgev2.ErrIgnoringRemoteEvent, editID)
+			}
+		}
+	}
+	converted, err := tc.convertEditToMatrix(ctx, portal, intent, existing, data)
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range converted.ModifiedParts {
+		if meta, ok := part.Part.Metadata.(*MessageMetadata); ok && meta != nil {
+			meta.LastXChatEditID = maxXChatSequenceID(meta.LastXChatEditID, editID)
+		}
+	}
+	return converted, nil
+}
+
 func (tc *TwitterClient) fetchOriginalXChatMessage(ctx context.Context, conversationID, messageID string) (*types.MessageData, error) {
 	const eventLimit = 10
 	cursor, err := xchatEditHistoryCursor(messageID)
