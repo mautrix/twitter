@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 )
@@ -73,6 +74,22 @@ func (state *xchatGapCatchupState) clearAnchor() {
 	state.anchor = nil
 }
 
+type xchatGapAnchorQuery interface {
+	GetLastNonFakePartAtOrBeforeTimeExcludingSender(ctx context.Context, portal networkid.PortalKey, maxTS time.Time, sender networkid.UserID) (*database.Message, error)
+	GetLastNonFakePartAtOrBeforeTime(ctx context.Context, portal networkid.PortalKey, maxTS time.Time) (*database.Message, error)
+}
+
+// loadXChatGapAnchor skips the user's own sends, which can be stored after
+// incoming messages that the gap is supposed to recover.
+func loadXChatGapAnchor(ctx context.Context, query xchatGapAnchorQuery, portal networkid.PortalKey, ownUserID networkid.UserID) (*database.Message, error) {
+	maxTS := time.Now().Add(10 * time.Second)
+	anchor, err := query.GetLastNonFakePartAtOrBeforeTimeExcludingSender(ctx, portal, maxTS, ownUserID)
+	if err != nil || anchor != nil {
+		return anchor, err
+	}
+	return query.GetLastNonFakePartAtOrBeforeTime(ctx, portal, maxTS)
+}
+
 func (tc *TwitterClient) catchupXChatConversationGap(
 	ctx context.Context,
 	conversationID, previousSequenceID, currentSequenceID string,
@@ -102,11 +119,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 	}
 
 	latestMessage, err := state.getOrLoadAnchor(func() (*database.Message, error) {
-		return tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(
-			ctx,
-			portal.PortalKey,
-			time.Now().Add(10*time.Second),
-		)
+		return loadXChatGapAnchor(ctx, tc.connector.br.DB.Message, portal.PortalKey, MakeUserID(ParseUserLoginID(tc.userLogin.ID)))
 	})
 	if err != nil {
 		return err

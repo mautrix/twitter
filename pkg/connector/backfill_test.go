@@ -322,6 +322,43 @@ func TestCompleteXChatForwardCatchupKeepsDifferentMessageAtAnchorTimestamp(t *te
 	}
 }
 
+func TestCompleteXChatForwardCatchupKeepsIncomingBeforeOwnSend(t *testing.T) {
+	page := func(context.Context, string, int) (*parsedXChatPage, error) {
+		return &parsedXChatPage{
+			messages: []*bridgev2.BackfillMessage{
+				{ID: MakeMessageID("100"), Timestamp: time.Unix(100, 0)},
+				{ID: MakeMessageID("200"), Timestamp: time.Unix(200, 0)},
+				{ID: MakeMessageID("300"), Timestamp: time.Unix(300, 0)},
+				{ID: MakeMessageID("400"), Timestamp: time.Unix(400, 0), Sender: bridgev2.EventSender{IsFromMe: true}},
+			},
+			oldestEventTS: time.Unix(50, 0),
+		}, nil
+	}
+	catchup := func(anchor *database.Message) []networkid.MessageID {
+		result, err := fetchXChatForwardCatchupPages(context.Background(), "conversation", anchor,
+			xchatForwardCatchupOptions{PageSize: 50, RequireComplete: true}, page)
+		if err != nil {
+			t.Fatalf("fetchXChatForwardCatchupPages() error = %v", err)
+		}
+		ids := make([]networkid.MessageID, len(result.Messages))
+		for i, msg := range result.Messages {
+			ids[i] = msg.ID
+		}
+		return ids
+	}
+
+	ownSendAnchor := &database.Message{ID: MakeMessageID("400"), Timestamp: time.Unix(400, 0)}
+	if ids := catchup(ownSendAnchor); len(ids) != 0 {
+		t.Fatalf("own send anchor messages = %v, want none", ids)
+	}
+	incomingAnchor := &database.Message{ID: MakeMessageID("100"), Timestamp: time.Unix(100, 0)}
+	ids := catchup(incomingAnchor)
+	want := []networkid.MessageID{MakeMessageID("200"), MakeMessageID("300"), MakeMessageID("400")}
+	if fmt.Sprint(ids) != fmt.Sprint(want) {
+		t.Fatalf("incoming anchor messages = %v, want %v", ids, want)
+	}
+}
+
 func TestCompleteXChatForwardCatchupRejectsUnconvertedNewerMessage(t *testing.T) {
 	_, err := fetchXChatForwardCatchupPages(
 		context.Background(),
