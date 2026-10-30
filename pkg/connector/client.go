@@ -63,6 +63,8 @@ type TwitterClient struct {
 	xchatInboxSyncLock    sync.Mutex
 	xchatGapCatchupStates sync.Map
 	xchatFailuresLoaded   bool
+
+	xchatGapCatchupPausedUntil atomic.Int64
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -383,12 +385,24 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			})
 			return
 		}
+		if errors.Is(err, errXChatInboxCursorStalled) && meta.XChatInboxCursor != nil {
+			fetchLog.Warn().Msg("Discarding stalled XChat inbox cursor, next retry starts a new inbox snapshot")
+			meta.XChatInboxCursor = nil
+			if saveErr := tc.saveUserLoginState(ctx); saveErr != nil {
+				fetchLog.Err(saveErr).Msg("Failed to save user login after discarding stalled XChat inbox cursor")
+			}
+		}
+		stateEvent, stateError := status.StateUnknownError, status.BridgeStateErrorCode("twitter-xchat-sync-error")
+		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+			stateEvent, stateError = status.StateTransientDisconnect, "twitter-xchat-rate-limited"
+			retryDelay = max(retryDelay, xchatInboxRateLimitRetryDelay)
+		}
 		fetchLog.Err(err).
 			Dur("retry_in", retryDelay).
 			Msg("XChat inbox sync failed, retrying from saved checkpoint")
 		tc.userLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateUnknownError,
-			Error:      "twitter-xchat-sync-error",
+			StateEvent: stateEvent,
+			Error:      stateError,
 			Info: map[string]any{
 				"go_error": err.Error(),
 			},
@@ -524,6 +538,8 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	// Save session state
 	tc.HandleCursorChange(ctx)
 }
+
+const xchatInboxRateLimitRetryDelay = 5 * time.Minute
 
 func waitForXChatInboxRetry(ctx context.Context, delay time.Duration) bool {
 	timer := time.NewTimer(delay)

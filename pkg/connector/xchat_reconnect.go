@@ -20,6 +20,8 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
+var errXChatInboxCursorStalled = errors.New("xchat inbox cursor did not advance")
+
 type xchatInboxCatchupState struct {
 	MaxSequenceID      string
 	MessagePullVersion *int
@@ -172,7 +174,7 @@ func runXChatInboxCatchup(
 		}
 		if nextCursor != nil && ((nextCursor.CursorId != "" && nextCursor.CursorId == requestCursor.CursorId) ||
 			(nextCursor.MaxLocalSequenceID != "" && compareIntStrings(nextCursor.MaxLocalSequenceID, requestCursor.MaxLocalSequenceID) <= 0)) {
-			return result, fmt.Errorf("xchat inbox cursor did not advance from %q", requestCursor.CursorId)
+			return result, fmt.Errorf("%w from %q", errXChatInboxCursorStalled, requestCursor.CursorId)
 		}
 		cursor = nextCursor
 		if err = checkpoint(); err != nil {
