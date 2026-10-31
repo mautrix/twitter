@@ -59,7 +59,9 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, editData.EditCount)
 	}
 	originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
-	if err != nil {
+	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+		return nil, fmt.Errorf("%w: rate limited while fetching original X message for edit: %w", bridgev2.ErrIgnoringRemoteEvent, err)
+	} else if err != nil {
 		return nil, fmt.Errorf("failed to fetch original X message for edit: %w", err)
 	}
 	editData = mergeXChatEditData(originalData, &editData)
