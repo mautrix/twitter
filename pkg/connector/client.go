@@ -328,13 +328,19 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	// for older history instead of eagerly walking every conversation here.
 	repairTruncatedItems := meta.MaxUserSequenceID != ""
 	var catchupResult xchatInboxCatchupResult
+	var resumeCursor, requestedCursor *payload.XChatCursor
 	retryDelay := time.Second
 	for {
 		var err error
+		cursor := xchatInboxCursorFromMetadata(meta.XChatInboxCursor)
+		if resumeCursor != nil {
+			cursor = resumeCursor
+		}
+		requestedCursor = nil
 		catchupResult, err = runXChatInboxCatchup(ctx, xchatInboxCatchupState{
 			MaxSequenceID:      meta.MaxUserSequenceID,
 			MessagePullVersion: meta.MessagePullVersion,
-			Cursor:             xchatInboxCursorFromMetadata(meta.XChatInboxCursor),
+			Cursor:             cursor,
 		}, xchatInboxCatchupOps{
 			FetchInitial: func(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (response.XChatInboxPage, error) {
 				fetchLog.Info().
@@ -351,6 +357,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 					Str("cursor_id", variables.ContinueCursor.CursorId).
 					Str("graph_snapshot_id", variables.ContinueCursor.GraphSnapshotId).
 					Msg("Fetching XChat inbox page")
+				requestedCursor = variables.ContinueCursor
 				resp, err := tc.client.GetInboxPageRequest(ctx, variables)
 				if err != nil {
 					return response.XChatInboxPage{}, err
@@ -392,8 +399,10 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 				fetchLog.Err(saveErr).Msg("Failed to save user login after discarding stalled XChat inbox cursor")
 			}
 		}
+		resumeCursor = nil
 		stateEvent, stateError := status.StateUnknownError, status.BridgeStateErrorCode("twitter-xchat-sync-error")
 		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+			resumeCursor = requestedCursor
 			stateEvent, stateError = status.StateTransientDisconnect, "twitter-xchat-rate-limited"
 			retryDelay = max(retryDelay, xchatInboxRateLimitRetryDelay)
 		}
