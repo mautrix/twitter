@@ -483,7 +483,21 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		Msg("Finished fetching XChat inbox")
 
 	go func() {
-		tc.syncUntrustedChannels(ctx)
+		retryDelay := time.Minute
+		for {
+			err := tc.syncUntrustedChannels(ctx)
+			if err == nil || twittermeow.IsAuthError(err) {
+				break
+			}
+			log.Warn().
+				Err(err).
+				Dur("retry_in", retryDelay).
+				Msg("Failed to fetch initial inbox state for untrusted conversations, retrying")
+			if !waitForXChatInboxRetry(ctx, retryDelay) {
+				return
+			}
+			retryDelay = min(retryDelay*2, 30*time.Minute)
+		}
 		tc.client.StartPolling(ctx)
 	}()
 

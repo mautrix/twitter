@@ -569,7 +569,7 @@ func isProbablyEncryptedGroupName(encName string) bool {
 }
 
 // syncUntrustedChannels fetches and syncs message requests and legacy groups via the REST API.
-func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
+func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
@@ -577,14 +577,13 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 	reqQuery.FilterLowQuality = false
 	initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to fetch initial inbox state for untrusted conversations")
-		return
+		return err
 	}
 
 	inbox := initialInboxState.InboxInitialState
 	if inbox == nil {
 		log.Debug().Msg("No inbox data in initial state response")
-		return
+		return nil
 	}
 
 	// Set the polling cursor for REST API polling
@@ -628,6 +627,7 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) {
 		Int("legacy_group_conversations", legacyGroupCount).
 		Int("total_conversations", len(inbox.Conversations)).
 		Msg("Finished syncing REST conversations")
+	return nil
 }
 
 func isTrustedRESTGroup(conv *types.Conversation) bool {
