@@ -992,18 +992,8 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		HasMore:  hasMore,
 		Forward:  fetchParams.Forward,
 	}
-	if conv, ok := fetchParams.BundledData.(*types.Conversation); ok && conv != nil && len(backfillMessages) > 0 {
-		lastReadID, err := strconv.ParseUint(conv.LastReadEventID, 10, 64)
-		if err == nil && lastReadID > 0 {
-			result.MarkRead = true
-			for _, msg := range backfillMessages {
-				messageID, err := strconv.ParseUint(ParseMessageID(msg.ID), 10, 64)
-				if err != nil || messageID > lastReadID {
-					result.MarkRead = false
-					break
-				}
-			}
-		}
+	if conv, ok := fetchParams.BundledData.(*types.Conversation); ok && conv != nil {
+		result.ReadUpTo = methods.ParseSnowflake(conv.LastReadEventID)
 	}
 	if fetchParams.Forward {
 		if hasMore && inbox.MaxEntryID != "" {
