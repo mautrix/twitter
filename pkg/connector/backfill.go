@@ -504,6 +504,7 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 	var keyChangeEventCount, nonMessageEventCount, convertFailedCount int
 	skipReasonCounts := make(map[string]int)
 
+	events := make([]*payload.MessageEvent, 0, len(page.EncodedMessageEvents))
 	for _, enc := range page.EncodedMessageEvents {
 		evt, err := twittermeow.DecodeMessageEvent(enc)
 		if err != nil || !normalizeXChatBackfillEventConversation(evt, conversationID) {
@@ -524,6 +525,10 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 			}
 			continue
 		}
+		events = append(events, evt)
+	}
+
+	for _, evt := range events {
 		if evt.Detail.MessageCreateEvent == nil {
 			nonMessageEventCount++
 			continue
@@ -621,6 +626,7 @@ const (
 	xchatSkipReasonEmptyContents = "empty_contents"
 	xchatSkipReasonUserMetadata  = "user_metadata"
 	xchatSkipReasonKeyMissing    = "key_missing"
+	xchatSkipReasonKeyLoadFailed = "key_load_failed"
 	xchatSkipReasonDecryptFailed = "decrypt_failed"
 	xchatSkipReasonParseFailed   = "parse_failed"
 	xchatSkipReasonEmptyEntry    = "empty_entry"
@@ -630,7 +636,7 @@ const (
 
 func isCriticalXChatBackfillSkip(reason string) bool {
 	switch reason {
-	case xchatSkipReasonKeyMissing,
+	case xchatSkipReasonKeyLoadFailed,
 		xchatSkipReasonDecryptFailed,
 		xchatSkipReasonParseFailed,
 		xchatSkipReasonConvertFailed:
@@ -662,8 +668,10 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	if isEncryptedXChatBackfillMessage(mce) {
 		km := tc.client.GetKeyManager()
 		convKey, err := km.GetConversationKey(ctx, conversationID, keyVersion)
-		if err != nil || convKey == nil || len(convKey.Key) == 0 {
+		if errors.Is(err, crypto.ErrKeyNotFound) || (err == nil && (convKey == nil || len(convKey.Key) == 0)) {
 			return nil, time.Time{}, 0, xchatSkipReasonKeyMissing
+		} else if err != nil {
+			return nil, time.Time{}, 0, xchatSkipReasonKeyLoadFailed
 		}
 
 		debugLog := zerolog.Ctx(ctx).With().
