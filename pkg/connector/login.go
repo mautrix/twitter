@@ -695,7 +695,7 @@ func makePINStep(errorLine string, isSetup bool) *bridgev2.LoginStep {
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
-					Type:      bridgev2.LoginInputFieldType2FACode,
+					Type:      bridgev2.LoginInputFieldTypePassword,
 					ID:        "pin",
 					Name:      fieldName,
 					Pattern:   pinRegex,
