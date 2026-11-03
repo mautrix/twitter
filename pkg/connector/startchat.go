@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
@@ -24,8 +25,10 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 		Query:      identifier,
 		ResultType: payload.SEARCH_RESULT_TYPE_USERS,
 	})
-	if err != nil {
-		return nil, err
+	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+		return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later").WithStatus(http.StatusBadRequest))
+	} else if err != nil {
+		return nil, bridgev2.RespError(mautrix.MUnknown.WithMessage("Failed to search for X users")).WithInternalError(err)
 	}
 	var resolvedUser types.User
 	for _, user := range response.Users {
@@ -45,9 +48,9 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 			DMUsers:      true,
 		})
 		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
-			return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later"))
+			return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later").WithStatus(http.StatusBadRequest))
 		} else if err != nil {
-			return nil, fmt.Errorf("failed to get DM permissions for Twitter User: %w", err)
+			return nil, bridgev2.RespError(mautrix.MUnknown.WithMessage("Failed to check if you can message this X user")).WithInternalError(err)
 		}
 
 		perms := permissions.Permissions.GetPermissionsForUser(resolvedUser.IDStr)
