@@ -149,6 +149,7 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 	if response.StatusCode >= 400 {
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {
+			respErr.StatusCode = response.StatusCode
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
 		} else if response.StatusCode == http.StatusTooManyRequests {
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrRatelimitExceeded)

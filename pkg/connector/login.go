@@ -284,7 +284,7 @@ var (
 	ErrJuiceboxRateLimited = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.JUICEBOX_RATE_LIMITED",
 		Err:        "Too many attempts. Please try again later.",
-		StatusCode: http.StatusTooManyRequests,
+		StatusCode: http.StatusBadRequest,
 	}
 	ErrJuiceboxInvalidAuth = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.JUICEBOX_INVALID_AUTH",
@@ -304,7 +304,7 @@ var (
 	ErrJuiceboxTransient = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.JUICEBOX_TRANSIENT",
 		Err:        "Temporary error. Try again.",
-		StatusCode: http.StatusServiceUnavailable,
+		StatusCode: http.StatusInternalServerError,
 	}
 	ErrMissingUserID = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.MISSING_USER_ID",
@@ -324,7 +324,7 @@ var (
 	ErrWebLoginFailed = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.LOGIN_FAILED",
 		Err:        "X login failed.",
-		StatusCode: http.StatusBadGateway,
+		StatusCode: http.StatusInternalServerError,
 	}
 	ErrLoginBadCookies = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.BAD_COOKIES",
@@ -344,7 +344,7 @@ var (
 	ErrLoginRateLimited = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.RATE_LIMITED",
 		Err:        "X is rate limiting the sign-in. Please wait a few minutes and try again.",
-		StatusCode: http.StatusTooManyRequests,
+		StatusCode: http.StatusBadRequest,
 	}
 	ErrLoginUnknown = bridgev2.RespError{
 		ErrCode:    "M_UNKNOWN",
@@ -1029,7 +1029,7 @@ func (t *TwitterLogin) bootstrapJuiceboxPIN(ctx context.Context, pin string) (*K
 		},
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to register xchat public key: %w", err)
+		return nil, "", wrapTwitterLoginError(fmt.Errorf("failed to register xchat public key: %w", err))
 	}
 	if len(addResp.Errors) > 0 {
 		return nil, "", fmt.Errorf("failed to register xchat public key: %s", addResp.Errors[0].Message)
@@ -1653,7 +1653,7 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 	// Get recovery config from X API
 	publicKeysResp, err := t.client.GetPublicKeys(ctx, []string{currentUserID})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get public keys: %w", err)
+		return nil, wrapTwitterLoginError(fmt.Errorf("failed to get public keys: %w", err))
 	}
 
 	var (
@@ -1677,7 +1677,7 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 			if errors.Is(selectionErr, juiceboxgo.ErrNotRegistered) {
 				return nil, ErrJuiceboxNotRegistered
 			}
-			return nil, fmt.Errorf("failed to select registered juicebox key: %w", selectionErr)
+			return nil, wrapTwitterLoginError(fmt.Errorf("failed to select registered juicebox key: %w", selectionErr))
 		}
 		var retryStep *bridgev2.LoginStep
 		keys, signingKeyVersion, retryStep, err = t.recoverJuiceboxPIN(ctx, pin, keyData)
