@@ -235,7 +235,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			if sendMode == messageSendXChatEncrypted {
 				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
 				if err != nil {
-					return nil, err
+					return nil, wrapTwitterMatrixError(err)
 				}
 
 				zerolog.Ctx(ctx).Debug().
@@ -269,7 +269,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 					MediaCategory: mediaCategory,
 				}, data)
 				if err != nil {
-					return nil, err
+					return nil, wrapTwitterMatrixError(err)
 				}
 				size = int64(uploadResult.Size)
 				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
@@ -496,7 +496,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 		}
 		uploadResult, err := tc.client.UploadMedia(ctx, uploadQuery, data)
 		if err != nil {
-			return nil, fmt.Errorf("failed to upload media for REST API: %w", err)
+			return nil, wrapTwitterMatrixError(fmt.Errorf("failed to upload media for REST API: %w", err))
 		}
 
 		pl.MediaID = uploadResult.MediaIDString
@@ -507,7 +507,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 
 	resp, err := tc.client.SendDirectMessage(ctx, pl)
 	if err != nil {
-		return nil, err
+		return nil, wrapTwitterMatrixError(err)
 	}
 
 	// Extract the message ID from the response
@@ -682,7 +682,7 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 		}
 		reactionResponse, err := tc.client.React(ctx, reactionPayload, remove)
 		if err != nil {
-			return err
+			return wrapTwitterMatrixError(err)
 		}
 		tc.client.Logger.Debug().
 			Any("reactionResponse", reactionResponse).
@@ -700,7 +700,7 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 	// XChat reactions are sent as MessageCreateEvents (reaction_add/reaction_remove).
 	xchatConvID := NormalizeConversationID(conversationID)
 	_, err := tc.client.SendXChatReaction(ctx, xchatConvID, messageID, emoji, remove, sendMode == messageSendXChatEncrypted)
-	return err
+	return wrapTwitterMatrixError(err)
 }
 
 func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt time.Time) {
@@ -872,7 +872,7 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		UpdatedText:             edit.Content.Body,
 	})
 	if err != nil {
-		return err
+		return wrapTwitterMatrixError(err)
 	}
 	tc.client.Logger.Debug().Any("editResponse", resp).Msg("XChat edit response")
 	if meta != nil {
@@ -908,7 +908,7 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 			zerolog.Ctx(ctx).Debug().Err(err).Msg("Group is no longer accessible on X, deleting portal anyway")
 			return nil
 		}
-		return err
+		return wrapTwitterMatrixError(err)
 	}
 
 	xchatErr := tc.client.DeleteXChatConversation(ctx, conversationID)
@@ -917,7 +917,7 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	}
 
 	if err := tc.client.DeleteConversation(ctx, restConversationID, &reqQuery); err != nil {
-		return errors.Join(xchatErr, fmt.Errorf("delete REST conversation: %w", err))
+		return wrapTwitterMatrixError(errors.Join(xchatErr, fmt.Errorf("delete REST conversation: %w", err)))
 	}
 	return nil
 }
@@ -938,10 +938,10 @@ func (tc *TwitterClient) HandleMatrixMessageRemove(ctx context.Context, msg *bri
 		_, err := tc.client.DeleteMessageForMe(ctx, &payload.DMMessageDeleteMutationVariables{
 			MessageID: sequenceID,
 		})
-		return err
+		return wrapTwitterMatrixError(err)
 	}
 
-	return tc.client.DeleteXChatMessage(ctx, xchatMessageRemovalOpts(conversationID, sequenceID))
+	return wrapTwitterMatrixError(tc.client.DeleteXChatMessage(ctx, xchatMessageRemovalOpts(conversationID, sequenceID)))
 }
 
 // Beeper handles delete-for-self locally, so a Matrix redaction always means delete for everyone.
@@ -976,7 +976,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
 		if err != nil {
-			return false, err
+			return false, wrapTwitterMatrixError(err)
 		}
 
 		updateAvatarParams := &payload.DMRequestQuery{
@@ -984,7 +984,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		}
 		err = tc.client.UpdateConversationAvatar(ctx, ParsePortalID(msg.Portal.ID), updateAvatarParams)
 		if err != nil {
-			return false, err
+			return false, wrapTwitterMatrixError(err)
 		}
 		return true, nil
 	}
@@ -1001,7 +1001,7 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 	}
 	err := tc.client.UpdateConversationName(ctx, ParsePortalID(msg.Portal.ID), updateNameParams)
 	if err != nil {
-		return false, err
+		return false, wrapTwitterMatrixError(err)
 	}
 	return true, nil
 }
@@ -1026,7 +1026,7 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 		AddedParticipants: []string{participantID},
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapTwitterMatrixError(err)
 	}
 	return &bridgev2.MatrixMembershipResult{}, nil
 }
@@ -1075,5 +1075,58 @@ func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev
 	if otherUserID == "" {
 		return errors.New("DM recipient is unknown")
 	}
-	return tc.client.SetUserDMBlocked(ctx, otherUserID, msg.Content.Block)
+	return wrapTwitterMatrixError(tc.client.SetUserDMBlocked(ctx, otherUserID, msg.Content.Block))
+}
+
+func wrapTwitterMatrixError(err error) error {
+	if err == nil || errors.As(err, &bridgev2.MessageStatus{}) {
+		return err
+	}
+	switch {
+	case errors.Is(err, twittermeow.ErrRatelimitExceeded):
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("rate limited by X").
+			WithErrorReason(event.MessageStatusNetworkError).
+			WithIsCertain(true).
+			WithSendNotice(true)
+	case errors.Is(err, twittermeow.ErrCouldNotAuthenticate):
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("your X session is no longer valid, please log in again").
+			WithErrorReason(event.MessageStatusNoPermission).
+			WithStatus(event.MessageStatusFail).
+			WithIsCertain(true).
+			WithSendNotice(true)
+	case twittermeow.IsAuthError(err):
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("your X account is suspended or locked").
+			WithErrorReason(event.MessageStatusNoPermission).
+			WithStatus(event.MessageStatusFail).
+			WithIsCertain(true).
+			WithSendNotice(true)
+	case errors.Is(err, twittermeow.ErrConversationDoesntExist):
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("you don't have access to this X conversation").
+			WithErrorReason(event.MessageStatusNoPermission).
+			WithStatus(event.MessageStatusFail).
+			WithIsCertain(true).
+			WithSendNotice(true)
+	case errors.Is(err, twittermeow.ErrClientNotPermitted):
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("X doesn't allow you to do that").
+			WithErrorReason(event.MessageStatusNoPermission).
+			WithStatus(event.MessageStatusFail).
+			WithIsCertain(true).
+			WithSendNotice(true)
+	case errors.As(err, new(*twittermeow.TwitterErrors)), errors.As(err, new(response.XChatGraphQLError)):
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("X rejected the request").
+			WithErrorReason(event.MessageStatusNetworkError).
+			WithIsCertain(true).
+			WithSendNotice(true)
+	default:
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("request to X failed").
+			WithIsCertain(false).
+			WithSendNotice(true)
+	}
 }
