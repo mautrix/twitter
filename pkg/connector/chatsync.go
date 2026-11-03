@@ -572,7 +572,7 @@ func isProbablyEncryptedGroupName(encName string) bool {
 }
 
 // syncInitialRESTInbox fetches and syncs the first REST inbox page.
-func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.TwitterInboxData, *payload.DMRequestQuery, int, error) {
+func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.TwitterInboxData, int, error) {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
@@ -580,13 +580,13 @@ func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.Tw
 	reqQuery.FilterLowQuality = false
 	initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, err
 	}
 
 	inbox := initialInboxState.InboxInitialState
 	if inbox == nil {
 		log.Debug().Msg("No inbox data in initial state response")
-		return nil, nil, 0, nil
+		return nil, 0, nil
 	}
 
 	// Set the polling cursor for REST API polling
@@ -640,12 +640,12 @@ func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.Tw
 		Int("trusted_dm_conversations", trustedDMCount).
 		Int("total_conversations", len(inbox.Conversations)).
 		Msg("Finished syncing initial REST conversations")
-	return inbox, reqQuery, trustedDMCount, nil
+	return inbox, trustedDMCount, nil
 }
 
-func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initial *response.TwitterInboxData, reqQuery *payload.DMRequestQuery, syncedDMs int) {
+func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initial *response.TwitterInboxData, syncedDMs int) {
 	limit := tc.connector.Config.ConversationSyncLimit
-	if initial == nil || reqQuery == nil || limit <= 0 || syncedDMs >= limit {
+	if initial == nil || (limit > 0 && syncedDMs >= limit) {
 		return
 	}
 	log := zerolog.Ctx(ctx)
@@ -656,8 +656,9 @@ func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initi
 	olderPages := 0
 	minID := initial.InboxTimelines.Trusted.MinEntryID
 	status := initial.InboxTimelines.Trusted.Status
-	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil && syncedDMs < limit && olderPages < maxOlderTrustedRESTInboxPages {
-		query := *reqQuery
+	query := payload.DMRequestQuery{}.Default()
+	query.FilterLowQuality = false
+	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil && (limit <= 0 || syncedDMs < limit) && olderPages < maxOlderTrustedRESTInboxPages {
 		query.MaxID = minID
 		older, err := tc.client.GetTrustedInboxTimeline(ctx, &query)
 		if err != nil {
@@ -681,7 +682,7 @@ func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initi
 			seen[id] = struct{}{}
 			if isTrustedRESTGroup(conv) {
 				tc.syncTrustedRESTGroup(ctx, conv, page)
-			} else if conv.Trusted && conv.Type == types.ConversationTypeOneToOne && syncedDMs < limit {
+			} else if conv.Trusted && conv.Type == types.ConversationTypeOneToOne && (limit <= 0 || syncedDMs < limit) {
 				if tc.syncRESTConversation(ctx, conv, page) {
 					syncedDMs++
 				}
@@ -690,7 +691,7 @@ func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initi
 		minID = page.MinEntryID
 		status = page.Status
 	}
-	log.Info().Int("total_conversations", len(seen)).Int("trusted_dm_conversations", syncedDMs).Int("pages", olderPages+1).Msg("Finished syncing REST conversations")
+	log.Debug().Int("pages", olderPages).Int("trusted_dm_conversations", syncedDMs).Msg("Finished syncing older REST conversations")
 }
 
 func isTrustedRESTGroup(conv *types.Conversation) bool {
