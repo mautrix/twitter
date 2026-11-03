@@ -903,7 +903,12 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	reqQuery := payload.DMRequestQuery{}.Default()
 	_, isRESTGroup := xchatGroupPortalAliasKey(chat.Portal.PortalKey)
 	if isRESTGroup {
-		return tc.client.DeleteConversation(ctx, restConversationID, &reqQuery)
+		err := tc.client.DeleteConversation(ctx, restConversationID, &reqQuery)
+		if errors.Is(err, twittermeow.ErrClientNotPermitted) {
+			zerolog.Ctx(ctx).Debug().Err(err).Msg("Group is no longer accessible on X, deleting portal anyway")
+			return nil
+		}
+		return err
 	}
 
 	xchatErr := tc.client.DeleteXChatConversation(ctx, conversationID)
