@@ -52,7 +52,8 @@ func (te TwitterError) Error() string {
 }
 
 type TwitterErrors struct {
-	Errors []TwitterError `json:"errors"`
+	Errors     []TwitterError `json:"errors"`
+	StatusCode int            `json:"-"`
 }
 
 func (te *TwitterErrors) Error() string {

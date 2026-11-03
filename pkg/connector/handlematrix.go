@@ -336,7 +336,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 				Msg("Falling back to REST API for message send (key/token not found)")
 			return tc.sendDirectMessageREST(ctx, msg, conversationID, messageID, text, opts, dbMsg, txnID)
 		}
-		return nil, bridgev2.WrapErrorInStatus(err).WithSendNotice(true)
+		return nil, wrapTwitterMatrixError(err)
 	}
 	zerolog.Ctx(ctx).Debug().
 		Str("conversation_id", conversationID).
@@ -908,7 +908,7 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 			zerolog.Ctx(ctx).Debug().Err(err).Msg("Group is no longer accessible on X, deleting portal anyway")
 			return nil
 		}
-		return wrapTwitterMatrixError(err)
+		return withoutNotice(wrapTwitterMatrixError(err))
 	}
 
 	xchatErr := tc.client.DeleteXChatConversation(ctx, conversationID)
@@ -917,7 +917,7 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 	}
 
 	if err := tc.client.DeleteConversation(ctx, restConversationID, &reqQuery); err != nil {
-		return wrapTwitterMatrixError(errors.Join(xchatErr, fmt.Errorf("delete REST conversation: %w", err)))
+		return withoutNotice(wrapTwitterMatrixError(errors.Join(xchatErr, fmt.Errorf("delete REST conversation: %w", err))))
 	}
 	return nil
 }
@@ -976,7 +976,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		}
 		uploadedMediaResponse, err := tc.client.UploadMedia(ctx, uploadMediaParams, data)
 		if err != nil {
-			return false, wrapTwitterMatrixError(err)
+			return false, withoutNotice(wrapTwitterMatrixError(err))
 		}
 
 		updateAvatarParams := &payload.DMRequestQuery{
@@ -984,7 +984,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		}
 		err = tc.client.UpdateConversationAvatar(ctx, ParsePortalID(msg.Portal.ID), updateAvatarParams)
 		if err != nil {
-			return false, wrapTwitterMatrixError(err)
+			return false, withoutNotice(wrapTwitterMatrixError(err))
 		}
 		return true, nil
 	}
@@ -1001,7 +1001,7 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 	}
 	err := tc.client.UpdateConversationName(ctx, ParsePortalID(msg.Portal.ID), updateNameParams)
 	if err != nil {
-		return false, wrapTwitterMatrixError(err)
+		return false, withoutNotice(wrapTwitterMatrixError(err))
 	}
 	return true, nil
 }
@@ -1026,7 +1026,7 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 		AddedParticipants: []string{participantID},
 	})
 	if err != nil {
-		return nil, wrapTwitterMatrixError(err)
+		return nil, withoutNotice(wrapTwitterMatrixError(err))
 	}
 	return &bridgev2.MatrixMembershipResult{}, nil
 }
@@ -1075,15 +1075,17 @@ func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev
 	if otherUserID == "" {
 		return errors.New("DM recipient is unknown")
 	}
-	return wrapTwitterMatrixError(tc.client.SetUserDMBlocked(ctx, otherUserID, msg.Content.Block))
+	return withoutNotice(wrapTwitterMatrixError(tc.client.SetUserDMBlocked(ctx, otherUserID, msg.Content.Block)))
 }
 
 func wrapTwitterMatrixError(err error) error {
 	if err == nil || errors.As(err, &bridgev2.MessageStatus{}) {
 		return err
 	}
+	var twitterErrs *twittermeow.TwitterErrors
+	hasTwitterErrs := errors.As(err, &twitterErrs)
 	switch {
-	case errors.Is(err, twittermeow.ErrRatelimitExceeded):
+	case errors.Is(err, twittermeow.ErrRatelimitExceeded), hasTwitterErrs && twitterErrs.StatusCode == http.StatusTooManyRequests:
 		return bridgev2.WrapErrorInStatus(err).
 			WithMessage("rate limited by X").
 			WithErrorReason(event.MessageStatusNetworkError).
@@ -1117,7 +1119,13 @@ func wrapTwitterMatrixError(err error) error {
 			WithStatus(event.MessageStatusFail).
 			WithIsCertain(true).
 			WithSendNotice(true)
-	case errors.As(err, new(*twittermeow.TwitterErrors)), errors.As(err, new(response.XChatGraphQLError)):
+	case hasTwitterErrs && twitterErrs.StatusCode >= 500:
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage("X had a server error").
+			WithErrorReason(event.MessageStatusNetworkError).
+			WithIsCertain(false).
+			WithSendNotice(true)
+	case hasTwitterErrs, errors.As(err, new(response.XChatGraphQLError)):
 		return bridgev2.WrapErrorInStatus(err).
 			WithMessage("X rejected the request").
 			WithErrorReason(event.MessageStatusNetworkError).
@@ -1129,4 +1137,12 @@ func wrapTwitterMatrixError(err error) error {
 			WithIsCertain(false).
 			WithSendNotice(true)
 	}
+}
+
+func withoutNotice(err error) error {
+	var ms bridgev2.MessageStatus
+	if errors.As(err, &ms) {
+		return ms.WithSendNotice(false)
+	}
+	return err
 }

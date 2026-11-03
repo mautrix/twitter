@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -28,6 +29,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
 		return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later").WithStatus(http.StatusBadRequest))
 	} else if err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to search for X users")
 		return nil, bridgev2.RespError(mautrix.MUnknown.WithMessage("Failed to search for X users")).WithInternalError(err)
 	}
 	var resolvedUser types.User
@@ -50,6 +52,7 @@ func (tc *TwitterClient) ResolveIdentifier(ctx context.Context, identifier strin
 		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
 			return nil, bridgev2.RespError(mautrix.MLimitExceeded.WithMessage("X is rate limiting requests, try again later").WithStatus(http.StatusBadRequest))
 		} else if err != nil {
+			zerolog.Ctx(ctx).Err(err).Msg("Failed to get DM permissions for X user")
 			return nil, bridgev2.RespError(mautrix.MUnknown.WithMessage("Failed to check if you can message this X user")).WithInternalError(err)
 		}
 
