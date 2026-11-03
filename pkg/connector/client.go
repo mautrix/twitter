@@ -512,25 +512,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		Int("items", catchupResult.Items).
 		Msg("Finished fetching XChat inbox")
 
-	go func() {
-		retryDelay := time.Minute
-		for {
-			err := tc.syncUntrustedChannels(ctx)
-			if err == nil || twittermeow.IsAuthError(err) {
-				break
-			}
-			log.Warn().
-				Err(err).
-				Dur("retry_in", retryDelay).
-				Msg("Failed to fetch initial inbox state for untrusted conversations, retrying")
-			if !waitForXChatInboxRetry(ctx, retryDelay) {
-				return
-			}
-			retryDelay = min(retryDelay*2, 30*time.Minute)
-		}
-		tc.client.StartPolling(ctx)
-	}()
-
 	if ctx.Err() != nil {
 		return
 	}
@@ -563,7 +544,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	// checkpoints have already persisted max sequence, cursor and pull version;
 	// rewriting them here could clobber a newer reconnect checkpoint.
 	tc.xchatInboxSyncLock.Lock()
-	defer tc.xchatInboxSyncLock.Unlock()
 	if remoteProfile != nil {
 		if tc.userLogin.RemoteName != remoteProfile.Username ||
 			tc.userLogin.RemoteProfile != *remoteProfile {
@@ -581,6 +561,33 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 
 	// Save session state
 	tc.HandleCursorChange(ctx)
+	tc.xchatInboxSyncLock.Unlock()
+
+	retryDelay = time.Minute
+	var inbox *response.TwitterInboxData
+	var query *payload.DMRequestQuery
+	var syncedDMs int
+	var err error
+	for {
+		inbox, query, syncedDMs, err = tc.syncInitialRESTInbox(ctx)
+		if err == nil || twittermeow.IsAuthError(err) {
+			break
+		}
+		log.Warn().
+			Err(err).
+			Dur("retry_in", retryDelay).
+			Msg("Failed to fetch initial REST inbox state, retrying")
+		if !waitForXChatInboxRetry(ctx, retryDelay) {
+			return
+		}
+		retryDelay = min(retryDelay*2, 30*time.Minute)
+	}
+	if ctx.Err() == nil {
+		tc.client.StartPolling(ctx)
+	}
+	if inbox != nil {
+		tc.syncOlderTrustedRESTChannels(ctx, inbox, query, syncedDMs)
+	}
 }
 
 const xchatInboxRateLimitRetryDelay = 5 * time.Minute
