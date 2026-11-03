@@ -674,7 +674,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 			log.Warn().Err(e.Error).Msg("Polling error")
 		}
 		tc.notePollingRuntime(e)
-		return !e.IsAuth
+		return true
 	default:
 		// For other event types, let them through
 		log.Debug().Msg("Received unhandled polling event type")

@@ -279,36 +279,23 @@ func (xc *xchatWebsocketClient) start(ctx context.Context) error {
 // waitForXChatStartup prefers a permanent token failure over the restricted-account unblock.
 // The bool is true only when the socket itself is ready.
 func waitForXChatStartup(ctx context.Context, ready <-chan struct{}, startupErr <-chan error, startupContinue <-chan struct{}) (bool, error) {
+	var socketReady bool
+	var err error
 	select {
-	case err := <-startupErr:
-		return false, err
-	default:
-	}
-	select {
-	case err := <-startupErr:
+	case err = <-startupErr:
 		return false, err
 	case <-ready:
-		// A code 32 can be queued in the same moment the socket becomes ready.
-		select {
-		case err := <-startupErr:
-			return false, err
-		default:
-			return true, nil
-		}
+		socketReady = true
 	case <-startupContinue:
-		select {
-		case err := <-startupErr:
-			return false, err
-		default:
-			return false, nil
-		}
 	case <-ctx.Done():
-		select {
-		case err := <-startupErr:
-			return false, err
-		default:
-			return false, ctx.Err()
-		}
+		err = ctx.Err()
+	}
+	// A code 32 can be queued in the same moment as another startup signal.
+	select {
+	case tokenErr := <-startupErr:
+		return false, tokenErr
+	default:
+		return socketReady, err
 	}
 }
 

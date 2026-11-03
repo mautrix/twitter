@@ -47,6 +47,17 @@ func (tc *TwitterClient) noteXChatRuntime(gen uint64, state twittermeow.XChatSoc
 	tc.setRuntimeLink(false, link, gen)
 }
 
+// The socket has not started yet, so a lifted restriction is reported as connecting.
+func (tc *TwitterClient) clearRestrictedState(gen uint64) {
+	tc.runtimeMu.Lock()
+	defer tc.runtimeMu.Unlock()
+	if gen != tc.runtimeGen {
+		return
+	}
+	tc.xchatLink = runtimeLink{}
+	tc.sendRuntimeState(status.BridgeState{StateEvent: status.StateConnecting})
+}
+
 func (tc *TwitterClient) setRuntimeLink(polling bool, link runtimeLink, gen uint64) {
 	tc.runtimeMu.Lock()
 	defer tc.runtimeMu.Unlock()
@@ -88,10 +99,6 @@ func (tc *TwitterClient) publishRuntimeState() {
 }
 
 func (tc *TwitterClient) sendRuntimeState(state status.BridgeState) {
-	if tc.runtimeSend != nil {
-		tc.runtimeSend(state)
-		return
-	}
 	if tc.userLogin == nil {
 		return
 	}

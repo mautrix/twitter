@@ -71,7 +71,6 @@ type TwitterClient struct {
 	runtimeStarted bool
 	pollingLink    runtimeLink
 	xchatLink      runtimeLink
-	runtimeSend    func(status.BridgeState)
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -129,19 +128,6 @@ const (
 	sessionMaxTimeSinceInit = 48 * time.Hour
 )
 
-func isXChatAuthError(err error) bool {
-	var apiErrors *twittermeow.TwitterErrors
-	if !errors.As(err, &apiErrors) {
-		return false
-	}
-	for _, apiError := range apiErrors.Errors {
-		if apiError.Code == 32 {
-			return true
-		}
-	}
-	return false
-}
-
 func (tc *TwitterClient) Connect(ctx context.Context) {
 	// Bridge startup waits for every NetworkAPI.Connect call, while inbox import may take minutes.
 	tc.startConnect(ctx, tc.connect)
@@ -188,9 +174,6 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 	tc.xchatInboxSyncLock.Unlock()
 	runtimeGen := tc.resetRuntimeSession()
-	if tc.client != nil {
-		tc.client.SetXChatRuntimeGen(runtimeGen)
-	}
 	log := zerolog.Ctx(ctx)
 
 	if tc.client == nil {
@@ -200,6 +183,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		})
 		return
 	}
+	tc.client.SetXChatRuntimeGen(runtimeGen)
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
 	if err := tc.restoreXChatFailedEvents(); err != nil {
@@ -254,14 +238,14 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			_, err := tc.client.LoadMessagesPage(ctx)
 			if err == nil {
 				if restricted {
-					tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketConnected, nil)
+					tc.clearRestrictedState(runtimeGen)
 				}
 				break
 			}
 			if ctx.Err() != nil {
 				return
 			}
-			if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
+			if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) {
 				log.Err(err).Msg("Failed to load messages page")
 				tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 				return
@@ -385,14 +369,14 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		})
 		if err == nil {
 			if inboxRestricted {
-				tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketConnected, nil)
+				tc.clearRestrictedState(runtimeGen)
 			}
 			break
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) || isXChatAuthError(err) {
+		if errors.Is(err, twittermeow.ErrCouldNotAuthenticate) {
 			fetchLog.Err(err).Msg("XChat inbox sync authentication failed")
 			tc.noteXChatRuntime(runtimeGen, twittermeow.XChatSocketBadCredentials, err)
 			return

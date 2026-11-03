@@ -262,12 +262,12 @@ func (c *Client) StartPolling(ctx context.Context, gen uint64) {
 		c.Logger.Warn().Msg("Cannot start polling without event handler")
 		return
 	}
-	if gen != 0 && c.pollingHalt.Load() == gen {
+	if c.pollingHalt.Load() == gen {
 		return
 	}
 	c.polling.startPolling(c.Logger.WithContext(ctx), gen)
 	// A code 32 token failure can land between the check above and startPolling.
-	if gen != 0 && c.pollingHalt.Load() == gen {
+	if c.pollingHalt.Load() == gen {
 		c.StopPolling()
 	}
 }
@@ -279,9 +279,6 @@ func (c *Client) StopPolling() {
 
 // haltPolling stops the current poller and rejects a later StartPolling for this generation.
 func (c *Client) haltPolling(gen uint64) {
-	if gen == 0 {
-		return
-	}
 	c.pollingHalt.Store(gen)
 	c.StopPolling()
 }
