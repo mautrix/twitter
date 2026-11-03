@@ -981,9 +981,6 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 	}
 
 	sortBackfillMessages(backfillMessages)
-	if fetchParams.Forward && fetchParams.AnchorMessage == nil && fetchParams.Count > 0 && len(backfillMessages) > fetchParams.Count {
-		backfillMessages = backfillMessages[len(backfillMessages)-fetchParams.Count:]
-	}
 
 	hasMore := inbox.Status == types.PaginationStatusHasMore
 	forcedOlderPage := false

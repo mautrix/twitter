@@ -660,6 +660,7 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 			CreatePortal: true, Timestamp: latestMessageTS,
 		},
 		ChatInfo: tc.conversationToChatInfo(ctx, conv, inbox), LatestMessageTS: latestMessageTS,
+		BundledBackfillData: conv,
 	})
 	if !result.Success {
 		zerolog.Ctx(ctx).Warn().Err(result.Error).Msg("Failed to queue trusted REST group resync")
@@ -683,16 +684,7 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 	}
 
 	readUpTo := methods.ParseSnowflake(conv.LastReadEventID)
-	queueReceipt := false
-	if !readUpTo.IsZero() && portal.MXID != "" {
-		// Backfill marks newer messages read via ReadUpTo, so only already bridged ones need a receipt.
-		latestMessage, err := tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to get latest message for REST read receipt")
-		} else {
-			queueReceipt = latestMessage != nil && !latestMessage.Timestamp.Before(readUpTo)
-		}
-	}
+	queueReceipt := !readUpTo.IsZero() && portal.MXID != ""
 
 	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
 	if latestMessageTS.IsZero() {
