@@ -21,6 +21,7 @@ type TwitterError struct {
 
 var (
 	ErrCouldNotAuthenticate     error = TwitterError{Code: 32}
+	ErrClientNotPermitted       error = TwitterError{Code: 61}
 	ErrRatelimitExceeded        error = TwitterError{Code: 88, Message: "Rate limit exceeded"}
 	ErrUserSuspended            error = TwitterError{Code: 63}
 	ErrAccountSuspended         error = TwitterError{Code: 63}
