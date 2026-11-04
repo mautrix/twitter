@@ -660,6 +660,7 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 			CreatePortal: true, Timestamp: latestMessageTS,
 		},
 		ChatInfo: tc.conversationToChatInfo(ctx, conv, inbox), LatestMessageTS: latestMessageTS,
+		BundledBackfillData: conv,
 	})
 	if !result.Success {
 		zerolog.Ctx(ctx).Warn().Err(result.Error).Msg("Failed to queue trusted REST group resync")
@@ -682,98 +683,36 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		return
 	}
 
-	chatInfo := tc.conversationToChatInfo(ctx, conv, inbox)
+	readUpTo := methods.ParseSnowflake(conv.LastReadEventID)
+	queueReceipt := !readUpTo.IsZero() && portal.MXID != ""
 
-	var latestMessageTS time.Time
-	var latestMessageID string
-	if portal.MXID != "" {
-		latestMessage, err := tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to get message-request snapshot boundary")
-			return
-		} else if latestMessage != nil {
-			latestMessageTS = latestMessage.Timestamp
-			latestMessageID = ParseMessageID(latestMessage.ID)
-		}
-	}
+	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
 	if latestMessageTS.IsZero() {
-		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
-			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
-				CreatePortal: true, Timestamp: time.Now(),
-			},
-			ChatInfo: chatInfo,
-			CheckNeedsBackfillFunc: func(_ context.Context, latestMessage *database.Message) (bool, error) {
-				return latestMessage == nil, nil
-			},
-		})
-		if !result.Success {
-			log.Warn().Err(result.Error).Msg("Failed to create Matrix room for untrusted conversation")
-		}
+		latestMessageTS = methods.ParseSnowflake(conv.SortEventID)
+	}
+	result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+		EventMeta: simplevent.EventMeta{
+			Type:         bridgev2.RemoteEventChatResync,
+			PortalKey:    portal.PortalKey,
+			CreatePortal: true,
+			Timestamp:    latestMessageTS,
+		},
+		ChatInfo:            tc.conversationToChatInfo(ctx, conv, inbox),
+		LatestMessageTS:     latestMessageTS,
+		BundledBackfillData: conv,
+	})
+	if !result.Success {
+		log.Warn().Err(result.Error).Msg("Failed to queue untrusted conversation resync")
 		return
-	} else {
-		// Room already exists - update MessageRequest status via ChatInfoChange
-		tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventChatInfoChange,
-				PortalKey: portal.PortalKey,
-				Timestamp: time.Now(),
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				ChatInfo: chatInfo,
-			},
-		})
 	}
-
-	// Ensure untrusted conversations also have a queue backfill task once a room exists.
-	if portal.MXID != "" && chatInfo.CanBackfill {
-		// FIXME this is wrong, backfill tasks are created automatically based on chat resyncs
-		if err := tc.connector.br.DB.BackfillTask.EnsureExists(ctx, portal.PortalKey, tc.userLogin.ID); err != nil {
-			log.Warn().Err(err).
-				Str("conversation_id", conv.ConversationID).
-				Msg("Failed to ensure backfill task exists for untrusted conversation")
-		} else {
-			tc.connector.br.WakeupBackfillQueue()
-		}
-	}
-	// Process messages for this conversation from inbox entries
-	if inbox != nil {
-		tc.processUntrustedMessages(ctx, conv.ConversationID, inbox, latestMessageTS, latestMessageID)
+	if queueReceipt && !tc.queueRESTReadReceipt(portal.PortalKey, ParseUserLoginID(tc.userLogin.ID), conv.LastReadEventID, readUpTo, readUpTo.UnixMilli()) {
+		log.Warn().Msg("Failed to queue REST inbox read receipt")
 	}
 
 	log.Debug().
 		Str("conversation_id", conv.ConversationID).
 		Bool("trusted", conv.Trusted).
 		Msg("Synced untrusted conversation")
-}
-
-// processUntrustedMessages processes message entries for an untrusted conversation.
-func (tc *TwitterClient) processUntrustedMessages(ctx context.Context, conversationID string, inbox *response.TwitterInboxData, afterMessageTS time.Time, afterMessageID string) {
-	log := zerolog.Ctx(ctx)
-
-	for _, entry := range inbox.Entries {
-		parsed := entry.ParseWithErrorLog(log)
-		if parsed == nil {
-			continue
-		}
-
-		// Only process messages for this conversation
-		msg, ok := parsed.(*types.Message)
-		if !ok {
-			continue
-		}
-		if msg.ConversationID != conversationID {
-			continue
-		}
-		messageID, source := restMessageCanonicalID(msg)
-		messageTS, _ := restMessageCanonicalTimestamp(msg, messageID, source)
-		if messageTS.Before(afterMessageTS) || messageTS.Equal(afterMessageTS) && compareIntStrings(messageID, afterMessageID) <= 0 {
-			continue
-		}
-
-		// Queue the message event
-		tc.HandlePollingEvent(msg, inbox)
-	}
 }
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.
