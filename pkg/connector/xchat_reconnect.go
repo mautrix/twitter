@@ -387,6 +387,13 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 	}
 	var rateLimited bool
 	var rateLimitedCursor *payload.XChatCursor
+	var fetchedSequenceID string
+	fetched := func(page response.XChatInboxPage) response.XChatInboxPage {
+		if page.MaxUserSequenceID != nil {
+			fetchedSequenceID = maxXChatSequenceID(fetchedSequenceID, *page.MaxUserSequenceID)
+		}
+		return page
+	}
 	var totalItems atomic.Int32
 	ops := xchatInboxCatchupOps{
 		FetchInitial: func(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (response.XChatInboxPage, error) {
@@ -396,7 +403,7 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 				rateLimited = errors.Is(err, twittermeow.ErrRatelimitExceeded)
 				return response.XChatInboxPage{}, err
 			}
-			return resp.Data.GetInboxPage, nil
+			return fetched(resp.Data.GetInboxPage), nil
 		},
 		FetchNext: func(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (response.XChatInboxPage, error) {
 			resp, err := tc.client.GetInboxPageRequest(ctx, variables)
@@ -406,7 +413,7 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 				}
 				return response.XChatInboxPage{}, err
 			}
-			return resp.Data.GetInboxPage, nil
+			return fetched(resp.Data.GetInboxPage), nil
 		},
 		ProcessPage: func(ctx context.Context, page response.XChatInboxPage) (xchatInboxPageProcessResult, error) {
 			_, err := tc.processXChatInboxPage(ctx, page, &totalItems, true)
@@ -425,7 +432,7 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 		if partial {
 			runDrain = nil
 		}
-		rateLimited, rateLimitedCursor = false, nil
+		rateLimited, rateLimitedCursor, fetchedSequenceID = false, nil, state.MaxSequenceID
 		var err error
 		result, err = runXChatPriorityCatchup(ctx, state, ops, tc.prepareXChatSnapshotProfiles, processor.ConversationRecoveryPending, runDrain)
 		if err != nil {
@@ -434,14 +441,14 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 			}
 			next := &xchatHandoffResume{Cursor: rateLimitedCursor, MaxSequenceID: state.MaxSequenceID}
 			if rateLimitedCursor != nil {
-				next.MaxSequenceID = maxXChatSequenceID(state.MaxSequenceID, result.MaxSequenceID)
+				next.MaxSequenceID = fetchedSequenceID
 			}
 			return next, err
 		}
 		if !partial {
 			break
 		}
-		state.MaxSequenceID = maxXChatSequenceID(state.MaxSequenceID, result.MaxSequenceID)
+		state.MaxSequenceID = fetchedSequenceID
 		state.Cursor = nil
 	}
 
