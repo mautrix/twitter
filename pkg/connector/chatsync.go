@@ -692,8 +692,10 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 	}
 	result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 		EventMeta: simplevent.EventMeta{
-			Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
-			CreatePortal: true, Timestamp: latestMessageTS,
+			Type:         bridgev2.RemoteEventChatResync,
+			PortalKey:    portal.PortalKey,
+			CreatePortal: true,
+			Timestamp:    latestMessageTS,
 		},
 		ChatInfo:            tc.conversationToChatInfo(ctx, conv, inbox),
 		LatestMessageTS:     latestMessageTS,
