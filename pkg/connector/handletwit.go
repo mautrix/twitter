@@ -668,14 +668,12 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 	case *types.TrustConversation:
 		conversationID = e.ConversationID
 	case *types.PollingError:
-		// Handle polling errors
 		if e.IsAuth {
 			log.Warn().Err(e.Error).Msg("Authentication error during polling")
-			return false
-		}
-		if e.Error != nil {
+		} else if e.Error != nil {
 			log.Warn().Err(e.Error).Msg("Polling error")
 		}
+		tc.notePollingRuntime(e)
 		return true
 	default:
 		// For other event types, let them through
