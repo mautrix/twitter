@@ -989,6 +989,9 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		HasMore:  hasMore,
 		Forward:  fetchParams.Forward,
 	}
+	if conv, ok := fetchParams.BundledData.(*types.Conversation); ok && conv != nil {
+		result.ReadUpTo = methods.ParseSnowflake(conv.LastReadEventID)
+	}
 	if fetchParams.Forward {
 		if hasMore && inbox.MaxEntryID != "" {
 			result.Cursor = networkid.PaginationCursor(inbox.MaxEntryID)
