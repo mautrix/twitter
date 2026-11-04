@@ -460,16 +460,16 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		copy := *value
 		msgPullVersion = &copy
 	}
-	var handoffCursor *payload.XChatCursor
+	var handoffResume *xchatHandoffResume
 	tc.client.SetXChatConnectHandler(func(connectCtx context.Context, drain twittermeow.XChatLiveDrain) error {
 		var err error
-		handoffCursor, err = tc.syncXChatInboxAfterConnect(
+		handoffResume, err = tc.syncXChatInboxAfterConnect(
 			connectCtx,
 			getMaxSeqID,
 			setMaxSeqID,
 			getMessagePullVersion,
 			setMessagePullVersion,
-			handoffCursor,
+			handoffResume,
 			drain,
 		)
 		return err
