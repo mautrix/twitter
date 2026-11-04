@@ -460,15 +460,19 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		copy := *value
 		msgPullVersion = &copy
 	}
+	var handoffCursor *payload.XChatCursor
 	tc.client.SetXChatConnectHandler(func(connectCtx context.Context, drain twittermeow.XChatLiveDrain) error {
-		return tc.syncXChatInboxAfterConnect(
+		var err error
+		handoffCursor, err = tc.syncXChatInboxAfterConnect(
 			connectCtx,
 			getMaxSeqID,
 			setMaxSeqID,
 			getMessagePullVersion,
 			setMessagePullVersion,
+			handoffCursor,
 			drain,
 		)
+		return err
 	})
 
 	// Start XChat websocket for real-time events after initial sync
