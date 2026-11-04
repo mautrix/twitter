@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"net/url"
 	"slices"
 	"strings"
 	"unicode"
@@ -119,7 +120,15 @@ func Parse(ctx context.Context, portal *bridgev2.Portal, msg *types.MessageData)
 
 			uid := mention.IDStr
 			if uid == "" || portal == nil || portal.Bridge == nil {
-				bodyHTML.WriteString(string(charArr[start:end]))
+				if mention.ScreenName != "" {
+					_, _ = fmt.Fprintf(&bodyHTML,
+						`<a href="https://x.com/%s">%s</a>`,
+						url.PathEscape(mention.ScreenName),
+						string(charArr[start:end]),
+					)
+				} else {
+					bodyHTML.WriteString(string(charArr[start:end]))
+				}
 				cursor = end
 				continue
 			}
