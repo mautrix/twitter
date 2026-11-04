@@ -340,18 +340,24 @@ func (tc *TwitterClient) isDeletedXChatConversationWithoutRoom(ctx context.Conte
 	return true
 }
 
+type xchatHandoffResume struct {
+	Cursor        *payload.XChatCursor
+	MaxSequenceID string
+}
+
 func (tc *TwitterClient) syncXChatInboxAfterConnect(
 	ctx context.Context,
 	getMaxSequenceID func() string,
 	setMaxSequenceID func(string),
 	getMessagePullVersion func() *int,
 	setMessagePullVersion func(*int),
+	resume *xchatHandoffResume,
 	drain twittermeow.XChatLiveDrain,
-) error {
+) (*xchatHandoffResume, error) {
 	tc.xchatInboxSyncLock.Lock()
 	defer tc.xchatInboxSyncLock.Unlock()
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return resume, ctx.Err()
 	}
 
 	log := zerolog.Ctx(ctx).With().Str("component", "xchat_socket_catchup").Logger()
@@ -370,41 +376,85 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 		processor.SetSequenceIDCallback(setMaxSequenceID)
 	}()
 
-	var totalItems atomic.Int32
-	result, err := runXChatPriorityCatchup(ctx, xchatInboxCatchupState{
+	state := xchatInboxCatchupState{
 		MaxSequenceID:      maxSequenceID,
 		MessagePullVersion: messagePullVersion,
 		Cursor:             xchatInboxCursorFromMetadata(meta.XChatInboxCursor),
-	}, xchatInboxCatchupOps{
+	}
+	if resume != nil {
+		state.MaxSequenceID = resume.MaxSequenceID
+		state.Cursor = resume.Cursor
+	}
+	var rateLimited bool
+	var rateLimitedCursor *payload.XChatCursor
+	var fetchedSequenceID string
+	fetched := func(page response.XChatInboxPage) response.XChatInboxPage {
+		if page.MaxUserSequenceID != nil {
+			fetchedSequenceID = maxXChatSequenceID(fetchedSequenceID, *page.MaxUserSequenceID)
+		}
+		return page
+	}
+	var totalItems atomic.Int32
+	ops := xchatInboxCatchupOps{
 		FetchInitial: func(ctx context.Context, variables *payload.GetInitialXChatPageQueryVariables) (response.XChatInboxPage, error) {
 			log.Info().Str("max_sequence_id", variables.MaxLocalSequenceId).Msg("Fetching XChat reconnect catch-up page")
 			resp, err := tc.client.GetInitialXChatPage(ctx, variables)
 			if err != nil {
+				rateLimited = errors.Is(err, twittermeow.ErrRatelimitExceeded)
 				return response.XChatInboxPage{}, err
 			}
-			return resp.Data.GetInboxPage, nil
+			return fetched(resp.Data.GetInboxPage), nil
 		},
 		FetchNext: func(ctx context.Context, variables *payload.GetInboxPageRequestQueryVariables) (response.XChatInboxPage, error) {
 			resp, err := tc.client.GetInboxPageRequest(ctx, variables)
 			if err != nil {
+				if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+					rateLimited, rateLimitedCursor = true, variables.ContinueCursor
+				}
 				return response.XChatInboxPage{}, err
 			}
-			return resp.Data.GetInboxPage, nil
+			return fetched(resp.Data.GetInboxPage), nil
 		},
 		ProcessPage: func(ctx context.Context, page response.XChatInboxPage) (xchatInboxPageProcessResult, error) {
 			_, err := tc.processXChatInboxPage(ctx, page, &totalItems, true)
+			if err != nil {
+				rateLimited = false
+			}
 			return xchatInboxPageProcessResult{
 				CheckpointBlocked: processor.SequenceCheckpointBlocked(),
 			}, err
 		},
-	}, tc.prepareXChatSnapshotProfiles, processor.ConversationRecoveryPending, drain)
-	if err != nil {
-		return err
+	}
+	var result xchatInboxCatchupResult
+	for {
+		partial := resume != nil && state.Cursor != nil
+		runDrain := drain
+		if partial {
+			runDrain = nil
+		}
+		rateLimited, rateLimitedCursor, fetchedSequenceID = false, nil, state.MaxSequenceID
+		var err error
+		result, err = runXChatPriorityCatchup(ctx, state, ops, tc.prepareXChatSnapshotProfiles, processor.ConversationRecoveryPending, runDrain)
+		if err != nil {
+			if !rateLimited {
+				return nil, err
+			}
+			next := &xchatHandoffResume{Cursor: rateLimitedCursor, MaxSequenceID: state.MaxSequenceID}
+			if rateLimitedCursor != nil {
+				next.MaxSequenceID = fetchedSequenceID
+			}
+			return next, err
+		}
+		if !partial {
+			break
+		}
+		state.MaxSequenceID = fetchedSequenceID
+		state.Cursor = nil
 	}
 
 	if !processor.SequenceCheckpointBlocked() {
-		if err = tc.saveXChatInboxCheckpoint(ctx, nil, result.MaxSequenceID, result.MessagePullVersion); err != nil {
-			return err
+		if err := tc.saveXChatInboxCheckpoint(ctx, nil, result.MaxSequenceID, result.MessagePullVersion); err != nil {
+			return nil, err
 		}
 		publishedSequence = result.MaxSequenceID
 	}
@@ -422,8 +472,9 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 		Int("items", result.Items).
 		Str("max_sequence_id", publishedSequence).
 		Bool("checkpoint_blocked", result.CheckpointBlocked).
+		Bool("resumed", resume != nil).
 		Msg("XChat reconnect catch-up completed")
-	return nil
+	return nil, nil
 }
 
 // runXChatPriorityCatchup uses runXChatInboxCatchup to collect inbox pages, then
@@ -486,6 +537,13 @@ func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, 
 		return xchatInboxPageProcessResult{}, nil
 	}
 	result, err := runXChatInboxCatchup(ctx, state, collect)
+	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+		for _, page := range pages {
+			if _, processErr := ops.ProcessPage(ctx, page); processErr != nil {
+				return result, processErr
+			}
+		}
+	}
 	if err != nil {
 		return result, err
 	}
