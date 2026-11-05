@@ -12,6 +12,8 @@ var (
 
 	ErrAlreadyPollingUpdates = errors.New("client is already polling for user updates")
 	ErrNotPollingUpdates     = errors.New("client is not polling for user updates")
+
+	ErrCloudflareChallenge = errors.New("cloudflare challenge page")
 )
 
 type TwitterError struct {

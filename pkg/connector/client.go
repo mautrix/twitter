@@ -255,9 +255,18 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 				})
 				return
 			}
-			log.Err(err).
+			retryLog := log.Error().Err(err).
 				Dur("retry_in", retryDelay).
-				Msg("Failed to load messages page, retrying")
+				Bool("cloudflare_challenge", errors.Is(err, twittermeow.ErrCloudflareChallenge)).
+				Strs("cookie_names", tc.client.GetCookieNames()).
+				Bool("has_cached_session", meta.Session != nil)
+			if meta.Session != nil {
+				retryLog.
+					Time("session_ts", meta.Session.LastSaved).
+					Time("session_init_ts", meta.Session.InitializedAt).
+					Int("session_cache_version", meta.Session.CacheVersion)
+			}
+			retryLog.Msg("Failed to load messages page, retrying")
 			tc.userLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateTransientDisconnect,
 				Error:      "twitter-load-error",

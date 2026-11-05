@@ -117,6 +117,10 @@ func (c *Client) GetCookieString() string {
 	return c.cookies.String()
 }
 
+func (c *Client) GetCookieNames() []string {
+	return c.cookies.Names()
+}
+
 func (c *Client) SetCookies(values map[string]string) {
 	for name, value := range values {
 		name = strings.TrimSpace(name)
