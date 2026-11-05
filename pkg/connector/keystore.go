@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -74,11 +73,10 @@ func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversatio
 		return nil, crypto.ErrKeyNotFound
 	}
 
-	log.Info().
+	log.Trace().
 		Str("conversation_id", conversationID).
 		Str("key_version", keyVersion).
 		Int("key_length", len(data.Key)).
-		Str("key_prefix", truncateKeyHex(data.Key, 8)).
 		Time("created_at", data.CreatedAt).
 		Msg("Retrieved conversation key from portal metadata")
 
@@ -118,7 +116,6 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 		Str("conversation_id", key.ConversationID).
 		Str("key_version", key.KeyVersion).
 		Int("key_length", len(key.Key)).
-		Str("key_prefix", truncateKeyHex(key.Key, 8)).
 		Int("total_keys_before", len(meta.ConversationKeys)).
 		Msg("Storing conversation key in portal metadata")
 
@@ -191,12 +188,11 @@ func (ks *userLoginKeyStore) GetLatestConversationKey(ctx context.Context, conve
 		}
 	}
 
-	log.Info().
+	log.Trace().
 		Str("conversation_id", conversationID).
 		Str("latest_key_version", latest.KeyVersion).
 		Int("total_keys", len(meta.ConversationKeys)).
 		Int("key_length", len(latest.Key)).
-		Str("key_prefix", truncateKeyHex(latest.Key, 8)).
 		Time("created_at", latest.CreatedAt).
 		Msg("Retrieved latest conversation key from portal metadata")
 
@@ -294,12 +290,4 @@ func (ks *userLoginKeyStore) PutConversationToken(ctx context.Context, conversat
 
 	meta.ConversationToken = token
 	return portal.Save(ctx)
-}
-
-// truncateKeyHex returns a hex representation of the first n bytes of a key for logging.
-func truncateKeyHex(key []byte, n int) string {
-	if len(key) <= n {
-		return hex.EncodeToString(key)
-	}
-	return hex.EncodeToString(key[:n]) + "..."
 }

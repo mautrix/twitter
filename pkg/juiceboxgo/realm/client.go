@@ -105,7 +105,6 @@ func (c *Client) makeSoftwareRealmRequest(ctx context.Context, req *requests.Sec
 	reqURL := buildRequestURL(c.realm.Address)
 	logEvt := c.logger.Debug().
 		Str("url", reqURL).
-		Str("request_cbor_hex", hex.EncodeToString(body)).
 		Int("request_len", len(body))
 	if c.logger.GetLevel() == zerolog.TraceLevel {
 		logEvt.Str("request_cbor_hex", hex.EncodeToString(body))
