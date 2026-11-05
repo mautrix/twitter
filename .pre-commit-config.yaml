@@ -27,4 +27,5 @@ repos:
       - id: zerolog-use-stringer
       - id: prevent-literal-http-methods
       - id: bridgelint
+        language: system
         verbose: true
