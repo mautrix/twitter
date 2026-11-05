@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	neturl "net/url"
+	"strings"
 	"time"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -56,6 +57,9 @@ func (c *Client) loadPage(ctx context.Context, url string) error {
 	}
 	mainPageResp, mainPageRespBody, err := c.MakeRequest(ctx, url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
 	if err != nil {
+		if strings.Contains(string(mainPageRespBody), "cf_chl_opt") {
+			err = fmt.Errorf("%w: %w", ErrCloudflareChallenge, err)
+		}
 		return fmt.Errorf("failed to send main page request: %w", err)
 	}
 
