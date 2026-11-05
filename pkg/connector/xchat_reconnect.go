@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"golang.org/x/sync/errgroup"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
@@ -264,7 +265,7 @@ func (tc *TwitterClient) processXChatInboxPage(
 					return pageCtx.Err()
 				}
 			}
-			repairConversationGap := latestMessage != nil && keyErr == nil && syncErr == nil && ((repairTruncatedItems && item.HasMore) ||
+			repairConversationGap := latestMessage != nil && keyErr == nil && syncErr == nil && ((repairTruncatedItems && item.HasMore && !xchatItemReachesMessage(item, latestMessage)) ||
 				processor.ConversationGapUnresolved(conversationID))
 			if repairConversationGap {
 				if gapErr := tc.catchupXChatConversationGap(pageCtx, conversationID, "", ""); gapErr != nil {
@@ -303,6 +304,17 @@ func (tc *TwitterClient) processXChatInboxPage(
 		})
 	}
 	return pageMissing, errors.Join(g.Wait(), processor.FailedEventPersistenceError())
+}
+
+func xchatItemReachesMessage(item *response.XChatInboxItem, message *database.Message) bool {
+	sequenceID := ParseMessageID(message.ID)
+	for _, raw := range slices.Concat(item.LatestMessageEvents, item.EncodedMessageEvents) {
+		evt, err := twittermeow.DecodeMessageEvent(raw)
+		if err == nil && evt.SequenceId != nil && compareIntStrings(*evt.SequenceId, sequenceID) <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (tc *TwitterClient) isDeletedXChatConversationWithoutRoom(ctx context.Context, item *response.XChatInboxItem) bool {
