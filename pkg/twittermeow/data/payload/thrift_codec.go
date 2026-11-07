@@ -267,6 +267,16 @@ func readStruct(ctx context.Context, proto thrift.TProtocol, v reflect.Value) er
 		fv := v.Field(fieldIndex)
 		ft := t.Field(fieldIndex)
 
+		if !thriftTypeMatches(ft.Type, fieldType) {
+			if err := proto.Skip(ctx, fieldType); err != nil {
+				return err
+			}
+			if err := proto.ReadFieldEnd(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if err := readValue(ctx, proto, fv, ft.Type, fieldType); err != nil {
 			return fmt.Errorf("field %s (id=%d): %w", ft.Name, fieldID, err)
 		}
@@ -277,6 +287,32 @@ func readStruct(ctx context.Context, proto thrift.TProtocol, v reflect.Value) er
 	}
 
 	return proto.ReadStructEnd(ctx)
+}
+
+func thriftTypeMatches(goType reflect.Type, thriftType thrift.TType) bool {
+	if goType.Kind() == reflect.Ptr {
+		goType = goType.Elem()
+	}
+	switch thriftType {
+	case thrift.BOOL:
+		return goType.Kind() == reflect.Bool
+	case thrift.I32, thrift.I64:
+		switch goType.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return true
+		}
+		return false
+	case thrift.STRING:
+		return goType.Kind() == reflect.String || goType.Kind() == reflect.Slice && goType.Elem().Kind() == reflect.Uint8
+	case thrift.LIST:
+		return goType.Kind() == reflect.Slice && goType.Elem().Kind() != reflect.Uint8
+	case thrift.MAP:
+		return goType.Kind() == reflect.Map
+	case thrift.STRUCT:
+		return goType.Kind() == reflect.Struct
+	default:
+		return true
+	}
 }
 
 // readValue reads a value from the protocol into v.
