@@ -237,7 +237,7 @@ func (tc *TwitterClient) processXChatInboxPage(
 			conversationID := item.ConversationDetail.ConversationID
 			if tc.isDeletedXChatConversationWithoutRoom(pageCtx, item) {
 				log.Debug().Str("conversation_id", conversationID).Msg("Skipping XChat conversation deleted after its last message")
-				return processor.ResolveInboxItemFailures(pageCtx, item)
+				return nil
 			}
 			keyErr := processor.ProcessKeyChangeEvents(pageCtx, item)
 			if keyErr != nil {
@@ -299,8 +299,6 @@ func (tc *TwitterClient) processXChatInboxPage(
 				if pageCtx.Err() != nil {
 					return pageCtx.Err()
 				}
-			} else if keyErr == nil && !processor.ConversationGapUnresolved(conversationID) {
-				return processor.ResolveInboxItemFailures(pageCtx, item)
 			}
 			return nil
 		})
