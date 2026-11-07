@@ -447,7 +447,10 @@ func (xc *xchatWebsocketClient) runConnection(
 			}
 		}
 		err = xc.client.xchatProcessor.ProcessMessage(readCtx, decoded)
-		if err != nil {
+		if err != nil && readCtx.Err() == nil && errors.Is(err, ErrRatelimitExceeded) && !errors.Is(err, ErrXChatFailurePersistence) {
+			log.Warn().Err(err).Msg("XChat message processing was rate limited, keeping websocket and leaving the event pending")
+			return nil
+		} else if err != nil {
 			log.Err(err).Msg("Failed to process XChat message")
 		}
 		return err
