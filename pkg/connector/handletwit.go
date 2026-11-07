@@ -568,6 +568,16 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Str("event_id", evt.ID).
 			Msg("Conversation create event received, ensuring portal exists")
 
+		if ctx != nil && ctx.Value(ensurePortalContextKey{}) != nil {
+			return tc.syncXChatTrust(
+				ctx,
+				evt.ConversationID,
+				evt.Trusted,
+				methods.ParseMsecTimestamp(evt.Time),
+				methods.ParseSnowflakeInt(evt.ID),
+			)
+		}
+
 		portalKey := tc.MakePortalKeyFromID(evt.ConversationID)
 		portal, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, "")
 		if err != nil {
