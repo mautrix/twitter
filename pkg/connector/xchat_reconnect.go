@@ -193,7 +193,11 @@ func (tc *TwitterClient) processXChatInboxPage(
 	repairTruncatedItems bool,
 ) ([]string, error) {
 	if page.MessageEventsCursor != nil {
-		return nil, tc.client.GetXChatProcessor().ProcessEncodedMessageEvents(ctx, page.EncodedMessageEvents)
+		processor := tc.client.GetXChatProcessor()
+		if err := processor.RetryFailedEventPersistence(ctx); err != nil {
+			return nil, err
+		}
+		return nil, processor.ProcessEncodedMessageEvents(ctx, page.EncodedMessageEvents)
 	}
 	log := zerolog.Ctx(ctx)
 	var pageMissing []string
@@ -226,6 +230,9 @@ func (tc *TwitterClient) processXChatInboxPage(
 	}
 
 	processor := tc.client.GetXChatProcessor()
+	if err := processor.RetryFailedEventPersistence(ctx); err != nil {
+		return pageMissing, err
+	}
 	g, pageCtx := errgroup.WithContext(ctx)
 	g.SetLimit(10)
 	for i := range page.Items {

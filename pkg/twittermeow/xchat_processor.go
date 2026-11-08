@@ -91,6 +91,31 @@ func (p *XChatEventProcessor) FailedEventPersistenceError() error {
 	return p.persistenceErr
 }
 
+func (p *XChatEventProcessor) RetryFailedEventPersistence(ctx context.Context) error {
+	p.failedEventLock.Lock()
+	defer p.failedEventLock.Unlock()
+	p.sequenceStateLock.Lock()
+	if p.persistenceErr == nil || p.persistFailure == nil {
+		p.sequenceStateLock.Unlock()
+		return nil
+	}
+	pending := maps.Clone(p.failedEvents)
+	persist := p.persistFailure
+	p.sequenceStateLock.Unlock()
+	err := persist(context.WithoutCancel(ctx), pending)
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if err != nil {
+		p.persistenceErr = fmt.Errorf("%w: %w", ErrXChatFailurePersistence, err)
+		return p.persistenceErr
+	}
+	p.persistenceErr = nil
+	p.log.Info().
+		Int("pending_failed_events", len(pending)).
+		Msg("Saved XChat event failure state after an earlier save failed")
+	return nil
+}
+
 func (p *XChatEventProcessor) updateFailedEvent(ctx context.Context, conversationID, sequenceID string, failed bool) error {
 	p.failedEventLock.Lock()
 	defer p.failedEventLock.Unlock()
