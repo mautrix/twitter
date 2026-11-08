@@ -121,7 +121,7 @@ func (p *XChatEventProcessor) updateFailedEvent(ctx context.Context, conversatio
 	}
 	persist := p.persistFailure
 	p.sequenceStateLock.Unlock()
-	err := persist(ctx, next)
+	err := persist(context.WithoutCancel(ctx), next)
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
 	if err != nil {
@@ -167,7 +167,7 @@ func (p *XChatEventProcessor) ResolveInboxItemFailures(ctx context.Context, item
 	resolved := len(p.failedEvents) - len(next)
 	persist := p.persistFailure
 	p.sequenceStateLock.Unlock()
-	err := persist(ctx, next)
+	err := persist(context.WithoutCancel(ctx), next)
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
 	if err != nil {
