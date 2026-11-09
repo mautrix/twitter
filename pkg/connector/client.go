@@ -245,6 +245,14 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			if errors.Is(err, twittermeow.ErrCloudflareChallenge) && meta.Session != nil && meta.Session.CacheVersion == twittermeow.CurrentCacheVersion {
+				log.Warn().Err(err).
+					Time("session_ts", meta.Session.LastSaved).
+					Time("session_init_ts", meta.Session.InitializedAt).
+					Msg("Messages page returned a Cloudflare challenge, connecting with expired cached session")
+				tc.client.SetSession(meta.Session)
+				break
+			}
 			if twittermeow.IsAuthError(err) {
 				log.Err(err).Msg("Failed to load messages page")
 				tc.userLogin.BridgeState.Send(status.BridgeState{
