@@ -1007,6 +1007,9 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 }
 
 func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (*bridgev2.MatrixMembershipResult, error) {
+	if msg.Type == bridgev2.ProfileChange {
+		return nil, nil
+	}
 	if msg.Type != bridgev2.Invite {
 		return nil, bridgev2.ErrMembershipNotSupported
 	}
