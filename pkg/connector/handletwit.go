@@ -26,6 +26,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
+	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -701,6 +702,13 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		// Handle polling errors
 		if e.IsAuth {
 			log.Warn().Err(e.Error).Msg("Authentication error during polling")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateBadCredentials,
+				Error:      authErrorCode(e.Error),
+				Info:       map[string]any{"go_error": e.Error.Error()},
+				UserAction: authErrorUserAction(e.Error),
+			})
+			go tc.Disconnect()
 			return false
 		}
 		if e.Error != nil {
