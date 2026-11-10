@@ -2,16 +2,26 @@ package response
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/tidwall/gjson"
 )
 
 type XChatGraphQLError struct {
 	Message string `json:"message,omitempty"`
+	Code    int    `json:"code,omitempty"`
 }
 
 func (err XChatGraphQLError) Error() string {
+	if err.Code != 0 {
+		return fmt.Sprintf("%d: %s", err.Code, err.Message)
+	}
 	return err.Message
+}
+
+func (err XChatGraphQLError) Is(target error) bool {
+	codedErr, ok := target.(interface{ TwitterErrorCode() int })
+	return ok && err.Code != 0 && codedErr.TwitterErrorCode() == err.Code
 }
 
 // XChatGetAuthTokenResponse models the GraphQL response for fetching an XChat auth token.

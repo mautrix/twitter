@@ -399,7 +399,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if isXChatAuthError(err) {
+		if isXChatAuthError(err) || isAccountRestrictedError(err) {
 			fetchLog.Err(err).Msg("XChat inbox sync authentication failed")
 			tc.userLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateBadCredentials,
