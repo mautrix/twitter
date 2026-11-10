@@ -49,6 +49,10 @@ func (te TwitterError) Is(other error) bool {
 	return false
 }
 
+func (te TwitterError) TwitterErrorCode() int {
+	return te.Code
+}
+
 func (te TwitterError) Error() string {
 	return fmt.Sprintf("%d: %s", te.Code, te.Message)
 }
