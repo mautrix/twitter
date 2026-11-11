@@ -196,6 +196,12 @@ type XChatGroupMetadata struct {
 	GroupAvatarURL                string                   `json:"group_avatar_url,omitempty"`
 	GroupInviteDetails            *XChatGroupInviteDetails `json:"group_invite_details,omitempty"`
 	ScreenCaptureDetectionEnabled bool                     `json:"screen_capture_detection_enabled,omitempty"`
+	AdminSettings                 *XChatGroupAdminSettings `json:"admin_settings,omitempty"`
+}
+
+// XChatGroupAdminSettings lists the group actions X restricts to admins.
+type XChatGroupAdminSettings struct {
+	EditGroupInfo bool `json:"edit_group_info,omitempty"`
 }
 
 type XChatGroupInviteDetails struct {

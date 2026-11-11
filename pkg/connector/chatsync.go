@@ -29,6 +29,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -468,6 +469,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 
 	if isGroup {
 		info.Type = ptr.Ptr(database.RoomTypeDefault)
+		info.Members.PowerLevels = xchatGroupPowerLevels(detail.GroupMetadata)
 		if conv != nil && conv.AvatarImageHttps != "" {
 			info.Avatar = tc.makeGroupAvatar(conversationID, conv.AvatarImageHttps, "")
 		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
@@ -819,5 +821,23 @@ func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Porta
 				ChatInfo: &bridgev2.ChatInfo{UserBlocked: blocked},
 			},
 		})
+	}
+}
+
+// xchatGroupPowerLevels lets X admins change power levels and lets everyone edit the group info
+// unless X restricts that to admins. The homeserver defaults (100 for power levels, 50 for name
+// and avatar) would otherwise block actions X allows.
+func xchatGroupPowerLevels(metadata *response.XChatGroupMetadata) *bridgev2.PowerLevelOverrides {
+	editInfoLevel := xchatMemberPowerLevel
+	if metadata != nil && metadata.AdminSettings != nil && metadata.AdminSettings.EditGroupInfo {
+		editInfoLevel = xchatAdminPowerLevel
+	}
+	return &bridgev2.PowerLevelOverrides{
+		Events: map[event.Type]int{
+			event.StatePowerLevels: xchatAdminPowerLevel,
+			event.StateRoomName:    editInfoLevel,
+			event.StateRoomAvatar:  editInfoLevel,
+			event.StateTopic:       editInfoLevel,
+		},
 	}
 }
