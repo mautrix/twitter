@@ -165,8 +165,7 @@ func mergeXChatEditData(original, edit *types.MessageData) types.MessageData {
 	merged := *original
 	merged.ID = edit.ID
 	merged.Time = edit.Time
-	merged.Text = edit.Text
-	merged.Entities = edit.Entities
+	merged.Text, merged.Entities = twittermeow.ComposeForwardedText(original.ForwardedText, original.ForwardedEntities, edit.Text, edit.Entities)
 	merged.EditCount = edit.EditCount
 	if edit.SenderID != "" {
 		merged.SenderID = edit.SenderID
