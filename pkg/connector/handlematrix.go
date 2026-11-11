@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1051,14 +1052,15 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
 	var err error
+	conversationID := ParsePortalID(msg.Portal.ID)
 	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
 	if otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID)); otherUserID != "" && meta.IsXChatConversation() {
-		err = tc.client.AcceptMessageRequest(ctx, otherUserID)
+		err = tc.client.AcceptMessageRequest(ctx, conversationID, otherUserID)
 	} else {
-		err = tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
+		err = tc.client.AcceptConversation(ctx, conversationID)
 		// Already-accepted conversations will throw a 279 error when trying to accept again.
-		// TODO maybe check that the conversation actually exists on the xchat side?
-		if errors.Is(err, twittermeow.ErrConversationDoesntExist) {
+		// X Chat group IDs always get a 279 from the REST endpoint, so it doesn't mean accepted there.
+		if errors.Is(err, twittermeow.ErrConversationDoesntExist) && !strings.HasPrefix(conversationID, "g") {
 			err = nil
 		}
 	}
