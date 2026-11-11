@@ -105,6 +105,7 @@ func (r *GetInboxPageConversationDataResponse) Item(conversationID string) (XCha
 	for _, item := range items {
 		returnedID := item.ConversationDetail.ConversationID
 		if returnedID == conversationID || (strings.HasPrefix(conversationID, "g") && returnedID == conversationID[1:]) ||
+			returnedID == "g"+conversationID ||
 			(returnedID == "" && len(items) == 1) {
 			return item, nil
 		}
