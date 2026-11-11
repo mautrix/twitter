@@ -137,7 +137,7 @@ func (c *Client) refreshConversationToken(ctx context.Context, conversationID st
 		return fmt.Errorf("fetch conversation data: %w", err)
 	}
 
-	item := resp.Data.GetInboxPageConversationData.Data
+	item := resp.Item()
 	encoded := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents)+len(item.LatestConversationKeyChangeEvents)+2)
 	encoded = append(encoded, item.LatestMessageEvents...)
 	encoded = append(encoded, item.EncodedMessageEvents...)
@@ -317,7 +317,7 @@ func (c *Client) RefreshConversationKeys(ctx context.Context, conversationID str
 		return fmt.Errorf("fetch conversation data: %w", err)
 	}
 
-	item := resp.Data.GetInboxPageConversationData.Data
+	item := resp.Item()
 
 	// Sync room data even if one key event was malformed: the response may still
 	// contain complete member/profile data and other usable keys.

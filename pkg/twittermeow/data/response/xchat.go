@@ -88,11 +88,19 @@ type GetInboxPageRequestQueryResponse struct {
 type GetInboxPageConversationDataResponse struct {
 	Data struct {
 		GetInboxPageConversationData struct {
-			Typename string         `json:"__typename,omitempty"`
-			Data     XChatInboxItem `json:"data"`
+			Typename string           `json:"__typename,omitempty"`
+			Items    []XChatInboxItem `json:"items"`
 		} `json:"get_inbox_page_conversation_data"`
 	} `json:"data"`
 	Errors []XChatGraphQLError `json:"errors,omitempty"`
+}
+
+// Item returns the conversation data for the single requested conversation, or an empty item if none was returned.
+func (r *GetInboxPageConversationDataResponse) Item() XChatInboxItem {
+	if items := r.Data.GetInboxPageConversationData.Items; len(items) > 0 {
+		return items[0]
+	}
+	return XChatInboxItem{}
 }
 
 type XChatInboxPage struct {
@@ -207,7 +215,7 @@ type XChatGroupInviteDetails struct {
 
 type XChatParticipantReadEvent struct {
 	Typename                        string             `json:"__typename,omitempty"`
-	ParticipantID                   XChatParticipantID `json:"participant_id,omitempty"`
+	ParticipantID                   XChatParticipantID `json:"participant_id_results,omitempty"`
 	LatestMarkConversationReadEvent string             `json:"latest_mark_conversation_read_event,omitempty"`
 }
 

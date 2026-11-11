@@ -46,7 +46,7 @@ func (tc *TwitterClient) fetchConversationData(ctx context.Context, conversation
 		return nil, nil, err
 	}
 
-	data := resp.Data.GetInboxPageConversationData.Data
+	data := resp.Item()
 	data.ConversationDetail.ConversationID = conversationDataResultID(
 		xchatConvID,
 		data.ConversationDetail.ConversationID,
