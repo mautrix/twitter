@@ -884,6 +884,11 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	tc.client.Logger.Debug().Any("editResponse", resp).Msg("XChat edit response")
 	if meta != nil {
 		meta.EditCount++
+		if encoded := resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent; encoded != "" {
+			if sentEvt, err := twittermeow.DecodeMessageEvent(encoded); err == nil {
+				meta.LastXChatEditID = maxXChatSequenceID(meta.LastXChatEditID, ptr.Val(sentEvt.SequenceId))
+			}
+		}
 	}
 	return nil
 }
