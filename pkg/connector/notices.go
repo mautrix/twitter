@@ -6,9 +6,11 @@ import (
 	"slices"
 	"time"
 
+	"github.com/rs/zerolog"
 	"go.mau.fi/util/exfmt"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -71,19 +73,39 @@ func xchatNoticeText(portal *bridgev2.Portal, notice *types.MessageNotice) strin
 	}
 }
 
-func claimUndecryptableNotice(ctx context.Context, portal *bridgev2.Portal, keyVersion string) error {
+func checkUndecryptableNotice(portal *bridgev2.Portal, keyVersion string) error {
 	meta, ok := portal.Metadata.(*PortalMetadata)
-	if !ok || keyVersion == "" {
-		return nil
-	} else if slices.Contains(meta.UndecryptableKeyVersions, keyVersion) {
+	if ok && keyVersion != "" && slices.Contains(meta.UndecryptableKeyVersions, keyVersion) {
 		return fmt.Errorf("%w: undecryptable notice already sent for key version %s", bridgev2.ErrIgnoringRemoteEvent, keyVersion)
 	}
-	meta.UndecryptableKeyVersions = append(meta.UndecryptableKeyVersions, keyVersion)
-	return portal.Save(ctx)
+	return nil
+}
+
+// undecryptableNoticeEvent records the key version on the portal only once the notice was actually bridged.
+type undecryptableNoticeEvent struct {
+	*simplevent.Message[*types.MessageData]
+	keyVersion string
+}
+
+var _ bridgev2.RemotePostHandler = (*undecryptableNoticeEvent)(nil)
+
+func (evt *undecryptableNoticeEvent) PostHandle(ctx context.Context, portal *bridgev2.Portal) {
+	meta, ok := portal.Metadata.(*PortalMetadata)
+	if !ok || evt.keyVersion == "" || slices.Contains(meta.UndecryptableKeyVersions, evt.keyVersion) {
+		return
+	}
+	part, err := portal.Bridge.DB.Message.GetFirstPartByID(ctx, portal.Receiver, evt.ID)
+	if err != nil || !isUndecryptableNotice([]*database.Message{part}) {
+		return
+	}
+	meta.UndecryptableKeyVersions = append(meta.UndecryptableKeyVersions, evt.keyVersion)
+	if err = portal.Save(ctx); err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to save undecryptable notice key version")
+	}
 }
 
 func isUndecryptableNotice(existing []*database.Message) bool {
-	if len(existing) == 0 {
+	if len(existing) == 0 || existing[0] == nil {
 		return false
 	}
 	meta, ok := existing[0].Metadata.(*MessageMetadata)
@@ -104,6 +126,7 @@ func (tc *TwitterClient) convertNowDecryptableMessage(ctx context.Context, porta
 		editPart := part.ToEditPart(existing[i])
 		if meta, ok := editPart.Part.Metadata.(*MessageMetadata); ok && meta != nil {
 			meta.Notice = nil
+			meta.ReplacedNotice = true
 		}
 		edit.ModifiedParts = append(edit.ModifiedParts, editPart)
 	}

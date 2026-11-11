@@ -343,7 +343,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			}
 		}
 
-		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.MessageData]{
+		msgEvt := &simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
 				Type: bridgev2.RemoteEventMessage,
 				LogContext: func(c zerolog.Context) zerolog.Context {
@@ -364,7 +364,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			Data:          &evt.MessageData,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
 				if data.Notice != nil && data.Notice.Type == types.MessageNoticeUndecryptable {
-					if err := claimUndecryptableNotice(ctx, portal, data.Notice.KeyVersion); err != nil {
+					if err := checkUndecryptableNotice(portal, data.Notice.KeyVersion); err != nil {
 						return nil, err
 					}
 				}
@@ -405,7 +405,11 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				// This is typically the remote echo for a pending outgoing message; don't bridge again.
 				return bridgev2.UpsertResult{SaveParts: true, ContinueMessageHandling: false}, nil
 			},
-		})
+		}
+		if notice := evt.MessageData.Notice; notice != nil && notice.Type == types.MessageNoticeUndecryptable {
+			return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &undecryptableNoticeEvent{Message: msgEvt, keyVersion: notice.KeyVersion})
+		}
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, msgEvt)
 
 	case *types.MessageReactionCreate:
 		reaction := (*types.MessageReaction)(evt)

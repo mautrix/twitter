@@ -147,7 +147,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		var ok bool
 		// Notices are bridge text, so only the identifiers (and X's own call card) describe the target.
 		if metaCopy.Notice == nil {
-			replyText, replyDisplayName, replyAttachments, ok = tc.fetchReplyPreviewContent(ctx, msg.Portal, msg.ReplyTo, conversationID, replySeqID, sendMode)
+			replyText, replyDisplayName, replyAttachments, ok = tc.fetchReplyPreviewContent(ctx, msg.Portal, msg.ReplyTo, conversationID, replySeqID, sendMode, metaCopy.ReplacedNotice)
 		}
 
 		// Get sender ID
@@ -607,8 +607,10 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 	return messageText, senderDisplayName, attachments, true
 }
 
-func (tc *TwitterClient) fetchReplyPreviewContent(ctx context.Context, portal *bridgev2.Portal, replyTo *database.Message, conversationID, replySeqID string, sendMode messageSendMode) (text string, displayName string, attachments []*payload.MessageAttachment, ok bool) {
-	text, displayName, attachments, ok = tc.fetchReplyInfoFromMatrix(ctx, portal, replyTo)
+func (tc *TwitterClient) fetchReplyPreviewContent(ctx context.Context, portal *bridgev2.Portal, replyTo *database.Message, conversationID, replySeqID string, sendMode messageSendMode, skipMatrix bool) (text string, displayName string, attachments []*payload.MessageAttachment, ok bool) {
+	if !skipMatrix {
+		text, displayName, attachments, ok = tc.fetchReplyInfoFromMatrix(ctx, portal, replyTo)
+	}
 	if ok || sendMode == messageSendREST {
 		return
 	}

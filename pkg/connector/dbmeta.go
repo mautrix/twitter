@@ -119,6 +119,9 @@ type MessageMetadata struct {
 	LastXChatEditID  string `json:"last_xchat_edit_id,omitempty"`
 
 	Notice *XChatNoticeMetadata `json:"notice,omitempty"`
+	// ReplacedNotice is set when a notice was edited into the real message, so the Matrix event
+	// content (which still holds the notice) isn't used for reply quotes.
+	ReplacedNotice bool `json:"replaced_notice,omitempty"`
 }
 
 // XChatNoticeMetadata describes a message bridged as a notice, so replies and redeliveries can handle it.
@@ -143,6 +146,7 @@ func (m *MessageMetadata) CopyFrom(other any) {
 	if m.Notice == nil {
 		m.Notice = o.Notice
 	}
+	m.ReplacedNotice = m.ReplacedNotice || o.ReplacedNotice
 }
 
 type PushKeys struct {
