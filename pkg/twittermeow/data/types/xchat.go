@@ -39,6 +39,7 @@ func (*XChatConversationMuteChange) isTwitterEvent() {}
 
 // XChatConversationArchiveChange is emitted when conversations are archived or unarchived on another device.
 type XChatConversationArchiveChange struct {
+	SequenceID      string
 	ConversationIDs []string
 	Archived        bool
 	Timestamp       time.Time
@@ -48,6 +49,8 @@ func (*XChatConversationArchiveChange) isTwitterEvent() {}
 
 // XChatConversationMarkedUnread is emitted when the user marks a conversation as unread on another device.
 type XChatConversationMarkedUnread struct {
+	// FromSnapshot is set when the event was replayed from an inbox snapshot rather than received live.
+	FromSnapshot   bool
 	SequenceID     string
 	ConversationID string
 	Timestamp      time.Time

@@ -91,6 +91,7 @@ type UserLoginMetadata struct {
 	PinnedConversationsSequenceID string            `json:"pinned_conversations_sequence_id,omitempty"`
 	ArchivedConversationIDs       []string          `json:"archived_conversation_ids,omitempty"`
 	MarkedUnreadSequenceIDs       map[string]string `json:"marked_unread_sequence_ids,omitempty"`
+	ArchiveSequenceIDs            map[string]string `json:"archive_sequence_ids,omitempty"`
 
 	// Migration tracking fields
 	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration

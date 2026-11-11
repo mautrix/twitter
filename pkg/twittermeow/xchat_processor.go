@@ -577,12 +577,14 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			})
 		case change.ArchiveConversation != nil:
 			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
+				SequenceID:      ptr.Val(evt.SequenceId),
 				ConversationIDs: conversationIDsOrSelf(change.ArchiveConversation.ConversationIds, evt),
 				Archived:        true,
 				Timestamp:       ts,
 			})
 		case change.UnarchiveConversation != nil:
 			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
+				SequenceID:      ptr.Val(evt.SequenceId),
 				ConversationIDs: conversationIDsOrSelf(change.UnarchiveConversation.ConversationIds, evt),
 				Timestamp:       ts,
 			})
@@ -801,7 +803,9 @@ func (p *XChatEventProcessor) emitMarkedUnread(ctx context.Context, evt *payload
 	if p.client == nil || ptr.Val(evt.SenderId) != p.client.GetCurrentUserID() || ptr.Val(evt.ConversationId) == "" {
 		return nil
 	}
+	_, fromSnapshot := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary)
 	return p.emitEvent(ctx, &types.XChatConversationMarkedUnread{
+		FromSnapshot:   fromSnapshot,
 		SequenceID:     ptr.Val(evt.SequenceId),
 		ConversationID: ptr.Val(evt.ConversationId),
 		Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),

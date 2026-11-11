@@ -1036,10 +1036,16 @@ func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.Matrix
 		return nil
 	}
 
+	var err error
 	if isFavourite {
-		return tc.client.SendXChatPinConversation(ctx, conversationID)
+		err = tc.client.SendXChatPinConversation(ctx, conversationID)
+	} else {
+		err = tc.client.SendXChatUnpinConversation(ctx, conversationID)
 	}
-	return tc.client.SendXChatUnpinConversation(ctx, conversationID)
+	if err == nil {
+		tc.setConversationPinned(ctx, conversationID, isFavourite)
+	}
+	return err
 }
 
 func (tc *TwitterClient) HandleMarkedUnread(ctx context.Context, msg *bridgev2.MatrixMarkedUnread) error {
