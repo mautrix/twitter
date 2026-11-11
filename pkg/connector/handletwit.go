@@ -552,6 +552,13 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 
 	case *types.XChatUnsupportedMessage:
 		streamOrder := methods.ParseSnowflakeInt(evt.SequenceID)
+		if ctx == nil || ctx.Value(ensurePortalContextKey{}) == nil {
+			if _, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, ""); err != nil {
+				log.Warn().Err(err).Str("conversation_id", evt.ConversationID).
+					Msg("Failed to ensure portal before handling unsupported XChat message")
+				return false
+			}
+		}
 		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.XChatUnsupportedMessage]{
 			EventMeta: simplevent.EventMeta{
 				Type:        bridgev2.RemoteEventMessage,
@@ -563,13 +570,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			ID:   MakeMessageID(evt.SequenceID),
 			Data: evt,
 			ConvertMessageFunc: func(context.Context, *bridgev2.Portal, bridgev2.MatrixAPI, *types.XChatUnsupportedMessage) (*bridgev2.ConvertedMessage, error) {
-				return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
-					Type: event.EventMessage,
-					Content: &event.MessageEventContent{
-						MsgType: event.MsgNotice,
-						Body:    "This message uses an X Chat encryption format the bridge can't read yet. Open X to view it.",
-					},
-				}}}, nil
+				return unsupportedEncryptionNotice(), nil
 			},
 		})
 
@@ -993,4 +994,14 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 		}
 		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update))
 	}
+}
+
+func unsupportedEncryptionNotice() *bridgev2.ConvertedMessage {
+	return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
+		Type: event.EventMessage,
+		Content: &event.MessageEventContent{
+			MsgType: event.MsgNotice,
+			Body:    "This message uses an X Chat encryption format the bridge can't read yet. Open X to view it.",
+		},
+	}}}
 }
