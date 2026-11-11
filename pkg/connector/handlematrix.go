@@ -108,6 +108,10 @@ func (tc *TwitterClient) handleMatrixMessage(ctx context.Context, msg *bridgev2.
 	conversationID := ParsePortalID(msg.Portal.ID)
 	content := msg.Content
 	sendMode := selectMessageSendMode(msg.Portal.Metadata.(*PortalMetadata))
+	var sentKeyVersion string
+	if sendMode == messageSendXChatEncrypted {
+		sentKeyVersion = tc.latestConversationKeyVersion(ctx, conversationID)
+	}
 
 	text := content.Body
 	if content.Format == event.FormatHTML {
@@ -364,7 +368,7 @@ func (tc *TwitterClient) handleMatrixMessage(ctx context.Context, msg *bridgev2.
 	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
 		msg.RemovePending(txnID)
 		if !isRetry && sendMode == messageSendXChatEncrypted && isKeyRefreshXChatFailure(evt.Detail.MessageFailureEvent) &&
-			tc.refreshConversationKeysForResend(ctx, conversationID) {
+			tc.refreshConversationKeysForResend(ctx, conversationID, sentKeyVersion) {
 			return tc.handleMatrixMessage(ctx, msg, true)
 		}
 		return nil, xchatFailureError(evt.Detail.MessageFailureEvent)
@@ -483,22 +487,22 @@ func decodeXChatMutationFailure(resp *response.SendMessageMutationResponse) (*pa
 	return evt.Detail.MessageFailureEvent, nil
 }
 
-// refreshConversationKeysForResend reports whether refreshing the conversation keys stored a newer key,
-// which is the only case where resending a rejected mutation can succeed.
-func (tc *TwitterClient) refreshConversationKeysForResend(ctx context.Context, conversationID string) bool {
-	latestKeyVersion := func() string {
-		if km := tc.client.GetKeyManager(); km != nil {
-			if ck, err := km.GetLatestConversationKey(ctx, conversationID); err == nil && ck != nil {
-				return ck.KeyVersion
-			}
+// refreshConversationKeysForResend reports whether the latest stored key after a refresh differs from the
+// one the rejected mutation was encrypted with, which is the only case where resending can succeed.
+func (tc *TwitterClient) latestConversationKeyVersion(ctx context.Context, conversationID string) string {
+	if km := tc.client.GetKeyManager(); km != nil {
+		if ck, err := km.GetLatestConversationKey(ctx, conversationID); err == nil && ck != nil {
+			return ck.KeyVersion
 		}
-		return ""
 	}
-	before := latestKeyVersion()
+	return ""
+}
+
+func (tc *TwitterClient) refreshConversationKeysForResend(ctx context.Context, conversationID, before string) bool {
 	if err := tc.client.RefreshConversationKeys(ctx, conversationID); err != nil {
 		zerolog.Ctx(ctx).Warn().Err(err).Str("conversation_id", conversationID).Msg("Conversation key refresh after send failure returned an error")
 	}
-	after := latestKeyVersion()
+	after := tc.latestConversationKeyVersion(ctx, conversationID)
 	zerolog.Ctx(ctx).Info().
 		Str("conversation_id", conversationID).
 		Str("key_version_before", before).
@@ -511,6 +515,7 @@ func (tc *TwitterClient) refreshConversationKeysForResend(ctx context.Context, c
 // conversation key and a newer key was found.
 func (tc *TwitterClient) sendXChatMutation(ctx context.Context, conversationID string, send func() (*response.SendMessageMutationResponse, error)) error {
 	for attempt := 0; ; attempt++ {
+		sentKeyVersion := tc.latestConversationKeyVersion(ctx, conversationID)
 		resp, err := send()
 		if err != nil {
 			return wrapTwitterMatrixError(err)
@@ -519,7 +524,7 @@ func (tc *TwitterClient) sendXChatMutation(ctx context.Context, conversationID s
 		if err != nil || failure == nil {
 			return err
 		}
-		if attempt == 0 && isKeyRefreshXChatFailure(failure) && tc.refreshConversationKeysForResend(ctx, conversationID) {
+		if attempt == 0 && isKeyRefreshXChatFailure(failure) && tc.refreshConversationKeysForResend(ctx, conversationID, sentKeyVersion) {
 			continue
 		}
 		return xchatFailureError(failure)
