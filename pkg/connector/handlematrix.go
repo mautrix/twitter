@@ -1044,12 +1044,21 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 	return tc.client.UnmuteConversation(ctx, conversationID)
 }
 
+func (tc *TwitterClient) isXChatConversationTrusted(ctx context.Context, conversationID string) bool {
+	resp, err := tc.client.GetConversationData(ctx, payload.NewInboxPageConversationDataQueryVariables(conversationID, true))
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Str("conversation_id", conversationID).Msg("Failed to check X Chat trust after accept returned 279")
+		return false
+	}
+	trusted := xchatInboxItemTrust(&resp.Data.GetInboxPageConversationData.Data)
+	return trusted != nil && *trusted
+}
+
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	err := tc.client.AcceptConversation(ctx, ConvertConversationIDToRESTAPI(conversationID))
 	// Already-accepted conversations will throw a 279 error when trying to accept again.
-	// TODO maybe check that the conversation actually exists on the xchat side?
-	if errors.Is(err, twittermeow.ErrConversationDoesntExist) && !strings.HasPrefix(conversationID, "g") {
+	if errors.Is(err, twittermeow.ErrConversationDoesntExist) && (!strings.HasPrefix(conversationID, "g") || tc.isXChatConversationTrusted(ctx, conversationID)) {
 		err = nil
 	}
 	if err == nil && msg != nil && msg.Portal != nil {
