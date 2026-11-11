@@ -190,6 +190,9 @@ func (c *Client) postXChatGroupMutation(ctx context.Context, url string, pl any)
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,
 		Body:           jsonBody,
+		// A server error doesn't mean the change wasn't applied, and resending it would sign a
+		// second change against state that may already be out of date.
+		NoRetry: true,
 	})
 	return respBody, err
 }

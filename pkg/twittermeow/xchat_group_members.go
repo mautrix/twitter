@@ -21,7 +21,11 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 )
 
-var ErrGroupInviteLinkEnabled = errors.New("changing members isn't supported while the group invite link is on")
+var (
+	ErrGroupInviteLinkEnabled = errors.New("changing members isn't supported while the group invite link is on")
+	ErrGroupHasPins           = errors.New("changing members isn't supported while the group has pinned messages")
+	ErrGroupHasDescription    = errors.New("changing members isn't supported while the group has a description")
+)
 
 // xchatGroupState is the group state that member changes re-sign and re-encrypt under a new key.
 type xchatGroupState struct {
@@ -60,6 +64,11 @@ func (c *Client) fetchXChatGroupState(ctx context.Context, conversationID string
 		return nil, errors.New("group state response is missing metadata, members or admins")
 	} else if meta.GroupInviteDetails != nil && meta.GroupInviteDetails.InviteURL != "" {
 		return nil, ErrGroupInviteLinkEnabled
+	} else if len(item.PMKBundle) > 0 || len(item.LatestPinnedMessageEvents) > 0 {
+		// x.com re-wraps the pinned message keys under the new conversation key, which isn't implemented here.
+		return nil, ErrGroupHasPins
+	} else if detail.LatestGroupDescriptionChangeEvent != "" {
+		return nil, ErrGroupHasDescription
 	}
 	oldKey, err := c.keyManager.GetLatestConversationKey(ctx, conversationID)
 	if err != nil {

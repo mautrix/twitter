@@ -150,6 +150,8 @@ type XChatInboxItem struct {
 	LatestNotifiableMessageCreateEvent string                      `json:"latest_notifiable_message_create_event,omitempty"`
 	LatestReadEventsPerParticipant     []XChatParticipantReadEvent `json:"latest_read_events_per_participant,omitempty"`
 	HasMore                            bool                        `json:"has_more,omitempty"`
+	LatestPinnedMessageEvents          []string                    `json:"latest_pinned_message_events,omitempty"`
+	PMKBundle                          []json.RawMessage           `json:"pmk_bundle,omitempty"`
 }
 
 func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
@@ -205,6 +207,7 @@ type XChatConversationDetail struct {
 	GroupJoinRequestedUsers            []XChatUserResult   `json:"group_join_requested_users,omitempty"`
 	LatestGroupTitleChangeMessageEvent string              `json:"latest_group_title_change_message_event,omitempty"`
 	GroupCreatedByUserResults          *XChatUserResult    `json:"group_created_by_user_results,omitempty"`
+	LatestGroupDescriptionChangeEvent  string              `json:"latest_group_description_change_message_event,omitempty"`
 }
 
 type XChatGroupMetadata struct {

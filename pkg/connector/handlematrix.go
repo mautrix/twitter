@@ -1082,6 +1082,9 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 		participantID = ParseUserLoginID(target.ID)
 	}
 	if isXChatGroupPortal(msg.Portal) {
+		if participantID == "" {
+			return nil, fmt.Errorf("%w: unknown membership target", bridgev2.ErrMembershipNotSupported)
+		}
 		var err error
 		switch msg.Type {
 		case bridgev2.Invite:
