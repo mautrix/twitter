@@ -537,8 +537,10 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}
 		for _, userID := range evt.AdminIDs {
 			memberChanges.MemberMap.Set(bridgev2.ChatMember{
-				EventSender: tc.MakeEventSender(userID),
-				PowerLevel:  ptr.Ptr(level),
+				EventSender:    tc.MakeEventSender(userID),
+				Membership:     event.MembershipJoin,
+				PrevMembership: event.MembershipJoin,
+				PowerLevel:     ptr.Ptr(level),
 			})
 		}
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{

@@ -828,16 +828,19 @@ func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Porta
 // unless X restricts that to admins. The homeserver defaults (100 for power levels, 50 for name
 // and avatar) would otherwise block actions X allows.
 func xchatGroupPowerLevels(metadata *response.XChatGroupMetadata) *bridgev2.PowerLevelOverrides {
+	overrides := &bridgev2.PowerLevelOverrides{
+		Events: map[event.Type]int{event.StatePowerLevels: xchatAdminPowerLevel},
+	}
+	// Without group metadata the response is partial, so keep the current group info levels.
+	if metadata == nil {
+		return overrides
+	}
 	editInfoLevel := xchatMemberPowerLevel
-	if metadata != nil && metadata.AdminSettings != nil && metadata.AdminSettings.EditGroupInfo {
+	if metadata.AdminSettings != nil && metadata.AdminSettings.EditGroupInfo {
 		editInfoLevel = xchatAdminPowerLevel
 	}
-	return &bridgev2.PowerLevelOverrides{
-		Events: map[event.Type]int{
-			event.StatePowerLevels: xchatAdminPowerLevel,
-			event.StateRoomName:    editInfoLevel,
-			event.StateRoomAvatar:  editInfoLevel,
-			event.StateTopic:       editInfoLevel,
-		},
-	}
+	overrides.Events[event.StateRoomName] = editInfoLevel
+	overrides.Events[event.StateRoomAvatar] = editInfoLevel
+	overrides.Events[event.StateTopic] = editInfoLevel
+	return overrides
 }
