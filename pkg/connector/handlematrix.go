@@ -865,11 +865,18 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		messageID = uuid.NewString()
 	}
 
+	text := edit.Content.Body
+	if edit.Content.Format == event.FormatHTML {
+		text = tc.matrixParser.Parse(edit.Content.FormattedBody, format.NewContext(ctx))
+	}
+	_, entities := buildURLAttachments(text)
+	entities = append(entities, buildMentionEntities(text)...)
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
 		ConversationID:          conversationID,
 		MessageID:               messageID,
 		TargetMessageSequenceID: targetMessageID,
-		UpdatedText:             edit.Content.Body,
+		UpdatedText:             text,
+		Entities:                entities,
 	})
 	if err != nil {
 		return wrapTwitterMatrixError(err)

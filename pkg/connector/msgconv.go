@@ -58,15 +58,24 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	} else if meta.EditCount >= editData.EditCount {
 		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, editData.EditCount)
 	}
-	originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
-	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
-		return nil, fmt.Errorf("%w: rate limited while fetching original X message for edit: %w", bridgev2.ErrIgnoringRemoteEvent, err)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to fetch original X message for edit: %w", err)
+	var converted *bridgev2.ConvertedMessage
+	if linkPreviews, isText := tc.getTextPartLinkPreviews(ctx, portal, existingPart); isText {
+		editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
+		converted = tc.convertToMatrix(ctx, portal, intent, &editData)
+		if len(converted.Parts) == 1 && converted.Parts[0].Content != nil && len(converted.Parts[0].Content.BeeperLinkPreviews) == 0 {
+			converted.Parts[0].Content.BeeperLinkPreviews = linkPreviews
+		}
+	} else {
+		originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
+		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+			return nil, fmt.Errorf("%w: rate limited while fetching original X message for edit: %w", bridgev2.ErrIgnoringRemoteEvent, err)
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to fetch original X message for edit: %w", err)
+		}
+		editData = mergeXChatEditData(originalData, &editData)
+		editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
+		converted = tc.convertToMatrix(ctx, portal, intent, &editData)
 	}
-	editData = mergeXChatEditData(originalData, &editData)
-	editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
-	converted := tc.convertToMatrix(ctx, portal, intent, &editData)
 	if len(converted.Parts) == 0 || converted.Parts[0].Content == nil {
 		return nil, fmt.Errorf("failed to convert edit: no message content")
 	}
@@ -77,6 +86,22 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	return &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{editPart},
 	}, nil
+}
+
+func (tc *TwitterClient) getTextPartLinkPreviews(ctx context.Context, portal *bridgev2.Portal, part *database.Message) ([]*event.BeeperLinkPreview, bool) {
+	if part.MXID == "" || portal.MXID == "" {
+		return nil, false
+	}
+	evt, err := tc.connector.br.Bot.GetEvent(ctx, portal.MXID, part.MXID)
+	if err != nil {
+		zerolog.Ctx(ctx).Debug().Err(err).Stringer("event_id", part.MXID).Msg("Failed to fetch Matrix event of edit target")
+		return nil, false
+	}
+	content, ok := evt.Content.Parsed.(*event.MessageEventContent)
+	if !ok || content == nil || content.MsgType.IsMedia() {
+		return nil, false
+	}
+	return content.BeeperLinkPreviews, true
 }
 
 func (tc *TwitterClient) convertXChatEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData, editID string) (*bridgev2.ConvertedEdit, error) {
