@@ -1104,11 +1104,11 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 	var resp struct {
 		Data struct {
 			UserAddTrust *struct {
-				ErrorCode string `json:"error_code"`
+				ErrorCode                      string `json:"error_code"`
+				SendMessageCreateEventResponse *struct {
+					EncodedMessageEvent string `json:"encoded_message_event"`
+				} `json:"send_message_create_event_response"`
 			} `json:"user_add_trust"`
-			SendMessageCreateEventResponse *struct {
-				EncodedMessageEvent string `json:"encoded_message_event"`
-			} `json:"send_message_create_event_response"`
 		} `json:"data"`
 	}
 	if err = json.Unmarshal(respBody, &resp); err != nil {
@@ -1117,7 +1117,7 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 		return errors.New("accept message request response had no user_add_trust result")
 	} else if resp.Data.UserAddTrust.ErrorCode != "" {
 		return fmt.Errorf("accept message request failed: %s", resp.Data.UserAddTrust.ErrorCode)
-	} else if resp.Data.SendMessageCreateEventResponse == nil || resp.Data.SendMessageCreateEventResponse.EncodedMessageEvent == "" {
+	} else if rebound := resp.Data.UserAddTrust.SendMessageCreateEventResponse; rebound == nil || rebound.EncodedMessageEvent == "" {
 		c.Logger.Warn().
 			Str("conversation_id", conversationID).
 			Msg("Accept message request response had no rebound AcceptMessageRequest event")
