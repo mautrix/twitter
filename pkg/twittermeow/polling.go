@@ -25,6 +25,7 @@ type PollingClient struct {
 	includeConversationID bool
 	shortCircuit          chan struct{}
 	pollingStopped        *exsync.Event
+	interval              time.Duration
 }
 
 // newPollingClient creates a new polling client.
@@ -55,16 +56,20 @@ func (pc *PollingClient) startPolling(ctx context.Context) {
 }
 
 func (pc *PollingClient) doPoll(ctx context.Context) {
-	tick := time.NewTicker(defaultPollingInterval)
+	interval := pc.interval
+	if interval <= 0 {
+		interval = defaultPollingInterval
+	}
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	log := zerolog.Ctx(ctx)
 	var failing bool
-	backoffInterval := defaultPollingInterval / 2
+	backoffInterval := interval / 2
 	for {
 		select {
 		case <-tick.C:
 		case <-pc.shortCircuit:
-			tick.Reset(defaultPollingInterval)
+			tick.Reset(interval)
 		case <-ctx.Done():
 			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
@@ -89,8 +94,8 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 		} else if failing {
 			failing = false
 			pc.client.eventHandler(&types.PollingError{}, nil)
-			backoffInterval = defaultPollingInterval / 2
-			tick.Reset(defaultPollingInterval)
+			backoffInterval = interval / 2
+			tick.Reset(interval)
 		}
 	}
 }

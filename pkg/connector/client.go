@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -448,7 +449,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	go func() {
 		retryDelay := time.Minute
 		for {
-			err := tc.syncUntrustedChannels(ctx)
+			err := tc.syncUntrustedChannels(ctx, false)
 			if err == nil || twittermeow.IsAuthError(err) {
 				break
 			}
@@ -588,7 +589,10 @@ func (tc *TwitterClient) initSession(ctx context.Context, meta *UserLoginMetadat
 	return true
 }
 
-const migrationReauthExpiry = 30 * 24 * time.Hour
+const (
+	migrationReauthExpiry   = 30 * 24 * time.Hour
+	restOnlyPollingInterval = time.Minute
+)
 
 func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLoginMetadata) {
 	log := zerolog.Ctx(ctx)
@@ -620,7 +624,7 @@ func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLogi
 	go func() {
 		retryDelay := time.Minute
 		for {
-			err := tc.syncUntrustedChannels(ctx)
+			err := tc.syncUntrustedChannels(ctx, true)
 			if err == nil || twittermeow.IsAuthError(err) {
 				break
 			}
@@ -633,6 +637,7 @@ func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLogi
 			}
 			retryDelay = min(retryDelay*2, 30*time.Minute)
 		}
+		tc.client.SetPollingInterval(restOnlyPollingInterval + rand.N(restOnlyPollingInterval))
 		tc.client.StartPolling(ctx)
 	}()
 }
