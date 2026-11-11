@@ -271,14 +271,15 @@ var _ bridgev2.LoginProcessWithParams = (*TwitterLogin)(nil)
 const (
 	pinLength           = 4
 	pinRegex            = "^[0-9]{4}$"
-	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat"
+	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat\n\n" + passcodeResetHint
+	passcodeResetHint   = "Forgot your passcode? Reset it with \"Forgot passcode\" in X Chat on x.com or the X app, then log in again. Resetting removes access to older encrypted messages."
 	passcodeBodySetup   = "No PIN code is registered yet. Create your X Chat PIN below."
 )
 
 var (
 	ErrJuiceboxLocked = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.JUICEBOX_LOCKED",
-		Err:        "Too many incorrect passcode attempts. X Chat is locked.",
+		Err:        "Too many incorrect passcode attempts. X Chat is locked. Reset your passcode with \"Forgot passcode\" in X Chat on x.com or the X app, then log in again.",
 		StatusCode: http.StatusForbidden,
 	}
 	ErrJuiceboxRateLimited = bridgev2.RespError{
