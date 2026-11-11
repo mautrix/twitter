@@ -15,7 +15,7 @@ var (
 
 	ErrCloudflareChallenge = errors.New("cloudflare challenge page")
 
-	ErrXChatMediaSizeUnsupported = errors.New("X Chat rejected the media size")
+	ErrXChatMediaSizeUnsupported = errors.New("media size rejected by X Chat")
 )
 
 type TwitterError struct {
