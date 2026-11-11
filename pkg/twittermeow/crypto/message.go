@@ -44,11 +44,9 @@ func DecryptMessageEntryContentsBytes(ciphertext []byte, conversationKey []byte)
 // DecryptMessageEntryContentsBytesDebug decrypts ciphertext bytes to MessageEntryContents (message/reaction/etc) with logging.
 func DecryptMessageEntryContentsBytesDebug(ciphertext []byte, conversationKey []byte, log *zerolog.Logger) (*payload.MessageEntryContents, error) {
 	if log != nil {
-		log.Debug().
+		log.Trace().
 			Int("ciphertext_len", len(ciphertext)).
-			Str("ciphertext_prefix", truncateHexBytes(ciphertext, 32)).
 			Int("key_len", len(conversationKey)).
-			Str("key_prefix", truncateHexBytes(conversationKey, 8)).
 			Msg("Attempting secretbox decryption")
 	}
 
@@ -61,9 +59,8 @@ func DecryptMessageEntryContentsBytesDebug(ciphertext []byte, conversationKey []
 	}
 
 	if log != nil {
-		log.Debug().
+		log.Trace().
 			Int("plaintext_len", len(plaintext)).
-			Str("plaintext_hex", truncateHexBytes(plaintext, 64)).
 			Msg("Secretbox decryption succeeded, attempting thrift decode")
 	}
 
@@ -77,7 +74,7 @@ func DecryptMessageEntryContentsBytesDebug(ciphertext []byte, conversationKey []
 	}
 	if log != nil && entry.Message != nil {
 		if msgJSON, err := json.Marshal(entry.Message); err == nil {
-			log.Info().
+			log.Trace().
 				Int("decrypted_json_len", len(msgJSON)).
 				Int("plaintext_len", len(plaintext)).
 				Msg("Decrypted XChat message contents")
@@ -88,7 +85,7 @@ func DecryptMessageEntryContentsBytesDebug(ciphertext []byte, conversationKey []
 
 // logHolderContents logs details about the decoded MessageEntryHolder structure.
 func logHolderContents(log *zerolog.Logger, holder *payload.MessageEntryHolder, plaintext []byte) {
-	evt := log.Debug().Bool("holder_contents_nil", holder.Contents == nil)
+	evt := log.Trace().Bool("holder_contents_nil", holder.Contents == nil)
 
 	if holder.Contents != nil {
 		c := holder.Contents
@@ -124,14 +121,6 @@ func logHolderContents(log *zerolog.Logger, holder *payload.MessageEntryHolder, 
 
 	evt = evt.Int("plaintext_len", len(plaintext))
 	evt.Msg("Thrift decode into MessageEntryHolder succeeded")
-}
-
-// truncateHexBytes returns hex representation of first n bytes.
-func truncateHexBytes(b []byte, n int) string {
-	if len(b) <= n {
-		return hex.EncodeToString(b)
-	}
-	return hex.EncodeToString(b[:n]) + "..."
 }
 
 // DecryptMessageContents decrypts hex-encoded ciphertext to MessageContents.

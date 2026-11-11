@@ -373,7 +373,7 @@ func (xc *xchatWebsocketClient) runConnection(
 					pingCancel()
 					return
 				}
-				log.Debug().Int("bytes", len(data)).Msg("Sent XChat ping frame")
+				log.Trace().Int("bytes", len(data)).Msg("Sent XChat ping frame")
 			}
 		}
 	}()
