@@ -20,3 +20,7 @@ x: false
 
 # Log X login responses at debug level. Only action paths and field names are kept, all other text is hashed.
 log_redacted_login_responses: false
+
+# Maximum number of history page requests per minute for the whole process, shared by all logins.
+# Applies to the backfill queue and to catch-ups longer than one page. 0 means no limit.
+backfill_requests_per_minute: 0

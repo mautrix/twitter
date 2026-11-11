@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +66,8 @@ type TwitterClient struct {
 	xchatFailuresLoaded   bool
 
 	xchatGapCatchupPausedUntil atomic.Int64
+	backfillPausedUntil        atomic.Int64
+	backfillStartAt            time.Time
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)
@@ -76,6 +79,7 @@ func NewTwitterClient(login *bridgev2.UserLogin, connector *TwitterConnector, cl
 		userLogin:        login,
 		userCache:        make(map[string]*types.User),
 		participantCache: make(map[string][]types.Participant),
+		backfillStartAt:  time.Now().Add(rand.N(backfillStartJitter)),
 	}
 	client.SetXChatEventHandler(tc.HandleXChatEvent)
 	client.SetEventHandler(tc.HandlePollingEvent, tc.HandleStreamEvent, tc.HandleCursorChange)

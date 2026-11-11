@@ -24,6 +24,8 @@ type Config struct {
 
 	LogRedactedLoginResponses bool `yaml:"log_redacted_login_responses"`
 
+	BackfillRequestsPerMinute int `yaml:"backfill_requests_per_minute"`
+
 	displaynameTemplate *template.Template `yaml:"-"`
 }
 
@@ -51,6 +53,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Bool, "cache_session")
 	helper.Copy(up.Bool, "x")
 	helper.Copy(up.Bool, "log_redacted_login_responses")
+	helper.Copy(up.Int, "backfill_requests_per_minute")
 }
 
 type DisplaynameParams struct {
