@@ -91,6 +91,31 @@ func (p *XChatEventProcessor) FailedEventPersistenceError() error {
 	return p.persistenceErr
 }
 
+func (p *XChatEventProcessor) RetryFailedEventPersistence(ctx context.Context) error {
+	p.failedEventLock.Lock()
+	defer p.failedEventLock.Unlock()
+	p.sequenceStateLock.Lock()
+	if p.persistenceErr == nil || p.persistFailure == nil {
+		p.sequenceStateLock.Unlock()
+		return nil
+	}
+	pending := maps.Clone(p.failedEvents)
+	persist := p.persistFailure
+	p.sequenceStateLock.Unlock()
+	err := persist(context.WithoutCancel(ctx), pending)
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if err != nil {
+		p.persistenceErr = fmt.Errorf("%w: %w", ErrXChatFailurePersistence, err)
+		return p.persistenceErr
+	}
+	p.persistenceErr = nil
+	p.log.Info().
+		Int("pending_failed_events", len(pending)).
+		Msg("Saved XChat event failure state after an earlier save failed")
+	return nil
+}
+
 func (p *XChatEventProcessor) updateFailedEvent(ctx context.Context, conversationID, sequenceID string, failed bool) error {
 	p.failedEventLock.Lock()
 	defer p.failedEventLock.Unlock()
@@ -121,7 +146,7 @@ func (p *XChatEventProcessor) updateFailedEvent(ctx context.Context, conversatio
 	}
 	persist := p.persistFailure
 	p.sequenceStateLock.Unlock()
-	err := persist(ctx, next)
+	err := persist(context.WithoutCancel(ctx), next)
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
 	if err != nil {
@@ -132,6 +157,55 @@ func (p *XChatEventProcessor) updateFailedEvent(ctx context.Context, conversatio
 	if !failed {
 		p.failedEvents = next
 	}
+	return nil
+}
+
+func (p *XChatEventProcessor) ResolveInboxItemFailures(ctx context.Context, item *response.XChatInboxItem) error {
+	conversationID := item.ConversationDetail.ConversationID
+	maxSequenceID := ""
+	for _, encoded := range slices.Concat(item.LatestMessageEvents, item.EncodedMessageEvents) {
+		evt, err := DecodeMessageEvent(encoded)
+		if err == nil && evt.SequenceId != nil && compareXChatSequenceIDs(*evt.SequenceId, maxSequenceID) > 0 {
+			maxSequenceID = *evt.SequenceId
+		}
+	}
+	p.failedEventLock.Lock()
+	defer p.failedEventLock.Unlock()
+	p.sequenceStateLock.Lock()
+	if p.persistFailure == nil || conversationID == "" || maxSequenceID == "" {
+		p.sequenceStateLock.Unlock()
+		return nil
+	}
+	var next map[string]string
+	for sequenceID, failedConversationID := range p.failedEvents {
+		if failedConversationID == conversationID && compareXChatSequenceIDs(sequenceID, maxSequenceID) <= 0 {
+			if next == nil {
+				next = maps.Clone(p.failedEvents)
+			}
+			delete(next, sequenceID)
+		}
+	}
+	if next == nil {
+		p.sequenceStateLock.Unlock()
+		return nil
+	}
+	resolved := len(p.failedEvents) - len(next)
+	persist := p.persistFailure
+	p.sequenceStateLock.Unlock()
+	err := persist(context.WithoutCancel(ctx), next)
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if err != nil {
+		p.persistenceErr = fmt.Errorf("%w: %w", ErrXChatFailurePersistence, err)
+		return p.persistenceErr
+	}
+	p.persistenceErr = nil
+	p.failedEvents = next
+	p.log.Info().
+		Str("conversation_id", conversationID).
+		Int("resolved_failed_events", resolved).
+		Int("pending_failed_events", len(next)).
+		Msg("Dropped pending XChat event failures covered by inbox sync")
 	return nil
 }
 
