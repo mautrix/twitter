@@ -802,6 +802,7 @@ func (p *XChatEventProcessor) emitMarkedUnread(ctx context.Context, evt *payload
 		return nil
 	}
 	return p.emitEvent(ctx, &types.XChatConversationMarkedUnread{
+		SequenceID:     ptr.Val(evt.SequenceId),
 		ConversationID: ptr.Val(evt.ConversationId),
 		Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
 	})

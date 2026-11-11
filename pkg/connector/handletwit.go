@@ -539,31 +539,16 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		if evt.Muted {
 			mutedUntil = event.MutedForever
 		}
-		return tc.queueUserLocalPortalInfo(ctx, evt.ConversationIDs, evt.Timestamp, &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil})
+		return tc.queueUserLocalPortalInfo(ctx, evt.ConversationIDs, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}))
 
 	case *types.XChatConversationArchiveChange:
-		var tag event.RoomTag
-		if evt.Archived {
-			tag = event.RoomTagLowPriority
-		}
-		return tc.queueUserLocalPortalInfo(ctx, evt.ConversationIDs, evt.Timestamp, &bridgev2.UserLocalPortalInfo{Tag: &tag})
+		return tc.handleXChatArchiveChange(ctx, evt)
 
 	case *types.XChatPinnedConversations:
 		return tc.handleXChatPinnedConversations(ctx, evt)
 
 	case *types.XChatConversationMarkedUnread:
-		if !tc.portalHasRoom(ctx, evt.ConversationID) {
-			return true
-		}
-		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.MarkUnread{
-			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventMarkUnread,
-				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
-				Sender:    tc.MakeEventSender(tc.client.GetCurrentUserID()),
-				Timestamp: evt.Timestamp,
-			},
-			Unread: true,
-		}))
+		return tc.handleXChatMarkedUnread(ctx, evt)
 
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{

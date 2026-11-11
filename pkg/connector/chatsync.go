@@ -472,9 +472,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		mutedUntil = event.MutedForever
 	}
 	info.UserLocal = &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}
-	if tc.isConversationPinned(conversationID) {
-		info.UserLocal.Tag = ptr.Ptr(event.RoomTagFavourite)
-	}
+	tc.applyPinAtCreation(ctx, conversationID, info)
 
 	return info
 }

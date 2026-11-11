@@ -1032,11 +1032,7 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.MatrixRoomTag) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	_, isFavourite := msg.Content.Tags[event.RoomTagFavourite]
-	wasFavourite := false
-	if msg.PrevContent != nil {
-		_, wasFavourite = msg.PrevContent.Tags[event.RoomTagFavourite]
-	}
-	if isFavourite == wasFavourite {
+	if isFavourite == tc.isConversationPinned(conversationID) {
 		return nil
 	}
 

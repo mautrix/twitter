@@ -48,6 +48,7 @@ func (*XChatConversationArchiveChange) isTwitterEvent() {}
 
 // XChatConversationMarkedUnread is emitted when the user marks a conversation as unread on another device.
 type XChatConversationMarkedUnread struct {
+	SequenceID     string
 	ConversationID string
 	Timestamp      time.Time
 }
