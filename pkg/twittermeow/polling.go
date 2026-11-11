@@ -72,6 +72,9 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 		select {
 		case <-tick.C:
 		case <-pc.shortCircuit:
+			if failing {
+				continue
+			}
 		case <-ctx.Done():
 			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
