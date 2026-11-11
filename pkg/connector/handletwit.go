@@ -550,6 +550,29 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		})
 		return true
 
+	case *types.XChatUnsupportedMessage:
+		streamOrder := methods.ParseSnowflakeInt(evt.SequenceID)
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.XChatUnsupportedMessage]{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventMessage,
+				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
+				Sender:      tc.MakeEventSender(evt.SenderID),
+				StreamOrder: streamOrder,
+				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+			},
+			ID:   MakeMessageID(evt.SequenceID),
+			Data: evt,
+			ConvertMessageFunc: func(context.Context, *bridgev2.Portal, bridgev2.MatrixAPI, *types.XChatUnsupportedMessage) (*bridgev2.ConvertedMessage, error) {
+				return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
+					Type: event.EventMessage,
+					Content: &event.MessageEventContent{
+						MsgType: event.MsgNotice,
+						Body:    "This message uses an X Chat encryption format the bridge can't read yet. Open X to view it.",
+					},
+				}}}, nil
+			},
+		})
+
 	case *types.XChatKeyChange:
 		log.Info().
 			Str("conversation_id", evt.ConversationID).

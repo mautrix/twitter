@@ -37,3 +37,15 @@ type XChatTyping struct {
 }
 
 func (*XChatTyping) isTwitterEvent() {}
+
+// XChatUnsupportedMessage is emitted for a message whose contents use an encryption version
+// the bridge can't read.
+type XChatUnsupportedMessage struct {
+	SequenceID     string
+	ConversationID string
+	SenderID       string
+	Time           string
+	Version        int16
+}
+
+func (*XChatUnsupportedMessage) isTwitterEvent() {}
