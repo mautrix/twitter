@@ -777,56 +777,6 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 	})
 }
 
-const restForwardCatchupMaxPages = 50
-
-func (tc *TwitterClient) fetchRESTForwardCatchup(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
-	anchor := fetchParams.AnchorMessage
-	pageParams := fetchParams
-	pageParams.Forward = false
-	pageParams.AnchorMessage = nil
-	pageParams.Cursor = ""
-	result := &bridgev2.FetchMessagesResponse{Forward: true}
-	seenIDs := make(map[networkid.MessageID]struct{})
-	reachedAnchor := false
-	pages := 0
-	for pages < restForwardCatchupMaxPages {
-		pages++
-		resp, err := tc.fetchRESTMessagesWithOptions(ctx, conversationID, pageParams, restBackfillOptions{})
-		if err != nil {
-			return nil, err
-		}
-		if pages == 1 {
-			result.ReadUpTo = resp.ReadUpTo
-		}
-		for _, msg := range resp.Messages {
-			if msg.ID == anchor.ID || !msg.Timestamp.After(anchor.Timestamp) {
-				reachedAnchor = true
-				continue
-			} else if _, seen := seenIDs[msg.ID]; seen {
-				continue
-			}
-			seenIDs[msg.ID] = struct{}{}
-			result.Messages = append(result.Messages, msg)
-		}
-		if reachedAnchor || !resp.HasMore || resp.Cursor == "" || resp.Cursor == pageParams.Cursor ||
-			(fetchParams.Count > 0 && len(result.Messages) >= fetchParams.Count) {
-			break
-		}
-		pageParams.Cursor = resp.Cursor
-	}
-	sortBackfillMessages(result.Messages)
-	if fetchParams.Count > 0 && len(result.Messages) > fetchParams.Count {
-		result.Messages = result.Messages[len(result.Messages)-fetchParams.Count:]
-	}
-	zerolog.Ctx(ctx).Debug().
-		Str("conversation_id", conversationID).
-		Int("pages", pages).
-		Bool("reached_anchor", reachedAnchor).
-		Int("message_count", len(result.Messages)).
-		Msg("REST forward catch-up finished")
-	return result, nil
-}
-
 func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 	ctx context.Context,
 	conversationID string,
@@ -1222,4 +1172,54 @@ func sortBackfillMessages(msgs []*bridgev2.BackfillMessage) {
 			return 0
 		}
 	})
+}
+
+const restForwardCatchupMaxPages = 50
+
+func (tc *TwitterClient) fetchRESTForwardCatchup(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	anchor := fetchParams.AnchorMessage
+	pageParams := fetchParams
+	pageParams.Forward = false
+	pageParams.AnchorMessage = nil
+	pageParams.Cursor = ""
+	result := &bridgev2.FetchMessagesResponse{Forward: true}
+	seenIDs := make(map[networkid.MessageID]struct{})
+	reachedAnchor := false
+	pages := 0
+	for pages < restForwardCatchupMaxPages {
+		pages++
+		resp, err := tc.fetchRESTMessagesForCursorMode(ctx, conversationID, pageParams, parseRESTBackfillCursorMode(pageParams.Cursor))
+		if err != nil {
+			return nil, err
+		}
+		if pages == 1 {
+			result.ReadUpTo = resp.ReadUpTo
+		}
+		for _, msg := range resp.Messages {
+			if msg.ID == anchor.ID || !msg.Timestamp.After(anchor.Timestamp) {
+				reachedAnchor = true
+				continue
+			} else if _, seen := seenIDs[msg.ID]; seen {
+				continue
+			}
+			seenIDs[msg.ID] = struct{}{}
+			result.Messages = append(result.Messages, msg)
+		}
+		if reachedAnchor || !resp.HasMore || resp.Cursor == "" || resp.Cursor == pageParams.Cursor ||
+			(fetchParams.Count > 0 && len(result.Messages) >= fetchParams.Count) {
+			break
+		}
+		pageParams.Cursor = resp.Cursor
+	}
+	sortBackfillMessages(result.Messages)
+	if fetchParams.Count > 0 && len(result.Messages) > fetchParams.Count {
+		result.Messages = result.Messages[len(result.Messages)-fetchParams.Count:]
+	}
+	zerolog.Ctx(ctx).Debug().
+		Str("conversation_id", conversationID).
+		Int("pages", pages).
+		Bool("reached_anchor", reachedAnchor).
+		Int("message_count", len(result.Messages)).
+		Msg("REST forward catch-up finished")
+	return result, nil
 }
