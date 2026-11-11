@@ -142,11 +142,19 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			replyMsgID = metaCopy.XChatClientMsgID
 		}
 
-		replyText, replyDisplayName, replyAttachments, ok := tc.fetchReplyPreviewContent(ctx, msg.Portal, msg.ReplyTo, conversationID, replySeqID, sendMode)
+		var replyText, replyDisplayName string
+		var replyAttachments []*payload.MessageAttachment
+		var ok bool
+		// Notices are bridge text, so only the identifiers (and X's own call card) describe the target.
+		if metaCopy.Notice == nil {
+			replyText, replyDisplayName, replyAttachments, ok = tc.fetchReplyPreviewContent(ctx, msg.Portal, msg.ReplyTo, conversationID, replySeqID, sendMode)
+		}
 
 		// Get sender ID
 		var senderIDStr string
-		if msg.ReplyTo.SenderID != "" {
+		if metaCopy.Notice != nil && metaCopy.Notice.SenderID != "" {
+			senderIDStr = metaCopy.Notice.SenderID
+		} else if msg.ReplyTo.SenderID != "" {
 			senderIDStr = ParseUserID(msg.ReplyTo.SenderID)
 		}
 
@@ -181,6 +189,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			replyAttachments,
 			ok,
 		)
+		if metaCopy.Notice != nil {
+			opts.ReplyTo.AvCallCard = metaCopy.Notice.CallCard
+		}
 
 		if ok {
 			zerolog.Ctx(ctx).Info().

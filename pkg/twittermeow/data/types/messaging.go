@@ -41,6 +41,10 @@ type MessageNotice struct {
 	Type            MessageNoticeType
 	AudioOnly       bool
 	DurationSeconds int64
+	// SenderID is the sender of the X entry, which isn't always the Matrix sender of the notice.
+	SenderID   string
+	KeyVersion string
+	CallCard   *payload.ReplyAVCallCard
 }
 
 type Message struct {

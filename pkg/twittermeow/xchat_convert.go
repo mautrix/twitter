@@ -81,17 +81,20 @@ func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.Messag
 		notice = types.MessageNotice{
 			Type:      types.MessageNoticeCallStarted,
 			AudioOnly: ptr.Val(contents.AvCallStarted.IsAudioOnly),
+			CallCard:  &payload.ReplyAVCallCard{Started: contents.AvCallStarted},
 		}
 	case contents.AvCallEnded != nil:
 		notice = types.MessageNotice{
 			Type:            types.MessageNoticeCallEnded,
 			AudioOnly:       ptr.Val(contents.AvCallEnded.IsAudioOnly),
 			DurationSeconds: ptr.Val(contents.AvCallEnded.DurationSeconds),
+			CallCard:        &payload.ReplyAVCallCard{Ended: contents.AvCallEnded},
 		}
 	case contents.AvCallMissed != nil:
 		notice = types.MessageNotice{
 			Type:      types.MessageNoticeCallMissed,
 			AudioOnly: ptr.Val(contents.AvCallMissed.IsAudioOnly),
+			CallCard:  &payload.ReplyAVCallCard{Missed: contents.AvCallMissed},
 		}
 	case contents.ScreenCaptureDetected != nil:
 		notice.Type = types.MessageNoticeScreenshot
@@ -101,8 +104,9 @@ func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.Messag
 	default:
 		return nil
 	}
+	notice.SenderID = ptr.Val(evt.SenderId)
 	msg := newXChatNoticeMessage(evt, &notice, keyVersion)
-	if notice.Type != types.MessageNoticeScreenshot && notice.Type != types.MessageNoticeScreenRecording {
+	if notice.CallCard != nil {
 		// Call entries are posted by X's own call service account rather than a chat member.
 		msg.MessageData.SenderID = ""
 	}

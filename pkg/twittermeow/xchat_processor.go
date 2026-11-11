@@ -96,25 +96,37 @@ func (p *XChatEventProcessor) markKeyNotForUs(conversationID, keyVersion string)
 	}
 }
 
-// claimKeyNotForUsNotice returns true the first time it's called for a known undecryptable key version.
-func (p *XChatEventProcessor) claimKeyNotForUsNotice(conversationID, keyVersion string) bool {
+func (p *XChatEventProcessor) keyNotForUsNoticeSent(conversationID, keyVersion string) bool {
 	p.keyNotForUsLock.Lock()
 	defer p.keyNotForUsLock.Unlock()
 	state, ok := p.keyNotForUs[conversationID+"|"+keyVersion]
-	if !ok || state.notified {
-		return false
+	return !ok || state.notified
+}
+
+func (p *XChatEventProcessor) markKeyNotForUsNoticeSent(conversationID, keyVersion string) {
+	p.keyNotForUsLock.Lock()
+	defer p.keyNotForUsLock.Unlock()
+	if state, ok := p.keyNotForUs[conversationID+"|"+keyVersion]; ok {
+		state.notified = true
 	}
-	state.notified = true
-	return true
 }
 
 func (p *XChatEventProcessor) emitKeyNotForUsNotice(ctx context.Context, evt *payload.MessageEvent, isUserMetadata bool) error {
 	conversationID := ptr.Val(evt.ConversationId)
 	keyVersion := ptr.Val(evt.Detail.MessageCreateEvent.ConversationKeyVersion)
-	if isUserMetadata || p.isBeforeSnapshotBoundary(ctx, evt) || !p.claimKeyNotForUsNotice(conversationID, keyVersion) {
+	if isUserMetadata || p.isBeforeSnapshotBoundary(ctx, evt) || p.keyNotForUsNoticeSent(conversationID, keyVersion) {
 		return nil
 	}
-	return p.emitEvent(ctx, newXChatNoticeMessage(evt, &types.MessageNotice{Type: types.MessageNoticeUndecryptable}, ""))
+	notice := &types.MessageNotice{
+		Type:       types.MessageNoticeUndecryptable,
+		SenderID:   ptr.Val(evt.SenderId),
+		KeyVersion: keyVersion,
+	}
+	if err := p.emitEvent(ctx, newXChatNoticeMessage(evt, notice, "")); err != nil {
+		return err
+	}
+	p.markKeyNotForUsNoticeSent(conversationID, keyVersion)
+	return nil
 }
 
 // SetFailedEventPersistence restores durable failures before the first connection.

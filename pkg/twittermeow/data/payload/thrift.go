@@ -598,6 +598,13 @@ type ReplyingToPreview struct {
 	SenderDisplayName           *string              `thrift:"sender_display_name,5" json:"sender_display_name,omitempty"`
 	ReplyingToMessageSequenceId *string              `thrift:"replying_to_message_sequence_id,6" json:"replying_to_message_sequence_id,omitempty"`
 	ReplyingToMessageId         *string              `thrift:"replying_to_message_id,7" json:"replying_to_message_id,omitempty"`
+	AvCallCard                  *ReplyAVCallCard     `thrift:"av_call_card,11" json:"av_call_card,omitempty"`
+}
+
+type ReplyAVCallCard struct {
+	Ended   *AVCallEnded   `thrift:"ended,1" json:"ended,omitempty"`
+	Missed  *AVCallMissed  `thrift:"missed,2" json:"missed,omitempty"`
+	Started *AVCallStarted `thrift:"started,3" json:"started,omitempty"`
 }
 
 type RequestForEncryptedResendEvent struct {

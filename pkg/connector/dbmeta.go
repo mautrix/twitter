@@ -26,6 +26,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
 func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
@@ -52,6 +54,9 @@ type PortalMetadata struct {
 	// Server token for XChat API
 	ConversationToken string `json:"conversation_token,omitempty"`
 	XChatTrusted      *bool  `json:"xchat_trusted,omitempty"`
+
+	// Key versions that already got an "unable to decrypt" notice in this chat.
+	UndecryptableKeyVersions []string `json:"undecryptable_key_versions,omitempty"`
 }
 
 // CanUseXChat returns true if this conversation has encryption keys
@@ -112,6 +117,15 @@ type MessageMetadata struct {
 	EditCount        int    `json:"edit_count,omitempty"`
 	XChatClientMsgID string `json:"xchat_client_msg_id,omitempty"` // UUID/txn id for locally-sent messages
 	LastXChatEditID  string `json:"last_xchat_edit_id,omitempty"`
+
+	Notice *XChatNoticeMetadata `json:"notice,omitempty"`
+}
+
+// XChatNoticeMetadata describes a message bridged as a notice, so replies and redeliveries can handle it.
+type XChatNoticeMetadata struct {
+	Type     types.MessageNoticeType  `json:"type"`
+	SenderID string                   `json:"sender_id,omitempty"`
+	CallCard *payload.ReplyAVCallCard `json:"call_card,omitempty"`
 }
 
 func (m *MessageMetadata) CopyFrom(other any) {
@@ -126,6 +140,9 @@ func (m *MessageMetadata) CopyFrom(other any) {
 		m.XChatClientMsgID = o.XChatClientMsgID
 	}
 	m.LastXChatEditID = maxXChatSequenceID(m.LastXChatEditID, o.LastXChatEditID)
+	if m.Notice == nil {
+		m.Notice = o.Notice
+	}
 }
 
 type PushKeys struct {
