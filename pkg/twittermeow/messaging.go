@@ -430,6 +430,7 @@ type SendEncryptedMessageOpts struct {
 	Attachments    []*payload.MessageAttachment
 	ReplyTo        *payload.ReplyingToPreview
 	Entities       []*payload.RichTextEntity
+	TTL            time.Duration
 }
 
 func buildUnencryptedMessageMutationPayload(
@@ -663,7 +664,8 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
 		SetMessageID(messageID).
 		SetConversationID(opts.ConversationID).
-		SetText(opts.Text)
+		SetText(opts.Text).
+		SetTTL(opts.TTL)
 
 	for _, att := range opts.Attachments {
 		builder.AddAttachment(att)

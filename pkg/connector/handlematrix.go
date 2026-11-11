@@ -125,6 +125,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		ConversationID: conversationID,
 		MessageID:      messageID,
 		Text:           text,
+		TTL:            msg.Portal.Disappear.Timer,
 	}
 
 	if msg.ReplyTo != nil {
