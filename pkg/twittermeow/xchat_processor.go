@@ -1039,7 +1039,8 @@ func (p *XChatEventProcessor) processInstruction(ctx context.Context, inst *payl
 		return nil
 
 	case inst.MessageRequestInfoInstruction != nil:
-		p.log.Debug().Msg("Ignoring MessageRequestInfoInstruction")
+		p.log.Debug().Msg("Message request info changed, polling REST updates now")
+		p.client.polling.doShortCircuit()
 		return nil
 
 	case inst.XNumberPromptInstruction != nil, inst.OpenInboxInstruction != nil:

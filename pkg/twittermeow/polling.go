@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"sync/atomic"
 	"time"
 
@@ -13,7 +14,14 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-var defaultPollingInterval = 10 * time.Second
+const (
+	minPollingInterval    = 60 * time.Second
+	pollingIntervalJitter = 60 * time.Second
+)
+
+func nextPollingInterval() time.Duration {
+	return minPollingInterval + rand.N(pollingIntervalJitter)
+}
 
 // PollingClient handles REST API polling for DM updates.
 // Used primarily for untrusted (message request) conversations
@@ -55,16 +63,15 @@ func (pc *PollingClient) startPolling(ctx context.Context) {
 }
 
 func (pc *PollingClient) doPoll(ctx context.Context) {
-	tick := time.NewTicker(defaultPollingInterval)
+	tick := time.NewTimer(nextPollingInterval())
 	defer tick.Stop()
 	log := zerolog.Ctx(ctx)
 	var failing bool
-	backoffInterval := defaultPollingInterval / 2
+	backoffInterval := minPollingInterval / 2
 	for {
 		select {
 		case <-tick.C:
 		case <-pc.shortCircuit:
-			tick.Reset(defaultPollingInterval)
 		case <-ctx.Done():
 			log.Debug().Err(ctx.Err()).Msg("Polling context canceled")
 			return
@@ -86,12 +93,13 @@ func (pc *PollingClient) doPoll(ctx context.Context) {
 				backoffInterval *= 2
 			}
 			tick.Reset(backoffInterval)
+			continue
 		} else if failing {
 			failing = false
 			pc.client.eventHandler(&types.PollingError{}, nil)
-			backoffInterval = defaultPollingInterval / 2
-			tick.Reset(defaultPollingInterval)
+			backoffInterval = minPollingInterval / 2
 		}
+		tick.Reset(nextPollingInterval())
 	}
 }
 
