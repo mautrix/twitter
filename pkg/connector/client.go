@@ -19,7 +19,6 @@ package connector
 import (
 	"context"
 	"errors"
-	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -589,10 +588,7 @@ func (tc *TwitterClient) initSession(ctx context.Context, meta *UserLoginMetadat
 	return true
 }
 
-const (
-	migrationReauthExpiry   = 30 * 24 * time.Hour
-	restOnlyPollingInterval = time.Minute
-)
+const migrationReauthExpiry = 30 * 24 * time.Hour
 
 func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLoginMetadata) {
 	log := zerolog.Ctx(ctx)
@@ -637,7 +633,6 @@ func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLogi
 			}
 			retryDelay = min(retryDelay*2, 30*time.Minute)
 		}
-		tc.client.SetPollingInterval(restOnlyPollingInterval + rand.N(restOnlyPollingInterval))
 		tc.client.StartPolling(ctx)
 	}()
 }

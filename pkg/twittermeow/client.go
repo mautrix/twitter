@@ -251,10 +251,6 @@ func (c *Client) StartPolling(ctx context.Context) {
 	c.polling.startPolling(c.Logger.WithContext(ctx))
 }
 
-func (c *Client) SetPollingInterval(interval time.Duration) {
-	c.polling.interval = interval
-}
-
 // StopPolling stops the REST API polling.
 func (c *Client) StopPolling() {
 	c.polling.stopPolling()
