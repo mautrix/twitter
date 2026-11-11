@@ -206,9 +206,6 @@ type xchatForwardPageFetcher func(context.Context, string, int) (*parsedXChatPag
 // missed while the bridge was disconnected. GetConversationPage only paginates from
 // newest to oldest, so this walks pages backwards from the top until it passes the
 // anchor's timestamp and returns everything newer than it.
-//
-// Timestamps are used instead of IDs to find the anchor because the anchor may be a
-// REST-era snowflake message ID, which is not comparable to XChat sequence IDs.
 func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversationID string, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	count := fetchParams.Count
 	pageSize := payload.DefaultGetConversationPageQuerySettings().ConversationEventLimit
