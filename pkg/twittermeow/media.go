@@ -221,7 +221,10 @@ func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID
 	if err != nil {
 		return nil, fmt.Errorf("get conversation key: %w", err)
 	}
+	return c.uploadXChatMediaWithKey(ctx, conversationID, messageID, mediaBytes, convKey)
+}
 
+func (c *Client) uploadXChatMediaWithKey(ctx context.Context, conversationID, messageID string, mediaBytes []byte, convKey *crypto.ConversationKey) (*XChatMediaUploadResult, error) {
 	// Encrypt media using secretstream (XChaCha20-Poly1305)
 	encryptedBytes, err := crypto.SecretstreamEncrypt(mediaBytes, convKey.Key)
 	if err != nil {
