@@ -1043,6 +1043,9 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 	if msg.Content.IsMuted() {
 		// X only has indefinite mutes, so timed mutes stay local to Beeper.
 		if msg.Content.GetMuteDuration() >= 0 {
+			if msg.PrevContent != nil && msg.PrevContent.GetMuteDuration() < 0 {
+				return tc.client.UnmuteConversation(ctx, conversationID)
+			}
 			return nil
 		}
 		return tc.client.MuteConversation(ctx, conversationID)
