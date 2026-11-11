@@ -997,7 +997,11 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 	if msg.Portal.RoomType == database.RoomTypeDM {
 		return false, bridgev2.ErrRoomMetadataNotAllowed
 	} else if isXChatGroupPortal(msg.Portal) {
-		return false, bridgev2.ErrRoomMetadataNotSupported
+		err := tc.client.EditXChatGroupTitle(ctx, ParsePortalID(msg.Portal.ID), msg.Content.Name)
+		if err != nil {
+			return false, withoutNotice(wrapTwitterMatrixError(err))
+		}
+		return true, nil
 	}
 
 	updateNameParams := &payload.DMRequestQuery{

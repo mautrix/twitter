@@ -43,7 +43,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 10
+	return 1, 11
 }
 
 const MaxTextLength = 10000
@@ -116,9 +116,11 @@ var selfDMCaps *event.RoomFeatures
 var xchatGroupCaps = ptr.Clone(groupCaps)
 
 func init() {
-	xchatGroupCaps.State = nil
+	xchatGroupCaps.State = event.StateFeatureMap{
+		event.StateRoomName.Type: {Level: event.CapLevelFullySupported},
+	}
 	xchatGroupCaps.MemberActions = nil
-	xchatGroupCaps.ID += "+xchat"
+	xchatGroupCaps.ID += "+xchat.2"
 
 	dmCaps.State = nil
 	dmCaps.MemberActions = nil
