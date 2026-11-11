@@ -32,6 +32,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.mau.fi/util/exgjson"
 	"go.mau.fi/util/exstrings"
+	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
@@ -202,7 +203,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	case event.MsgText:
 		// nothing extra
 	case event.MsgVideo, event.MsgImage, event.MsgAudio, event.MsgFile, event.CapMsgSticker:
-		if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
+		if content.FileName == "" || content.Body == content.FileName {
 			opts.Text = ""
 		}
 		if content.Info == nil {
@@ -225,6 +226,16 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			var attType payload.MediaType
 			if sendMode == messageSendXChatEncrypted {
 				attType = xchatMediaType(content)
+				if attType == payload.MediaTypeGif && mimeType != "image/gif" {
+					converted, err := tc.client.ConvertGIFPayload(ctx, data, mimeType)
+					if err != nil || len(converted) > maxXChatGIFSize {
+						zerolog.Ctx(ctx).Warn().Err(err).Int("converted_size", len(converted)).Msg("Sending GIF as a video instead of converting it")
+						attType = payload.MediaTypeVideo
+					} else {
+						data = converted
+						mimeType = "image/gif"
+					}
+				}
 				if attType == payload.MediaTypeAudio && mimeType != "audio/mp4" {
 					data, err = tc.client.ConvertVoicePayload(ctx, data, mimeType)
 					if err != nil {
@@ -253,7 +264,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 			if sendMode == messageSendXChatEncrypted {
 				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
-				if err != nil {
+				if errors.Is(err, twittermeow.ErrXChatMediaSizeUnsupported) {
+					return nil, bridgev2.ErrMediaTooLarge
+				} else if err != nil {
 					return nil, wrapTwitterMatrixError(err)
 				}
 
@@ -277,8 +290,12 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 					FilesizeBytes: &size,
 					Filename:      ptr.Ptr(filename),
 				}
-				if content.Info.Duration > 0 && (attType == payload.MediaTypeAudio || attType == payload.MediaTypeVideo) {
-					media.DurationMillis = ptr.Ptr(int64(content.Info.Duration))
+				duration := content.Info.Duration
+				if duration <= 0 && content.MSC1767Audio != nil {
+					duration = content.MSC1767Audio.Duration
+				}
+				if duration > 0 && (attType == payload.MediaTypeAudio || attType == payload.MediaTypeVideo || attType == payload.MediaTypeGif) {
+					media.DurationMillis = ptr.Ptr(int64(duration))
 				}
 				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{Media: media})
 			} else {
@@ -358,6 +375,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	if err != nil {
 		msg.RemovePending(txnID)
 		if sendMode == messageSendXChatEncrypted && errors.Is(err, crypto.ErrKeyNotFound) {
+			if msg.Content.MsgType == event.MsgFile || msg.Content.MsgType == event.CapMsgSticker {
+				return nil, fmt.Errorf("%w %s without an X Chat conversation token", bridgev2.ErrUnsupportedMessageType, msg.Content.MsgType)
+			}
 			zerolog.Ctx(ctx).Debug().
 				Str("conversation_id", conversationID).
 				Msg("Falling back to REST API for message send (key/token not found)")
@@ -411,6 +431,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 func xchatMediaType(content *event.MessageEventContent) payload.MediaType {
 	switch content.MsgType {
 	case event.MsgVideo:
+		if content.Info.MauGIF && ffmpeg.Supported() {
+			return payload.MediaTypeGif
+		}
 		return payload.MediaTypeVideo
 	case event.MsgAudio:
 		if content.MSC3245Voice != nil {

@@ -63,7 +63,9 @@ func capID() string {
 }
 
 const MaxTextLength = 10000
+
 const MaxFileSize = 100 * 1024 * 1024
+const maxXChatGIFSize = 15 * 1024 * 1024
 
 var groupCaps = &event.RoomFeatures{
 	ID: capID(),
@@ -98,7 +100,7 @@ var groupCaps = &event.RoomFeatures{
 			},
 			Caption:          event.CapLevelFullySupported,
 			MaxCaptionLength: MaxTextLength,
-			MaxSize:          15 * 1024 * 1024,
+			MaxSize:          maxXChatGIFSize,
 		},
 		event.CapMsgSticker: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{

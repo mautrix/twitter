@@ -214,6 +214,15 @@ func (c *Client) ConvertVoicePayload(ctx context.Context, mediaBytes []byte, mim
 	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".m4a", nil, []string{"-vn", "-c:a", "aac"}, mimeType)
 }
 
+func (c *Client) ConvertGIFPayload(ctx context.Context, mediaBytes []byte, mimeType string) ([]byte, error) {
+	if !ffmpeg.Supported() {
+		return nil, errors.New("ffmpeg is required to convert GIFs")
+	}
+	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".gif", nil, []string{
+		"-an", "-vf", "split[a][b];[a]palettegen[p];[b][p]paletteuse", "-loop", "0",
+	}, mimeType)
+}
+
 // XChatMediaUploadResult contains the result of an XChat media upload.
 type XChatMediaUploadResult struct {
 	MediaHashKey string
@@ -245,6 +254,15 @@ func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID
 	initResp, err := c.initializeXChatMediaUpload(ctx, conversationID, messageID, len(encryptedBytes))
 	if err != nil {
 		return nil, fmt.Errorf("initialize upload: %w", err)
+	}
+
+	initData := initResp.Data.XChatInitializeMediaUpload
+	if initData.UploadError == "MediaSizeUnsupported" {
+		return nil, ErrXChatMediaSizeUnsupported
+	} else if initData.UploadError != "" {
+		return nil, fmt.Errorf("initialize upload: %s", initData.UploadError)
+	} else if initData.ResumeUploadURL == "" {
+		return nil, errors.New("initialize upload: response had no upload URL")
 	}
 
 	// Upload encrypted bytes in chunks

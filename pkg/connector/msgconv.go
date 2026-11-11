@@ -700,7 +700,7 @@ func (tc *TwitterClient) uploadMediaReader(
 				return nil, err
 			}
 			mime := http.DetectContentType(prefix[:n])
-			if mime != "application/octet-stream" {
+			if mime != "application/octet-stream" && (content.MsgType != event.MsgFile || content.Info.MimeType == "" || content.Info.MimeType == "application/octet-stream") {
 				content.Info.MimeType = mime
 			}
 		}
