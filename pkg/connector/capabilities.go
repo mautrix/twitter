@@ -156,6 +156,9 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected
+		if baseCaps == xchatGroupCaps {
+			caps.State = nil
+		}
 		caps.ID += "+no-edit+no-delete"
 		return caps
 	}

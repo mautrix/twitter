@@ -1020,6 +1020,8 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 		if err != nil {
 			return false, withoutNotice(wrapTwitterMatrixError(err))
 		}
+		msg.Portal.Name = msg.Content.Name
+		msg.Portal.NameSet = true
 		return true, nil
 	}
 
