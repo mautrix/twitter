@@ -18,6 +18,18 @@ type XChatKeyChange struct {
 
 func (*XChatKeyChange) isTwitterEvent() {}
 
+// XChatGroupAdminChange is emitted when users are made or removed as group admins.
+type XChatGroupAdminChange struct {
+	ID             string
+	Time           string
+	ConversationID string
+	SenderID       string
+	AdminIDs       []string
+	IsAdmin        bool
+}
+
+func (*XChatGroupAdminChange) isTwitterEvent() {}
+
 // XChatMessageFailure is emitted when a message send fails.
 type XChatMessageFailure struct {
 	ConversationID string

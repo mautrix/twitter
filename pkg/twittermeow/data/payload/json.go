@@ -126,6 +126,28 @@ func NewEditGroupConversationMutationPayload(vars EditGroupConversationMutationV
 	}
 }
 
+type GroupAdminMutationVariables struct {
+	ConversationID   string                         `json:"conversation_id"`
+	UserID           string                         `json:"user_id"`
+	ActionSignatures []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+type GroupAdminMutationPayload struct {
+	OperationName string                      `json:"operationName"`
+	Variables     GroupAdminMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions            `json:"extensions"`
+}
+
+func NewGroupAdminMutationPayload(operationName, hash string, vars GroupAdminMutationVariables) *GroupAdminMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = hash
+	return &GroupAdminMutationPayload{
+		OperationName: operationName,
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 // MuteConversationMutationVariables contains the variables for the MuteConversation mutation
 type MuteConversationMutationVariables struct {
 	ConversationIDs  []string                       `json:"conversationIds"`

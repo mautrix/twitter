@@ -29,6 +29,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -345,6 +346,16 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		memberOrder = append(memberOrder, userID)
 	}
 
+	var adminIDs map[string]struct{}
+	if isGroup && len(detail.GroupAdminsResults) > 0 {
+		adminIDs = make(map[string]struct{}, len(detail.GroupAdminsResults))
+		for _, r := range detail.GroupAdminsResults {
+			if userID, _ := xchatUserFromResult(r); userID != "" {
+				adminIDs[userID] = struct{}{}
+			}
+		}
+	}
+
 	memberMap := make(bridgev2.ChatMemberMap, len(memberByID))
 	for _, restID := range memberOrder {
 		p := memberByID[restID]
@@ -368,9 +379,17 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 			Bool("has_result", p.Result != nil).
 			Bool("has_user_info", userInfo != nil).
 			Msg("xchatItemToChatInfo adding participant")
+		var powerLevel *int
+		if adminIDs != nil {
+			powerLevel = ptr.Ptr(xchatMemberPowerLevel)
+			if _, isAdmin := adminIDs[p.RestID]; isAdmin {
+				powerLevel = ptr.Ptr(xchatAdminPowerLevel)
+			}
+		}
 		memberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
 			UserInfo:    userInfo,
+			PowerLevel:  powerLevel,
 		})
 	}
 
@@ -450,6 +469,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 
 	if isGroup {
 		info.Type = ptr.Ptr(database.RoomTypeDefault)
+		info.Members.PowerLevels = xchatGroupPowerLevels(detail.GroupMetadata)
 		if conv != nil && conv.AvatarImageHttps != "" {
 			info.Avatar = tc.makeGroupAvatar(conversationID, conv.AvatarImageHttps, "")
 		} else if detail.GroupMetadata != nil && detail.GroupMetadata.GroupAvatarURL != "" {
@@ -802,4 +822,25 @@ func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Porta
 			},
 		})
 	}
+}
+
+// xchatGroupPowerLevels lets X admins change power levels and lets everyone edit the group info
+// unless X restricts that to admins. The homeserver defaults (100 for power levels, 50 for name
+// and avatar) would otherwise block actions X allows.
+func xchatGroupPowerLevels(metadata *response.XChatGroupMetadata) *bridgev2.PowerLevelOverrides {
+	overrides := &bridgev2.PowerLevelOverrides{
+		Events: map[event.Type]int{event.StatePowerLevels: xchatAdminPowerLevel},
+	}
+	// Without group metadata the response is partial, so keep the current group info levels.
+	if metadata == nil {
+		return overrides
+	}
+	editInfoLevel := xchatMemberPowerLevel
+	if metadata.AdminSettings != nil && metadata.AdminSettings.EditGroupInfo {
+		editInfoLevel = xchatAdminPowerLevel
+	}
+	overrides.Events[event.StateRoomName] = editInfoLevel
+	overrides.Events[event.StateRoomAvatar] = editInfoLevel
+	overrides.Events[event.StateTopic] = editInfoLevel
+	return overrides
 }

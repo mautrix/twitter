@@ -399,6 +399,17 @@ func convertXChatGroupTitleChange(evt *payload.MessageEvent, title *payload.Grou
 	}
 }
 
+func convertXChatGroupAdminChange(evt *payload.MessageEvent, adminIDs []string, isAdmin bool) *types.XChatGroupAdminChange {
+	return &types.XChatGroupAdminChange{
+		ID:             ptr.Val(evt.SequenceId),
+		Time:           ptr.Val(evt.CreatedAtMsec),
+		ConversationID: ptr.Val(evt.ConversationId),
+		SenderID:       ptr.Val(evt.SenderId),
+		AdminIDs:       adminIDs,
+		IsAdmin:        isAdmin,
+	}
+}
+
 // convertXChatGroupAvatarChange converts XChat GroupAvatarUrlChange to types.ConversationAvatarUpdate
 func convertXChatGroupAvatarChange(evt *payload.MessageEvent, avatar *payload.GroupAvatarUrlChange) *types.ConversationAvatarUpdate {
 	return &types.ConversationAvatarUpdate{

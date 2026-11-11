@@ -75,15 +75,71 @@ func (c *Client) editXChatGroup(
 	change *payload.GroupChange,
 	signatureFields ...string,
 ) error {
+	sig, err := c.signXChatGroupChange(ctx, vars.ConversationID, changeName, change, signatureFields...)
+	if err != nil {
+		return err
+	}
+	vars.ActionSignatures = []payload.DeleteMessageActionSignature{*sig}
+	respBody, err := c.postXChatGroupMutation(ctx, endpoints.EDIT_GROUP_CONVERSATION_URL, payload.NewEditGroupConversationMutationPayload(vars))
+	if err != nil {
+		return err
+	}
+	return parseEditGroupConversationResponse(respBody)
+}
+
+// SetXChatGroupAdmin makes a group member an admin or removes their admin status.
+func (c *Client) SetXChatGroupAdmin(ctx context.Context, conversationID, userID string, admin bool) error {
+	if conversationID == "" || userID == "" {
+		return errors.New("conversation ID and user ID are required")
+	}
+	var (
+		changeName  string
+		change      payload.GroupChange
+		url         string
+		pl          *payload.GroupAdminMutationPayload
+		resultField string
+	)
+	vars := payload.GroupAdminMutationVariables{ConversationID: conversationID, UserID: userID}
+	if admin {
+		changeName = "GroupAdminAddChange"
+		change.GroupAdminAdd = &payload.GroupAdminAddChange{AdminIds: []string{userID}}
+		url = endpoints.ADD_GROUP_ADMIN_URL
+		pl = payload.NewGroupAdminMutationPayload("AddAsAdminMutation", "1RrduaHSFpenZuOQzgSZqA", vars)
+		resultField = "xchat_add_group_admins"
+	} else {
+		changeName = "GroupAdminRemoveChange"
+		change.GroupAdminRemove = &payload.GroupAdminRemoveChange{AdminIds: []string{userID}}
+		url = endpoints.REMOVE_GROUP_ADMIN_URL
+		pl = payload.NewGroupAdminMutationPayload("RemoveAsAdminMutation", "i3RDeN7PE4lDpu7dpPjbZw", vars)
+		resultField = "xchat_remove_group_admins"
+	}
+	sig, err := c.signXChatGroupChange(ctx, conversationID, changeName, &change, userID)
+	if err != nil {
+		return err
+	}
+	pl.Variables.ActionSignatures = []payload.DeleteMessageActionSignature{*sig}
+	respBody, err := c.postXChatGroupMutation(ctx, url, pl)
+	if err != nil {
+		return err
+	}
+	return parseXChatGroupMutationResponse(respBody, resultField)
+}
+
+func (c *Client) signXChatGroupChange(
+	ctx context.Context,
+	conversationID, changeName string,
+	change *payload.GroupChange,
+	signatureFields ...string,
+) (*payload.DeleteMessageActionSignature, error) {
 	senderID := c.GetCurrentUserID()
 	if senderID == "" {
-		return errors.New("sender ID is required")
+		return nil, errors.New("sender ID is required")
 	}
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
-		return fmt.Errorf("get signing key: %w", err)
+		return nil, fmt.Errorf("get signing key: %w", err)
 	} else if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
-		return errors.New("missing signing key")
+		return nil, errors.New("missing signing key")
 	}
 
 	messageID := uuid.NewString()
@@ -91,17 +147,17 @@ func (c *Client) editXChatGroup(
 		GroupChangeEvent: &payload.GroupChangeEvent{GroupChange: change},
 	})
 	if err != nil {
-		return fmt.Errorf("encode group change: %w", err)
+		return nil, fmt.Errorf("encode group change: %w", err)
 	}
-	signaturePayload, err := crypto.SignaturePayloadGroupChange(changeName, messageID, senderID, vars.ConversationID, signatureFields...)
+	signaturePayload, err := crypto.SignaturePayloadGroupChange(changeName, messageID, senderID, conversationID, signatureFields...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	signature, err := crypto.Sign(keyPair.SigningKey, []byte(signaturePayload))
 	if err != nil {
-		return fmt.Errorf("sign group change: %w", err)
+		return nil, fmt.Errorf("sign group change: %w", err)
 	}
-	vars.ActionSignatures = []payload.DeleteMessageActionSignature{{
+	return &payload.DeleteMessageActionSignature{
 		MessageID:                 messageID,
 		EncodedMessageEventDetail: encodedDetail,
 		SignaturePayload:          signaturePayload,
@@ -110,45 +166,47 @@ func (c *Client) editXChatGroup(
 			PublicKeyVersion: keyPair.KeyVersion,
 			SignatureVersion: crypto.SignatureVersion7,
 		},
-	}}
-	jsonBody, err := json.Marshal(payload.NewEditGroupConversationMutationPayload(vars))
+	}, nil
+}
+
+func (c *Client) postXChatGroupMutation(ctx context.Context, url string, pl any) ([]byte, error) {
+	jsonBody, err := json.Marshal(pl)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.EDIT_GROUP_CONVERSATION_URL,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,
 		Body:           jsonBody,
 	})
-	if err != nil {
-		return err
-	}
-	return parseEditGroupConversationResponse(respBody)
+	return respBody, err
 }
 
 func parseEditGroupConversationResponse(respBody []byte) error {
+	return parseXChatGroupMutationResponse(respBody, "xchat_edit_group")
+}
+
+func parseXChatGroupMutationResponse(respBody []byte, resultField string) error {
 	var resp struct {
-		Data struct {
-			EditGroup *struct {
-				Typename  string `json:"__typename"`
-				ErrorCode string `json:"error_code"`
-			} `json:"xchat_edit_group"`
+		Data map[string]*struct {
+			Typename  string `json:"__typename"`
+			ErrorCode string `json:"error_code"`
 		} `json:"data"`
 		Errors []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return fmt.Errorf("decode edit group response: %w", err)
+		return fmt.Errorf("decode %s response: %w", resultField, err)
 	} else if len(resp.Errors) > 0 {
-		return fmt.Errorf("edit group error: %s", resp.Errors[0].Message)
-	} else if resp.Data.EditGroup == nil {
-		return errors.New("edit group returned no result")
-	} else if resp.Data.EditGroup.ErrorCode != "" {
-		return fmt.Errorf("edit group failed: %s", resp.Data.EditGroup.ErrorCode)
+		return fmt.Errorf("%s error: %s", resultField, resp.Errors[0].Message)
+	} else if result := resp.Data[resultField]; result == nil {
+		return fmt.Errorf("%s returned no result", resultField)
+	} else if result.ErrorCode != "" {
+		return fmt.Errorf("%s failed: %s", resultField, result.ErrorCode)
 	}
 	return nil
 }
