@@ -531,6 +531,10 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 	for _, evt := range events {
 		if evt.Detail.MessageCreateEvent == nil {
 			nonMessageEventCount++
+			if ttlChange := twittermeow.XChatConversationTTLChangeFromEvent(evt); ttlChange != nil && anchor != nil {
+				// Forward catch-up can run inside the portal's event handling, so queue the change separately.
+				go tc.userLogin.QueueRemoteEvent(tc.makeXChatDisappearTimerChange(ttlChange))
+			}
 			continue
 		}
 

@@ -339,6 +339,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			TargetMessage: MakeMessageID(msgID),
 			Data:          &evt.MessageData,
 			ConvertMessageFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data *types.MessageData) (*bridgev2.ConvertedMessage, error) {
+				applyImplicitXChatDisappearTimer(ctx, portal, intent, data)
 				converted := tc.convertToMatrix(ctx, portal, intent, data)
 				if converted == nil {
 					return nil, nil
@@ -535,22 +536,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
 	case *types.XChatConversationTTLChange:
-		setting := database.DisappearingSetting{Type: event.DisappearingTypeAfterRead, Timer: evt.TTL}
-		if evt.TTL <= 0 {
-			setting = database.DisappearingSetting{}
-		}
-		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-			EventMeta: simplevent.EventMeta{
-				Type:        bridgev2.RemoteEventChatInfoChange,
-				Sender:      tc.MakeEventSender(evt.SenderID),
-				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
-				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
-				Timestamp:   evt.Timestamp,
-			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{
-				ChatInfo: &bridgev2.ChatInfo{Disappear: &setting},
-			},
-		}))
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(tc.makeXChatDisappearTimerChange(evt)))
 
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{

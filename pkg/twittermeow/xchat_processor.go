@@ -560,21 +560,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		return p.processMessageFailure(ctx, evt, detail.MessageFailureEvent)
 
 	case detail.ConversationMetadataChangeEvent != nil:
-		change := detail.ConversationMetadataChangeEvent.ConversationMetadataChange
-		if change != nil && (change.MessageDurationChange != nil || change.MessageDurationRemove != nil) {
-			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
-			if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok && (after.timestamp.IsZero() || !ts.After(after.timestamp)) {
-				return nil
-			}
-			ttlChange := &types.XChatConversationTTLChange{
-				ID:             ptr.Val(evt.SequenceId),
-				ConversationID: ptr.Val(evt.ConversationId),
-				SenderID:       ptr.Val(evt.SenderId),
-				Timestamp:      ts,
-			}
-			if change.MessageDurationChange != nil {
-				ttlChange.TTL = time.Duration(ptr.Val(change.MessageDurationChange.TtlMsec)) * time.Millisecond
-			}
+		if ttlChange := XChatConversationTTLChangeFromEvent(evt); ttlChange != nil {
 			return p.emitEvent(ctx, ttlChange)
 		}
 		p.log.Debug().
@@ -782,7 +768,19 @@ func (p *XChatEventProcessor) processGroupChangeEvent(ctx context.Context, evt *
 
 	switch {
 	case gc.GroupMemberAdd != nil:
-		return p.emitEvent(ctx, convertXChatGroupMemberAdd(evt, gc.GroupMemberAdd))
+		if err := p.emitEvent(ctx, convertXChatGroupMemberAdd(evt, gc.GroupMemberAdd)); err != nil {
+			return err
+		}
+		if gc.GroupMemberAdd.CurrentTtlMsec == nil {
+			return nil
+		}
+		return p.emitEvent(ctx, &types.XChatConversationTTLChange{
+			ID:             ptr.Val(evt.SequenceId),
+			ConversationID: ptr.Val(evt.ConversationId),
+			SenderID:       ptr.Val(evt.SenderId),
+			TTL:            time.Duration(*gc.GroupMemberAdd.CurrentTtlMsec) * time.Millisecond,
+			Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+		})
 	case gc.GroupMemberRemove != nil:
 		return p.emitEvent(ctx, convertXChatGroupMemberRemove(evt, gc.GroupMemberRemove))
 	case gc.GroupTitleChange != nil:

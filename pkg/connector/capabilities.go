@@ -29,6 +29,7 @@ import (
 )
 
 var generalCaps = &bridgev2.NetworkGeneralCapabilities{
+	DisappearingMessages: true,
 	Provisioning: bridgev2.ProvisioningCapabilities{
 		ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
 			CreateDM:       true,
