@@ -1021,7 +1021,9 @@ func (c *Client) setConversationMuted(ctx context.Context, conversationID string
 		return err
 	}
 	var resp struct {
-		Data   map[string]json.RawMessage `json:"data"`
+		Data map[string]*struct {
+			ErrorCode string `json:"error_code"`
+		} `json:"data"`
 		Errors []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
@@ -1030,8 +1032,10 @@ func (c *Client) setConversationMuted(ctx context.Context, conversationID string
 		return fmt.Errorf("decode %s response: %w", changeName, err)
 	} else if len(resp.Errors) > 0 {
 		return fmt.Errorf("%s failed: %s", changeName, resp.Errors[0].Message)
-	} else if result := resp.Data[resultField]; len(result) == 0 || string(result) == "null" {
+	} else if result := resp.Data[resultField]; result == nil {
 		return fmt.Errorf("%s returned no result", changeName)
+	} else if result.ErrorCode != "" {
+		return fmt.Errorf("%s failed: %s", changeName, result.ErrorCode)
 	}
 	return nil
 }
