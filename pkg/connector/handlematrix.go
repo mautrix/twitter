@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1044,10 +1045,11 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 }
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
-	err := tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
+	conversationID := ParsePortalID(msg.Portal.ID)
+	err := tc.client.AcceptConversation(ctx, ConvertConversationIDToRESTAPI(conversationID))
 	// Already-accepted conversations will throw a 279 error when trying to accept again.
 	// TODO maybe check that the conversation actually exists on the xchat side?
-	if errors.Is(err, twittermeow.ErrConversationDoesntExist) {
+	if errors.Is(err, twittermeow.ErrConversationDoesntExist) && !strings.HasPrefix(conversationID, "g") {
 		err = nil
 	}
 	if err == nil && msg != nil && msg.Portal != nil {
