@@ -65,6 +65,7 @@ type TwitterClient struct {
 	xchatFailuresLoaded   bool
 
 	xchatGapCatchupPausedUntil atomic.Int64
+	backfillPausedUntil        atomic.Int64
 }
 
 var _ bridgev2.NetworkAPI = (*TwitterClient)(nil)

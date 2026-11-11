@@ -97,7 +97,26 @@ func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
 	return ensureRESTFallbackCursor(restResp), nil
 }
 
+const backfillRateLimitPause = 15 * time.Minute
+
+var errBackfillPaused = errors.New("backfill paused after a rate limit")
+
 func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	if fetchParams.Forward {
+		return tc.fetchMessages(ctx, fetchParams)
+	}
+	if time.Now().UnixMilli() < max(tc.backfillPausedUntil.Load(), tc.xchatGapCatchupPausedUntil.Load()) {
+		return nil, errBackfillPaused
+	}
+	resp, err := tc.fetchMessages(ctx, fetchParams)
+	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+		tc.backfillPausedUntil.Store(time.Now().Add(backfillRateLimitPause).UnixMilli())
+		zerolog.Ctx(ctx).Warn().Dur("pause", backfillRateLimitPause).Msg("X rate limited backfill, pausing backfill requests")
+	}
+	return resp, err
+}
+
+func (tc *TwitterClient) fetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationID := ParsePortalID(fetchParams.Portal.PortalKey.ID)
 	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
 	cursorMode := parseRESTBackfillCursorMode(fetchParams.Cursor)
