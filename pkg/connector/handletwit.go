@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -540,16 +539,31 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		if evt.Muted {
 			mutedUntil = event.MutedForever
 		}
-		for _, conversationID := range evt.ConversationIDs {
-			tc.queueUserLocalPortalInfo(conversationID, evt.Timestamp, &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil})
+		return tc.queueUserLocalPortalInfo(ctx, evt.ConversationIDs, evt.Timestamp, &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil})
+
+	case *types.XChatConversationArchiveChange:
+		var tag event.RoomTag
+		if evt.Archived {
+			tag = event.RoomTagLowPriority
 		}
-		return true
+		return tc.queueUserLocalPortalInfo(ctx, evt.ConversationIDs, evt.Timestamp, &bridgev2.UserLocalPortalInfo{Tag: &tag})
 
 	case *types.XChatPinnedConversations:
-		for _, conversationID := range evt.ConversationIDs {
-			tc.queueUserLocalPortalInfo(conversationID, evt.Timestamp, &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagFavourite)})
+		return tc.handleXChatPinnedConversations(ctx, evt)
+
+	case *types.XChatConversationMarkedUnread:
+		if !tc.portalHasRoom(ctx, evt.ConversationID) {
+			return true
 		}
-		return true
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.MarkUnread{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventMarkUnread,
+				PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
+				Sender:    tc.MakeEventSender(tc.client.GetCurrentUserID()),
+				Timestamp: evt.Timestamp,
+			},
+			Unread: true,
+		}))
 
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
@@ -982,18 +996,4 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 		}
 		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update))
 	}
-}
-
-func (tc *TwitterClient) queueUserLocalPortalInfo(conversationID string, ts time.Time, info *bridgev2.UserLocalPortalInfo) {
-	tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
-		EventMeta: simplevent.EventMeta{
-			Type:      bridgev2.RemoteEventChatInfoChange,
-			PortalKey: tc.MakePortalKeyFromID(conversationID),
-			Sender:    tc.MakeEventSender(tc.client.GetCurrentUserID()),
-			Timestamp: ts,
-		},
-		ChatInfoChange: &bridgev2.ChatInfoChange{
-			ChatInfo: &bridgev2.ChatInfo{UserLocal: info},
-		},
-	})
 }

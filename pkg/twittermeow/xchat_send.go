@@ -56,6 +56,52 @@ func (c *Client) SendXChatReadReceipt(ctx context.Context, conversationID, lastR
 	return c.SendXChatPayload(ctx, &payload.Message{MessageEvent: event})
 }
 
+func (c *Client) SendXChatMarkConversationUnread(ctx context.Context, conversationID string) error {
+	senderID := c.GetCurrentUserID()
+	if conversationID == "" || senderID == "" {
+		return errors.New("conversation and sender IDs are required")
+	}
+	conversationToken, err := c.ensureConversationToken(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
+	} else if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return errors.New("complete signing key is required")
+	}
+	messageID := uuid.NewString()
+	signature, err := crypto.SignMarkConversationUnreadEvent(keyPair.SigningKey, messageID, senderID, conversationID)
+	if err != nil {
+		return fmt.Errorf("sign mark unread: %w", err)
+	}
+	signingPublicKey, err := crypto.EncodePublicKeySPKI(&keyPair.SigningKey.PublicKey)
+	if err != nil {
+		return fmt.Errorf("encode signing public key: %w", err)
+	}
+	createdAtMsec := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	relaySource := int32(0)
+	sigVersion := crypto.SignatureVersion7
+	return c.SendXChatPayload(ctx, &payload.Message{MessageEvent: &payload.MessageEvent{
+		MessageId:         &messageID,
+		SenderId:          &senderID,
+		ConversationId:    &conversationID,
+		ConversationToken: &conversationToken,
+		CreatedAtMsec:     &createdAtMsec,
+		RelaySource:       &relaySource,
+		Detail: &payload.MessageEventDetail{
+			MarkConversationUnreadEvent: &payload.MarkConversationUnreadEvent{},
+		},
+		MessageEventSignature: &payload.MessageEventSignature{
+			Signature:        &signature,
+			PublicKeyVersion: &keyPair.KeyVersion,
+			SignatureVersion: &sigVersion,
+			SigningPublicKey: &signingPublicKey,
+		},
+	}})
+}
+
 func buildXChatReadReceiptEvent(
 	messageID, senderID, conversationID, conversationToken, lastReadEventID string,
 	createdAt, seenAt time.Time,

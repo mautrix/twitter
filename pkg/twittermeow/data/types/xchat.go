@@ -37,8 +37,26 @@ type XChatConversationMuteChange struct {
 
 func (*XChatConversationMuteChange) isTwitterEvent() {}
 
+// XChatConversationArchiveChange is emitted when conversations are archived or unarchived on another device.
+type XChatConversationArchiveChange struct {
+	ConversationIDs []string
+	Archived        bool
+	Timestamp       time.Time
+}
+
+func (*XChatConversationArchiveChange) isTwitterEvent() {}
+
+// XChatConversationMarkedUnread is emitted when the user marks a conversation as unread on another device.
+type XChatConversationMarkedUnread struct {
+	ConversationID string
+	Timestamp      time.Time
+}
+
+func (*XChatConversationMarkedUnread) isTwitterEvent() {}
+
 // XChatPinnedConversations is emitted with the full list of pinned conversations from the user metadata.
 type XChatPinnedConversations struct {
+	SequenceID      string
 	ConversationIDs []string
 	Timestamp       time.Time
 }
