@@ -18,8 +18,10 @@ package connector
 
 import (
 	"context"
+	"maps"
 	"time"
 
+	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
@@ -42,13 +44,29 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 9
+	return 1, 10
+}
+
+func supportedIfFFmpeg() event.CapabilitySupportLevel {
+	if ffmpeg.Supported() {
+		return event.CapLevelPartialSupport
+	}
+	return event.CapLevelRejected
+}
+
+func capID() string {
+	base := "fi.mau.twitter.capabilities.2026_11_11"
+	if ffmpeg.Supported() {
+		return base + "+ffmpeg"
+	}
+	return base
 }
 
 const MaxTextLength = 10000
+const MaxFileSize = 100 * 1024 * 1024
 
 var groupCaps = &event.RoomFeatures{
-	ID: "fi.mau.twitter.capabilities.2026_10_12",
+	ID: capID(),
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 	//	event.FmtUserLink: event.CapLevelFullySupported,
 	//},
@@ -80,7 +98,44 @@ var groupCaps = &event.RoomFeatures{
 			},
 			Caption:          event.CapLevelFullySupported,
 			MaxCaptionLength: MaxTextLength,
-			MaxSize:          5 * 1024 * 1024,
+			MaxSize:          15 * 1024 * 1024,
+		},
+		event.CapMsgSticker: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"image/jpeg": event.CapLevelFullySupported,
+				"image/png":  event.CapLevelFullySupported,
+				"image/gif":  event.CapLevelFullySupported,
+				"image/webp": event.CapLevelFullySupported,
+			},
+			Caption: event.CapLevelDropped,
+			MaxSize: 5 * 1024 * 1024,
+		},
+		event.CapMsgVoice: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"audio/mp4":  event.CapLevelFullySupported,
+				"audio/ogg":  supportedIfFFmpeg(),
+				"audio/webm": supportedIfFFmpeg(),
+				"audio/mpeg": supportedIfFFmpeg(),
+				"audio/aac":  supportedIfFFmpeg(),
+			},
+			Caption: event.CapLevelDropped,
+			MaxSize: MaxFileSize,
+		},
+		event.MsgAudio: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"audio/*": event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: MaxTextLength,
+			MaxSize:          MaxFileSize,
+		},
+		event.MsgFile: {
+			MimeTypes: map[string]event.CapabilitySupportLevel{
+				"*/*": event.CapLevelFullySupported,
+			},
+			Caption:          event.CapLevelFullySupported,
+			MaxCaptionLength: MaxTextLength,
+			MaxSize:          MaxFileSize,
 		},
 	},
 	MemberActions: map[event.MemberAction]event.CapabilitySupportLevel{
@@ -139,6 +194,11 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected
+		caps.File = maps.Clone(baseCaps.File)
+		delete(caps.File, event.MsgFile)
+		delete(caps.File, event.MsgAudio)
+		delete(caps.File, event.CapMsgVoice)
+		delete(caps.File, event.CapMsgSticker)
 		caps.ID += "+no-edit+no-delete"
 		return caps
 	}

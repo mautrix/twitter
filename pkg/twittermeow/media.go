@@ -207,6 +207,13 @@ func (c *Client) ConvertAudioPayload(ctx context.Context, mediaBytes []byte, mim
 	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".mp4", []string{"-f", "lavfi", "-i", "color=black:s=854x480:r=30"}, []string{"-c:v", "h264", "-c:a", "aac", "-tune", "stillimage", "-shortest"}, mimeType)
 }
 
+func (c *Client) ConvertVoicePayload(ctx context.Context, mediaBytes []byte, mimeType string) ([]byte, error) {
+	if !ffmpeg.Supported() {
+		return nil, errors.New("ffmpeg is required to send voice message")
+	}
+	return ffmpeg.ConvertBytes(ctx, mediaBytes, ".m4a", nil, []string{"-vn", "-c:a", "aac"}, mimeType)
+}
+
 // XChatMediaUploadResult contains the result of an XChat media upload.
 type XChatMediaUploadResult struct {
 	MediaHashKey string

@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -199,9 +201,18 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	switch content.MsgType {
 	case event.MsgText:
 		// nothing extra
-	case event.MsgVideo, event.MsgImage, event.MsgAudio:
+	case event.MsgVideo, event.MsgImage, event.MsgAudio, event.MsgFile, event.CapMsgSticker:
 		if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
 			opts.Text = ""
+		}
+		if content.Info == nil {
+			content.Info = &event.FileInfo{}
+		}
+		if content.MsgType == event.CapMsgSticker || content.MSC3245Voice != nil {
+			opts.Text = ""
+		}
+		if (content.MsgType == event.MsgFile || content.MsgType == event.CapMsgSticker) && sendMode != messageSendXChatEncrypted {
+			return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
 		}
 
 		if sendMode != messageSendREST {
@@ -211,22 +222,30 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			}
 
 			mimeType := content.Info.MimeType
-			// Convert audio to mp4 if needed
-			if content.MsgType == event.MsgAudio && mimeType != "video/mp4" {
-				converted, err := tc.client.ConvertAudioPayload(ctx, data, mimeType)
-				if err != nil {
-					return nil, err
+			var attType payload.MediaType
+			if sendMode == messageSendXChatEncrypted {
+				attType = xchatMediaType(content)
+				if attType == payload.MediaTypeAudio && mimeType != "audio/mp4" {
+					data, err = tc.client.ConvertVoicePayload(ctx, data, mimeType)
+					if err != nil {
+						return nil, err
+					}
 				}
-				data = converted
-				mimeType = "video/mp4"
-			}
-
-			attType := payload.MediaTypeImage
-			switch content.MsgType {
-			case event.MsgVideo:
-				attType = payload.MediaTypeVideo
-			case event.MsgAudio:
-				attType = payload.MediaTypeAudio
+			} else {
+				attType = payload.MediaTypeImage
+				switch content.MsgType {
+				case event.MsgVideo:
+					attType = payload.MediaTypeVideo
+				case event.MsgAudio:
+					attType = payload.MediaTypeAudio
+					if mimeType != "video/mp4" {
+						data, err = tc.client.ConvertAudioPayload(ctx, data, mimeType)
+						if err != nil {
+							return nil, err
+						}
+						mimeType = "video/mp4"
+					}
+				}
 			}
 			width := int64(content.Info.Width)
 			height := int64(content.Info.Height)
@@ -242,18 +261,26 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 					Str("media_hash_key", uploadResult.MediaHashKey).
 					Msg("Successfully uploaded encrypted media to XChat")
 
-				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
-					Media: &payload.MediaAttachment{
-						MediaHashKey: &uploadResult.MediaHashKey,
-						Type:         ptr.Ptr(int32(attType)),
-						Dimensions: &payload.MediaDimensions{
-							Width:  &width,
-							Height: &height,
-						},
-						FilesizeBytes: &size,
-						Filename:      ptr.Ptr(content.FileName),
+				filename := content.FileName
+				if filename == "" && attType == payload.MediaTypeFile {
+					filename = content.Body
+				} else if attType == payload.MediaTypeAudio && filename != "" {
+					filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".m4a"
+				}
+				media := &payload.MediaAttachment{
+					MediaHashKey: &uploadResult.MediaHashKey,
+					Type:         ptr.Ptr(int32(attType)),
+					Dimensions: &payload.MediaDimensions{
+						Width:  &width,
+						Height: &height,
 					},
-				})
+					FilesizeBytes: &size,
+					Filename:      ptr.Ptr(filename),
+				}
+				if content.Info.Duration > 0 && (attType == payload.MediaTypeAudio || attType == payload.MediaTypeVideo) {
+					media.DurationMillis = ptr.Ptr(int64(content.Info.Duration))
+				}
+				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{Media: media})
 			} else {
 				mediaCategory := payload.MEDIA_CATEGORY_DM_IMAGE
 				switch content.MsgType {
@@ -379,6 +406,25 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		DB:            dbMsg,
 		RemovePending: txnID,
 	}, nil
+}
+
+func xchatMediaType(content *event.MessageEventContent) payload.MediaType {
+	switch content.MsgType {
+	case event.MsgVideo:
+		return payload.MediaTypeVideo
+	case event.MsgAudio:
+		if content.MSC3245Voice != nil {
+			return payload.MediaTypeAudio
+		}
+		return payload.MediaTypeFile
+	case event.MsgFile:
+		return payload.MediaTypeFile
+	default:
+		if content.Info.MimeType == "image/gif" {
+			return payload.MediaTypeGif
+		}
+		return payload.MediaTypeImage
+	}
 }
 
 func buildReplyingToPreview(
