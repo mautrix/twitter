@@ -117,7 +117,8 @@ var xchatGroupCaps = ptr.Clone(groupCaps)
 
 func init() {
 	xchatGroupCaps.State = event.StateFeatureMap{
-		event.StateRoomName.Type: {Level: event.CapLevelFullySupported},
+		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
 	}
 	xchatGroupCaps.MemberActions = nil
 	xchatGroupCaps.ID += "+xchat.2"

@@ -21,15 +21,63 @@ func (c *Client) EditXChatGroupTitle(ctx context.Context, conversationID, title 
 	if conversationID == "" {
 		return errors.New("conversation ID is required")
 	}
-	senderID := c.GetCurrentUserID()
-	if senderID == "" {
-		return errors.New("sender ID is required")
-	}
 	convKey, err := c.keyManager.GetLatestConversationKey(ctx, conversationID)
 	if err != nil {
 		return fmt.Errorf("get conversation key: %w", err)
 	} else if convKey == nil || len(convKey.Key) == 0 || convKey.KeyVersion == "" {
 		return crypto.ErrKeyNotFound
+	}
+	encryptedTitle, err := crypto.SecretboxEncrypt([]byte(title), convKey.Key)
+	if err != nil {
+		return fmt.Errorf("encrypt group title: %w", err)
+	}
+	encodedTitle := base64.StdEncoding.EncodeToString(encryptedTitle)
+	return c.editXChatGroup(ctx, payload.EditGroupConversationMutationVariables{
+		ConversationID:         conversationID,
+		ConversationKeyVersion: convKey.KeyVersion,
+		GroupName:              &encodedTitle,
+		ModifiedFields:         []payload.EditGroupFieldName{payload.EditGroupFieldTitle},
+	}, "GroupTitleChange", &payload.GroupChange{
+		GroupTitleChange: &payload.GroupTitleChange{
+			CustomTitle:            &encodedTitle,
+			ConversationKeyVersion: &convKey.KeyVersion,
+		},
+	}, convKey.KeyVersion, encodedTitle)
+}
+
+// EditXChatGroupAvatar uploads a new X Chat group avatar, encrypted with the latest conversation key, and sets it.
+func (c *Client) EditXChatGroupAvatar(ctx context.Context, conversationID string, avatar []byte) (string, error) {
+	if conversationID == "" {
+		return "", errors.New("conversation ID is required")
+	}
+	uploaded, err := c.UploadXChatMedia(ctx, conversationID, fmt.Sprintf("avatar-%s-%s", conversationID, uuid.NewString()), avatar)
+	if err != nil {
+		return "", fmt.Errorf("upload group avatar: %w", err)
+	}
+	avatarURL := fmt.Sprintf("%s/%s/%s", endpoints.XCHAT_MEDIA_BASE_URL, conversationID, uploaded.MediaHashKey)
+	return avatarURL, c.editXChatGroup(ctx, payload.EditGroupConversationMutationVariables{
+		ConversationID:         conversationID,
+		ConversationKeyVersion: uploaded.KeyVersion,
+		AvatarURL:              &avatarURL,
+		ModifiedFields:         []payload.EditGroupFieldName{payload.EditGroupFieldAvatar},
+	}, "GroupAvatarUrlChange", &payload.GroupChange{
+		GroupAvatarChange: &payload.GroupAvatarUrlChange{
+			CustomAvatarUrl:        &avatarURL,
+			ConversationKeyVersion: &uploaded.KeyVersion,
+		},
+	}, uploaded.KeyVersion, avatarURL)
+}
+
+func (c *Client) editXChatGroup(
+	ctx context.Context,
+	vars payload.EditGroupConversationMutationVariables,
+	changeName string,
+	change *payload.GroupChange,
+	signatureFields ...string,
+) error {
+	senderID := c.GetCurrentUserID()
+	if senderID == "" {
+		return errors.New("sender ID is required")
 	}
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
@@ -38,52 +86,32 @@ func (c *Client) EditXChatGroupTitle(ctx context.Context, conversationID, title 
 		return errors.New("missing signing key")
 	}
 
-	encryptedTitle, err := crypto.SecretboxEncrypt([]byte(title), convKey.Key)
-	if err != nil {
-		return fmt.Errorf("encrypt group title: %w", err)
-	}
-	encodedTitle := base64.StdEncoding.EncodeToString(encryptedTitle)
-
 	messageID := uuid.NewString()
 	encodedDetail, err := crypto.EncodeMessageEventDetail(&payload.MessageEventDetail{
-		GroupChangeEvent: &payload.GroupChangeEvent{
-			GroupChange: &payload.GroupChange{
-				GroupTitleChange: &payload.GroupTitleChange{
-					CustomTitle:            &encodedTitle,
-					ConversationKeyVersion: &convKey.KeyVersion,
-				},
-			},
-		},
+		GroupChangeEvent: &payload.GroupChangeEvent{GroupChange: change},
 	})
 	if err != nil {
-		return fmt.Errorf("encode group title change: %w", err)
+		return fmt.Errorf("encode group change: %w", err)
 	}
-	signaturePayload, err := crypto.SignaturePayloadGroupChange("GroupTitleChange", messageID, senderID, conversationID, convKey.KeyVersion, encodedTitle)
+	signaturePayload, err := crypto.SignaturePayloadGroupChange(changeName, messageID, senderID, vars.ConversationID, signatureFields...)
 	if err != nil {
 		return err
 	}
 	signature, err := crypto.Sign(keyPair.SigningKey, []byte(signaturePayload))
 	if err != nil {
-		return fmt.Errorf("sign group title change: %w", err)
+		return fmt.Errorf("sign group change: %w", err)
 	}
-
-	pl := payload.NewEditGroupConversationMutationPayload(payload.EditGroupConversationMutationVariables{
-		ConversationID:         conversationID,
-		ConversationKeyVersion: convKey.KeyVersion,
-		GroupName:              &encodedTitle,
-		ModifiedFields:         []payload.EditGroupFieldName{payload.EditGroupFieldTitle},
-		ActionSignatures: []payload.DeleteMessageActionSignature{{
-			MessageID:                 messageID,
-			EncodedMessageEventDetail: encodedDetail,
-			SignaturePayload:          signaturePayload,
-			MessageEventSignature: &payload.DeleteMessageEventSignatureJSON{
-				Signature:        signature,
-				PublicKeyVersion: keyPair.KeyVersion,
-				SignatureVersion: crypto.SignatureVersion7,
-			},
-		}},
-	})
-	jsonBody, err := json.Marshal(pl)
+	vars.ActionSignatures = []payload.DeleteMessageActionSignature{{
+		MessageID:                 messageID,
+		EncodedMessageEventDetail: encodedDetail,
+		SignaturePayload:          signaturePayload,
+		MessageEventSignature: &payload.DeleteMessageEventSignatureJSON{
+			Signature:        signature,
+			PublicKeyVersion: keyPair.KeyVersion,
+			SignatureVersion: crypto.SignatureVersion7,
+		},
+	}}
+	jsonBody, err := json.Marshal(payload.NewEditGroupConversationMutationPayload(vars))
 	if err != nil {
 		return err
 	}

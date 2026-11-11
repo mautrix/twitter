@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -957,7 +958,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 	if msg.Portal.RoomType == database.RoomTypeDM {
 		return false, bridgev2.ErrRoomMetadataNotAllowed
 	} else if isXChatGroupPortal(msg.Portal) {
-		return false, bridgev2.ErrRoomMetadataNotSupported
+		return tc.handleXChatGroupAvatar(ctx, msg)
 	}
 
 	if msg.Content.URL != "" || msg.Content.MSC3414File != nil {
@@ -991,6 +992,24 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 		return true, nil
 	}
 	return false, errors.New("avatar not found")
+}
+
+func (tc *TwitterClient) handleXChatGroupAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
+	if msg.Content.URL == "" && msg.Content.MSC3414File == nil {
+		return false, fmt.Errorf("%w: removing X Chat group avatars", bridgev2.ErrRoomMetadataNotSupported)
+	}
+	data, err := msg.Portal.Bridge.Bot.DownloadMedia(ctx, msg.Content.URL, msg.Content.MSC3414File)
+	if err != nil {
+		return false, fmt.Errorf("failed to download avatar: %w", err)
+	}
+	avatarURL, err := tc.client.EditXChatGroupAvatar(ctx, ParsePortalID(msg.Portal.ID), data)
+	if err != nil {
+		return false, withoutNotice(wrapTwitterMatrixError(err))
+	}
+	msg.Portal.AvatarID = networkid.AvatarID(avatarURL)
+	msg.Portal.AvatarMXC = msg.Content.URL
+	msg.Portal.AvatarHash = sha256.Sum256(data)
+	return true, nil
 }
 
 func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
