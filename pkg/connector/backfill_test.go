@@ -456,12 +456,9 @@ func TestPrepareRESTFallbackPreservesAnchorForFiltering(t *testing.T) {
 		AnchorMessage: anchor,
 	}
 
-	restParams, opts := prepareRESTBackfillFetchParams(params, restBackfillCursorModeFallback)
-	if restParams.Cursor != "" {
-		t.Fatalf("REST fallback cursor = %q, want empty", restParams.Cursor)
-	}
-	if !opts.IgnoreAnchorForQuery {
-		t.Fatal("REST fallback did not ignore the XChat anchor for the REST query")
+	restParams := prepareRESTBackfillFetchParams(params, restBackfillCursorModeFallback)
+	if restParams.Cursor != "xchat-cursor" {
+		t.Fatalf("REST fallback cursor = %q, want %q", restParams.Cursor, "xchat-cursor")
 	}
 	if restParams.AnchorMessage != anchor {
 		t.Fatal("REST fallback removed the anchor needed for response filtering")

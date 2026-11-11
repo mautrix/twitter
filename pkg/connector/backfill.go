@@ -32,13 +32,6 @@ const xchatBackfillMaxInt = "9223372036854775807"
 const restFallbackCursorPrefix = "rest_fallback:"
 const restPaginationCursorPrefix = "rest_cursor:"
 
-type restBackfillOptions struct {
-	// IgnoreAnchorForQuery skips using AnchorMessage.ID as max_id/min_id.
-	// This is needed when transitioning from XChat to REST where the anchor ID
-	// may be an XChat sequence ID that REST can't paginate with.
-	IgnoreAnchorForQuery bool
-}
-
 func (tc *TwitterClient) GetBackfillMaxBatchCount(_ context.Context, portal *bridgev2.Portal, _ *database.BackfillTask) int {
 	overrideKey := "dm"
 	if strings.HasPrefix(ParsePortalID(portal.PortalKey.ID), "g") {
@@ -70,17 +63,15 @@ func parseRESTBackfillCursorMode(cursor networkid.PaginationCursor) restBackfill
 func prepareRESTBackfillFetchParams(
 	fetchParams bridgev2.FetchMessagesParams,
 	mode restBackfillCursorMode,
-) (bridgev2.FetchMessagesParams, restBackfillOptions) {
+) bridgev2.FetchMessagesParams {
 	restParams := fetchParams
-	opts := restBackfillOptions{}
 	switch mode {
 	case restBackfillCursorModeFallback:
-		restParams.Cursor = ""
-		opts.IgnoreAnchorForQuery = true
+		restParams.Cursor = networkid.PaginationCursor(strings.TrimPrefix(string(fetchParams.Cursor), restFallbackCursorPrefix))
 	case restBackfillCursorModePagination:
 		restParams.Cursor = networkid.PaginationCursor(strings.TrimPrefix(string(fetchParams.Cursor), restPaginationCursorPrefix))
 	}
-	return restParams, opts
+	return restParams
 }
 
 func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
@@ -89,8 +80,7 @@ func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
 	fetchParams bridgev2.FetchMessagesParams,
 	mode restBackfillCursorMode,
 ) (*bridgev2.FetchMessagesResponse, error) {
-	restParams, opts := prepareRESTBackfillFetchParams(fetchParams, mode)
-	restResp, err := tc.fetchRESTMessagesWithOptions(ctx, conversationID, restParams, opts)
+	restResp, err := tc.fetchRESTMessages(ctx, conversationID, prepareRESTBackfillFetchParams(fetchParams, mode))
 	if err != nil {
 		return nil, err
 	}
@@ -774,11 +764,10 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 	})
 }
 
-func (tc *TwitterClient) fetchRESTMessagesWithOptions(
+func (tc *TwitterClient) fetchRESTMessages(
 	ctx context.Context,
 	conversationID string,
 	fetchParams bridgev2.FetchMessagesParams,
-	opts restBackfillOptions,
 ) (*bridgev2.FetchMessagesResponse, error) {
 	log := zerolog.Ctx(ctx)
 	reqQuery := payload.DMRequestQuery{}.Default()
@@ -799,27 +788,16 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		}, nil
 	}
 
-	// When explicitly ignoring anchor IDs, also ignore cursor IDs to avoid
-	// passing XChat sequence IDs into REST max_id/min_id pagination.
 	cursorForQuery := fetchParams.Cursor
-	if opts.IgnoreAnchorForQuery && cursorForQuery != "" {
-		log.Debug().
-			Str("conversation_id", restConvID).
-			Str("original_cursor", string(cursorForQuery)).
-			Bool("cursor_cleared_for_rest", true).
-			Msg("Ignoring cursor for REST backfill query due to cross-protocol fallback")
-		cursorForQuery = ""
-	}
-
 	if fetchParams.Forward {
 		if cursorForQuery != "" {
 			reqQuery.MinID = string(cursorForQuery)
-		} else if fetchParams.AnchorMessage != nil && !opts.IgnoreAnchorForQuery {
+		} else if fetchParams.AnchorMessage != nil {
 			reqQuery.MinID = ParseMessageID(fetchParams.AnchorMessage.ID)
 		}
 	} else if cursorForQuery != "" {
 		reqQuery.MaxID = string(cursorForQuery)
-	} else if fetchParams.AnchorMessage != nil && !opts.IgnoreAnchorForQuery {
+	} else if fetchParams.AnchorMessage != nil {
 		reqQuery.MaxID = ParseMessageID(fetchParams.AnchorMessage.ID)
 	} else {
 		log.Debug().
@@ -1052,7 +1030,6 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 		Str("selected_message_conversation_id", selectedMessageConversationID).
 		Str("cursor", string(result.Cursor)).
 		Bool("forward", fetchParams.Forward).
-		Bool("ignore_anchor_for_query", opts.IgnoreAnchorForQuery).
 		Bool("forced_older_page", forcedOlderPage).
 		Msg("REST API backfill response")
 
