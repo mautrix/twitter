@@ -173,7 +173,8 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 	}
 	fromQueue := fetchParams.Task != nil && fetchParams.Task.FromQueue
 	now := time.Now()
-	if now.UnixMilli() < max(tc.backfillPausedUntil.Load(), tc.xchatGapCatchupPausedUntil.Load()) {
+	if now.UnixMilli() < max(tc.backfillPausedUntil.Load(), tc.xchatGapCatchupPausedUntil.Load()) ||
+		now.Before(twittermeow.CloudflareCooldownUntil()) {
 		if !fromQueue {
 			return nil, errBackfillPaused
 		}
@@ -324,7 +325,8 @@ func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversat
 		}
 	}
 	maxPages := int(math.Ceil(float64(count) / float64(pageSize)))
-	if fetchParams.AnchorMessage == nil && backfillPacingEnabled() {
+	if queue := tc.connector.br.Config.Backfill.Queue; fetchParams.AnchorMessage == nil && backfillPacingEnabled() &&
+		queue.Enabled && tc.GetBackfillMaxBatchCount(ctx, fetchParams.Portal, nil) != 0 {
 		maxPages = 1
 	}
 	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
