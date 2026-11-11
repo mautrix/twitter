@@ -17,17 +17,21 @@
 package connector
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exmime"
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -42,13 +46,15 @@ import (
 )
 
 func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
-	existingPart := existing[0]
-	for _, part := range existing[1:] {
-		if part.PartID < existingPart.PartID {
-			existingPart = part
-		}
+	parts := slices.Clone(existing)
+	slices.SortFunc(parts, func(a, b *database.Message) int {
+		return cmp.Compare(partIndex(a.PartID), partIndex(b.PartID))
+	})
+	targetPart, previous := tc.findEditTargetPart(ctx, portal, parts)
+	if targetPart == nil {
+		targetPart = parts[0]
 	}
-	meta, ok := existingPart.Metadata.(*MessageMetadata)
+	meta, ok := targetPart.Metadata.(*MessageMetadata)
 	if !ok || meta == nil {
 		meta = &MessageMetadata{}
 	}
@@ -58,12 +64,23 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	} else if meta.EditCount >= editData.EditCount {
 		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, editData.EditCount)
 	}
-	var converted *bridgev2.ConvertedMessage
-	if linkPreviews, isText := tc.getTextPartLinkPreviews(ctx, portal, existingPart); isText {
-		editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
-		converted = tc.convertToMatrix(ctx, portal, intent, &editData)
-		if len(converted.Parts) == 1 && converted.Parts[0].Content != nil && len(converted.Parts[0].Content.BeeperLinkPreviews) == 0 {
-			converted.Parts[0].Content.BeeperLinkPreviews = linkPreviews
+	editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
+	var editedPart *bridgev2.ConvertedMessagePart
+	if previous != nil {
+		editData.Attachments = nil
+		editData.Attachment = nil
+		textConverted := tc.convertToMatrix(ctx, portal, intent, &editData)
+		var textPart *bridgev2.ConvertedMessagePart
+		if len(textConverted.Parts) > 0 {
+			textPart = textConverted.Parts[0]
+		}
+		if previous.Content.MsgType.IsMedia() {
+			editedPart = bridgev2.MergeCaption(textPart, previous)
+		} else if textPart != nil {
+			editedPart = textPart
+			if len(editedPart.Content.BeeperLinkPreviews) == 0 {
+				editedPart.Content.BeeperLinkPreviews = previous.Content.BeeperLinkPreviews
+			}
 		}
 	} else {
 		originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
@@ -74,12 +91,16 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 		}
 		editData = mergeXChatEditData(originalData, &editData)
 		editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
-		converted = tc.convertToMatrix(ctx, portal, intent, &editData)
+		converted := tc.convertToMatrix(ctx, portal, intent, &editData)
+		if len(converted.Parts) > 0 {
+			editedPart = converted.Parts[0]
+		}
+		targetPart = parts[0]
 	}
-	if len(converted.Parts) == 0 || converted.Parts[0].Content == nil {
+	if editedPart == nil || editedPart.Content == nil {
 		return nil, fmt.Errorf("failed to convert edit: no message content")
 	}
-	editPart := converted.Parts[0].ToEditPart(existingPart)
+	editPart := editedPart.ToEditPart(targetPart)
 	updatedMeta := *meta
 	updatedMeta.EditCount = editData.EditCount
 	editPart.Part.Metadata = &updatedMeta
@@ -88,20 +109,70 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	}, nil
 }
 
-func (tc *TwitterClient) getTextPartLinkPreviews(ctx context.Context, portal *bridgev2.Portal, part *database.Message) ([]*event.BeeperLinkPreview, bool) {
-	if part.MXID == "" || portal.MXID == "" {
-		return nil, false
+func partIndex(partID networkid.PartID) int {
+	if partID == "" {
+		return 0
 	}
-	evt, err := tc.connector.br.Bot.GetEvent(ctx, portal.MXID, part.MXID)
+	idx, err := strconv.Atoi(string(partID))
 	if err != nil {
-		zerolog.Ctx(ctx).Debug().Err(err).Stringer("event_id", part.MXID).Msg("Failed to fetch Matrix event of edit target")
-		return nil, false
+		return math.MaxInt
 	}
-	content, ok := evt.Content.Parsed.(*event.MessageEventContent)
-	if !ok || content == nil || content.MsgType.IsMedia() {
-		return nil, false
+	return idx
+}
+
+var editPreservedContentKeys = map[string]struct{}{
+	"body": {}, "format": {}, "formatted_body": {}, "m.mentions": {}, "com.beeper.linkpreviews": {},
+	"msgtype": {}, "url": {}, "file": {}, "info": {}, "filename": {}, "m.relates_to": {}, "m.new_content": {},
+	"org.matrix.msc3245.voice": {}, "org.matrix.msc1767.audio": {},
+}
+
+// findEditTargetPart returns the part that holds the message text and its current content, rebuilt
+// without the old caption, so edits don't need the original from X. It returns nil when the
+// message has to be reconverted from the original (forwards and parts that failed to bridge).
+func (tc *TwitterClient) findEditTargetPart(ctx context.Context, portal *bridgev2.Portal, parts []*database.Message) (*database.Message, *bridgev2.ConvertedMessagePart) {
+	if portal.MXID == "" {
+		return nil, nil
 	}
-	return content.BeeperLinkPreviews, true
+	for _, part := range parts {
+		if part.MXID == "" {
+			return nil, nil
+		}
+		evt, err := tc.connector.br.Bot.GetEvent(ctx, portal.MXID, part.MXID)
+		if err != nil {
+			zerolog.Ctx(ctx).Debug().Err(err).Stringer("event_id", part.MXID).Msg("Failed to fetch Matrix event of edit target")
+			return nil, nil
+		}
+		content, ok := evt.Content.Parsed.(*event.MessageEventContent)
+		if !ok || content == nil {
+			return nil, nil
+		}
+		if strings.Contains(content.FormattedBody, "data-mx-forwarded-notice") {
+			return nil, nil
+		}
+		switch {
+		case content.MsgType == event.MsgText || content.MsgType == event.MsgEmote:
+			return part, &bridgev2.ConvertedMessagePart{Type: event.EventMessage, Content: content}
+		case content.MsgType.IsMedia():
+			media := ptr.Clone(content)
+			if media.FileName != "" && media.Body != media.FileName {
+				media.Body = media.FileName
+			}
+			media.Format = ""
+			media.FormattedBody = ""
+			media.Mentions = nil
+			media.BeeperLinkPreviews = nil
+			media.RelatesTo = nil
+			media.NewContent = nil
+			extra := map[string]any{}
+			for key, value := range evt.Content.Raw {
+				if _, skip := editPreservedContentKeys[key]; !skip {
+					extra[key] = value
+				}
+			}
+			return part, &bridgev2.ConvertedMessagePart{Type: event.EventMessage, Content: media, Extra: extra}
+		}
+	}
+	return nil, nil
 }
 
 func (tc *TwitterClient) convertXChatEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData, editID string) (*bridgev2.ConvertedEdit, error) {
