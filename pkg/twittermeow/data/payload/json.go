@@ -350,9 +350,9 @@ type SendMessageMutationPayload struct {
 
 func NewSendMessageMutationPayload(vars SendMessageMutationVariables) *SendMessageMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "LkAIEchf8AGj-WgeLoTVcw"
+	ext.PersistedQuery.Sha256Hash = "TWRPP7gnKwV_R8-tE-Dd3Q"
 	return &SendMessageMutationPayload{
-		OperationName: "SendMessageMutation",
+		OperationName: "SendMessageCreateMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}
@@ -415,7 +415,7 @@ type InitializeXChatMediaUploadVariables struct {
 }
 
 func (p *InitializeXChatMediaUploadPayload) Default() *InitializeXChatMediaUploadPayload {
-	p.OperationName = "InitializeXChatMediaUpload"
+	p.OperationName = "InitializeXChatMediaUploadMutation"
 	p.Extensions = DefaultApolloExtensions()
 	return p
 }
@@ -437,7 +437,7 @@ type FinalizeXChatMediaUploadVariables struct {
 }
 
 func (p *FinalizeXChatMediaUploadPayload) Default() *FinalizeXChatMediaUploadPayload {
-	p.OperationName = "FinalizeXChatMediaUpload"
+	p.OperationName = "FinalizeXChatMediaUploadMutation"
 	p.Extensions = DefaultApolloExtensions()
 	return p
 }

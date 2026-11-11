@@ -2,7 +2,9 @@ package response
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -88,11 +90,26 @@ type GetInboxPageRequestQueryResponse struct {
 type GetInboxPageConversationDataResponse struct {
 	Data struct {
 		GetInboxPageConversationData struct {
-			Typename string         `json:"__typename,omitempty"`
-			Data     XChatInboxItem `json:"data"`
+			Typename string           `json:"__typename,omitempty"`
+			Items    []XChatInboxItem `json:"items"`
 		} `json:"get_inbox_page_conversation_data"`
 	} `json:"data"`
 	Errors []XChatGraphQLError `json:"errors,omitempty"`
+}
+
+var ErrConversationDataMissing = errors.New("conversation data response didn't include the conversation")
+
+// Item returns the conversation data for the requested conversation.
+func (r *GetInboxPageConversationDataResponse) Item(conversationID string) (XChatInboxItem, error) {
+	items := r.Data.GetInboxPageConversationData.Items
+	for _, item := range items {
+		returnedID := item.ConversationDetail.ConversationID
+		if returnedID == conversationID || (strings.HasPrefix(conversationID, "g") && returnedID == conversationID[1:]) ||
+			(returnedID == "" && len(items) == 1) {
+			return item, nil
+		}
+	}
+	return XChatInboxItem{}, fmt.Errorf("%w: %s", ErrConversationDataMissing, conversationID)
 }
 
 type XChatInboxPage struct {
@@ -213,7 +230,7 @@ type XChatGroupInviteDetails struct {
 
 type XChatParticipantReadEvent struct {
 	Typename                        string             `json:"__typename,omitempty"`
-	ParticipantID                   XChatParticipantID `json:"participant_id,omitempty"`
+	ParticipantID                   XChatParticipantID `json:"participant_id_results,omitempty"`
 	LatestMarkConversationReadEvent string             `json:"latest_mark_conversation_read_event,omitempty"`
 }
 
