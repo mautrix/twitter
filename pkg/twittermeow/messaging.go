@@ -942,192 +942,75 @@ func parseDeleteMessageMutationResponse(respBody []byte) error {
 
 // MuteConversation mutes a conversation via the XChat MuteConversation GraphQL endpoint.
 func (c *Client) MuteConversation(ctx context.Context, conversationID string) error {
-	if conversationID == "" {
-		return fmt.Errorf("conversation ID is required")
-	}
-
-	senderID := c.GetCurrentUserID()
-	if senderID == "" {
-		return fmt.Errorf("sender ID is required")
-	}
-
-	token, err := c.ensureConversationToken(ctx, conversationID)
-	if err != nil {
-		return fmt.Errorf("get conversation token: %w", err)
-	}
-
-	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
-	if err != nil {
-		return fmt.Errorf("get signing key: %w", err)
-	}
-	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
-		return fmt.Errorf("missing signing key data: signed conversation deletion requires message_event_signature")
-	}
-
-	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
-	messageID := uuid.NewString()
-
-	detail := &payload.MuteConversation{
-		MutedConversationIds: []string{conversationID},
-	}
-
-	encodedDetail, err := crypto.EncodeMuteConversation(detail)
-	if err != nil {
-		return fmt.Errorf("encode mute conversation: %w", err)
-	}
-
-	actionSig := payload.DeleteMessageActionSignature{
-		MessageID:                 messageID,
-		EncodedMessageEventDetail: encodedDetail,
-	}
-	actionSig.SignaturePayload = crypto.SignaturePayloadMuteConversation(
-		messageID,
-		senderID,
-		conversationID,
-		token,
-		createdAtMsec,
-		encodedDetail,
-	)
-
-	if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
-		signature, err := crypto.SignMuteConversation(
-			keyPair.SigningKey,
-			messageID,
-			senderID,
-			conversationID,
-			token,
-			createdAtMsec,
-			encodedDetail,
-		)
-		if err != nil {
-			return fmt.Errorf("sign mute event: %w", err)
-		}
-
-		sigVersion := crypto.SignatureVersion4
-		actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
-			Signature:        signature,
-			PublicKeyVersion: keyPair.KeyVersion,
-			SignatureVersion: sigVersion,
-		}
-	}
-
-	pl := payload.NewMuteConversationMutationPayload(payload.MuteConversationMutationVariables{
-		ConversationIDs:  []string{conversationID},
-		ActionSignatures: []payload.DeleteMessageActionSignature{actionSig},
-	})
-
-	jsonBody, err := json.Marshal(pl)
-	if err != nil {
-		return err
-	}
-
-	c.Logger.Debug().
-		RawJSON("payload", jsonBody).
-		Msg("MuteConversation payload")
-
-	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.MUTE_CONVERSATION_URL,
-		Method:         http.MethodPost,
-		WithClientUUID: true,
-		Origin:         endpoints.BASE_URL,
-		ContentType:    types.ContentTypeJSON,
-		Body:           jsonBody,
-	})
-	if err != nil {
-		return err
-	}
-
-	c.Logger.Debug().
-		RawJSON("response", respBody).
-		Msg("MuteConversation response")
-
-	return nil
+	return c.setConversationMuted(ctx, conversationID, true)
 }
 
 // UnmuteConversation unmutes a conversation via the XChat UnmuteConversation GraphQL endpoint.
 func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) error {
+	return c.setConversationMuted(ctx, conversationID, false)
+}
+
+func (c *Client) setConversationMuted(ctx context.Context, conversationID string, muted bool) error {
 	if conversationID == "" {
 		return fmt.Errorf("conversation ID is required")
 	}
-
 	senderID := c.GetCurrentUserID()
 	if senderID == "" {
 		return fmt.Errorf("sender ID is required")
 	}
-
-	token, err := c.ensureConversationToken(ctx, conversationID)
-	if err != nil {
-		return fmt.Errorf("get conversation token: %w", err)
-	}
-
 	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
 	if err != nil {
 		return fmt.Errorf("get signing key: %w", err)
+	} else if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return fmt.Errorf("missing signing key")
 	}
 
-	createdAtMsec := fmt.Sprintf("%d", time.Now().UnixMilli())
-	messageID := uuid.NewString()
-
-	detail := &payload.UnmuteConversation{
-		UnmutedConversationIds: []string{conversationID},
+	change := &payload.ConversationMetadataChange{}
+	changeName, url, resultField := "UnmuteConversation", endpoints.UNMUTE_CONVERSATION_URL, "xchat_unmute_conversation"
+	if muted {
+		change.MuteConversation = &payload.MuteConversation{MutedConversationIds: []string{conversationID}}
+		changeName, url, resultField = "MuteConversation", endpoints.MUTE_CONVERSATION_URL, "xchat_mute_conversation"
+	} else {
+		change.UnmuteConversation = &payload.UnmuteConversation{UnmutedConversationIds: []string{conversationID}}
 	}
-
-	encodedDetail, err := crypto.EncodeUnmuteConversation(detail)
-	if err != nil {
-		return fmt.Errorf("encode unmute conversation: %w", err)
-	}
-
-	actionSig := payload.DeleteMessageActionSignature{
-		MessageID:                 messageID,
-		EncodedMessageEventDetail: encodedDetail,
-	}
-	actionSig.SignaturePayload = crypto.SignaturePayloadUnmuteConversation(
-		messageID,
-		senderID,
-		conversationID,
-		token,
-		createdAtMsec,
-		encodedDetail,
-	)
-
-	if keyPair != nil && keyPair.SigningKey != nil && keyPair.KeyVersion != "" {
-		signature, err := crypto.SignUnmuteConversation(
-			keyPair.SigningKey,
-			messageID,
-			senderID,
-			conversationID,
-			token,
-			createdAtMsec,
-			encodedDetail,
-		)
-		if err != nil {
-			return fmt.Errorf("sign unmute event: %w", err)
-		}
-
-		sigVersion := crypto.SignatureVersion4
-		actionSig.MessageEventSignature = &payload.DeleteMessageEventSignatureJSON{
-			Signature:        signature,
-			PublicKeyVersion: keyPair.KeyVersion,
-			SignatureVersion: sigVersion,
-		}
-	}
-
-	pl := payload.NewUnmuteConversationMutationPayload(payload.UnmuteConversationMutationVariables{
-		ConversationIDs:  []string{conversationID},
-		ActionSignatures: []payload.DeleteMessageActionSignature{actionSig},
+	encodedDetail, err := crypto.EncodeMessageEventDetail(&payload.MessageEventDetail{
+		ConversationMetadataChangeEvent: &payload.ConversationMetadataChangeEvent{ConversationMetadataChange: change},
 	})
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", changeName, err)
+	}
 
+	messageID := uuid.NewString()
+	// Metadata changes are signed against the user's own self-conversation.
+	selfConversationID := senderID + ":" + senderID
+	signaturePayload := crypto.SignaturePayloadConversationMetadataChange(changeName, messageID, senderID, selfConversationID, conversationID)
+	signature, err := crypto.Sign(keyPair.SigningKey, []byte(signaturePayload))
+	if err != nil {
+		return fmt.Errorf("sign %s: %w", changeName, err)
+	}
+	vars := payload.MuteConversationMutationVariables{
+		ConversationIDs: []string{conversationID},
+		ActionSignatures: []payload.DeleteMessageActionSignature{{
+			MessageID:                 messageID,
+			EncodedMessageEventDetail: encodedDetail,
+			SignaturePayload:          signaturePayload,
+			MessageEventSignature: &payload.DeleteMessageEventSignatureJSON{
+				Signature:        signature,
+				PublicKeyVersion: keyPair.KeyVersion,
+				SignatureVersion: crypto.SignatureVersion7,
+			},
+		}},
+	}
+	var pl any = payload.NewUnmuteConversationMutationPayload(payload.UnmuteConversationMutationVariables(vars))
+	if muted {
+		pl = payload.NewMuteConversationMutationPayload(vars)
+	}
 	jsonBody, err := json.Marshal(pl)
 	if err != nil {
 		return err
 	}
-
-	c.Logger.Debug().
-		RawJSON("payload", jsonBody).
-		Msg("UnmuteConversation payload")
-
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            endpoints.UNMUTE_CONVERSATION_URL,
+		URL:            url,
 		Method:         http.MethodPost,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
@@ -1137,11 +1020,19 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 	if err != nil {
 		return err
 	}
-
-	c.Logger.Debug().
-		RawJSON("response", respBody).
-		Msg("UnmuteConversation response")
-
+	var resp struct {
+		Data   map[string]json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err = json.Unmarshal(respBody, &resp); err != nil {
+		return fmt.Errorf("decode %s response: %w", changeName, err)
+	} else if len(resp.Errors) > 0 {
+		return fmt.Errorf("%s failed: %s", changeName, resp.Errors[0].Message)
+	} else if result := resp.Data[resultField]; len(result) == 0 || string(result) == "null" {
+		return fmt.Errorf("%s returned no result", changeName)
+	}
 	return nil
 }
 

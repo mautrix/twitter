@@ -110,9 +110,9 @@ type MuteConversationMutationPayload struct {
 // NewMuteConversationMutationPayload creates a new MuteConversationMutationPayload with default extensions
 func NewMuteConversationMutationPayload(vars MuteConversationMutationVariables) *MuteConversationMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "Dy7geJg7CL5dqhsl6QBteg"
+	ext.PersistedQuery.Sha256Hash = "9hq3baCBRMAG9JuLtb0ubg"
 	return &MuteConversationMutationPayload{
-		OperationName: "MuteConversation",
+		OperationName: "MuteConversationMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}
@@ -134,9 +134,9 @@ type UnmuteConversationMutationPayload struct {
 // NewUnmuteConversationMutationPayload creates a new UnmuteConversationMutationPayload with default extensions
 func NewUnmuteConversationMutationPayload(vars UnmuteConversationMutationVariables) *UnmuteConversationMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "LnNSeGu4vnbwqXAvh7OlGQ"
+	ext.PersistedQuery.Sha256Hash = "UCN8vZu2Mui2iDY0MSYfLA"
 	return &UnmuteConversationMutationPayload{
-		OperationName: "UnmuteConversation",
+		OperationName: "UnmuteConversationMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}

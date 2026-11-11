@@ -105,40 +105,10 @@ func SignMessageDeleteEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, c
 	return Sign(privateKey, preimage)
 }
 
-// SignaturePreimageMuteConversation builds the preimage for signature version 4 for mute events.
-func SignaturePreimageMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
-	preimage := SignaturePayloadMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
-	return []byte(preimage)
-}
-
-// SignaturePayloadMuteConversation builds the canonical signature payload for MuteConversation.
-func SignaturePayloadMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) string {
-	return fmt.Sprintf("MuteConversation,%s,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
-}
-
-// SignMuteConversation creates a signature for a MuteConversation event.
-func SignMuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
-	preimage := SignaturePreimageMuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
-	return Sign(privateKey, preimage)
-}
-
-// SignaturePreimageUnmuteConversation builds the preimage for signature version 4 for unmute events.
-func SignaturePreimageUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) []byte {
-	preimage := SignaturePayloadUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
-	return []byte(preimage)
-}
-
-// SignaturePayloadUnmuteConversation builds the canonical signature payload for UnmuteConversation.
-func SignaturePayloadUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) string {
-	return fmt.Sprintf("UnmuteConversation,%s,%s,%s,%s,%s,%s",
-		messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
-}
-
-// SignUnmuteConversation creates a signature for an UnmuteConversation event.
-func SignUnmuteConversation(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail string) (string, error) {
-	preimage := SignaturePreimageUnmuteConversation(messageID, senderID, conversationID, conversationToken, createdAtMsec, encodedMessageEventDetail)
-	return Sign(privateKey, preimage)
+// SignaturePayloadConversationMetadataChange builds the version 7 signature payload for a
+// ConversationMetadataChangeEvent, named like "ConversationMetadataChangeEvent.MuteConversation".
+func SignaturePayloadConversationMetadataChange(change, messageID, senderID, conversationID string, extras ...string) string {
+	return strings.Join(append([]string{"ConversationMetadataChangeEvent." + change, messageID, senderID, conversationID}, extras...), ",")
 }
 
 // SignaturePayloadConversationDeletion builds the canonical signature payload for ConversationDeleteEvent.
