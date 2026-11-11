@@ -590,6 +590,16 @@ func (tc *TwitterClient) initSession(ctx context.Context, meta *UserLoginMetadat
 
 const migrationReauthExpiry = 30 * 24 * time.Hour
 
+func (tc *TwitterClient) expireMigrationReauth(ctx context.Context, since time.Time) {
+	zerolog.Ctx(ctx).Info().
+		Time("migration_reauth_since", since).
+		Msg("Passcode reauth wasn't completed in time, deleting login")
+	tc.userLogin.Delete(context.WithoutCancel(ctx), status.BridgeState{
+		StateEvent: status.StateLoggedOut,
+		Error:      "twitter-migration-expired",
+	}, bridgev2.DeleteOpts{DontCleanupRooms: true})
+}
+
 func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLoginMetadata) {
 	log := zerolog.Ctx(ctx)
 	if meta.MigrationReauthSince == nil {
@@ -597,16 +607,21 @@ func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLogi
 		if err := tc.userLogin.Save(ctx); err != nil {
 			log.Err(err).Msg("Failed to save passcode reauth start time")
 		}
-	} else if time.Since(*meta.MigrationReauthSince) > migrationReauthExpiry {
-		log.Info().
-			Time("migration_reauth_since", *meta.MigrationReauthSince).
-			Msg("Passcode reauth wasn't completed in time, deleting login")
-		tc.userLogin.Delete(context.WithoutCancel(ctx), status.BridgeState{
-			StateEvent: status.StateLoggedOut,
-			Error:      "twitter-migration-expired",
-		}, bridgev2.DeleteOpts{DontCleanupRooms: true})
+	}
+	expiresIn := time.Until(meta.MigrationReauthSince.Add(migrationReauthExpiry))
+	if expiresIn <= 0 {
+		tc.expireMigrationReauth(ctx, *meta.MigrationReauthSince)
 		return
 	}
+	go func() {
+		timer := time.NewTimer(expiresIn)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+			tc.expireMigrationReauth(ctx, *meta.MigrationReauthSince)
+		}
+	}()
 	log.Info().
 		Time("migration_reauth_since", *meta.MigrationReauthSince).
 		Msg("X Chat keys are missing, connecting in REST-only mode until the passcode is entered")
