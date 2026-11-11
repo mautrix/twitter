@@ -140,37 +140,48 @@ func (tc *TwitterClient) handleXChatArchiveChange(ctx context.Context, evt *type
 	}
 	tc.userLocalLock.Lock()
 	pinned := slices.Clone(meta.PinnedConversationIDs)
-	if meta.ArchiveSequenceIDs == nil {
-		meta.ArchiveSequenceIDs = make(map[string]string)
-	}
 	var changed []string
 	for _, conversationID := range evt.ConversationIDs {
 		conversationID = NormalizeConversationID(conversationID)
-		if evt.SequenceID == "" || compareIntStrings(evt.SequenceID, meta.ArchiveSequenceIDs[conversationID]) <= 0 {
+		if evt.SequenceID != "" && compareIntStrings(evt.SequenceID, meta.ArchiveSequenceIDs[conversationID]) > 0 {
+			changed = append(changed, conversationID)
+		}
+	}
+	tc.userLocalLock.Unlock()
+	if len(changed) == 0 {
+		return true
+	}
+	if !tc.queueUserLocalPortalInfo(ctx, changed, evt.Timestamp, func(conversationID string) *bridgev2.UserLocalPortalInfo {
+		switch {
+		case evt.Archived:
+			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagLowPriority)}
+		case slices.Contains(pinned, conversationID):
+			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagFavourite)}
+		default:
+			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTag(""))}
+		}
+	}) {
+		return false
+	}
+	tc.userLocalLock.Lock()
+	defer tc.userLocalLock.Unlock()
+	if meta.ArchiveSequenceIDs == nil {
+		meta.ArchiveSequenceIDs = make(map[string]string)
+	}
+	for _, conversationID := range changed {
+		if compareIntStrings(evt.SequenceID, meta.ArchiveSequenceIDs[conversationID]) <= 0 {
 			continue
 		}
 		meta.ArchiveSequenceIDs[conversationID] = evt.SequenceID
-		changed = append(changed, conversationID)
 		meta.ArchivedConversationIDs = slices.DeleteFunc(meta.ArchivedConversationIDs, func(id string) bool { return id == conversationID })
 		if evt.Archived {
 			meta.ArchivedConversationIDs = append(meta.ArchivedConversationIDs, conversationID)
 		}
 	}
-	err := tc.userLogin.Save(ctx)
-	tc.userLocalLock.Unlock()
-	if err != nil {
+	if err := tc.userLogin.Save(ctx); err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to save archived conversations")
 	}
-	return tc.queueUserLocalPortalInfo(ctx, changed, evt.Timestamp, func(conversationID string) *bridgev2.UserLocalPortalInfo {
-		switch {
-		case evt.Archived:
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagLowPriority)}
-		case slices.Contains(pinned, NormalizeConversationID(conversationID)):
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagFavourite)}
-		default:
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTag(""))}
-		}
-	})
+	return true
 }
 
 // handleXChatMarkedUnread bridges the user's own mark-unread from another device once, since inbox
