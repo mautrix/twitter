@@ -345,6 +345,16 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		memberOrder = append(memberOrder, userID)
 	}
 
+	var adminIDs map[string]struct{}
+	if isGroup && len(detail.GroupAdminsResults) > 0 {
+		adminIDs = make(map[string]struct{}, len(detail.GroupAdminsResults))
+		for _, r := range detail.GroupAdminsResults {
+			if userID, _ := xchatUserFromResult(r); userID != "" {
+				adminIDs[userID] = struct{}{}
+			}
+		}
+	}
+
 	memberMap := make(bridgev2.ChatMemberMap, len(memberByID))
 	for _, restID := range memberOrder {
 		p := memberByID[restID]
@@ -368,9 +378,17 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 			Bool("has_result", p.Result != nil).
 			Bool("has_user_info", userInfo != nil).
 			Msg("xchatItemToChatInfo adding participant")
+		var powerLevel *int
+		if adminIDs != nil {
+			powerLevel = ptr.Ptr(xchatMemberPowerLevel)
+			if _, isAdmin := adminIDs[p.RestID]; isAdmin {
+				powerLevel = ptr.Ptr(xchatAdminPowerLevel)
+			}
+		}
 		memberMap.Set(bridgev2.ChatMember{
 			EventSender: tc.MakeEventSender(p.RestID),
 			UserInfo:    userInfo,
+			PowerLevel:  powerLevel,
 		})
 	}
 

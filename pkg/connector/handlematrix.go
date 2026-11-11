@@ -56,6 +56,7 @@ var (
 	_ bridgev2.DeleteChatHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.RedactionHandlingNetworkAPI       = (*TwitterClient)(nil)
 	_ bridgev2.MembershipHandlingNetworkAPI      = (*TwitterClient)(nil)
+	_ bridgev2.PowerLevelHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.MessageRequestAcceptingNetworkAPI = (*TwitterClient)(nil)
 	_ bridgev2.RoomAvatarHandlingNetworkAPI      = (*TwitterClient)(nil)
 	_ bridgev2.RoomNameHandlingNetworkAPI        = (*TwitterClient)(nil)
@@ -1031,6 +1032,40 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 		return false, withoutNotice(wrapTwitterMatrixError(err))
 	}
 	return true, nil
+}
+
+const (
+	xchatMemberPowerLevel = 0
+	xchatAdminPowerLevel  = 50
+)
+
+func (tc *TwitterClient) HandleMatrixPowerLevels(ctx context.Context, msg *bridgev2.MatrixPowerLevelChange) (bool, error) {
+	if !isXChatGroupPortal(msg.Portal) {
+		return false, bridgev2.ErrPowerLevelsNotSupported
+	}
+	conversationID := ParsePortalID(msg.Portal.ID)
+	changed := false
+	for _, plc := range msg.Users {
+		wasAdmin := plc.OrigLevel >= xchatAdminPowerLevel
+		isAdmin := plc.NewLevel >= xchatAdminPowerLevel
+		if wasAdmin == isAdmin {
+			continue
+		}
+		var userID string
+		switch target := plc.Target.(type) {
+		case *bridgev2.Ghost:
+			userID = ParseUserID(target.ID)
+		case *bridgev2.UserLogin:
+			userID = ParseUserLoginID(target.ID)
+		default:
+			continue
+		}
+		if err := tc.client.SetXChatGroupAdmin(ctx, conversationID, userID, isAdmin); err != nil {
+			return changed, withoutNotice(wrapTwitterMatrixError(err))
+		}
+		changed = true
+	}
+	return changed, nil
 }
 
 func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (*bridgev2.MatrixMembershipResult, error) {

@@ -779,17 +779,9 @@ func (p *XChatEventProcessor) processGroupChangeEvent(ctx context.Context, evt *
 			Msg("Received GroupCreate event")
 		return nil
 	case gc.GroupAdminAdd != nil:
-		p.log.Debug().
-			Str("sequence_id", ptr.Val(evt.SequenceId)).
-			Strs("admin_ids", gc.GroupAdminAdd.AdminIds).
-			Msg("Received GroupAdminAdd event")
-		return nil
+		return p.emitEvent(ctx, convertXChatGroupAdminChange(evt, gc.GroupAdminAdd.AdminIds, true))
 	case gc.GroupAdminRemove != nil:
-		p.log.Debug().
-			Str("sequence_id", ptr.Val(evt.SequenceId)).
-			Strs("admin_ids", gc.GroupAdminRemove.AdminIds).
-			Msg("Received GroupAdminRemove event")
-		return nil
+		return p.emitEvent(ctx, convertXChatGroupAdminChange(evt, gc.GroupAdminRemove.AdminIds, false))
 	case gc.GroupInviteEnable != nil:
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
