@@ -637,7 +637,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
-	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
+	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0 || contents.Message.ForwardedMessage != nil) {
 		if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
 			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
 			// REST and XChat IDs cannot be ordered against each other on timestamp ties.

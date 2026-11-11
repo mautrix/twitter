@@ -28,6 +28,17 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	if len(contents.Entities) > 0 {
 		msgData.Entities = convertXChatEntities(contents.Entities)
 	}
+	if fwd := contents.ForwardedMessage; fwd != nil {
+		msgData.Forwarded = true
+		if fwdText := ptr.Val(fwd.MessageText); msgData.Text == "" {
+			msgData.Text = fwdText
+			if len(fwd.Entities) > 0 {
+				msgData.Entities = convertXChatEntities(fwd.Entities)
+			}
+		} else if fwdText != "" {
+			msgData.Text += "\n\n" + fwdText
+		}
+	}
 
 	// Convert attachments
 	if len(contents.Attachments) > 0 {
