@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -203,11 +204,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 		log.Info().
 			Str("user_id", ParseUserLoginID(tc.userLogin.ID)).
 			Msg("Migration detected: user has cookies but missing encryption keys, triggering passcode-only reauth")
-		tc.userLogin.BridgeState.Send(status.BridgeState{
-			StateEvent: status.StateBadCredentials,
-			Error:      "twitter-migration-reauth",
-			Message:    "Please re-authenticate to enable X Chat. You only need to enter your passcode.",
-		})
+		tc.connectWithoutXChat(ctx, meta)
 		return
 	}
 
@@ -221,72 +218,8 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 	fullInboxSyncInProgress := meta.PendingEncryptedSync || meta.MaxUserSequenceID == "" || meta.XChatInboxCursor != nil
 
-	// Check for cached session
-	useCachedSession := tc.connector.Config.CacheSession &&
-		meta.Session != nil &&
-		meta.Session.LastSaved.Add(sessionMaxTimeSinceSave).After(time.Now()) &&
-		meta.Session.InitializedAt.Add(48*time.Hour).After(time.Now()) &&
-		meta.Session.CacheVersion == twittermeow.CurrentCacheVersion
-
-	if useCachedSession {
-		log.Debug().
-			Time("session_ts", meta.Session.LastSaved).
-			Time("session_init_ts", meta.Session.InitializedAt).
-			Msg("Connecting with cached session")
-		tc.client.SetSession(meta.Session)
-	} else {
-		// Load messages page to initialize session (populates cookies, tokens, etc.).
-		retryDelay := time.Second
-		for {
-			_, err := tc.client.LoadMessagesPage(ctx)
-			if err == nil {
-				break
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			if errors.Is(err, twittermeow.ErrCloudflareChallenge) && meta.Session != nil && meta.Session.CacheVersion == twittermeow.CurrentCacheVersion {
-				log.Warn().Err(err).
-					Time("session_ts", meta.Session.LastSaved).
-					Time("session_init_ts", meta.Session.InitializedAt).
-					Msg("Messages page returned a Cloudflare challenge, connecting with expired cached session")
-				tc.client.SetSession(meta.Session)
-				break
-			}
-			if twittermeow.IsAuthError(err) {
-				log.Err(err).Msg("Failed to load messages page")
-				tc.userLogin.BridgeState.Send(status.BridgeState{
-					StateEvent: status.StateBadCredentials,
-					Error:      authErrorCode(err),
-					Info:       map[string]any{"go_error": err.Error()},
-					UserAction: authErrorUserAction(err),
-				})
-				return
-			}
-			retryLog := log.Error().Err(err).
-				Dur("retry_in", retryDelay).
-				Bool("cloudflare_challenge", errors.Is(err, twittermeow.ErrCloudflareChallenge)).
-				Strs("cookie_names", tc.client.GetCookieNames()).
-				Bool("has_cached_session", meta.Session != nil)
-			if meta.Session != nil {
-				retryLog.
-					Time("session_ts", meta.Session.LastSaved).
-					Time("session_init_ts", meta.Session.InitializedAt).
-					Int("session_cache_version", meta.Session.CacheVersion)
-			}
-			retryLog.Msg("Failed to load messages page, retrying")
-			tc.userLogin.BridgeState.Send(status.BridgeState{
-				StateEvent: status.StateTransientDisconnect,
-				Error:      "twitter-load-error",
-				Info: map[string]any{
-					"go_error": err.Error(),
-				},
-			})
-			if !waitForXChatInboxRetry(ctx, retryDelay) {
-				return
-			}
-			retryDelay = min(retryDelay*2, time.Minute)
-		}
+	if !tc.initSession(ctx, meta) {
+		return
 	}
 
 	// Full XChat inbox sync (migration / fresh login) can take a while. Mark as connected once we
@@ -583,6 +516,127 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	tc.HandleCursorChange(ctx)
 }
 
+func (tc *TwitterClient) initSession(ctx context.Context, meta *UserLoginMetadata) bool {
+	log := zerolog.Ctx(ctx)
+	// Check for cached session
+	useCachedSession := tc.connector.Config.CacheSession &&
+		meta.Session != nil &&
+		meta.Session.LastSaved.Add(sessionMaxTimeSinceSave).After(time.Now()) &&
+		meta.Session.InitializedAt.Add(48*time.Hour).After(time.Now()) &&
+		meta.Session.CacheVersion == twittermeow.CurrentCacheVersion
+
+	if useCachedSession {
+		log.Debug().
+			Time("session_ts", meta.Session.LastSaved).
+			Time("session_init_ts", meta.Session.InitializedAt).
+			Msg("Connecting with cached session")
+		tc.client.SetSession(meta.Session)
+	} else {
+		// Load messages page to initialize session (populates cookies, tokens, etc.).
+		retryDelay := time.Second
+		for {
+			_, err := tc.client.LoadMessagesPage(ctx)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				return false
+			}
+			if errors.Is(err, twittermeow.ErrCloudflareChallenge) && meta.Session != nil && meta.Session.CacheVersion == twittermeow.CurrentCacheVersion {
+				log.Warn().Err(err).
+					Time("session_ts", meta.Session.LastSaved).
+					Time("session_init_ts", meta.Session.InitializedAt).
+					Msg("Messages page returned a Cloudflare challenge, connecting with expired cached session")
+				tc.client.SetSession(meta.Session)
+				break
+			}
+			if twittermeow.IsAuthError(err) {
+				log.Err(err).Msg("Failed to load messages page")
+				tc.userLogin.BridgeState.Send(status.BridgeState{
+					StateEvent: status.StateBadCredentials,
+					Error:      authErrorCode(err),
+					Info:       map[string]any{"go_error": err.Error()},
+					UserAction: authErrorUserAction(err),
+				})
+				return false
+			}
+			retryLog := log.Error().Err(err).
+				Dur("retry_in", retryDelay).
+				Bool("cloudflare_challenge", errors.Is(err, twittermeow.ErrCloudflareChallenge)).
+				Strs("cookie_names", tc.client.GetCookieNames()).
+				Bool("has_cached_session", meta.Session != nil)
+			if meta.Session != nil {
+				retryLog.
+					Time("session_ts", meta.Session.LastSaved).
+					Time("session_init_ts", meta.Session.InitializedAt).
+					Int("session_cache_version", meta.Session.CacheVersion)
+			}
+			retryLog.Msg("Failed to load messages page, retrying")
+			tc.userLogin.BridgeState.Send(status.BridgeState{
+				StateEvent: status.StateTransientDisconnect,
+				Error:      "twitter-load-error",
+				Info: map[string]any{
+					"go_error": err.Error(),
+				},
+			})
+			if !waitForXChatInboxRetry(ctx, retryDelay) {
+				return false
+			}
+			retryDelay = min(retryDelay*2, time.Minute)
+		}
+	}
+	return true
+}
+
+const migrationReauthExpiry = 30 * 24 * time.Hour
+
+func (tc *TwitterClient) connectWithoutXChat(ctx context.Context, meta *UserLoginMetadata) {
+	log := zerolog.Ctx(ctx)
+	if meta.MigrationReauthSince == nil {
+		meta.MigrationReauthSince = ptr.Ptr(time.Now())
+		if err := tc.userLogin.Save(ctx); err != nil {
+			log.Err(err).Msg("Failed to save passcode reauth start time")
+		}
+	} else if time.Since(*meta.MigrationReauthSince) > migrationReauthExpiry {
+		log.Info().
+			Time("migration_reauth_since", *meta.MigrationReauthSince).
+			Msg("Passcode reauth wasn't completed in time, deleting login")
+		tc.userLogin.Delete(context.WithoutCancel(ctx), status.BridgeState{
+			StateEvent: status.StateLoggedOut,
+			Error:      "twitter-migration-expired",
+		}, bridgev2.DeleteOpts{DontCleanupRooms: true})
+		return
+	}
+	log.Info().
+		Time("migration_reauth_since", *meta.MigrationReauthSince).
+		Msg("X Chat keys are missing, connecting in REST-only mode until the passcode is entered")
+	if !tc.initSession(ctx, meta) {
+		return
+	}
+	tc.userLogin.BridgeState.Send(status.BridgeState{
+		StateEvent: status.StateBadCredentials,
+		Error:      "twitter-migration-reauth",
+	})
+	go func() {
+		retryDelay := time.Minute
+		for {
+			err := tc.syncUntrustedChannels(ctx)
+			if err == nil || twittermeow.IsAuthError(err) {
+				break
+			}
+			log.Warn().
+				Err(err).
+				Dur("retry_in", retryDelay).
+				Msg("Failed to fetch initial inbox state, retrying")
+			if !waitForXChatInboxRetry(ctx, retryDelay) {
+				return
+			}
+			retryDelay = min(retryDelay*2, 30*time.Minute)
+		}
+		tc.client.StartPolling(ctx)
+	}()
+}
+
 const xchatInboxRateLimitRetryDelay = 5 * time.Minute
 
 func waitForXChatInboxRetry(ctx context.Context, delay time.Duration) bool {
@@ -760,7 +814,8 @@ func (tc *TwitterClient) Disconnect() {
 }
 
 func (tc *TwitterClient) IsLoggedIn() bool {
-	return tc.client.IsLoggedIn() && tc.userLogin.BridgeState.GetPrevUnsent().StateEvent != status.StateBadCredentials
+	prevState := tc.userLogin.BridgeState.GetPrevUnsent()
+	return tc.client.IsLoggedIn() && (prevState.StateEvent != status.StateBadCredentials || prevState.Error == "twitter-migration-reauth")
 }
 
 func (tc *TwitterClient) LogoutRemote(ctx context.Context) {
