@@ -101,7 +101,12 @@ func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.Messag
 	default:
 		return nil
 	}
-	return newXChatNoticeMessage(evt, &notice, keyVersion)
+	msg := newXChatNoticeMessage(evt, &notice, keyVersion)
+	if notice.Type != types.MessageNoticeScreenshot && notice.Type != types.MessageNoticeScreenRecording {
+		// Call entries are posted by X's own call service account rather than a chat member.
+		msg.MessageData.SenderID = ""
+	}
+	return msg
 }
 
 func newXChatNoticeMessage(evt *payload.MessageEvent, notice *types.MessageNotice, keyVersion string) *types.Message {
