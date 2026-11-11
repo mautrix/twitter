@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -534,6 +535,22 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipLeave)
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
+	case *types.XChatConversationMuteChange:
+		mutedUntil := bridgev2.Unmuted
+		if evt.Muted {
+			mutedUntil = event.MutedForever
+		}
+		for _, conversationID := range evt.ConversationIDs {
+			tc.queueUserLocalPortalInfo(conversationID, evt.Timestamp, &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil})
+		}
+		return true
+
+	case *types.XChatPinnedConversations:
+		for _, conversationID := range evt.ConversationIDs {
+			tc.queueUserLocalPortalInfo(conversationID, evt.Timestamp, &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagFavourite)})
+		}
+		return true
+
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
 			EventMeta: simplevent.EventMeta{
@@ -965,4 +982,18 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 		}
 		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update))
 	}
+}
+
+func (tc *TwitterClient) queueUserLocalPortalInfo(conversationID string, ts time.Time, info *bridgev2.UserLocalPortalInfo) {
+	tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+		EventMeta: simplevent.EventMeta{
+			Type:      bridgev2.RemoteEventChatInfoChange,
+			PortalKey: tc.MakePortalKeyFromID(conversationID),
+			Sender:    tc.MakeEventSender(tc.client.GetCurrentUserID()),
+			Timestamp: ts,
+		},
+		ChatInfoChange: &bridgev2.ChatInfoChange{
+			ChatInfo: &bridgev2.ChatInfo{UserLocal: info},
+		},
+	})
 }

@@ -486,6 +486,18 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		return p.processMessageFailure(ctx, evt, detail.MessageFailureEvent)
 
 	case detail.ConversationMetadataChangeEvent != nil:
+		if change := detail.ConversationMetadataChangeEvent.ConversationMetadataChange; change != nil && change.MuteConversation != nil {
+			return p.emitEvent(ctx, &types.XChatConversationMuteChange{
+				ConversationIDs: change.MuteConversation.MutedConversationIds,
+				Muted:           true,
+				Timestamp:       methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+			})
+		} else if change != nil && change.UnmuteConversation != nil {
+			return p.emitEvent(ctx, &types.XChatConversationMuteChange{
+				ConversationIDs: change.UnmuteConversation.UnmutedConversationIds,
+				Timestamp:       methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+			})
+		}
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Msg("Ignoring ConversationMetadataChangeEvent")
@@ -604,11 +616,14 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			Str("key_version", keyVersion).
 			Logger()
 		if isUserMetadata {
-			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
+			meta, err := crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
 			if err != nil {
 				return fmt.Errorf("decrypt XChat user metadata: %w", err)
 			}
-			return nil
+			return p.emitEvent(ctx, &types.XChatPinnedConversations{
+				ConversationIDs: meta.PinnedConversationIds,
+				Timestamp:       methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+			})
 		}
 
 		contents, err = crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
