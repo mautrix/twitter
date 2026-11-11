@@ -130,10 +130,15 @@ func init() {
 	dmCaps.BlockUser = true
 }
 
+func isXChatGroupPortal(portal *bridgev2.Portal) bool {
+	meta, _ := portal.Metadata.(*PortalMetadata)
+	return portal.RoomType != database.RoomTypeDM && (strings.HasPrefix(string(portal.ID), "g") || meta.IsXChatConversation())
+}
+
 func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	baseCaps := groupCaps
 	meta, _ := portal.Metadata.(*PortalMetadata)
-	if portal.RoomType != database.RoomTypeDM && (strings.HasPrefix(string(portal.ID), "g") || meta.IsXChatConversation()) {
+	if isXChatGroupPortal(portal) {
 		baseCaps = xchatGroupCaps
 	} else if portal.RoomType == database.RoomTypeDM {
 		baseCaps = dmCaps

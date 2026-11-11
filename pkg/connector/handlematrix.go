@@ -956,6 +956,8 @@ func xchatMessageRemovalOpts(conversationID, sequenceID string) twittermeow.Dele
 func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
 		return false, bridgev2.ErrRoomMetadataNotAllowed
+	} else if isXChatGroupPortal(msg.Portal) {
+		return false, bridgev2.ErrRoomMetadataNotSupported
 	}
 
 	if msg.Content.URL != "" || msg.Content.MSC3414File != nil {
@@ -994,6 +996,8 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
 		return false, bridgev2.ErrRoomMetadataNotAllowed
+	} else if isXChatGroupPortal(msg.Portal) {
+		return false, bridgev2.ErrRoomMetadataNotSupported
 	}
 
 	updateNameParams := &payload.DMRequestQuery{
@@ -1009,6 +1013,8 @@ func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2
 func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridgev2.MatrixMembershipChange) (*bridgev2.MatrixMembershipResult, error) {
 	if msg.Type != bridgev2.Invite || msg.Portal.RoomType == database.RoomTypeDM {
 		return nil, nil
+	} else if isXChatGroupPortal(msg.Portal) {
+		return nil, bridgev2.ErrMembershipNotSupported
 	}
 
 	var participantID string
