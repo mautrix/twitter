@@ -279,6 +279,8 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 					filename = content.Body
 				} else if attType == payload.MediaTypeAudio && filename != "" {
 					filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".m4a"
+				} else if attType == payload.MediaTypeGif && mimeType == "image/gif" && filename != "" {
+					filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".gif"
 				}
 				media := &payload.MediaAttachment{
 					MediaHashKey: &uploadResult.MediaHashKey,
