@@ -1044,6 +1044,43 @@ func (c *Client) MuteConversation(ctx context.Context, conversationID string) er
 	return nil
 }
 
+// AcceptMessageRequest trusts the sender of a 1:1 message request, like X's own accept button.
+func (c *Client) AcceptMessageRequest(ctx context.Context, targetUserID string) error {
+	if targetUserID == "" {
+		return errors.New("target user ID is required")
+	}
+	jsonBody, err := json.Marshal(payload.NewAcceptMessageRequestMutationPayload(targetUserID))
+	if err != nil {
+		return err
+	}
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            endpoints.ACCEPT_MESSAGE_REQUEST_URL,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Data struct {
+			UserAddTrust *struct {
+				ErrorCode string `json:"error_code"`
+			} `json:"user_add_trust"`
+		} `json:"data"`
+	}
+	if err = json.Unmarshal(respBody, &resp); err != nil {
+		return fmt.Errorf("parse accept message request response: %w", err)
+	} else if resp.Data.UserAddTrust == nil {
+		return errors.New("accept message request response had no user_add_trust result")
+	} else if resp.Data.UserAddTrust.ErrorCode != "" {
+		return fmt.Errorf("accept message request failed: %s", resp.Data.UserAddTrust.ErrorCode)
+	}
+	return nil
+}
+
 // UnmuteConversation unmutes a conversation via the XChat UnmuteConversation GraphQL endpoint.
 func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) error {
 	if conversationID == "" {

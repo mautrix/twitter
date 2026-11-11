@@ -83,7 +83,7 @@ func selectMessageSendMode(meta *PortalMetadata) messageSendMode {
 }
 
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
-	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
+	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText || msg.Portal.MessageRequest {
 		return nil
 	}
 
@@ -716,6 +716,9 @@ func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt t
 }
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
+	if msg.Portal.MessageRequest {
+		return nil
+	}
 	conversationID := ParsePortalID(msg.Portal.ID)
 	readUpTo, readAt := matrixReadReceiptTimes(msg)
 
@@ -1047,11 +1050,17 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 }
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
-	err := tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
-	// Already-accepted conversations will throw a 279 error when trying to accept again.
-	// TODO maybe check that the conversation actually exists on the xchat side?
-	if errors.Is(err, twittermeow.ErrConversationDoesntExist) {
-		err = nil
+	var err error
+	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
+	if otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID)); otherUserID != "" && meta.IsXChatConversation() {
+		err = tc.client.AcceptMessageRequest(ctx, otherUserID)
+	} else {
+		err = tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
+		// Already-accepted conversations will throw a 279 error when trying to accept again.
+		// TODO maybe check that the conversation actually exists on the xchat side?
+		if errors.Is(err, twittermeow.ErrConversationDoesntExist) {
+			err = nil
+		}
 	}
 	if err == nil && msg != nil && msg.Portal != nil {
 		_, ok := msg.Portal.Metadata.(*PortalMetadata)
