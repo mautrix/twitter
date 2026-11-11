@@ -488,11 +488,15 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	case detail.ConversationMetadataChangeEvent != nil:
 		change := detail.ConversationMetadataChangeEvent.ConversationMetadataChange
 		if change != nil && (change.MessageDurationChange != nil || change.MessageDurationRemove != nil) {
+			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+			if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok && (after.timestamp.IsZero() || !ts.After(after.timestamp)) {
+				return nil
+			}
 			ttlChange := &types.XChatConversationTTLChange{
 				ID:             ptr.Val(evt.SequenceId),
 				ConversationID: ptr.Val(evt.ConversationId),
 				SenderID:       ptr.Val(evt.SenderId),
-				Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+				Timestamp:      ts,
 			}
 			if change.MessageDurationChange != nil {
 				ttlChange.TTL = time.Duration(ptr.Val(change.MessageDurationChange.TtlMsec)) * time.Millisecond
