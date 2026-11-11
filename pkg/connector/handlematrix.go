@@ -718,6 +718,7 @@ func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt t
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
 	if msg.Portal.MessageRequest {
+		tc.requestReadReceipts.Store(msg.Portal.PortalKey, msg)
 		return nil
 	}
 	conversationID := ParsePortalID(msg.Portal.ID)
@@ -1070,6 +1071,11 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 			chatInfo := &bridgev2.ChatInfo{}
 			applyXChatTrustToChatInfo(chatInfo, true)
 			msg.Portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
+		}
+		if receipt, ok := tc.requestReadReceipts.LoadAndDelete(msg.Portal.PortalKey); ok && !msg.Portal.MessageRequest {
+			if receiptErr := tc.HandleMatrixReadReceipt(ctx, receipt.(*bridgev2.MatrixReadReceipt)); receiptErr != nil {
+				zerolog.Ctx(ctx).Warn().Err(receiptErr).Msg("Failed to send held back read receipt after accepting message request")
+			}
 		}
 	}
 	return err
