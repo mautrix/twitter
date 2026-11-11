@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -34,6 +36,14 @@ var (
 )
 
 var ErrCloudflareRateLimited error = cloudflareRateLimitError{}
+
+const CloudflareCooldown = 15 * time.Minute
+
+var cloudflareCooldownUntil atomic.Int64
+
+func CloudflareCooldownUntil() time.Time {
+	return time.UnixMilli(cloudflareCooldownUntil.Load())
+}
 
 type cloudflareRateLimitError struct{}
 

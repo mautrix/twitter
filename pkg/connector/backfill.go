@@ -102,15 +102,15 @@ func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
 const (
 	backfillRateLimitPause = 15 * time.Minute
 	backfillStartJitter    = 10 * time.Minute
+	backfillMinSlotWait    = time.Minute
 )
 
 var errBackfillPaused = errors.New("backfill paused after a rate limit")
 
 var backfillPacer struct {
 	sync.Mutex
-	interval      time.Duration
-	next          time.Time
-	cooldownUntil time.Time
+	interval time.Duration
+	next     time.Time
 }
 
 func setBackfillRequestsPerMinute(perMinute int) {
@@ -122,37 +122,37 @@ func setBackfillRequestsPerMinute(perMinute int) {
 	}
 }
 
-func takeBackfillSlot(startAt time.Time) bool {
+func backfillPacingEnabled() bool {
 	backfillPacer.Lock()
 	defer backfillPacer.Unlock()
-	now := time.Now()
-	if now.Before(backfillPacer.cooldownUntil) || now.Before(backfillPacer.next) ||
-		(backfillPacer.interval > 0 && now.Before(startAt)) {
-		return false
-	}
-	backfillPacer.next = now.Add(backfillPacer.interval)
-	return true
+	return backfillPacer.interval > 0
 }
 
-func waitForBackfillSlot(ctx context.Context) error {
-	backfillPacer.Lock()
-	now := time.Now()
-	slot := now
-	if backfillPacer.next.After(now) {
-		slot = backfillPacer.next
-	}
-	backfillPacer.next = slot.Add(backfillPacer.interval)
-	backfillPacer.Unlock()
-	if !slot.After(now) {
-		return nil
-	}
-	timer := time.NewTimer(slot.Sub(now))
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+func waitForBackfillSlot(ctx context.Context, maxWait time.Duration) bool {
+	deadline := time.Now().Add(maxWait)
+	for {
+		backfillPacer.Lock()
+		now := time.Now()
+		readyAt := backfillPacer.next
+		if cooldownUntil := twittermeow.CloudflareCooldownUntil(); cooldownUntil.After(readyAt) {
+			readyAt = cooldownUntil
+		}
+		if !now.Before(readyAt) {
+			backfillPacer.next = now.Add(backfillPacer.interval)
+			backfillPacer.Unlock()
+			return true
+		}
+		backfillPacer.Unlock()
+		if readyAt.After(deadline) {
+			return false
+		}
+		timer := time.NewTimer(readyAt.Sub(now))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
 	}
 }
 
@@ -162,22 +162,9 @@ func isRateLimitError(err error) bool {
 		(errors.As(err, &twitterErrs) && twitterErrs.StatusCode == http.StatusTooManyRequests)
 }
 
-func (tc *TwitterClient) handleBackfillError(ctx context.Context, err error) {
-	if !isRateLimitError(err) {
-		return
-	}
-	until := time.Now().Add(backfillRateLimitPause)
-	tc.backfillPausedUntil.Store(until.UnixMilli())
-	cloudflare := errors.Is(err, twittermeow.ErrCloudflareRateLimited)
-	if cloudflare {
-		backfillPacer.Lock()
-		backfillPacer.cooldownUntil = until
-		backfillPacer.Unlock()
-	}
-	zerolog.Ctx(ctx).Warn().
-		Bool("cloudflare", cloudflare).
-		Dur("pause", backfillRateLimitPause).
-		Msg("X rate limited backfill, pausing backfill requests")
+func (tc *TwitterClient) skipBackfillBatch(fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	fetchParams.Task.BatchCount--
+	return &bridgev2.FetchMessagesResponse{Cursor: fetchParams.Cursor, HasMore: true}, nil
 }
 
 func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
@@ -190,12 +177,18 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		if !fromQueue {
 			return nil, errBackfillPaused
 		}
-		return &bridgev2.FetchMessagesResponse{Cursor: fetchParams.Cursor, HasMore: true}, nil
-	} else if fromQueue && !takeBackfillSlot(tc.backfillStartAt) {
-		return &bridgev2.FetchMessagesResponse{Cursor: fetchParams.Cursor, HasMore: true}, nil
+		return tc.skipBackfillBatch(fetchParams)
+	} else if fromQueue && backfillPacingEnabled() {
+		maxWait := time.Duration(tc.connector.br.Config.Backfill.Queue.BatchDelay) * time.Second
+		if now.Before(tc.backfillStartAt) || !waitForBackfillSlot(ctx, max(maxWait, backfillMinSlotWait)) {
+			return tc.skipBackfillBatch(fetchParams)
+		}
 	}
 	resp, err := tc.fetchMessages(ctx, fetchParams)
-	tc.handleBackfillError(ctx, err)
+	if isRateLimitError(err) {
+		tc.backfillPausedUntil.Store(time.Now().Add(backfillRateLimitPause).UnixMilli())
+		zerolog.Ctx(ctx).Warn().Err(err).Dur("pause", backfillRateLimitPause).Msg("X rate limited backfill, pausing backfill requests")
+	}
 	return resp, err
 }
 
@@ -331,16 +324,14 @@ func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversat
 		}
 	}
 	maxPages := int(math.Ceil(float64(count) / float64(pageSize)))
+	if fetchParams.AnchorMessage == nil && backfillPacingEnabled() {
+		maxPages = 1
+	}
 	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
 		PageSize:    count,
 		MaxMessages: count,
 		MaxPages:    maxPages,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
-		if cursor != xchatBackfillMaxInt {
-			if err := waitForBackfillSlot(ctx); err != nil {
-				return nil, err
-			}
-		}
 		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
 	})
 }

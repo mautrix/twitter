@@ -94,7 +94,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 	ctx context.Context,
 	conversationID, previousSequenceID, currentSequenceID string,
 ) error {
-	if time.Now().UnixMilli() < tc.xchatGapCatchupPausedUntil.Load() {
+	if time.Now().UnixMilli() < tc.xchatGapCatchupPausedUntil.Load() || time.Now().Before(twittermeow.CloudflareCooldownUntil()) {
 		return errXChatGapCatchupPaused
 	}
 	stateValue, _ := tc.xchatGapCatchupStates.LoadOrStore(conversationID, &xchatGapCatchupState{})
