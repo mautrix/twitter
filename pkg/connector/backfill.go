@@ -632,6 +632,7 @@ const (
 	xchatSkipReasonEmptyEntry    = "empty_entry"
 	xchatSkipReasonNoContent     = "no_content"
 	xchatSkipReasonConvertFailed = "convert_failed"
+	xchatSkipReasonNewEncryption = "unsupported_encryption"
 )
 
 func isCriticalXChatBackfillSkip(reason string) bool {
@@ -639,7 +640,8 @@ func isCriticalXChatBackfillSkip(reason string) bool {
 	case xchatSkipReasonKeyLoadFailed,
 		xchatSkipReasonDecryptFailed,
 		xchatSkipReasonParseFailed,
-		xchatSkipReasonConvertFailed:
+		xchatSkipReasonConvertFailed,
+		xchatSkipReasonNewEncryption:
 		return true
 	default:
 		return false
@@ -656,6 +658,9 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	contentsBytes := mce.Contents
 	isUserMetadata := isEncryptedXChatBackfillMessage(mce) && mce.IsUserMetadata()
 
+	if ptr.Val(mce.ContentsEncryptionVersion) != 0 {
+		return nil, time.Time{}, 0, xchatSkipReasonNewEncryption
+	}
 	if len(contentsBytes) == 0 {
 		if isUserMetadata {
 			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed

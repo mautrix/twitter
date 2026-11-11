@@ -33,6 +33,7 @@ type XChatTyping struct {
 	ConversationID string
 	SenderID       string
 	Timestamp      time.Time
+	ActivityType   payload.MessageActivityType
 }
 
 func (*XChatTyping) isTwitterEvent() {}

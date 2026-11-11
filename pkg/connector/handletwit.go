@@ -535,6 +535,10 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
 	case *types.XChatTyping:
+		typingType := bridgev2.TypingTypeText
+		if evt.ActivityType == payload.MessageActivityTypeRecordingVoiceMessage {
+			typingType = bridgev2.TypingTypeRecordingMedia
+		}
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventTyping,
@@ -542,6 +546,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Sender:    tc.MakeEventSender(evt.SenderID),
 			},
 			Timeout: 3 * time.Second,
+			Type:    typingType,
 		})
 		return true
 
