@@ -21,6 +21,26 @@ type MessageData struct {
 	// OriginalAttachments holds the raw payload attachments for reply preview storage.
 	// Populated during XChat message conversion and used to store in DB metadata.
 	OriginalAttachments []*payload.MessageAttachment `json:"-"`
+
+	// Notice is set for X Chat entries that are shown as notices instead of messages, like calls.
+	Notice *MessageNotice `json:"-"`
+}
+
+type MessageNoticeType string
+
+const (
+	MessageNoticeCallStarted     MessageNoticeType = "call_started"
+	MessageNoticeCallEnded       MessageNoticeType = "call_ended"
+	MessageNoticeCallMissed      MessageNoticeType = "call_missed"
+	MessageNoticeScreenshot      MessageNoticeType = "screenshot"
+	MessageNoticeScreenRecording MessageNoticeType = "screen_recording"
+	MessageNoticeUndecryptable   MessageNoticeType = "undecryptable"
+)
+
+type MessageNotice struct {
+	Type            MessageNoticeType
+	AudioOnly       bool
+	DurationSeconds int64
 }
 
 type Message struct {
