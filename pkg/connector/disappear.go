@@ -73,21 +73,47 @@ func (evt *xchatDisappearTimerChange) GetChatInfoChange(ctx context.Context, por
 	}, nil
 }
 
-// applyImplicitXChatDisappearTimer updates the portal timer from a live message, since every X Chat
-// message carries the conversation's timer and the timer change itself may have been missed.
-func applyImplicitXChatDisappearTimer(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) {
-	if !markXChatDisappearTimerApplied(portal, msg.ID) {
+func (tc *TwitterClient) xchatPortalHasRoom(ctx context.Context, conversationID string) bool {
+	portal, err := tc.connector.br.GetExistingPortalByKey(ctx, tc.MakePortalKeyFromID(conversationID))
+	return err == nil && portal != nil && portal.MXID != ""
+}
+
+type pendingXChatDisappearTimer struct {
+	SequenceID string
+	TTL        time.Duration
+}
+
+// rememberPendingXChatDisappearTimer keeps the newest timer change for a conversation without a room,
+// because bridgev2 drops chat info changes for portals that don't exist yet.
+func (tc *TwitterClient) rememberPendingXChatDisappearTimer(evt *types.XChatConversationTTLChange) {
+	key := NormalizeConversationID(evt.ConversationID)
+	next := &pendingXChatDisappearTimer{SequenceID: evt.ID, TTL: evt.TTL}
+	for {
+		existing, loaded := tc.pendingDisappearTimers.LoadOrStore(key, next)
+		if !loaded {
+			return
+		}
+		prev := existing.(*pendingXChatDisappearTimer)
+		if compareIntStrings(next.SequenceID, prev.SequenceID) <= 0 || tc.pendingDisappearTimers.CompareAndSwap(key, prev, next) {
+			return
+		}
+	}
+}
+
+func (tc *TwitterClient) applyPendingXChatDisappearTimer(ctx context.Context, conversationID string, info *bridgev2.ChatInfo) {
+	key := NormalizeConversationID(conversationID)
+	value, ok := tc.pendingDisappearTimers.Load(key)
+	if !ok || info.Disappear != nil {
+		return
+	} else if tc.xchatPortalHasRoom(ctx, conversationID) {
+		tc.pendingDisappearTimers.CompareAndDelete(key, value)
 		return
 	}
-	setting := xchatDisappearSetting(msg.TTL)
-	if portal.Disappear.Timer == setting.Timer {
-		return
-	}
-	portal.UpdateDisappearingSetting(ctx, setting, bridgev2.UpdateDisappearingSettingOpts{
-		Sender:     intent,
-		Timestamp:  methods.ParseMsecTimestamp(msg.Time),
-		Implicit:   true,
-		Save:       true,
-		SendNotice: true,
+	pending := value.(*pendingXChatDisappearTimer)
+	setting := xchatDisappearSetting(pending.TTL)
+	info.Disappear = &setting
+	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
+		tc.pendingDisappearTimers.CompareAndDelete(key, pending)
+		return markXChatDisappearTimerApplied(portal, pending.SequenceID)
 	})
 }

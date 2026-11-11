@@ -56,6 +56,8 @@ type TwitterClient struct {
 	pollingChatResyncLast sync.Map
 	dmBlockResyncLast     sync.Map
 
+	pendingDisappearTimers sync.Map
+
 	connectLock    sync.Mutex
 	connectCancel  context.CancelFunc
 	connectRunLock sync.Mutex

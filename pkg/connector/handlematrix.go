@@ -235,7 +235,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			size := int64(len(data))
 
 			if sendMode == messageSendXChatEncrypted {
-				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
+				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data, msg.Portal.Disappear.Timer)
 				if err != nil {
 					return nil, wrapTwitterMatrixError(err)
 				}

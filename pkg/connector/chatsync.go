@@ -466,6 +466,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		info.Type = ptr.Ptr(database.RoomTypeDM)
 		tc.applySelfDMNameAndAvatar(ctx, conversationID, info, users, nil)
 	}
+	tc.applyPendingXChatDisappearTimer(ctx, conversationID, info)
 
 	return info
 }
