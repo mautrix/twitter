@@ -671,7 +671,7 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 
 	// Try 2: Fetch via REST API
 	log.Debug().Msg("Fetching conversation via REST API")
-	restConvID := ConvertConversationIDToREST(conversationID)
+	restConvID := ConvertConversationIDToRESTAPI(conversationID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	resp, err := tc.client.FetchConversationContext(ctx, restConvID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {

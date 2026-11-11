@@ -37,6 +37,13 @@ func ConvertConversationIDToREST(conversationID string) string {
 	return strings.ReplaceAll(conversationID, ":", "-")
 }
 
+func ConvertConversationIDToRESTAPI(conversationID string) string {
+	if restKey, ok := restGroupPortalAliasKey(networkid.PortalKey{ID: networkid.PortalID(conversationID)}); ok {
+		return string(restKey.ID)
+	}
+	return ConvertConversationIDToREST(conversationID)
+}
+
 func MakePortalID(conversationID string) networkid.PortalID {
 	// Backwards compat for old pre-xchat portal IDs
 	return networkid.PortalID(ConvertConversationIDToREST(conversationID))

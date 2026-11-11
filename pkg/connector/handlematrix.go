@@ -92,7 +92,7 @@ func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.M
 	if msg.Portal.Metadata.(*PortalMetadata).IsXChatConversation() {
 		return tc.client.SendXChatTypingNotification(ctx, conversationID)
 	}
-	return tc.client.SendTypingNotification(ctx, ConvertConversationIDToREST(conversationID))
+	return tc.client.SendTypingNotification(ctx, ConvertConversationIDToRESTAPI(conversationID))
 }
 
 func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.RoomID, eventType event.Type) networkid.RawTransactionID {
@@ -434,7 +434,7 @@ func (tc *TwitterClient) sendDirectMessageREST(
 	dbMsg *database.Message,
 	_ networkid.TransactionID,
 ) (*bridgev2.MatrixMessageResponse, error) {
-	conversationID = ConvertConversationIDToREST(conversationID)
+	conversationID = ConvertConversationIDToRESTAPI(conversationID)
 	log := zerolog.Ctx(ctx)
 	log.Debug().
 		Str("conversation_id", conversationID).
@@ -675,7 +675,7 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 	sendMode := selectMessageSendMode(meta)
 	if sendMode == messageSendREST {
 		reactionPayload := &payload.ReactionActionPayload{
-			ConversationID: ConvertConversationIDToREST(conversationID),
+			ConversationID: ConvertConversationIDToRESTAPI(conversationID),
 			MessageID:      messageID,
 			ReactionTypes:  []string{"Emoji"},
 			EmojiReactions: []string{emoji},
@@ -820,7 +820,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	if !canUseXChat {
 		// No encryption keys - use REST API
 		params := &payload.MarkConversationReadQuery{
-			ConversationID:  ConvertConversationIDToREST(conversationID),
+			ConversationID:  ConvertConversationIDToRESTAPI(conversationID),
 			LastReadEventID: lastReadEventID,
 		}
 		return tc.client.MarkConversationRead(ctx, params)
@@ -831,7 +831,7 @@ func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridg
 	if xchatErr != nil {
 		if errors.Is(xchatErr, crypto.ErrKeyNotFound) || errors.Is(xchatErr, twittermeow.ErrXChatWebsocketNotConnected) {
 			params := &payload.MarkConversationReadQuery{
-				ConversationID:  ConvertConversationIDToREST(conversationID),
+				ConversationID:  ConvertConversationIDToRESTAPI(conversationID),
 				LastReadEventID: lastReadEventID,
 			}
 			return tc.client.MarkConversationRead(ctx, params)
@@ -887,7 +887,7 @@ func (tc *TwitterClient) HandleMatrixViewingChat(ctx context.Context, chat *brid
 		conversationID = ParsePortalID(chat.Portal.ID)
 		tc.resyncDMBlock(ctx, chat.Portal)
 	}
-	tc.client.SetActiveConversation(ConvertConversationIDToREST(conversationID))
+	tc.client.SetActiveConversation(ConvertConversationIDToRESTAPI(conversationID))
 	return nil
 }
 
@@ -896,10 +896,7 @@ func (tc *TwitterClient) HandleMatrixDeleteChat(ctx context.Context, chat *bridg
 		return bridgev2.WrapErrorInStatus(errors.New("deleting chats for everyone is not supported on X")).WithIsCertain(true).WithErrorAsMessage().WithErrorReason(event.MessageStatusUnsupported).WithStatus(event.MessageStatusFail)
 	}
 	conversationID := ParsePortalID(chat.Portal.ID)
-	restConversationID := ConvertConversationIDToREST(conversationID)
-	if restKey, ok := restGroupPortalAliasKey(chat.Portal.PortalKey); ok {
-		restConversationID = string(restKey.ID)
-	}
+	restConversationID := ConvertConversationIDToRESTAPI(conversationID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	_, isRESTGroup := xchatGroupPortalAliasKey(chat.Portal.PortalKey)
 	if isRESTGroup {
