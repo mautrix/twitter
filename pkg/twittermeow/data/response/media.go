@@ -49,14 +49,18 @@ type InitializeXChatMediaUploadResponse struct {
 			ResumeUploadURL string `json:"resume_upload_url"`
 			MediaHashKey    string `json:"media_hash_key"`
 			ResumeID        string `json:"resume_id"`
+			UploadError     string `json:"upload_error"`
 		} `json:"xchat_initialize_media_upload"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 type FinalizeXChatMediaUploadResponse struct {
 	Data struct {
 		XChatFinalizeMediaUpload struct {
-			TypeName string `json:"__typename"`
+			TypeName    string `json:"__typename"`
+			UploadError string `json:"upload_error"`
 		} `json:"xchat_finalize_media_upload"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }

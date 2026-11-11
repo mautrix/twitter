@@ -2,7 +2,9 @@ package response
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -95,12 +97,19 @@ type GetInboxPageConversationDataResponse struct {
 	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
-// Item returns the conversation data for the single requested conversation, or an empty item if none was returned.
-func (r *GetInboxPageConversationDataResponse) Item() XChatInboxItem {
-	if items := r.Data.GetInboxPageConversationData.Items; len(items) > 0 {
-		return items[0]
+var ErrConversationDataMissing = errors.New("conversation data response didn't include the conversation")
+
+// Item returns the conversation data for the requested conversation.
+func (r *GetInboxPageConversationDataResponse) Item(conversationID string) (XChatInboxItem, error) {
+	items := r.Data.GetInboxPageConversationData.Items
+	for _, item := range items {
+		returnedID := item.ConversationDetail.ConversationID
+		if returnedID == conversationID || (strings.HasPrefix(conversationID, "g") && returnedID == conversationID[1:]) ||
+			(returnedID == "" && len(items) == 1) {
+			return item, nil
+		}
 	}
-	return XChatInboxItem{}
+	return XChatInboxItem{}, fmt.Errorf("%w: %s", ErrConversationDataMissing, conversationID)
 }
 
 type XChatInboxPage struct {
