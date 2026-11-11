@@ -100,6 +100,10 @@ func (tc *TwitterConnector) GenerateTransactionID(userID id.UserID, roomID id.Ro
 }
 
 func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (message *bridgev2.MatrixMessageResponse, err error) {
+	return tc.handleMatrixMessage(ctx, msg, false)
+}
+
+func (tc *TwitterClient) handleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage, isRetry bool) (message *bridgev2.MatrixMessageResponse, err error) {
 	tc.resyncDMBlock(ctx, msg.Portal)
 	conversationID := ParsePortalID(msg.Portal.ID)
 	content := msg.Content
@@ -112,7 +116,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 	messageID := string(msg.InputTransactionID)
 	if messageID != "" {
-		if _, err := uuid.Parse(messageID); err != nil {
+		if _, err := uuid.Parse(messageID); err != nil || isRetry {
 			messageID = ""
 		}
 	}
@@ -359,6 +363,17 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		return nil, bridgev2.WrapErrorInStatus(fmt.Errorf("failed to decode XChat send message response: %w", err)).WithSendNotice(true).WithErrorAsMessage()
 	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
 		msg.RemovePending(txnID)
+		if !isRetry && sendMode == messageSendXChatEncrypted && isRetryableXChatFailure(evt.Detail.MessageFailureEvent) {
+			zerolog.Ctx(ctx).Info().
+				Str("conversation_id", conversationID).
+				Int32("failure_type", ptr.Val(evt.Detail.MessageFailureEvent.FailureType)).
+				Msg("X rejected message because of a key change, refreshing conversation keys and resending")
+			if refreshErr := tc.client.RefreshConversationKeys(ctx, conversationID); refreshErr != nil {
+				zerolog.Ctx(ctx).Warn().Err(refreshErr).Msg("Failed to refresh conversation keys for resend")
+			} else {
+				return tc.handleMatrixMessage(ctx, msg, true)
+			}
+		}
 		return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
 			WithStatus(event.MessageStatusFail).
 			WithIsCertain(true).
@@ -407,19 +422,69 @@ func buildReplyingToPreview(
 
 func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
 	switch payload.FailureType(ptr.Val(failure.FailureType)) {
-	case payload.FailureTypeInvalidSenderSignature:
-		return "X rejected this message: invalid sender signature"
+	case payload.FailureTypeInternalError, payload.FailureTypeGenericError, payload.FailureTypeEmptyDetail:
+		return "X couldn't deliver this message, try again later"
 	case payload.FailureTypeContentsTooLarge:
 		return "X rejected this message: contents too large"
+	case payload.FailureTypeTooManyMessages:
+		return "X rejected this message: you're sending messages too fast"
+	case payload.FailureTypeInvalidSenderSignature:
+		return "X rejected this message: invalid sender signature"
+	case payload.FailureTypeNonLatestCkeyVersion:
+		return "X rejected this message: the chat's encryption key changed"
 	case payload.FailureTypeRecipientHasNotTrustedConversation:
 		return "X rejected this message: recipient has not trusted this conversation"
-	case payload.FailureTypeInvalidSignatureVersion:
-		return "X rejected this message: invalid signature version"
+	case payload.FailureTypeRecipientKeyHasChanged:
+		return "X rejected this message: the recipient's encryption key changed"
+	case payload.FailureTypeOnlyEncryptedMessagesAllowed:
+		return "X rejected this message: only encrypted messages are allowed in this chat"
+	case payload.FailureTypeRequesterNotAdmin:
+		return "X rejected this message: only group admins can do that"
+	case payload.FailureTypeFlaggedAsSpam:
+		return "X rejected this message: flagged as spam"
+	case payload.FailureTypeRateLimitUpsell:
+		return "X rejected this message: you've reached the message request limit"
 	case payload.FailureTypeSignatureVerificationFailed:
 		return "X rejected this message: signature verification failed"
+	case payload.FailureTypeSenderNotGroupMember:
+		return "X rejected this message: you're not a member of this group"
+	case payload.FailureTypeInvalidSignatureVersion:
+		return "X rejected this message: invalid signature version"
+	case payload.FailureTypeInvalidPinRequest:
+		return "X rejected this message: invalid pin request"
+	case payload.FailureTypeTooManyPins:
+		return "X rejected this message: too many pinned messages"
+	case payload.FailureTypeInvalidXMoneyToken:
+		return "X rejected this message: invalid payment token"
+	case payload.FailureTypeRecipientNotMessageable:
+		return "X rejected this message: this account can't receive your messages"
 	default:
 		return fmt.Sprintf("X rejected this message: failure type %d", ptr.Val(failure.FailureType))
 	}
+}
+
+func isRetryableXChatFailure(failure *payload.MessageFailureEvent) bool {
+	switch payload.FailureType(ptr.Val(failure.FailureType)) {
+	case payload.FailureTypeNonLatestCkeyVersion, payload.FailureTypeRecipientKeyHasChanged:
+		return true
+	default:
+		return false
+	}
+}
+
+func xchatMutationFailure(resp *response.SendMessageMutationResponse) error {
+	if resp == nil || resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent == "" {
+		return nil
+	}
+	evt, err := twittermeow.DecodeSendMessageMutationMessageEvent(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
+	if err != nil || evt == nil || evt.Detail == nil || evt.Detail.MessageFailureEvent == nil {
+		return nil
+	}
+	return bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
+		WithStatus(event.MessageStatusFail).
+		WithIsCertain(true).
+		WithSendNotice(true).
+		WithErrorAsMessage()
 }
 
 // sendDirectMessageREST sends a message via the REST API for conversations
@@ -699,8 +764,11 @@ func (tc *TwitterClient) doHandleMatrixReaction(ctx context.Context, remove bool
 
 	// XChat reactions are sent as MessageCreateEvents (reaction_add/reaction_remove).
 	xchatConvID := NormalizeConversationID(conversationID)
-	_, err := tc.client.SendXChatReaction(ctx, xchatConvID, messageID, emoji, remove, sendMode == messageSendXChatEncrypted)
-	return wrapTwitterMatrixError(err)
+	resp, err := tc.client.SendXChatReaction(ctx, xchatConvID, messageID, emoji, remove, sendMode == messageSendXChatEncrypted)
+	if err != nil {
+		return wrapTwitterMatrixError(err)
+	}
+	return xchatMutationFailure(resp)
 }
 
 func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt time.Time) {
@@ -875,6 +943,9 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		return wrapTwitterMatrixError(err)
 	}
 	tc.client.Logger.Debug().Any("editResponse", resp).Msg("XChat edit response")
+	if err = xchatMutationFailure(resp); err != nil {
+		return err
+	}
 	if meta != nil {
 		meta.EditCount++
 	}
