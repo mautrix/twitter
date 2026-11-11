@@ -632,7 +632,7 @@ func xchatEventDetailType(detail *payload.MessageEventDetail) string {
 
 // handleUnsupportedContentsEncryption skips a message the bridge can't read without failing
 // the event, so it neither blocks the inbox checkpoint nor drops the websocket.
-func (p *XChatEventProcessor) handleUnsupportedContentsEncryption(ctx context.Context, evt *payload.MessageEvent, version int16) error {
+func (p *XChatEventProcessor) handleUnsupportedContentsEncryption(ctx context.Context, evt *payload.MessageEvent, version int16, isUserMetadata bool) error {
 	conversationID := ptr.Val(evt.ConversationId)
 	logEvt := p.log.Debug()
 	if _, alreadyLogged := p.unsupportedEncryptionLogged.LoadOrStore(conversationID, struct{}{}); !alreadyLogged {
@@ -643,6 +643,9 @@ func (p *XChatEventProcessor) handleUnsupportedContentsEncryption(ctx context.Co
 		Str("conversation_id", conversationID).
 		Int16("contents_encryption_version", version).
 		Msg("MessageCreateEvent uses an unsupported contents encryption version")
+	if isUserMetadata {
+		return nil
+	}
 	if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
 		ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
 		if after.timestamp.IsZero() || ts.Before(after.timestamp) ||
@@ -673,7 +676,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	isUserMetadata := isEncryptedMessageCreateEvent(mce) && mce.IsUserMetadata()
 
 	if version := ptr.Val(mce.ContentsEncryptionVersion); version != 0 {
-		return p.handleUnsupportedContentsEncryption(ctx, evt, version)
+		return p.handleUnsupportedContentsEncryption(ctx, evt, version, isUserMetadata)
 	}
 
 	if len(contentsBytes) == 0 {
