@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
+	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -1142,6 +1144,89 @@ func (c *Client) UnmuteConversation(ctx context.Context, conversationID string) 
 		RawJSON("response", respBody).
 		Msg("UnmuteConversation response")
 
+	return nil
+}
+
+// SetXChatConversationTTL sets or removes the disappearing message timer of an XChat conversation.
+func (c *Client) SetXChatConversationTTL(ctx context.Context, conversationID string, ttl time.Duration) error {
+	senderID := c.GetCurrentUserID()
+	if senderID == "" {
+		return fmt.Errorf("sender ID is required")
+	}
+	keyPair, err := c.keyManager.GetOwnSigningKey(ctx)
+	if err != nil {
+		return fmt.Errorf("get signing key: %w", err)
+	}
+	if keyPair == nil || keyPair.SigningKey == nil || keyPair.KeyVersion == "" {
+		return fmt.Errorf("missing signing key data: signed conversation TTL change requires message_event_signature")
+	}
+
+	messageID := uuid.NewString()
+	change := &payload.ConversationMetadataChange{}
+	var changeName, ttlMsec, url, opName, queryID, resultKey string
+	var extra []string
+	if ttl > 0 {
+		ttlMsec = strconv.FormatInt(ttl.Milliseconds(), 10)
+		change.MessageDurationChange = &payload.MessageDurationChange{TtlMsec: ptr.Ptr(ttl.Milliseconds())}
+		changeName, extra = "MessageDurationChange", []string{ttlMsec}
+		url, opName, queryID = endpoints.UPDATE_CONVERSATION_TTL_URL, "UpdateConversationTTLMutation", "Gu3kCEwNN2V-Az8NDk30Zg"
+		resultKey = "xchat_update_conversation_message_duration"
+	} else {
+		change.MessageDurationRemove = &payload.MessageDurationRemove{}
+		changeName = "MessageDurationRemove"
+		url, opName, queryID = endpoints.REMOVE_CONVERSATION_TTL_URL, "RemoveConversationTTLMutation", "EqSXvxskUyw99ARuIbhYlg"
+		resultKey = "xchat_remove_conversation_message_duration"
+	}
+	encodedDetail, err := crypto.EncodeMessageEventDetail(&payload.MessageEventDetail{
+		ConversationMetadataChangeEvent: &payload.ConversationMetadataChangeEvent{ConversationMetadataChange: change},
+	})
+	if err != nil {
+		return fmt.Errorf("encode message event detail: %w", err)
+	}
+	signaturePayload := crypto.SignaturePayloadConversationMetadataChange(changeName, messageID, senderID, conversationID, extra...)
+	signature, err := crypto.Sign(keyPair.SigningKey, []byte(signaturePayload))
+	if err != nil {
+		return fmt.Errorf("sign conversation TTL change: %w", err)
+	}
+
+	pl := payload.NewConversationTTLMutationPayload(opName, queryID, payload.ConversationTTLMutationVariables{
+		ConversationID: conversationID,
+		TTLMsec:        ttlMsec,
+		ActionSignatures: []payload.DeleteMessageActionSignature{{
+			MessageID:                 messageID,
+			EncodedMessageEventDetail: encodedDetail,
+			SignaturePayload:          signaturePayload,
+			MessageEventSignature: &payload.DeleteMessageEventSignatureJSON{
+				Signature:        signature,
+				PublicKeyVersion: keyPair.KeyVersion,
+				SignatureVersion: crypto.SignatureVersion7,
+			},
+		}},
+	})
+	jsonBody, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
+		URL:            url,
+		Method:         http.MethodPost,
+		WithClientUUID: true,
+		Origin:         endpoints.BASE_URL,
+		ContentType:    types.ContentTypeJSON,
+		Body:           jsonBody,
+	})
+	if err != nil {
+		return err
+	}
+	c.Logger.Debug().RawJSON("response", respBody).Str("operation", opName).Msg("Conversation TTL mutation response")
+	result := gjson.GetBytes(respBody, "data."+resultKey)
+	if errs := gjson.GetBytes(respBody, "errors.0.message"); errs.Exists() {
+		return fmt.Errorf("%s error: %s", opName, errs.Str)
+	} else if !result.Exists() || result.Type == gjson.Null {
+		return fmt.Errorf("%s returned no result", opName)
+	} else if code := result.Get("error_code"); code.Exists() && code.Type != gjson.Null {
+		return fmt.Errorf("%s returned error code %s", opName, code.Raw)
+	}
 	return nil
 }
 

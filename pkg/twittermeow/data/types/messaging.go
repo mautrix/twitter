@@ -1,6 +1,10 @@
 package types
 
-import "go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+import (
+	"time"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
+)
 
 type MessageData struct {
 	ID                     string      `json:"id,omitempty"`
@@ -21,6 +25,8 @@ type MessageData struct {
 	// OriginalAttachments holds the raw payload attachments for reply preview storage.
 	// Populated during XChat message conversion and used to store in DB metadata.
 	OriginalAttachments []*payload.MessageAttachment `json:"-"`
+
+	TTL time.Duration `json:"-"`
 }
 
 type Message struct {

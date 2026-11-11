@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
@@ -50,6 +51,9 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	// Convert reply data
 	if contents.ReplyingToPreview != nil {
 		msgData.ReplyData = convertXChatReplyPreview(contents.ReplyingToPreview)
+	}
+	if evt.Detail != nil && evt.Detail.MessageCreateEvent != nil {
+		msgData.TTL = time.Duration(ptr.Val(evt.Detail.MessageCreateEvent.TtlMsec)) * time.Millisecond
 	}
 
 	return &types.Message{

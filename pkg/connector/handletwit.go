@@ -534,6 +534,24 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipLeave)
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
+	case *types.XChatConversationTTLChange:
+		setting := database.DisappearingSetting{Type: event.DisappearingTypeAfterRead, Timer: evt.TTL}
+		if evt.TTL <= 0 {
+			setting = database.DisappearingSetting{}
+		}
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventChatInfoChange,
+				Sender:      tc.MakeEventSender(evt.SenderID),
+				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
+				Timestamp:   evt.Timestamp,
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				ChatInfo: &bridgev2.ChatInfo{Disappear: &setting},
+			},
+		}))
+
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
 			EventMeta: simplevent.EventMeta{

@@ -486,6 +486,19 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		return p.processMessageFailure(ctx, evt, detail.MessageFailureEvent)
 
 	case detail.ConversationMetadataChangeEvent != nil:
+		change := detail.ConversationMetadataChangeEvent.ConversationMetadataChange
+		if change != nil && (change.MessageDurationChange != nil || change.MessageDurationRemove != nil) {
+			ttlChange := &types.XChatConversationTTLChange{
+				ID:             ptr.Val(evt.SequenceId),
+				ConversationID: ptr.Val(evt.ConversationId),
+				SenderID:       ptr.Val(evt.SenderId),
+				Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+			}
+			if change.MessageDurationChange != nil {
+				ttlChange.TTL = time.Duration(ptr.Val(change.MessageDurationChange.TtlMsec)) * time.Millisecond
+			}
+			return p.emitEvent(ctx, ttlChange)
+		}
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Msg("Ignoring ConversationMetadataChangeEvent")

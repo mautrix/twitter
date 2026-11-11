@@ -118,6 +118,28 @@ func NewMuteConversationMutationPayload(vars MuteConversationMutationVariables) 
 	}
 }
 
+type ConversationTTLMutationVariables struct {
+	ConversationID   string                         `json:"conversationId"`
+	TTLMsec          string                         `json:"ttlMsec,omitempty"`
+	ActionSignatures []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+type ConversationTTLMutationPayload struct {
+	OperationName string                           `json:"operationName"`
+	Variables     ConversationTTLMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                 `json:"extensions"`
+}
+
+func NewConversationTTLMutationPayload(operationName, queryID string, vars ConversationTTLMutationVariables) *ConversationTTLMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = queryID
+	return &ConversationTTLMutationPayload{
+		OperationName: operationName,
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 // UnmuteConversationMutationVariables contains the variables for the UnmuteConversation mutation
 type UnmuteConversationMutationVariables struct {
 	ConversationIDs  []string                       `json:"conversationIds"`
