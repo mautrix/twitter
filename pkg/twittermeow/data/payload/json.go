@@ -148,6 +148,57 @@ func NewGroupAdminMutationPayload(operationName, hash string, vars GroupAdminMut
 	}
 }
 
+type GroupParticipantKey struct {
+	EncryptedConversationKey string `json:"encrypted_conversation_key"`
+	PublicKeyVersion         string `json:"public_key_version"`
+	UserID                   string `json:"user_id"`
+}
+
+type AddGroupMembersMutationVariables struct {
+	ConversationID               string                         `json:"conversation_id"`
+	UserIDs                      []string                       `json:"user_ids"`
+	ConversationKeyVersion       string                         `json:"conversation_key_version"`
+	ConversationParticipantKeys  []GroupParticipantKey          `json:"conversation_participant_keys"`
+	RotatedPMKBundle             any                            `json:"rotated_pmk_bundle"`
+	EncryptedAvatarURL           *string                        `json:"encrypted_avatar_url"`
+	EncryptedTitle               *string                        `json:"encrypted_title"`
+	EncryptedDescription         *string                        `json:"encrypted_description"`
+	ActionSignatures             []DeleteMessageActionSignature `json:"action_signatures"`
+	ScreenCaptureBlockingEnabled bool                           `json:"screen_capture_blocking_enabled"`
+	TTLMsec                      *string                        `json:"ttl_msec"`
+	GroupInviteEnable            any                            `json:"group_invite_enable"`
+}
+
+type GroupKeyRotationData struct {
+	ConversationKeyVersion      string                `json:"conversation_key_version"`
+	ConversationParticipantKeys []GroupParticipantKey `json:"conversation_participant_keys"`
+	EncryptedAvatar             *string               `json:"encrypted_avatar"`
+	EncryptedTitle              *string               `json:"encrypted_title"`
+}
+
+type RemoveFromGroupMutationVariables struct {
+	ConversationID       string                         `json:"conversation_id"`
+	UserIDs              []string                       `json:"user_ids"`
+	ActionSignatures     []DeleteMessageActionSignature `json:"action_signatures"`
+	GroupKeyRotationData GroupKeyRotationData           `json:"group_key_rotation_data"`
+}
+
+type GroupMutationPayload[T any] struct {
+	OperationName string           `json:"operationName"`
+	Variables     T                `json:"variables"`
+	Extensions    ApolloExtensions `json:"extensions"`
+}
+
+func NewGroupMutationPayload[T any](operationName, hash string, vars T) *GroupMutationPayload[T] {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = hash
+	return &GroupMutationPayload[T]{
+		OperationName: operationName,
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 // MuteConversationMutationVariables contains the variables for the MuteConversation mutation
 type MuteConversationMutationVariables struct {
 	ConversationIDs  []string                       `json:"conversationIds"`
@@ -350,9 +401,9 @@ type SendMessageMutationPayload struct {
 
 func NewSendMessageMutationPayload(vars SendMessageMutationVariables) *SendMessageMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "LkAIEchf8AGj-WgeLoTVcw"
+	ext.PersistedQuery.Sha256Hash = "TWRPP7gnKwV_R8-tE-Dd3Q"
 	return &SendMessageMutationPayload{
-		OperationName: "SendMessageMutation",
+		OperationName: "SendMessageCreateMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}
@@ -415,7 +466,7 @@ type InitializeXChatMediaUploadVariables struct {
 }
 
 func (p *InitializeXChatMediaUploadPayload) Default() *InitializeXChatMediaUploadPayload {
-	p.OperationName = "InitializeXChatMediaUpload"
+	p.OperationName = "InitializeXChatMediaUploadMutation"
 	p.Extensions = DefaultApolloExtensions()
 	return p
 }
@@ -437,7 +488,7 @@ type FinalizeXChatMediaUploadVariables struct {
 }
 
 func (p *FinalizeXChatMediaUploadPayload) Default() *FinalizeXChatMediaUploadPayload {
-	p.OperationName = "FinalizeXChatMediaUpload"
+	p.OperationName = "FinalizeXChatMediaUploadMutation"
 	p.Extensions = DefaultApolloExtensions()
 	return p
 }

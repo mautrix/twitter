@@ -2,7 +2,9 @@ package response
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -88,11 +90,27 @@ type GetInboxPageRequestQueryResponse struct {
 type GetInboxPageConversationDataResponse struct {
 	Data struct {
 		GetInboxPageConversationData struct {
-			Typename string         `json:"__typename,omitempty"`
-			Data     XChatInboxItem `json:"data"`
+			Typename string           `json:"__typename,omitempty"`
+			Items    []XChatInboxItem `json:"items"`
 		} `json:"get_inbox_page_conversation_data"`
 	} `json:"data"`
 	Errors []XChatGraphQLError `json:"errors,omitempty"`
+}
+
+var ErrConversationDataMissing = errors.New("conversation data response didn't include the conversation")
+
+// Item returns the conversation data for the requested conversation.
+func (r *GetInboxPageConversationDataResponse) Item(conversationID string) (XChatInboxItem, error) {
+	items := r.Data.GetInboxPageConversationData.Items
+	for _, item := range items {
+		returnedID := item.ConversationDetail.ConversationID
+		if returnedID == conversationID || (strings.HasPrefix(conversationID, "g") && returnedID == conversationID[1:]) ||
+			returnedID == "g"+conversationID ||
+			(returnedID == "" && len(items) == 1) {
+			return item, nil
+		}
+	}
+	return XChatInboxItem{}, fmt.Errorf("%w: %s", ErrConversationDataMissing, conversationID)
 }
 
 type XChatInboxPage struct {
@@ -132,6 +150,8 @@ type XChatInboxItem struct {
 	LatestNotifiableMessageCreateEvent string                      `json:"latest_notifiable_message_create_event,omitempty"`
 	LatestReadEventsPerParticipant     []XChatParticipantReadEvent `json:"latest_read_events_per_participant,omitempty"`
 	HasMore                            bool                        `json:"has_more,omitempty"`
+	LatestPinnedMessageEvents          []string                    `json:"latest_pinned_message_events,omitempty"`
+	PMKBundle                          []json.RawMessage           `json:"pmk_bundle,omitempty"`
 }
 
 func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
@@ -186,6 +206,8 @@ type XChatConversationDetail struct {
 	GroupRemovedUsers                  []XChatUserResult   `json:"group_removed_users,omitempty"`
 	GroupJoinRequestedUsers            []XChatUserResult   `json:"group_join_requested_users,omitempty"`
 	LatestGroupTitleChangeMessageEvent string              `json:"latest_group_title_change_message_event,omitempty"`
+	GroupCreatedByUserResults          *XChatUserResult    `json:"group_created_by_user_results,omitempty"`
+	LatestGroupDescriptionChangeEvent  string              `json:"latest_group_description_change_message_event,omitempty"`
 }
 
 type XChatGroupMetadata struct {
@@ -197,11 +219,18 @@ type XChatGroupMetadata struct {
 	GroupInviteDetails            *XChatGroupInviteDetails `json:"group_invite_details,omitempty"`
 	ScreenCaptureDetectionEnabled bool                     `json:"screen_capture_detection_enabled,omitempty"`
 	AdminSettings                 *XChatGroupAdminSettings `json:"admin_settings,omitempty"`
+	MessageTTLMsec                string                   `json:"message_ttl_msec,omitempty"`
+	ScreenCaptureBlockingEnabled  bool                     `json:"screen_capture_blocking_enabled,omitempty"`
 }
 
 // XChatGroupAdminSettings lists the group actions X restricts to admins.
 type XChatGroupAdminSettings struct {
-	EditGroupInfo bool `json:"edit_group_info,omitempty"`
+	EditGroupInfo      bool `json:"edit_group_info,omitempty"`
+	EditMessageTTL     bool `json:"edit_message_ttl,omitempty"`
+	BlockScreenCapture bool `json:"block_screen_capture,omitempty"`
+	AddMember          bool `json:"add_member,omitempty"`
+	SendMessage        bool `json:"send_message,omitempty"`
+	StartCall          bool `json:"start_call,omitempty"`
 }
 
 type XChatGroupInviteDetails struct {
@@ -213,7 +242,7 @@ type XChatGroupInviteDetails struct {
 
 type XChatParticipantReadEvent struct {
 	Typename                        string             `json:"__typename,omitempty"`
-	ParticipantID                   XChatParticipantID `json:"participant_id,omitempty"`
+	ParticipantID                   XChatParticipantID `json:"participant_id_results,omitempty"`
 	LatestMarkConversationReadEvent string             `json:"latest_mark_conversation_read_event,omitempty"`
 }
 

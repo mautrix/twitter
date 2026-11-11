@@ -62,13 +62,13 @@ func SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID stri
 	return strings.Join(append(fields, sequenceIDs...), ",")
 }
 
-// SignaturePayloadGroupChange builds the version 7 signature payload for a GroupChangeEvent,
-// named like "GroupChangeEvent.GroupTitleChange".
-func SignaturePayloadGroupChange(change, messageID, senderID, conversationID string, extras ...string) (string, error) {
-	fields := append([]string{"GroupChangeEvent." + change, messageID, senderID, conversationID}, extras...)
+// SignaturePayloadV7 builds a version 7 signature payload: the event name, message ID, sender
+// and conversation, then the event-specific fields, joined with commas.
+func SignaturePayloadV7(eventName, messageID, senderID, conversationID string, extras ...string) (string, error) {
+	fields := append([]string{eventName, messageID, senderID, conversationID}, extras...)
 	for _, field := range fields {
 		if strings.Contains(field, ",") {
-			return "", fmt.Errorf("group change signature field contains a comma")
+			return "", fmt.Errorf("signature field contains a comma")
 		}
 	}
 	return strings.Join(fields, ","), nil

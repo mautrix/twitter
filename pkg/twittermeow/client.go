@@ -596,6 +596,7 @@ type apiRequestOpts struct {
 	WithClientUUID   bool
 	Headers          map[string]string
 	DontReadResponse bool
+	NoRetry          bool
 }
 
 func (c *Client) makeAPIRequest(ctx context.Context, opts apiRequestOpts) (*http.Response, []byte, error) {
@@ -639,6 +640,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, opts apiRequestOpts) (*http
 		Payload:      payload,
 		ContentType:  opts.ContentType,
 		DontReadBody: opts.DontReadResponse,
+		NoRetry:      opts.NoRetry,
 	})
 }
 

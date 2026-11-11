@@ -131,6 +131,17 @@ func (c *Client) signXChatGroupChange(
 	change *payload.GroupChange,
 	signatureFields ...string,
 ) (*payload.DeleteMessageActionSignature, error) {
+	return c.signXChatEvent(ctx, &payload.MessageEventDetail{
+		GroupChangeEvent: &payload.GroupChangeEvent{GroupChange: change},
+	}, "GroupChangeEvent."+changeName, conversationID, signatureFields...)
+}
+
+func (c *Client) signXChatEvent(
+	ctx context.Context,
+	detail *payload.MessageEventDetail,
+	eventName, conversationID string,
+	signatureFields ...string,
+) (*payload.DeleteMessageActionSignature, error) {
 	senderID := c.GetCurrentUserID()
 	if senderID == "" {
 		return nil, errors.New("sender ID is required")
@@ -143,24 +154,22 @@ func (c *Client) signXChatGroupChange(
 	}
 
 	messageID := uuid.NewString()
-	encodedDetail, err := crypto.EncodeMessageEventDetail(&payload.MessageEventDetail{
-		GroupChangeEvent: &payload.GroupChangeEvent{GroupChange: change},
-	})
+	encodedDetail, err := crypto.EncodeMessageEventDetail(detail)
 	if err != nil {
-		return nil, fmt.Errorf("encode group change: %w", err)
+		return nil, fmt.Errorf("encode %s: %w", eventName, err)
 	}
-	signaturePayload, err := crypto.SignaturePayloadGroupChange(changeName, messageID, senderID, conversationID, signatureFields...)
+	signaturePayload, err := crypto.SignaturePayloadV7(eventName, messageID, senderID, conversationID, signatureFields...)
 	if err != nil {
 		return nil, err
 	}
 	signature, err := crypto.Sign(keyPair.SigningKey, []byte(signaturePayload))
 	if err != nil {
-		return nil, fmt.Errorf("sign group change: %w", err)
+		return nil, fmt.Errorf("sign %s: %w", eventName, err)
 	}
+	// The payload isn't sent: key change payloads contain the new conversation key.
 	return &payload.DeleteMessageActionSignature{
 		MessageID:                 messageID,
 		EncodedMessageEventDetail: encodedDetail,
-		SignaturePayload:          signaturePayload,
 		MessageEventSignature: &payload.DeleteMessageEventSignatureJSON{
 			Signature:        signature,
 			PublicKeyVersion: keyPair.KeyVersion,
@@ -181,6 +190,9 @@ func (c *Client) postXChatGroupMutation(ctx context.Context, url string, pl any)
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,
 		Body:           jsonBody,
+		// A server error doesn't mean the change wasn't applied, and resending it would sign a
+		// second change against state that may already be out of date.
+		NoRetry: true,
 	})
 	return respBody, err
 }
