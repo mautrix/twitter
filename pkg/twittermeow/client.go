@@ -59,6 +59,8 @@ type Client struct {
 	jetfuelLoginIdentifier    string
 
 	defaultTransport *req.Transport
+	proxyLock        sync.Mutex
+	proxyAddr        string
 	websocketHTTP    *http.Client
 
 	eventHandler              EventHandler
@@ -160,23 +162,40 @@ func (c *Client) SetKeyStore(store crypto.KeyStore) {
 // SetProxy routes requests to X and the XChat websocket through the given http, https or socks5
 // proxy URL. An empty URL connects directly.
 func (c *Client) SetProxy(proxyAddr string) error {
-	if proxyAddr == "" {
-		c.defaultTransport.SetProxy(http.ProxyFromEnvironment)
-		c.websocketHTTP = nil
+	proxyFunc := http.ProxyFromEnvironment
+	var websocketHTTP *http.Client
+	if proxyAddr != "" {
+		proxyURL, err := url.Parse(proxyAddr)
+		if err != nil {
+			// The parse error repeats the URL, which may contain credentials.
+			return errors.New("invalid proxy URL")
+		} else if proxyURL.Host == "" {
+			return errors.New("proxy URL has no host")
+		}
+		proxyFunc = http.ProxyURL(proxyURL)
+		wsTransport := http.DefaultTransport.(*http.Transport).Clone()
+		wsTransport.Proxy = proxyFunc
+		websocketHTTP = &http.Client{Transport: wsTransport}
+	}
+	c.proxyLock.Lock()
+	defer c.proxyLock.Unlock()
+	if c.proxyAddr == proxyAddr {
 		return nil
 	}
-	proxyURL, err := url.Parse(proxyAddr)
-	if err != nil {
-		return fmt.Errorf("parse proxy URL: %w", err)
-	} else if proxyURL.Host == "" {
-		return fmt.Errorf("proxy URL %q has no host", proxyAddr)
-	}
-	proxyFunc := http.ProxyURL(proxyURL)
+	c.proxyAddr = proxyAddr
 	c.defaultTransport.SetProxy(proxyFunc)
-	wsTransport := http.DefaultTransport.(*http.Transport).Clone()
-	wsTransport.Proxy = proxyFunc
-	c.websocketHTTP = &http.Client{Transport: wsTransport}
+	c.defaultTransport.CloseIdleConnections()
+	if c.websocketHTTP != nil {
+		c.websocketHTTP.CloseIdleConnections()
+	}
+	c.websocketHTTP = websocketHTTP
 	return nil
+}
+
+func (c *Client) getWebsocketHTTP() *http.Client {
+	c.proxyLock.Lock()
+	defer c.proxyLock.Unlock()
+	return c.websocketHTTP
 }
 
 func (c *Client) SetLoginHTTPTransport(transport http.RoundTripper) {

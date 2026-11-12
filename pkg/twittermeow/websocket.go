@@ -320,7 +320,7 @@ func (xc *xchatWebsocketClient) runConnection(
 
 	conn, resp, err := websocket.Dial(ctx, wsURL.String(), &websocket.DialOptions{
 		HTTPHeader: headers,
-		HTTPClient: xc.client.websocketHTTP,
+		HTTPClient: xc.client.getWebsocketHTTP(),
 	})
 	if err != nil {
 		if resp != nil {

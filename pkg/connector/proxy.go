@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -21,7 +22,7 @@ func (tc *TwitterConnector) getProxy(ctx context.Context, reason string) (string
 	}
 	parsed, err := url.Parse(tc.Config.GetProxyURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse get_proxy_url: %w", err)
+		return "", errors.New("failed to parse get_proxy_url")
 	}
 	q := parsed.Query()
 	q.Set("reason", reason)
@@ -33,6 +34,11 @@ func (tc *TwitterConnector) getProxy(ctx context.Context, reason string) (string
 	req.Header.Set("User-Agent", mautrix.DefaultUserAgent)
 	resp, err := getProxyClient.Do(req)
 	if err != nil {
+		// The URL error includes the full get_proxy_url, which can contain a token.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
