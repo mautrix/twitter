@@ -54,6 +54,18 @@ func (tc *TwitterConnector) getProxy(ctx context.Context, reason string) (string
 	return respData.ProxyURL, nil
 }
 
+// initProxy makes a new client fail closed until applyProxy runs. A static proxy is set right away.
+func (tc *TwitterConnector) initProxy(client *twittermeow.Client) error {
+	if tc == nil || (tc.Config.Proxy == "" && tc.Config.GetProxyURL == "") {
+		return nil
+	}
+	client.RequireProxy()
+	if tc.Config.GetProxyURL == "" {
+		return client.SetProxy(tc.Config.Proxy)
+	}
+	return nil
+}
+
 // applyProxy sets the configured proxy on a client. reason is passed to get_proxy_url.
 func (tc *TwitterConnector) applyProxy(ctx context.Context, client *twittermeow.Client, reason string) error {
 	if tc == nil || (tc.Config.Proxy == "" && tc.Config.GetProxyURL == "") {

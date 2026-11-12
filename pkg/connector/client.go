@@ -112,6 +112,9 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 		client.SetBrowserHeaders(*meta.BrowserHeaders)
 	}
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
+	if err := tc.initProxy(client); err != nil {
+		log.Err(err).Msg("Failed to set proxy")
+	}
 	login.Client = NewTwitterClient(login, tc, client)
 	return nil
 }

@@ -1168,10 +1168,10 @@ func (t *TwitterLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 	return t.mapClientHTTPFailure(t.startCredentialsLogin(ctx))
 }
 
-// applyLoginProxy skips the bridge proxy when login requests go through the user's device.
+// applyLoginProxy doesn't call get_proxy_url when login requests go through the user's device.
 func (t *TwitterLogin) applyLoginProxy(ctx context.Context, client *twittermeow.Client) error {
 	if t.loginHTTPTransport != nil {
-		return nil
+		return t.tc.initProxy(client)
 	}
 	return t.tc.applyProxy(ctx, client, "login")
 }
@@ -1741,7 +1741,13 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 
 	// The client becomes persistent in NewLogin below, so detach the login-scoped
 	// transport before exposing it to the long-lived bridge client.
+	usedDeviceTransport := t.loginHTTPTransport != nil
 	t.finishLoginHTTPTransport()
+	if usedDeviceTransport {
+		if err := t.tc.applyProxy(ctx, t.client, "login"); err != nil {
+			t.User.Log.Warn().Err(err).Msg("Failed to set proxy after device login, requests are blocked until connect sets it")
+		}
+	}
 
 	remoteProfile := &status.RemoteProfile{
 		Username: strings.TrimSpace(t.profile.ScreenName),

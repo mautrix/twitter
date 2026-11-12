@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -59,8 +60,7 @@ type Client struct {
 	jetfuelLoginIdentifier    string
 
 	defaultTransport *req.Transport
-	proxyLock        sync.Mutex
-	proxyAddr        string
+	proxy            atomic.Pointer[proxyState]
 	websocketHTTP    *http.Client
 
 	eventHandler              EventHandler
@@ -101,6 +101,11 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 		defaultTransport: defaultTransport,
 		Logger:           logger,
 	}
+
+	defaultTransport.SetProxy(cli.proxyFunc)
+	wsTransport := http.DefaultTransport.(*http.Transport).Clone()
+	wsTransport.Proxy = cli.proxyFunc
+	cli.websocketHTTP = &http.Client{Transport: wsTransport}
 
 	cli.polling = cli.newPollingClient()
 	cli.stream = cli.newStreamClient()
@@ -159,11 +164,45 @@ func (c *Client) SetKeyStore(store crypto.KeyStore) {
 	c.keyManager = crypto.NewKeyManager(store)
 }
 
+// ErrProxyNotSet is returned for requests made after RequireProxy and before SetProxy.
+var ErrProxyNotSet = errors.New("proxy not set yet")
+
+type proxyState struct {
+	addr     string
+	url      *url.URL
+	required bool
+}
+
+func (c *Client) proxyFunc(req *http.Request) (*url.URL, error) {
+	state := c.proxy.Load()
+	if state == nil {
+		return http.ProxyFromEnvironment(req)
+	} else if state.required {
+		return nil, ErrProxyNotSet
+	} else if state.url != nil {
+		return state.url, nil
+	}
+	return http.ProxyFromEnvironment(req)
+}
+
+func (c *Client) swapProxy(state *proxyState) {
+	old := c.proxy.Swap(state)
+	if old != nil && old.addr == state.addr && old.required == state.required {
+		return
+	}
+	c.defaultTransport.CloseIdleConnections()
+	c.websocketHTTP.CloseIdleConnections()
+}
+
+// RequireProxy makes requests to X and the XChat websocket fail until SetProxy is called.
+func (c *Client) RequireProxy() {
+	c.swapProxy(&proxyState{required: true})
+}
+
 // SetProxy routes requests to X and the XChat websocket through the given http, https or socks5
 // proxy URL. An empty URL connects directly.
 func (c *Client) SetProxy(proxyAddr string) error {
-	proxyFunc := http.ProxyFromEnvironment
-	var websocketHTTP *http.Client
+	state := &proxyState{addr: proxyAddr}
 	if proxyAddr != "" {
 		proxyURL, err := url.Parse(proxyAddr)
 		if err != nil {
@@ -172,30 +211,10 @@ func (c *Client) SetProxy(proxyAddr string) error {
 		} else if proxyURL.Host == "" {
 			return errors.New("proxy URL has no host")
 		}
-		proxyFunc = http.ProxyURL(proxyURL)
-		wsTransport := http.DefaultTransport.(*http.Transport).Clone()
-		wsTransport.Proxy = proxyFunc
-		websocketHTTP = &http.Client{Transport: wsTransport}
+		state.url = proxyURL
 	}
-	c.proxyLock.Lock()
-	defer c.proxyLock.Unlock()
-	if c.proxyAddr == proxyAddr {
-		return nil
-	}
-	c.proxyAddr = proxyAddr
-	c.defaultTransport.SetProxy(proxyFunc)
-	c.defaultTransport.CloseIdleConnections()
-	if c.websocketHTTP != nil {
-		c.websocketHTTP.CloseIdleConnections()
-	}
-	c.websocketHTTP = websocketHTTP
+	c.swapProxy(state)
 	return nil
-}
-
-func (c *Client) getWebsocketHTTP() *http.Client {
-	c.proxyLock.Lock()
-	defer c.proxyLock.Unlock()
-	return c.websocketHTTP
 }
 
 func (c *Client) SetLoginHTTPTransport(transport http.RoundTripper) {
