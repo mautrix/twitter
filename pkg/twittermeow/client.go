@@ -58,7 +58,8 @@ type Client struct {
 	LogRedactedLoginResponses bool
 	jetfuelLoginIdentifier    string
 
-	defaultTransport http.RoundTripper
+	defaultTransport *req.Transport
+	websocketHTTP    *http.Client
 
 	eventHandler              EventHandler
 	streamEventHandler        StreamEventHandler
@@ -154,6 +155,28 @@ func (c *Client) GetXChatProcessor() *XChatEventProcessor {
 // This replaces the current KeyManager with a new one using the provided store.
 func (c *Client) SetKeyStore(store crypto.KeyStore) {
 	c.keyManager = crypto.NewKeyManager(store)
+}
+
+// SetProxy routes requests to X and the XChat websocket through the given http, https or socks5
+// proxy URL. An empty URL connects directly.
+func (c *Client) SetProxy(proxyAddr string) error {
+	if proxyAddr == "" {
+		c.defaultTransport.SetProxy(http.ProxyFromEnvironment)
+		c.websocketHTTP = nil
+		return nil
+	}
+	proxyURL, err := url.Parse(proxyAddr)
+	if err != nil {
+		return fmt.Errorf("parse proxy URL: %w", err)
+	} else if proxyURL.Host == "" {
+		return fmt.Errorf("proxy URL %q has no host", proxyAddr)
+	}
+	proxyFunc := http.ProxyURL(proxyURL)
+	c.defaultTransport.SetProxy(proxyFunc)
+	wsTransport := http.DefaultTransport.(*http.Transport).Clone()
+	wsTransport.Proxy = proxyFunc
+	c.websocketHTTP = &http.Client{Transport: wsTransport}
+	return nil
 }
 
 func (c *Client) SetLoginHTTPTransport(transport http.RoundTripper) {

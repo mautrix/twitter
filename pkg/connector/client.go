@@ -190,6 +190,11 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
+	if err := tc.connector.applyProxy(ctx, tc.client, "connect"); err != nil {
+		log.Err(err).Msg("Failed to set proxy")
+		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateUnknownError, Error: "twitter-proxy-error"})
+		return
+	}
 	if err := tc.restoreXChatFailedEvents(); err != nil {
 		log.Err(err).Msg("Failed to load pending XChat event failures")
 		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateUnknownError, Error: "twitter-failed-events-load-failed"})

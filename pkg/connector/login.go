@@ -763,6 +763,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 	client.SetLoginHTTPTransport(t.loginHTTPTransport)
+	if err := t.tc.applyProxy(ctx, client, "login"); err != nil {
+		return nil, err
+	}
 
 	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
@@ -804,6 +807,10 @@ func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
 		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 		t.client = twittermeow.NewClient(cookieStruct, nil, t.log().With().Str("component", "login_twitter_client").Logger())
 		t.client.SetLoginHTTPTransport(t.loginHTTPTransport)
+		if err := t.tc.applyProxy(ctx, t.client, "login"); err != nil {
+			t.client = nil
+			return "", err
+		}
 		if t.browserHeaders.UserAgent != "" {
 			t.client.SetBrowserHeaders(t.browserHeaders)
 		}
@@ -1162,7 +1169,11 @@ func (t *TwitterLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 }
 
 func (t *TwitterLogin) startCredentialsLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
-	t.webLogin = twittermeow.NewWebLoginSession(t.newLoginClient())
+	client := t.newLoginClient()
+	if err := t.tc.applyProxy(ctx, client, "login"); err != nil {
+		return nil, err
+	}
+	t.webLogin = twittermeow.NewWebLoginSession(client)
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
