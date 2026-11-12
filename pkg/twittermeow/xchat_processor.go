@@ -771,6 +771,12 @@ func (p *XChatEventProcessor) processGroupChangeEvent(ctx context.Context, evt *
 	case gc.GroupTitleChange != nil:
 		return p.emitEvent(ctx, convertXChatGroupTitleChange(evt, gc.GroupTitleChange))
 	case gc.GroupAvatarChange != nil:
+		if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
+			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+			if after.timestamp.IsZero() || !ts.After(after.timestamp) {
+				return nil
+			}
+		}
 		return p.emitEvent(ctx, convertXChatGroupAvatarChange(evt, gc.GroupAvatarChange))
 	case gc.GroupCreate != nil:
 		p.log.Debug().
