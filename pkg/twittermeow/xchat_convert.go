@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
@@ -27,6 +28,14 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	// Convert entities
 	if len(contents.Entities) > 0 {
 		msgData.Entities = convertXChatEntities(contents.Entities)
+	}
+	if fwd := contents.ForwardedMessage; fwd != nil {
+		msgData.Forwarded = true
+		msgData.ForwardedText = ptr.Val(fwd.MessageText)
+		if len(fwd.Entities) > 0 {
+			msgData.ForwardedEntities = convertXChatEntities(fwd.Entities)
+		}
+		msgData.Text, msgData.Entities = ComposeForwardedText(msgData.ForwardedText, msgData.ForwardedEntities, msgData.Text, msgData.Entities)
 	}
 
 	// Convert attachments
@@ -452,4 +461,67 @@ func ConvertXChatUserToUser(xu *response.XChatUser) *types.User {
 	}
 
 	return user
+}
+
+func HasForwardedText(fwd *payload.ForwardedMessage) bool {
+	return fwd != nil && ptr.Val(fwd.MessageText) != ""
+}
+
+// ComposeForwardedText puts the forwarded text first and the sender's own comment after it, like X does.
+func ComposeForwardedText(fwdText string, fwdEntities *types.Entities, text string, entities *types.Entities) (string, *types.Entities) {
+	if fwdText == "" {
+		return text, entities
+	} else if text == "" {
+		return fwdText, fwdEntities
+	}
+	prefix := fwdText + "\n\n"
+	offset := utf8.RuneCountInString(prefix)
+	combined := &types.Entities{}
+	for _, src := range []*types.Entities{fwdEntities, entities} {
+		if src == nil {
+			continue
+		}
+		shift := 0
+		if src == entities {
+			shift = offset
+		}
+		for _, url := range src.URLs {
+			url.Indices = shiftIndices(url.Indices, shift)
+			combined.URLs = append(combined.URLs, url)
+		}
+		for _, mention := range src.UserMentions {
+			mention.Indices = shiftIndices(mention.Indices, shift)
+			combined.UserMentions = append(combined.UserMentions, mention)
+		}
+		combined.Hashtags = append(combined.Hashtags, shiftIndexedEntities(src.Hashtags, shift)...)
+		combined.Symbols = append(combined.Symbols, shiftIndexedEntities(src.Symbols, shift)...)
+		combined.Media = append(combined.Media, src.Media...)
+	}
+	return prefix + text, combined
+}
+
+func shiftIndices(indices []int, shift int) []int {
+	shifted := make([]int, len(indices))
+	for i, idx := range indices {
+		shifted[i] = idx + shift
+	}
+	return shifted
+}
+
+func shiftIndexedEntities(entities []any, shift int) []any {
+	shifted := make([]any, 0, len(entities))
+	for _, entity := range entities {
+		if m, ok := entity.(map[string]any); ok {
+			if indices, ok := m["indices"].([]int); ok {
+				copied := make(map[string]any, len(m))
+				for k, v := range m {
+					copied[k] = v
+				}
+				copied["indices"] = shiftIndices(indices, shift)
+				entity = copied
+			}
+		}
+		shifted = append(shifted, entity)
+	}
+	return shifted
 }

@@ -704,7 +704,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 		return nil, time.Time{}, 0, xchatSkipReasonEmptyEntry
 	}
 
-	if entry.Message.MessageText == nil && len(entry.Message.Attachments) == 0 {
+	if entry.Message.MessageText == nil && len(entry.Message.Attachments) == 0 && !twittermeow.HasForwardedText(entry.Message.ForwardedMessage) {
 		return nil, time.Time{}, 0, xchatSkipReasonNoContent
 	}
 

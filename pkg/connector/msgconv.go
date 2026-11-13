@@ -165,8 +165,7 @@ func mergeXChatEditData(original, edit *types.MessageData) types.MessageData {
 	merged := *original
 	merged.ID = edit.ID
 	merged.Time = edit.Time
-	merged.Text = edit.Text
-	merged.Entities = edit.Entities
+	merged.Text, merged.Entities = twittermeow.ComposeForwardedText(original.ForwardedText, original.ForwardedEntities, edit.Text, edit.Entities)
 	merged.EditCount = edit.EditCount
 	if edit.SenderID != "" {
 		merged.SenderID = edit.SenderID
@@ -236,6 +235,10 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
+	if msg.Forwarded && len(parts) > 0 {
+		markForwarded(parts[0])
+	}
+
 	for i, part := range parts {
 		if i == 0 {
 			part.ID = ""
@@ -250,6 +253,21 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	return &bridgev2.ConvertedMessage{
 		ReplyTo: replyTo,
 		Parts:   parts,
+	}
+}
+
+func markForwarded(part *bridgev2.ConvertedMessagePart) {
+	hasCaption := part.Content.FileName != "" && part.Content.FileName != part.Content.Body
+	isMedia := part.Content.MsgType.IsMedia()
+	if isMedia && !hasCaption {
+		part.Content.FileName = part.Content.Body
+		part.Content.Body = "↷ Forwarded"
+		part.Content.Format = event.FormatHTML
+		part.Content.FormattedBody = "<p data-mx-forwarded-notice><em>↷ Forwarded</em></p>"
+	} else if isMedia || part.Content.MsgType.IsText() {
+		part.Content.EnsureHasHTML()
+		part.Content.Body = "↷ Forwarded\n\n" + part.Content.Body
+		part.Content.FormattedBody = "<p data-mx-forwarded-notice><em>↷ Forwarded</em></p>" + part.Content.FormattedBody
 	}
 }
 
