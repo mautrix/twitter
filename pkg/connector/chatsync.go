@@ -42,8 +42,6 @@ import (
 const (
 	ConversationTypeOneToOne = "ONE_TO_ONE"
 	ConversationTypeGroupDM  = "GROUP_DM"
-	// Bound requests even when older pages contain only XChat conversations or duplicates.
-	maxOlderTrustedRESTInboxPages = 20
 )
 
 func isXChatPortalForLogin(portal *bridgev2.Portal, loginID networkid.UserLoginID) bool {
@@ -658,7 +656,7 @@ func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initi
 	status := initial.InboxTimelines.Trusted.Status
 	query := payload.DMRequestQuery{}.Default()
 	query.FilterLowQuality = false
-	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil && (limit <= 0 || syncedDMs < limit) && olderPages < maxOlderTrustedRESTInboxPages {
+	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil && (limit <= 0 || syncedDMs < limit) {
 		query.MaxID = minID
 		older, err := tc.client.GetTrustedInboxTimeline(ctx, &query)
 		if err != nil {
@@ -687,6 +685,10 @@ func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initi
 					syncedDMs++
 				}
 			}
+		}
+		if page.Status == types.PaginationStatusHasMore && page.MinEntryID != "" && compareIntStrings(page.MinEntryID, minID) >= 0 {
+			log.Warn().Str("min_id", minID).Str("next_min_id", page.MinEntryID).Msg("Older trusted REST inbox cursor did not advance")
+			break
 		}
 		minID = page.MinEntryID
 		status = page.Status
@@ -753,6 +755,15 @@ func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.C
 
 	readUpTo := methods.ParseSnowflake(conv.LastReadEventID)
 	queueReceipt := !readUpTo.IsZero() && portal.MXID != ""
+	catchUpWithoutBackfill := portal.MXID != "" && !tc.connector.br.Config.Backfill.Enabled
+	var latestMessage *database.Message
+	if catchUpWithoutBackfill {
+		latestMessage, err = tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to get REST snapshot message boundary")
+			return false
+		}
+	}
 
 	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
 	if latestMessageTS.IsZero() {
@@ -772,6 +783,16 @@ func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.C
 	if !result.Success {
 		log.Warn().Err(result.Error).Msg("Failed to queue REST conversation resync")
 		return false
+	}
+	if catchUpWithoutBackfill && inbox != nil {
+		for _, msg := range inbox.SortedMessages(ctx)[conv.ConversationID] {
+			messageID, source := restMessageCanonicalID(msg)
+			messageTS, _ := restMessageCanonicalTimestamp(msg, messageID, source)
+			if latestMessage != nil && (messageTS.Before(latestMessage.Timestamp) || messageTS.Equal(latestMessage.Timestamp) && compareIntStrings(messageID, ParseMessageID(latestMessage.ID)) <= 0) {
+				continue
+			}
+			tc.HandlePollingEvent(msg, inbox)
+		}
 	}
 	if queueReceipt && !tc.queueRESTReadReceipt(portal.PortalKey, ParseUserLoginID(tc.userLogin.ID), conv.LastReadEventID, readUpTo, readUpTo.UnixMilli()) {
 		log.Warn().Msg("Failed to queue REST inbox read receipt")
