@@ -49,6 +49,7 @@ import (
 var (
 	_ bridgev2.ReactionHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI     = (*TwitterClient)(nil)
+	_ bridgev2.MarkedUnreadHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI            = (*TwitterClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI          = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI             = (*TwitterClient)(nil)
@@ -1031,11 +1032,28 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.MatrixRoomTag) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	_, isFavourite := msg.Content.Tags[event.RoomTagFavourite]
-
-	if isFavourite {
-		return tc.client.SendXChatPinConversation(ctx, conversationID)
+	if isFavourite == tc.isConversationPinned(conversationID) {
+		return nil
 	}
-	return tc.client.SendXChatUnpinConversation(ctx, conversationID)
+
+	var err error
+	if isFavourite {
+		err = tc.client.SendXChatPinConversation(ctx, conversationID)
+	} else {
+		err = tc.client.SendXChatUnpinConversation(ctx, conversationID)
+	}
+	if err == nil {
+		tc.setConversationPinned(ctx, conversationID, isFavourite)
+	}
+	return err
+}
+
+func (tc *TwitterClient) HandleMarkedUnread(ctx context.Context, msg *bridgev2.MatrixMarkedUnread) error {
+	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
+	if !msg.Content.Unread || !meta.CanUseXChat() {
+		return nil
+	}
+	return tc.client.SendXChatMarkConversationUnread(ctx, NormalizeConversationID(ParsePortalID(msg.Portal.ID)))
 }
 
 func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
