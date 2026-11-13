@@ -787,7 +787,7 @@ func (tc *TwitterClient) fetchRESTMessagesWithOptions(
 	}
 
 	// REST APIs require dash-form conversation IDs.
-	restConvID := ConvertConversationIDToREST(conversationID)
+	restConvID := ConvertConversationIDToRESTAPI(conversationID)
 	if restConvID == "" {
 		log.Warn().
 			Str("conversation_id", conversationID).
