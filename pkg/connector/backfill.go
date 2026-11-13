@@ -535,7 +535,23 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 		}
 
 		msg, ts, streamOrder, skipReason := tc.decodeXChatMessageCreateForBackfill(ctx, conversationID, evt)
-		if msg == nil {
+		if skipReason == xchatSkipReasonNewEncryption {
+			skipReasonCounts[skipReason]++
+			seqID := ptr.Val(evt.SequenceId)
+			ts = methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+			if seqID == "" || anchor != nil && (MakeMessageID(seqID) == anchor.ID || ts.Before(anchor.Timestamp)) {
+				continue
+			}
+			result.messages = append(result.messages, &bridgev2.BackfillMessage{
+				ConvertedMessage: unsupportedEncryptionNotice(),
+				Sender:           tc.MakeEventSender(ptr.Val(evt.SenderId)),
+				ID:               MakeMessageID(seqID),
+				TxnID:            networkid.TransactionID(seqID),
+				Timestamp:        ts,
+				StreamOrder:      methods.ParseSnowflakeInt(seqID),
+			})
+			continue
+		} else if msg == nil {
 			skipReasonCounts[skipReason]++
 			if isCriticalXChatBackfillSkip(skipReason) {
 				result.unconvertedMessages = append(result.unconvertedMessages, xchatUnconvertedMessage{
@@ -632,6 +648,7 @@ const (
 	xchatSkipReasonEmptyEntry    = "empty_entry"
 	xchatSkipReasonNoContent     = "no_content"
 	xchatSkipReasonConvertFailed = "convert_failed"
+	xchatSkipReasonNewEncryption = "unsupported_encryption"
 )
 
 func isCriticalXChatBackfillSkip(reason string) bool {
@@ -656,6 +673,12 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	contentsBytes := mce.Contents
 	isUserMetadata := isEncryptedXChatBackfillMessage(mce) && mce.IsUserMetadata()
 
+	if ptr.Val(mce.ContentsEncryptionVersion) != 0 {
+		if isUserMetadata {
+			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
+		}
+		return nil, time.Time{}, 0, xchatSkipReasonNewEncryption
+	}
 	if len(contentsBytes) == 0 {
 		if isUserMetadata {
 			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed

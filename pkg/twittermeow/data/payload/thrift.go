@@ -200,6 +200,22 @@ type GroupChange struct {
 	GroupInviteDisable *GroupInviteDisable      `thrift:"group_invite_disable,9" json:"group_invite_disable,omitempty"`
 	GroupJoinRequest   *GroupJoinRequest        `thrift:"group_join_request,10" json:"group_join_request,omitempty"`
 	GroupJoinReject    *GroupJoinReject         `thrift:"group_join_reject,11" json:"group_join_reject,omitempty"`
+	GroupAdminSettings *GroupAdminSettings      `thrift:"group_admin_settings_change,12" json:"group_admin_settings_change,omitempty"`
+	GroupDescription   *GroupDescriptionChange  `thrift:"group_description_change,14" json:"group_description_change,omitempty"`
+}
+
+type GroupAdminSettings struct {
+	EditGroupInfo      *bool `thrift:"edit_group_info,1" json:"edit_group_info,omitempty"`
+	EditMessageTtl     *bool `thrift:"edit_message_ttl,2" json:"edit_message_ttl,omitempty"`
+	BlockScreenCapture *bool `thrift:"block_screen_capture,3" json:"block_screen_capture,omitempty"`
+	AddMember          *bool `thrift:"add_member,4" json:"add_member,omitempty"`
+	SendMessage        *bool `thrift:"send_message,5" json:"send_message,omitempty"`
+	StartCall          *bool `thrift:"start_call,6" json:"start_call,omitempty"`
+}
+
+type GroupDescriptionChange struct {
+	CustomDescription      *string `thrift:"custom_description,1" json:"custom_description,omitempty"`
+	ConversationKeyVersion *string `thrift:"conversation_key_version,2" json:"conversation_key_version,omitempty"`
 }
 
 type GroupChangeEvent struct {
@@ -308,6 +324,8 @@ type MediaAttachment struct {
 	AttachmentId          *string          `thrift:"attachment_id,7" json:"attachment_id,omitempty"`
 	LegacyMediaUrlHttps   *string          `thrift:"legacy_media_url_https,8" json:"legacy_media_url_https,omitempty"`
 	LegacyMediaPreviewUrl *string          `thrift:"legacy_media_preview_url,9" json:"legacy_media_preview_url,omitempty"`
+	GrokTag               *string          `thrift:"grok_tag,10" json:"grok_tag,omitempty"`
+	PlaintextSha256       *string          `thrift:"plaintext_sha256,11" json:"plaintext_sha256,omitempty"`
 }
 
 type MediaDimensions struct {
@@ -334,6 +352,23 @@ type MessageAttachment struct {
 	Url         *UrlAttachment         `thrift:"url,3" json:"url,omitempty"`
 	UnifiedCard *UnifiedCardAttachment `thrift:"unified_card,4" json:"unified_card,omitempty"`
 	Money       *MoneyAttachment       `thrift:"money,5" json:"money,omitempty"`
+	Jetfuel     *JetfuelAttachment     `thrift:"jetfuel,6" json:"jetfuel,omitempty"`
+	Payment     *PaymentReceipt        `thrift:"payment_receipt,7" json:"payment_receipt,omitempty"`
+	BotMessage  *BotMessageAttachment  `thrift:"bot_message,8" json:"bot_message,omitempty"`
+}
+
+type JetfuelAttachment struct {
+	Url          *string `thrift:"url,3" json:"url,omitempty"`
+	AttachmentId *string `thrift:"attachment_id,4" json:"attachment_id,omitempty"`
+}
+
+type PaymentReceipt struct {
+	ReceiptToken *string `thrift:"receipt_token,1" json:"receipt_token,omitempty"`
+}
+
+type BotMessageAttachment struct {
+	EntryId *string `thrift:"entry_id,1" json:"entry_id,omitempty"`
+	Type    *int32  `thrift:"type,2" json:"type,omitempty"`
 }
 
 type MessageContents struct {
@@ -356,7 +391,10 @@ type MessageCreateEvent struct {
 	IsPendingPublicKey     *bool                      `thrift:"is_pending_public_key,105" json:"is_pending_public_key,omitempty"`
 	Priority               *int32                     `thrift:"priority,106" json:"priority,omitempty"`
 	AdditionalActionList   []int32                    `thrift:"additional_action_list,107" json:"additional_action_list,omitempty"`
+	IsMessageRequest       *bool                      `thrift:"is_message_request,109" json:"is_message_request,omitempty"`
 	SideEffects            []*MessageCreateSideEffect `thrift:"side_effects,111" json:"side_effects,omitempty"`
+	// ContentsEncryptionVersion is unset or 0 for the only contents encryption the bridge knows.
+	ContentsEncryptionVersion *int16 `thrift:"contents_encryption_version,112" json:"contents_encryption_version,omitempty"`
 }
 
 func (mce *MessageCreateEvent) IsUserMetadata() bool {
@@ -450,6 +488,32 @@ type MessageEventDetail struct {
 	MarkConversationReadEvent       *MarkConversationReadEvent       `thrift:"markConversationReadEvent,12" json:"markConversationReadEvent,omitempty"`
 	MarkConversationUnreadEvent     *MarkConversationUnreadEvent     `thrift:"markConversationUnreadEvent,13" json:"markConversationUnreadEvent,omitempty"`
 	MemberAccountDeleteEvent        *MemberAccountDeleteEvent        `thrift:"memberAccountDeleteEvent,14" json:"memberAccountDeleteEvent,omitempty"`
+	GrokMessageEvent                *GrokMessageEvent                `thrift:"grokMessageEvent,15" json:"grokMessageEvent,omitempty"`
+	GrokResponseEvent               *GrokResponseEvent               `thrift:"grokResponseEvent,16" json:"grokResponseEvent,omitempty"`
+	PinMessageEvent                 *PinMessageEvent                 `thrift:"pinMessageEvent,17" json:"pinMessageEvent,omitempty"`
+	UnpinMessageEvent               *UnpinMessageEvent               `thrift:"unpinMessageEvent,18" json:"unpinMessageEvent,omitempty"`
+	PmkBundleUpdateEvent            *PmkBundleUpdateEvent            `thrift:"pmkBundleUpdateEvent,19" json:"pmkBundleUpdateEvent,omitempty"`
+}
+
+type GrokMessageEvent struct {
+	ConversationKeyVersion *string `thrift:"conversation_key_version,5" json:"conversation_key_version,omitempty"`
+}
+
+type GrokResponseEvent struct {
+	ReplyingToMessageSequenceId *string `thrift:"replying_to_message_sequence_id,10" json:"replying_to_message_sequence_id,omitempty"`
+}
+
+type PinMessageEvent struct {
+	ConversationKeyVersion *string `thrift:"conversation_key_version,3" json:"conversation_key_version,omitempty"`
+	MessageSequenceId      *int64  `thrift:"message_sequence_id,4" json:"message_sequence_id,omitempty"`
+}
+
+type UnpinMessageEvent struct {
+	PmeSequenceId     *int64 `thrift:"pme_sequence_id,1" json:"pme_sequence_id,omitempty"`
+	MessageSequenceId *int64 `thrift:"message_sequence_id,2" json:"message_sequence_id,omitempty"`
+}
+
+type PmkBundleUpdateEvent struct {
 }
 
 type MessageEventRelaySource struct {
@@ -473,6 +537,29 @@ type MessageInstruction struct {
 	PinReminderInstruction              *PinReminderInstruction              `thrift:"pinReminderInstruction,4" json:"pinReminderInstruction,omitempty"`
 	SwitchToHybridPullInstruction       *SwitchToHybridPullInstruction       `thrift:"switchToHybridPullInstruction,5" json:"switchToHybridPullInstruction,omitempty"`
 	DisplayTemporaryPasscodeInstruction *DisplayTemporaryPasscodeInstruction `thrift:"displayTemporaryPasscodeInstruction,6" json:"displayTemporaryPasscodeInstruction,omitempty"`
+	DeviceEnrollmentInstruction         *DeviceEnrollmentInstruction         `thrift:"deviceEnrollmentInstruction,7" json:"deviceEnrollmentInstruction,omitempty"`
+	MigrateUserMetadataInstruction      *MigrateUserMetadataInstruction      `thrift:"migrateUserMetadataInstruction,8" json:"migrateUserMetadataInstruction,omitempty"`
+	MessageRequestInfoInstruction       *MessageRequestInfoInstruction       `thrift:"messageRequestInfoInstruction,9" json:"messageRequestInfoInstruction,omitempty"`
+	XNumberPromptInstruction            *XNumberPromptInstruction            `thrift:"xNumberPromptInstruction,10" json:"xNumberPromptInstruction,omitempty"`
+	OpenInboxInstruction                *OpenInboxInstruction                `thrift:"openInboxInstruction,11" json:"openInboxInstruction,omitempty"`
+}
+
+type DeviceEnrollmentInstruction struct {
+	EnrollmentId *string `thrift:"enrollment_id,1" json:"enrollment_id,omitempty"`
+	Status       *int32  `thrift:"status,2" json:"status,omitempty"`
+}
+
+type MigrateUserMetadataInstruction struct {
+	ShouldMigrate *bool `thrift:"should_migrate,1" json:"should_migrate,omitempty"`
+}
+
+type MessageRequestInfoInstruction struct {
+}
+
+type XNumberPromptInstruction struct {
+}
+
+type OpenInboxInstruction struct {
 }
 
 type MessageReactionAdd struct {
@@ -487,7 +574,15 @@ type MessageReactionRemove struct {
 
 type MessageTypingEvent struct {
 	ConversationId *string `thrift:"conversation_id,1" json:"conversation_id,omitempty"`
+	ActivityType   *int32  `thrift:"activity_type,2" json:"activity_type,omitempty"`
 }
+
+type MessageActivityType int32
+
+const (
+	MessageActivityTypeTyping                MessageActivityType = 1
+	MessageActivityTypeRecordingVoiceMessage MessageActivityType = 2
+)
 
 type MoneyAttachment struct {
 	FallbackText *string `thrift:"fallbackText,1" json:"fallbackText,omitempty"`

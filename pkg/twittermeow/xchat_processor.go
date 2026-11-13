@@ -52,6 +52,8 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
+
+	unsupportedEncryptionLogged sync.Map
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
@@ -542,6 +544,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			ConversationID: convID,
 			SenderID:       senderID,
 			Timestamp:      time.Now(),
+			ActivityType:   payload.MessageActivityType(ptr.Val(detail.MessageTypingEvent.ActivityType)),
 		})
 
 	case detail.GroupChangeEvent != nil:
@@ -592,6 +595,15 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			Msg("Ignoring MarkConversationUnreadEvent")
 		return nil
 
+	case detail.GrokMessageEvent != nil, detail.GrokResponseEvent != nil,
+		detail.PinMessageEvent != nil, detail.UnpinMessageEvent != nil, detail.PmkBundleUpdateEvent != nil:
+		p.log.Debug().
+			Str("sequence_id", ptr.Val(evt.SequenceId)).
+			Str("conversation_id", ptr.Val(evt.ConversationId)).
+			Str("detail_type", xchatEventDetailType(detail)).
+			Msg("Ignoring unsupported MessageEventDetail")
+		return nil
+
 	default:
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
@@ -599,6 +611,55 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			Msg("Unknown MessageEventDetail type")
 		return nil
 	}
+}
+
+func xchatEventDetailType(detail *payload.MessageEventDetail) string {
+	switch {
+	case detail.GrokMessageEvent != nil:
+		return "grok_message"
+	case detail.GrokResponseEvent != nil:
+		return "grok_response"
+	case detail.PinMessageEvent != nil:
+		return "pin_message"
+	case detail.UnpinMessageEvent != nil:
+		return "unpin_message"
+	case detail.PmkBundleUpdateEvent != nil:
+		return "pmk_bundle_update"
+	default:
+		return "unknown"
+	}
+}
+
+// handleUnsupportedContentsEncryption skips a message the bridge can't read without failing
+// the event, so it neither blocks the inbox checkpoint nor drops the websocket.
+func (p *XChatEventProcessor) handleUnsupportedContentsEncryption(ctx context.Context, evt *payload.MessageEvent, version int16, isUserMetadata bool) error {
+	conversationID := ptr.Val(evt.ConversationId)
+	logEvt := p.log.Debug()
+	if _, alreadyLogged := p.unsupportedEncryptionLogged.LoadOrStore(conversationID, struct{}{}); !alreadyLogged {
+		logEvt = p.log.Error()
+	}
+	logEvt.
+		Str("sequence_id", ptr.Val(evt.SequenceId)).
+		Str("conversation_id", conversationID).
+		Int16("contents_encryption_version", version).
+		Msg("MessageCreateEvent uses an unsupported contents encryption version")
+	if isUserMetadata {
+		return nil
+	}
+	if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
+		ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+		if after.timestamp.IsZero() || ts.Before(after.timestamp) ||
+			ts.Equal(after.timestamp) && ptr.Val(evt.SequenceId) == after.sequenceID {
+			return nil
+		}
+	}
+	return p.emitEvent(ctx, &types.XChatUnsupportedMessage{
+		SequenceID:     ptr.Val(evt.SequenceId),
+		ConversationID: conversationID,
+		SenderID:       ptr.Val(evt.SenderId),
+		Time:           ptr.Val(evt.CreatedAtMsec),
+		Version:        version,
+	})
 }
 
 func isEncryptedMessageCreateEvent(mce *payload.MessageCreateEvent) bool {
@@ -613,6 +674,10 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	contentsBytes := mce.Contents
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	isUserMetadata := isEncryptedMessageCreateEvent(mce) && mce.IsUserMetadata()
+
+	if version := ptr.Val(mce.ContentsEncryptionVersion); version != 0 {
+		return p.handleUnsupportedContentsEncryption(ctx, evt, version, isUserMetadata)
+	}
 
 	if len(contentsBytes) == 0 {
 		if isUserMetadata {
@@ -990,6 +1055,26 @@ func (p *XChatEventProcessor) processInstruction(ctx context.Context, inst *payl
 			Bool("has_token", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.Token) != "").
 			Str("public_key_version", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.LatestPublicKeyVersion)).
 			Msg("Received DisplayTemporaryPasscodeInstruction")
+		return nil
+
+	case inst.DeviceEnrollmentInstruction != nil:
+		p.log.Debug().
+			Int32("status", ptr.Val(inst.DeviceEnrollmentInstruction.Status)).
+			Msg("Ignoring DeviceEnrollmentInstruction")
+		return nil
+
+	case inst.MigrateUserMetadataInstruction != nil:
+		p.log.Debug().
+			Bool("should_migrate", ptr.Val(inst.MigrateUserMetadataInstruction.ShouldMigrate)).
+			Msg("Ignoring MigrateUserMetadataInstruction")
+		return nil
+
+	case inst.MessageRequestInfoInstruction != nil:
+		p.log.Debug().Msg("Ignoring MessageRequestInfoInstruction")
+		return nil
+
+	case inst.XNumberPromptInstruction != nil, inst.OpenInboxInstruction != nil:
+		p.log.Trace().Msg("Ignoring UI MessageInstruction")
 		return nil
 
 	default:
