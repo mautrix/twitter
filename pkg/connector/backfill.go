@@ -700,6 +700,9 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 		}
 		entry = parsed
 	}
+	if notice := twittermeow.ConvertXChatNoticeEntry(evt, entry, keyVersion); notice != nil {
+		return notice, methods.ParseMsecTimestamp(notice.Time), methods.ParseSnowflakeInt(notice.SequenceID), ""
+	}
 	if entry == nil || entry.Message == nil {
 		return nil, time.Time{}, 0, xchatSkipReasonEmptyEntry
 	}
