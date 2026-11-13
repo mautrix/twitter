@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
@@ -10,6 +11,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/methods"
 )
 
 // convertXChatMessageToTwitterMessage converts an XChat MessageEvent with decrypted contents to a types.Message.
@@ -50,6 +52,9 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	// Convert reply data
 	if contents.ReplyingToPreview != nil {
 		msgData.ReplyData = convertXChatReplyPreview(contents.ReplyingToPreview)
+	}
+	if evt.Detail != nil && evt.Detail.MessageCreateEvent != nil {
+		msgData.TTL = time.Duration(ptr.Val(evt.Detail.MessageCreateEvent.TtlMsec)) * time.Millisecond
 	}
 
 	return &types.Message{
@@ -452,4 +457,25 @@ func ConvertXChatUserToUser(xu *response.XChatUser) *types.User {
 	}
 
 	return user
+}
+
+// XChatConversationTTLChangeFromEvent returns the disappearing timer change in a message event, if it is one.
+func XChatConversationTTLChangeFromEvent(evt *payload.MessageEvent) *types.XChatConversationTTLChange {
+	if evt == nil || evt.Detail == nil || evt.Detail.ConversationMetadataChangeEvent == nil {
+		return nil
+	}
+	change := evt.Detail.ConversationMetadataChangeEvent.ConversationMetadataChange
+	if change == nil || (change.MessageDurationChange == nil && change.MessageDurationRemove == nil) {
+		return nil
+	}
+	ttlChange := &types.XChatConversationTTLChange{
+		ID:             ptr.Val(evt.SequenceId),
+		ConversationID: ptr.Val(evt.ConversationId),
+		SenderID:       ptr.Val(evt.SenderId),
+		Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+	}
+	if change.MessageDurationChange != nil {
+		ttlChange.TTL = time.Duration(ptr.Val(change.MessageDurationChange.TtlMsec)) * time.Millisecond
+	}
+	return ttlChange
 }

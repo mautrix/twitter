@@ -560,6 +560,9 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		return p.processMessageFailure(ctx, evt, detail.MessageFailureEvent)
 
 	case detail.ConversationMetadataChangeEvent != nil:
+		if ttlChange := XChatConversationTTLChangeFromEvent(evt); ttlChange != nil {
+			return p.emitEvent(ctx, ttlChange)
+		}
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Msg("Ignoring ConversationMetadataChangeEvent")
@@ -765,7 +768,19 @@ func (p *XChatEventProcessor) processGroupChangeEvent(ctx context.Context, evt *
 
 	switch {
 	case gc.GroupMemberAdd != nil:
-		return p.emitEvent(ctx, convertXChatGroupMemberAdd(evt, gc.GroupMemberAdd))
+		if err := p.emitEvent(ctx, convertXChatGroupMemberAdd(evt, gc.GroupMemberAdd)); err != nil {
+			return err
+		}
+		if gc.GroupMemberAdd.CurrentTtlMsec == nil {
+			return nil
+		}
+		return p.emitEvent(ctx, &types.XChatConversationTTLChange{
+			ID:             ptr.Val(evt.SequenceId),
+			ConversationID: ptr.Val(evt.ConversationId),
+			SenderID:       ptr.Val(evt.SenderId),
+			TTL:            time.Duration(*gc.GroupMemberAdd.CurrentTtlMsec) * time.Millisecond,
+			Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+		})
 	case gc.GroupMemberRemove != nil:
 		return p.emitEvent(ctx, convertXChatGroupMemberRemove(evt, gc.GroupMemberRemove))
 	case gc.GroupTitleChange != nil:

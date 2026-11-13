@@ -28,6 +28,17 @@ type XChatMessageFailure struct {
 
 func (*XChatMessageFailure) isTwitterEvent() {}
 
+// XChatConversationTTLChange is emitted when the disappearing message timer of a conversation changes.
+type XChatConversationTTLChange struct {
+	ID             string
+	ConversationID string
+	SenderID       string
+	TTL            time.Duration
+	Timestamp      time.Time
+}
+
+func (*XChatConversationTTLChange) isTwitterEvent() {}
+
 // XChatTyping represents a typing indicator from XChat.
 type XChatTyping struct {
 	ConversationID string

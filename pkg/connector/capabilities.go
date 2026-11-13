@@ -18,6 +18,7 @@ package connector
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"go.mau.fi/util/jsontime"
@@ -28,6 +29,7 @@ import (
 )
 
 var generalCaps = &bridgev2.NetworkGeneralCapabilities{
+	DisappearingMessages: true,
 	Provisioning: bridgev2.ProvisioningCapabilities{
 		ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
 			CreateDM:       true,
@@ -42,13 +44,25 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 9
+	return 1, 10
 }
 
 const MaxTextLength = 10000
 
+var disappearingCaps = &event.DisappearingTimerCapability{
+	Types: []event.DisappearingType{event.DisappearingTypeAfterRead},
+	Timers: []jsontime.Milliseconds{
+		jsontime.MS(5 * time.Minute),
+		jsontime.MS(1 * time.Hour),
+		jsontime.MS(8 * time.Hour),
+		jsontime.MS(24 * time.Hour),
+		jsontime.MS(7 * 24 * time.Hour),
+		jsontime.MS(28 * 24 * time.Hour),
+	},
+}
+
 var groupCaps = &event.RoomFeatures{
-	ID: "fi.mau.twitter.capabilities.2026_10_12",
+	ID: "fi.mau.twitter.capabilities.2026_11_11",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 	//	event.FmtUserLink: event.CapLevelFullySupported,
 	//},
@@ -87,8 +101,9 @@ var groupCaps = &event.RoomFeatures{
 		event.MemberActionInvite: event.CapLevelFullySupported,
 	},
 	State: event.StateFeatureMap{
-		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
-		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
+		event.StateRoomName.Type:                {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type:              {Level: event.CapLevelFullySupported},
+		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
 	},
 
 	MaxTextLength: MaxTextLength,
@@ -105,6 +120,8 @@ var groupCaps = &event.RoomFeatures{
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,
 
+	DisappearingTimer: disappearingCaps,
+
 	MessageRequest: &event.MessageRequestFeatures{
 		AcceptWithButton: event.CapLevelFullySupported,
 	},
@@ -114,7 +131,9 @@ var dmCaps = ptr.Clone(groupCaps)
 var selfDMCaps *event.RoomFeatures
 
 func init() {
-	dmCaps.State = nil
+	dmCaps.State = event.StateFeatureMap{
+		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
+	}
 	dmCaps.MemberActions = nil
 	dmCaps.ID += "+dm"
 
@@ -139,6 +158,9 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected
+		caps.DisappearingTimer = nil
+		caps.State = maps.Clone(baseCaps.State)
+		delete(caps.State, event.StateBeeperDisappearingTimer.Type)
 		caps.ID += "+no-edit+no-delete"
 		return caps
 	}

@@ -62,6 +62,16 @@ func SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID stri
 	return strings.Join(append(fields, sequenceIDs...), ",")
 }
 
+func SignaturePayloadConversationMetadataChange(change, messageID, senderID, conversationID string, extra ...string) string {
+	fields := []string{
+		"ConversationMetadataChangeEvent." + change,
+		messageID,
+		senderID,
+		conversationID,
+	}
+	return strings.Join(append(fields, extra...), ",")
+}
+
 // Sign creates an ECDSA P-256 signature over the given preimage.
 // Returns the raw 64-byte signature (r || s), base64-encoded.
 func Sign(privateKey *ecdsa.PrivateKey, preimage []byte) (string, error) {

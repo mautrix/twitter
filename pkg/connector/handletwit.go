@@ -534,6 +534,13 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipLeave)
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
+	case *types.XChatConversationTTLChange:
+		if !tc.xchatPortalHasRoom(ctx, evt.ConversationID) {
+			tc.rememberPendingXChatDisappearTimer(evt)
+			return true
+		}
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(tc.makeXChatDisappearTimerChange(evt)))
+
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
 			EventMeta: simplevent.EventMeta{

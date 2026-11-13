@@ -152,7 +152,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		count = 50
 	}
 
-	parsed, err := tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, minSeqID, count, nil)
+	parsed, err := tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, minSeqID, count, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversat
 		MaxMessages: count,
 		MaxPages:    maxPages,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
-		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
+		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage, true)
 	})
 }
 
@@ -250,7 +250,7 @@ func (tc *TwitterClient) fetchCompleteXChatForwardCatchup(ctx context.Context, c
 		PageSize:        pageSize,
 		RequireComplete: true,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
-		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
+		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage, true)
 	})
 }
 
@@ -442,7 +442,7 @@ func normalizeXChatBackfillEventConversation(evt *payload.MessageEvent, conversa
 	return eventConversationID == conversationID
 }
 
-func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Portal, conversationID, minSeqID string, count int, anchor *database.Message) (*parsedXChatPage, error) {
+func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Portal, conversationID, minSeqID string, count int, anchor *database.Message, forward bool) (*parsedXChatPage, error) {
 	settings := payload.DefaultGetConversationPageQuerySettings()
 	if count < settings.ConversationEventLimit {
 		settings.ConversationEventLimit = count
@@ -531,6 +531,11 @@ func (tc *TwitterClient) fetchXChatPage(ctx context.Context, portal *bridgev2.Po
 	for _, evt := range events {
 		if evt.Detail.MessageCreateEvent == nil {
 			nonMessageEventCount++
+			if ttlChange := twittermeow.XChatConversationTTLChangeFromEvent(evt); ttlChange != nil && forward {
+				// Forward backfill can run inside the portal's event handling, so queue the change separately.
+				// Older history pages are skipped: portals without a stored timer sequence would take stale timers from them.
+				go tc.userLogin.QueueRemoteEvent(tc.makeXChatDisappearTimerChange(ttlChange))
+			}
 			continue
 		}
 
