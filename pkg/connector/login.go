@@ -763,6 +763,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 	client.SetLoginHTTPTransport(t.loginHTTPTransport)
+	if err := t.applyLoginProxy(ctx, client); err != nil {
+		return nil, err
+	}
 
 	profile, err := client.LoadMessagesPage(ctx)
 	if err != nil {
@@ -804,6 +807,10 @@ func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
 		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 		t.client = twittermeow.NewClient(cookieStruct, nil, t.log().With().Str("component", "login_twitter_client").Logger())
 		t.client.SetLoginHTTPTransport(t.loginHTTPTransport)
+		if err := t.applyLoginProxy(ctx, t.client); err != nil {
+			t.client = nil
+			return "", err
+		}
 		if t.browserHeaders.UserAgent != "" {
 			t.client.SetBrowserHeaders(t.browserHeaders)
 		}
@@ -1161,8 +1168,20 @@ func (t *TwitterLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 	return t.mapClientHTTPFailure(t.startCredentialsLogin(ctx))
 }
 
+// applyLoginProxy doesn't call get_proxy_url when login requests go through the user's device.
+func (t *TwitterLogin) applyLoginProxy(ctx context.Context, client *twittermeow.Client) error {
+	if t.loginHTTPTransport != nil {
+		return t.tc.initProxy(client)
+	}
+	return t.tc.applyProxy(ctx, client, "login")
+}
+
 func (t *TwitterLogin) startCredentialsLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
-	t.webLogin = twittermeow.NewWebLoginSession(t.newLoginClient())
+	client := t.newLoginClient()
+	if err := t.applyLoginProxy(ctx, client); err != nil {
+		return nil, err
+	}
+	t.webLogin = twittermeow.NewWebLoginSession(client)
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
@@ -1722,7 +1741,13 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 
 	// The client becomes persistent in NewLogin below, so detach the login-scoped
 	// transport before exposing it to the long-lived bridge client.
+	usedDeviceTransport := t.loginHTTPTransport != nil
 	t.finishLoginHTTPTransport()
+	if usedDeviceTransport {
+		if err := t.tc.applyProxy(ctx, t.client, "login"); err != nil {
+			t.User.Log.Warn().Err(err).Msg("Failed to set proxy after device login, requests are blocked until connect sets it")
+		}
+	}
 
 	remoteProfile := &status.RemoteProfile{
 		Username: strings.TrimSpace(t.profile.ScreenName),
