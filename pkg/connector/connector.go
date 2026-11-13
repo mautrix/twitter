@@ -45,6 +45,7 @@ func xchatRemoteEventHandled(result bridgev2.EventHandlingResult) bool {
 }
 
 func (tc *TwitterConnector) Start(_ context.Context) error {
+	setBackfillRequestsPerMinute(tc.Config.BackfillRequestsPerMinute)
 	return nil
 }
 

@@ -17,6 +17,7 @@ import (
 const (
 	defaultXChatGapCatchupMessages = 50
 	xchatGapCatchupRateLimitPause  = 15 * time.Minute
+	xchatGapMaxBatchSize           = 500
 )
 
 var errXChatGapCatchupPaused = errors.New("xchat gap catch-up paused after a rate limit")
@@ -94,7 +95,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 	ctx context.Context,
 	conversationID, previousSequenceID, currentSequenceID string,
 ) error {
-	if time.Now().UnixMilli() < tc.xchatGapCatchupPausedUntil.Load() {
+	if time.Now().UnixMilli() < tc.xchatGapCatchupPausedUntil.Load() || time.Now().Before(twittermeow.CloudflareCooldownUntil()) {
 		return errXChatGapCatchupPaused
 	}
 	stateValue, _ := tc.xchatGapCatchupStates.LoadOrStore(conversationID, &xchatGapCatchupState{})
@@ -179,7 +180,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 		return nil
 	}
 	log.Info().Int("message_count", len(resp.Messages)).Msg("Bridging missed XChat conversation messages")
-	err = sendXChatGapBatches(len(resp.Messages), count, func(start, end int, final bool) error {
+	err = sendXChatGapBatches(len(resp.Messages), min(count, xchatGapMaxBatchSize), func(start, end int, final bool) error {
 		var completeCallback func()
 		if final {
 			completeCallback = resp.CompleteCallback

@@ -151,6 +151,9 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		if json.Unmarshal(responseBody, &respErr) == nil {
 			respErr.StatusCode = response.StatusCode
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
+		} else if response.StatusCode == http.StatusTooManyRequests && bytes.Contains(responseBody, []byte("1015")) && bytes.Contains(responseBody, []byte("Cloudflare")) {
+			cloudflareCooldownUntil.Store(time.Now().Add(CloudflareCooldown).UnixMilli())
+			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrCloudflareRateLimited)
 		} else if response.StatusCode == http.StatusTooManyRequests {
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrRatelimitExceeded)
 		} else if len(responseBody) == 0 {

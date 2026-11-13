@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -97,7 +99,101 @@ func (tc *TwitterClient) fetchRESTMessagesForCursorMode(
 	return ensureRESTFallbackCursor(restResp), nil
 }
 
+const (
+	backfillRateLimitPause = 15 * time.Minute
+	backfillStartJitter    = 10 * time.Minute
+	backfillMinSlotWait    = time.Minute
+)
+
+var errBackfillPaused = errors.New("backfill paused after a rate limit")
+
+var backfillPacer struct {
+	sync.Mutex
+	interval time.Duration
+	next     time.Time
+}
+
+func setBackfillRequestsPerMinute(perMinute int) {
+	backfillPacer.Lock()
+	defer backfillPacer.Unlock()
+	backfillPacer.interval = 0
+	if perMinute > 0 {
+		backfillPacer.interval = time.Minute / time.Duration(perMinute)
+	}
+}
+
+func backfillPacingEnabled() bool {
+	backfillPacer.Lock()
+	defer backfillPacer.Unlock()
+	return backfillPacer.interval > 0
+}
+
+func waitForBackfillSlot(ctx context.Context, maxWait time.Duration) bool {
+	deadline := time.Now().Add(maxWait)
+	for {
+		backfillPacer.Lock()
+		now := time.Now()
+		readyAt := backfillPacer.next
+		if cooldownUntil := twittermeow.CloudflareCooldownUntil(); cooldownUntil.After(readyAt) {
+			readyAt = cooldownUntil
+		}
+		if !now.Before(readyAt) {
+			backfillPacer.next = now.Add(backfillPacer.interval)
+			backfillPacer.Unlock()
+			return true
+		}
+		backfillPacer.Unlock()
+		if readyAt.After(deadline) {
+			return false
+		}
+		timer := time.NewTimer(readyAt.Sub(now))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
+	}
+}
+
+func isRateLimitError(err error) bool {
+	var twitterErrs *twittermeow.TwitterErrors
+	return errors.Is(err, twittermeow.ErrRatelimitExceeded) ||
+		(errors.As(err, &twitterErrs) && twitterErrs.StatusCode == http.StatusTooManyRequests)
+}
+
+func (tc *TwitterClient) skipBackfillBatch(fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	fetchParams.Task.BatchCount--
+	return &bridgev2.FetchMessagesResponse{Cursor: fetchParams.Cursor, HasMore: true}, nil
+}
+
 func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	if fetchParams.Forward {
+		return tc.fetchMessages(ctx, fetchParams)
+	}
+	fromQueue := fetchParams.Task != nil && fetchParams.Task.FromQueue
+	now := time.Now()
+	if now.UnixMilli() < max(tc.backfillPausedUntil.Load(), tc.xchatGapCatchupPausedUntil.Load()) ||
+		now.Before(twittermeow.CloudflareCooldownUntil()) {
+		if !fromQueue {
+			return nil, errBackfillPaused
+		}
+		return tc.skipBackfillBatch(fetchParams)
+	} else if fromQueue && backfillPacingEnabled() {
+		maxWait := time.Duration(tc.connector.br.Config.Backfill.Queue.BatchDelay) * time.Second
+		if now.Before(tc.backfillStartAt) || !waitForBackfillSlot(ctx, max(maxWait, backfillMinSlotWait)) {
+			return tc.skipBackfillBatch(fetchParams)
+		}
+	}
+	resp, err := tc.fetchMessages(ctx, fetchParams)
+	if isRateLimitError(err) {
+		tc.backfillPausedUntil.Store(time.Now().Add(backfillRateLimitPause).UnixMilli())
+		zerolog.Ctx(ctx).Warn().Err(err).Dur("pause", backfillRateLimitPause).Msg("X rate limited backfill, pausing backfill requests")
+	}
+	return resp, err
+}
+
+func (tc *TwitterClient) fetchMessages(ctx context.Context, fetchParams bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
 	conversationID := ParsePortalID(fetchParams.Portal.PortalKey.ID)
 	meta := fetchParams.Portal.Metadata.(*PortalMetadata)
 	cursorMode := parseRESTBackfillCursorMode(fetchParams.Cursor)
@@ -229,6 +325,10 @@ func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversat
 		}
 	}
 	maxPages := int(math.Ceil(float64(count) / float64(pageSize)))
+	if queue := tc.connector.br.Config.Backfill.Queue; fetchParams.AnchorMessage == nil && backfillPacingEnabled() &&
+		queue.Enabled && tc.GetBackfillMaxBatchCount(ctx, fetchParams.Portal, nil) != 0 {
+		maxPages = 1
+	}
 	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
 		PageSize:    count,
 		MaxMessages: count,

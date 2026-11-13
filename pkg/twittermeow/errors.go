@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -32,6 +34,26 @@ var (
 	ErrAccountTemporarilyLocked error = TwitterError{Code: 326}
 	ErrCSRFMismatch             error = TwitterError{Code: 353}
 )
+
+var ErrCloudflareRateLimited error = cloudflareRateLimitError{}
+
+const CloudflareCooldown = 15 * time.Minute
+
+var cloudflareCooldownUntil atomic.Int64
+
+func CloudflareCooldownUntil() time.Time {
+	return time.UnixMilli(cloudflareCooldownUntil.Load())
+}
+
+type cloudflareRateLimitError struct{}
+
+func (cloudflareRateLimitError) Error() string {
+	return "rate limited by Cloudflare (error 1015)"
+}
+
+func (cloudflareRateLimitError) Is(target error) bool {
+	return errors.Is(ErrRatelimitExceeded, target)
+}
 
 func IsAuthError(err error) bool {
 	return errors.Is(err, ErrCouldNotAuthenticate) ||
