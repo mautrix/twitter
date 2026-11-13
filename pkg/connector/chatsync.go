@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -568,8 +569,8 @@ func isProbablyEncryptedGroupName(encName string) bool {
 	return len(decoded) >= 40
 }
 
-// syncUntrustedChannels fetches and syncs message requests and legacy groups via the REST API.
-func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
+// syncInitialRESTInbox fetches and syncs the first REST inbox page.
+func (tc *TwitterClient) syncInitialRESTInbox(ctx context.Context) (*response.TwitterInboxData, int, error) {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
@@ -577,13 +578,13 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
 	reqQuery.FilterLowQuality = false
 	initialInboxState, err := tc.client.GetInitialInboxState(ctx, reqQuery)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 
 	inbox := initialInboxState.InboxInitialState
 	if inbox == nil {
 		log.Debug().Msg("No inbox data in initial state response")
-		return nil
+		return nil, 0, nil
 	}
 
 	// Set the polling cursor for REST API polling
@@ -598,16 +599,25 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
 	// Cache users and update ghost info when needed.
 	tc.updateTwitterUserInfo(ctx, inbox)
 
-	// Process message requests and accepted legacy groups that XChat did not return.
+	// Process message requests and accepted REST conversations not supplied by XChat.
 	untrustedCount := 0
 	trustedCount := 0
 	legacyGroupCount := 0
-	for _, conv := range inbox.SortedConversations() {
+	trustedDMCount := 0
+	limit := tc.connector.Config.ConversationSyncLimit
+	for _, conv := range slices.Backward(inbox.SortedConversations()) {
+		if ctx.Err() != nil {
+			break
+		}
 		if conv.Trusted {
 			trustedCount++
 			if isTrustedRESTGroup(conv) {
 				legacyGroupCount++
 				tc.syncTrustedRESTGroup(ctx, conv, inbox)
+			} else if conv.Type == types.ConversationTypeOneToOne && (limit <= 0 || trustedDMCount < limit) {
+				if tc.syncRESTConversation(ctx, conv, inbox) {
+					trustedDMCount++
+				}
 			}
 			continue
 		}
@@ -618,16 +628,72 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
 			Bool("low_quality", conv.LowQuality).
 			Str("type", string(conv.Type)).
 			Msg("Processing untrusted conversation")
-		tc.syncUntrustedConversation(ctx, conv, inbox)
+		tc.syncRESTConversation(ctx, conv, inbox)
 	}
 
 	log.Info().
 		Int("untrusted_conversations", untrustedCount).
 		Int("trusted_conversations", trustedCount).
 		Int("legacy_group_conversations", legacyGroupCount).
+		Int("trusted_dm_conversations", trustedDMCount).
 		Int("total_conversations", len(inbox.Conversations)).
-		Msg("Finished syncing REST conversations")
-	return nil
+		Msg("Finished syncing initial REST conversations")
+	return inbox, trustedDMCount, nil
+}
+
+func (tc *TwitterClient) syncOlderTrustedRESTChannels(ctx context.Context, initial *response.TwitterInboxData, syncedDMs int) {
+	limit := tc.connector.Config.ConversationSyncLimit
+	if initial == nil || (limit > 0 && syncedDMs >= limit) {
+		return
+	}
+	log := zerolog.Ctx(ctx)
+	seen := make(map[string]struct{}, len(initial.Conversations))
+	for _, conv := range initial.Conversations {
+		seen[NormalizeConversationID(conv.ConversationID)] = struct{}{}
+	}
+	olderPages := 0
+	minID := initial.InboxTimelines.Trusted.MinEntryID
+	status := initial.InboxTimelines.Trusted.Status
+	query := payload.DMRequestQuery{}.Default()
+	query.FilterLowQuality = false
+	for status == types.PaginationStatusHasMore && minID != "" && ctx.Err() == nil && (limit <= 0 || syncedDMs < limit) {
+		query.MaxID = minID
+		older, err := tc.client.GetTrustedInboxTimeline(ctx, &query)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to fetch older trusted REST conversations")
+			break
+		} else if older.InboxTimeline == nil {
+			log.Warn().Msg("Older trusted REST inbox page is missing")
+			break
+		}
+		page := older.InboxTimeline
+		olderPages++
+		tc.updateTwitterUserInfo(ctx, page)
+		for _, conv := range slices.Backward(page.SortedConversations()) {
+			if ctx.Err() != nil {
+				return
+			}
+			id := NormalizeConversationID(conv.ConversationID)
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+			if isTrustedRESTGroup(conv) {
+				tc.syncTrustedRESTGroup(ctx, conv, page)
+			} else if conv.Trusted && conv.Type == types.ConversationTypeOneToOne && (limit <= 0 || syncedDMs < limit) {
+				if tc.syncRESTConversation(ctx, conv, page) {
+					syncedDMs++
+				}
+			}
+		}
+		if page.Status == types.PaginationStatusHasMore && page.MinEntryID != "" && compareIntStrings(page.MinEntryID, minID) >= 0 {
+			log.Warn().Str("min_id", minID).Str("next_min_id", page.MinEntryID).Msg("Older trusted REST inbox cursor did not advance")
+			break
+		}
+		minID = page.MinEntryID
+		status = page.Status
+	}
+	log.Debug().Int("pages", olderPages).Int("trusted_dm_conversations", syncedDMs).Msg("Finished syncing older REST conversations")
 }
 
 func isTrustedRESTGroup(conv *types.Conversation) bool {
@@ -667,24 +733,37 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 	}
 }
 
-// syncUntrustedConversation syncs a single untrusted conversation.
-func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
+// syncRESTConversation syncs a REST-only conversation, including accepted legacy DMs.
+func (tc *TwitterClient) syncRESTConversation(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) bool {
 	log := zerolog.Ctx(ctx)
+	if tc.client.GetXChatProcessor().ConversationRecoveryPending(NormalizeConversationID(conv.ConversationID)) {
+		log.Debug().Str("conversation_id", conv.ConversationID).Msg("Deferring REST sync for pending XChat conversation")
+		return false
+	}
 
 	_, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
 	if err != nil {
 		log.Warn().Err(err).
 			Str("conversation_id", conv.ConversationID).
-			Msg("Failed to get/create portal for untrusted conversation")
-		return
+			Msg("Failed to get/create portal for REST conversation")
+		return false
 	}
 	if isXChatPortalForLogin(portal, tc.userLogin.ID) {
-		log.Debug().Msg("Skipping REST message-request sync for XChat conversation")
-		return
+		log.Debug().Msg("Skipping REST sync for XChat conversation")
+		return false
 	}
 
 	readUpTo := methods.ParseSnowflake(conv.LastReadEventID)
 	queueReceipt := !readUpTo.IsZero() && portal.MXID != ""
+	catchUpWithoutBackfill := portal.MXID != "" && !tc.connector.br.Config.Backfill.Enabled
+	var latestMessage *database.Message
+	if catchUpWithoutBackfill {
+		latestMessage, err = tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to get REST snapshot message boundary")
+			return false
+		}
+	}
 
 	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
 	if latestMessageTS.IsZero() {
@@ -702,8 +781,18 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 		BundledBackfillData: conv,
 	})
 	if !result.Success {
-		log.Warn().Err(result.Error).Msg("Failed to queue untrusted conversation resync")
-		return
+		log.Warn().Err(result.Error).Msg("Failed to queue REST conversation resync")
+		return false
+	}
+	if catchUpWithoutBackfill && inbox != nil {
+		for _, msg := range inbox.SortedMessages(ctx)[conv.ConversationID] {
+			messageID, source := restMessageCanonicalID(msg)
+			messageTS, _ := restMessageCanonicalTimestamp(msg, messageID, source)
+			if latestMessage != nil && (messageTS.Before(latestMessage.Timestamp) || messageTS.Equal(latestMessage.Timestamp) && compareIntStrings(messageID, ParseMessageID(latestMessage.ID)) <= 0) {
+				continue
+			}
+			tc.HandlePollingEvent(msg, inbox)
+		}
 	}
 	if queueReceipt && !tc.queueRESTReadReceipt(portal.PortalKey, ParseUserLoginID(tc.userLogin.ID), conv.LastReadEventID, readUpTo, readUpTo.UnixMilli()) {
 		log.Warn().Msg("Failed to queue REST inbox read receipt")
@@ -712,7 +801,8 @@ func (tc *TwitterClient) syncUntrustedConversation(ctx context.Context, conv *ty
 	log.Debug().
 		Str("conversation_id", conv.ConversationID).
 		Bool("trusted", conv.Trusted).
-		Msg("Synced untrusted conversation")
+		Msg("Synced REST conversation")
+	return true
 }
 
 // conversationToChatInfo converts a REST API conversation to bridgev2 chat info.

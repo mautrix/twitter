@@ -515,20 +515,21 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	go func() {
 		retryDelay := time.Minute
 		for {
-			err := tc.syncUntrustedChannels(ctx)
+			inbox, syncedDMs, err := tc.syncInitialRESTInbox(ctx)
 			if err == nil || twittermeow.IsAuthError(err) {
-				break
+				tc.client.StartPolling(ctx)
+				tc.syncOlderTrustedRESTChannels(ctx, inbox, syncedDMs)
+				return
 			}
 			log.Warn().
 				Err(err).
 				Dur("retry_in", retryDelay).
-				Msg("Failed to fetch initial inbox state for untrusted conversations, retrying")
+				Msg("Failed to fetch initial REST inbox state, retrying")
 			if !waitForXChatInboxRetry(ctx, retryDelay) {
 				return
 			}
 			retryDelay = min(retryDelay*2, 30*time.Minute)
 		}
-		tc.client.StartPolling(ctx)
 	}()
 
 	if ctx.Err() != nil {
