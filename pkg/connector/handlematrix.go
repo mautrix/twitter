@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,7 +84,7 @@ func selectMessageSendMode(meta *PortalMetadata) messageSendMode {
 }
 
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
-	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
+	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText || msg.Portal.MessageRequest {
 		return nil
 	}
 
@@ -716,6 +717,10 @@ func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt t
 }
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
+	if msg.Portal.MessageRequest {
+		tc.requestReadReceipts.Store(msg.Portal.PortalKey, msg)
+		return nil
+	}
 	conversationID := ParsePortalID(msg.Portal.ID)
 	readUpTo, readAt := matrixReadReceiptTimes(msg)
 
@@ -1047,11 +1052,18 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 }
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
-	err := tc.client.AcceptConversation(ctx, ParsePortalID(msg.Portal.ID))
-	// Already-accepted conversations will throw a 279 error when trying to accept again.
-	// TODO maybe check that the conversation actually exists on the xchat side?
-	if errors.Is(err, twittermeow.ErrConversationDoesntExist) {
-		err = nil
+	var err error
+	conversationID := ParsePortalID(msg.Portal.ID)
+	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
+	if otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID)); otherUserID != "" && meta.IsXChatConversation() {
+		err = tc.client.AcceptMessageRequest(ctx, conversationID, otherUserID)
+	} else {
+		err = tc.client.AcceptConversation(ctx, conversationID)
+		// Already-accepted conversations will throw a 279 error when trying to accept again.
+		// X Chat group IDs always get a 279 from the REST endpoint, so it doesn't mean accepted there.
+		if errors.Is(err, twittermeow.ErrConversationDoesntExist) && !strings.HasPrefix(conversationID, "g") {
+			err = nil
+		}
 	}
 	if err == nil && msg != nil && msg.Portal != nil {
 		_, ok := msg.Portal.Metadata.(*PortalMetadata)
@@ -1059,6 +1071,11 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 			chatInfo := &bridgev2.ChatInfo{}
 			applyXChatTrustToChatInfo(chatInfo, true)
 			msg.Portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
+		}
+		if receipt, ok := tc.requestReadReceipts.LoadAndDelete(msg.Portal.PortalKey); ok && !msg.Portal.MessageRequest {
+			if receiptErr := tc.HandleMatrixReadReceipt(ctx, receipt.(*bridgev2.MatrixReadReceipt)); receiptErr != nil {
+				zerolog.Ctx(ctx).Warn().Err(receiptErr).Msg("Failed to send held back read receipt after accepting message request")
+			}
 		}
 	}
 	return err

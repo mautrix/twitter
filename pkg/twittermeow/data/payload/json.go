@@ -118,6 +118,28 @@ func NewMuteConversationMutationPayload(vars MuteConversationMutationVariables) 
 	}
 }
 
+type AcceptMessageRequestMutationVariables struct {
+	TargetUserID string                        `json:"targetUserId"`
+	SendMCE      *SendMessageMutationVariables `json:"send_mce"`
+	AddCkey      any                           `json:"add_ckey"`
+}
+
+type AcceptMessageRequestMutationPayload struct {
+	OperationName string                                `json:"operationName"`
+	Variables     AcceptMessageRequestMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                      `json:"extensions"`
+}
+
+func NewAcceptMessageRequestMutationPayload(targetUserID string, sendMCE *SendMessageMutationVariables) *AcceptMessageRequestMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "4YtAUhUwROL6ejia63Lj6Q"
+	return &AcceptMessageRequestMutationPayload{
+		OperationName: "AcceptMessageRequestMutation",
+		Variables:     AcceptMessageRequestMutationVariables{TargetUserID: targetUserID, SendMCE: sendMCE},
+		Extensions:    ext,
+	}
+}
+
 // UnmuteConversationMutationVariables contains the variables for the UnmuteConversation mutation
 type UnmuteConversationMutationVariables struct {
 	ConversationIDs  []string                       `json:"conversationIds"`

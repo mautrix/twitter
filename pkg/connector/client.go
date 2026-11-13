@@ -47,6 +47,9 @@ type TwitterClient struct {
 	userCache     map[string]*types.User
 	userCacheLock sync.RWMutex
 
+	// Read receipts held back while a chat is a message request, sent once it's accepted.
+	requestReadReceipts sync.Map
+
 	participantCache map[string][]types.Participant
 
 	matrixParser *format.HTMLParser

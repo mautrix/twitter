@@ -42,6 +42,7 @@ const (
 	GENERATE_XCHAT_TOKEN_MUTATION_URL  = API_BASE_URL + "/graphql/Qh3fZRjPPtPoHYR_2sCZsA/GenerateXChatTokenMutation"
 	SEND_MESSAGE_MUTATION_URL          = API_BASE_URL + "/graphql/LkAIEchf8AGj-WgeLoTVcw/SendMessageMutation"
 	DELETE_MESSAGE_MUTATION_URL        = API_BASE_URL + "/graphql/4gsDQKEmYkOtvsSIpHXdQA/DeleteMessageMutation"
+	ACCEPT_MESSAGE_REQUEST_URL         = API_BASE_URL + "/graphql/4YtAUhUwROL6ejia63Lj6Q/AcceptMessageRequestMutation"
 	MUTE_CONVERSATION_URL              = API_BASE_URL + "/graphql/Dy7geJg7CL5dqhsl6QBteg/MuteConversation"
 	UNMUTE_CONVERSATION_URL            = API_BASE_URL + "/graphql/LnNSeGu4vnbwqXAvh7OlGQ/UnmuteConversation"
 	DELETE_CONVERSATION_MUTATION_URL   = API_BASE_URL + "/graphql/9nsAnKrQvpifR3UmdtIdOg/ConversationDeletion"
