@@ -14,6 +14,8 @@ var (
 	ErrNotPollingUpdates     = errors.New("client is not polling for user updates")
 
 	ErrCloudflareChallenge = errors.New("cloudflare challenge page")
+
+	ErrXChatMediaSizeUnsupported = errors.New("media size rejected by X Chat")
 )
 
 type TwitterError struct {
