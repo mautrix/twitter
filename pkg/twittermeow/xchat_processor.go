@@ -52,6 +52,9 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
+
+	keysNotForUsLock sync.Mutex
+	keysNotForUs     map[string]struct{}
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
@@ -62,7 +65,21 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		catchupGeneration:          make(map[string]uint64),
 		unresolvedConversationGaps: make(map[string]struct{}),
 		failedEvents:               make(map[string]string),
+		keysNotForUs:               make(map[string]struct{}),
 	}
+}
+
+func (p *XChatEventProcessor) markKeyNotForUs(conversationID, keyVersion string) {
+	p.keysNotForUsLock.Lock()
+	p.keysNotForUs[conversationID+"|"+keyVersion] = struct{}{}
+	p.keysNotForUsLock.Unlock()
+}
+
+func (p *XChatEventProcessor) isKnownKeyNotForUs(conversationID, keyVersion string) bool {
+	p.keysNotForUsLock.Lock()
+	defer p.keysNotForUsLock.Unlock()
+	_, ok := p.keysNotForUs[conversationID+"|"+keyVersion]
+	return ok
 }
 
 // SetFailedEventPersistence restores durable failures before the first connection.
@@ -634,7 +651,14 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		if err == nil && (convKey == nil || len(convKey.Key) == 0) {
 			err = crypto.ErrKeyNotFound
 		}
-		if errors.Is(err, crypto.ErrKeyNotFound) {
+		if errors.Is(err, crypto.ErrKeyNotFound) && p.isKnownKeyNotForUs(conversationID, keyVersion) {
+			p.log.Warn().
+				Str("sequence_id", ptr.Val(evt.SequenceId)).
+				Str("conversation_id", conversationID).
+				Str("key_version", keyVersion).
+				Msg("Conversation key for message is not encrypted for our key pair, skipping message")
+			return nil
+		} else if errors.Is(err, crypto.ErrKeyNotFound) {
 			// Try to fetch missing keys
 			refreshErr := p.client.RefreshConversationKeys(ctx, conversationID)
 			if refreshErr != nil {
@@ -649,6 +673,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				err = crypto.ErrKeyNotFound
 			}
 			if err != nil && isKeyNotForUs(refreshErr, keyVersion) {
+				p.markKeyNotForUs(conversationID, keyVersion)
 				p.log.Warn().
 					Err(refreshErr).
 					Str("sequence_id", ptr.Val(evt.SequenceId)).
@@ -881,6 +906,7 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 	if errors.Is(err, crypto.ErrKeyNotForUs) {
+		p.markKeyNotForUs(conversationID, newKeyVersion)
 		p.log.Warn().Err(err).
 			Str("conversation_id", conversationID).
 			Str("key_version", newKeyVersion).
