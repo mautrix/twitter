@@ -266,8 +266,13 @@ func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousS
 		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) <= 0 {
 		return false
 	}
-	_, handled := p.recentHandledSequences[previousSequenceID]
-	return !handled
+	if _, handled := p.recentHandledSequences[previousSequenceID]; handled {
+		return false
+	}
+	// The missed event may belong to any conversation, so make the next live
+	// event in every conversation verify its history, like after a reconnect.
+	p.reconnectGeneration++
+	return true
 }
 
 func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
