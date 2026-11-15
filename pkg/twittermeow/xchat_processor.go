@@ -52,6 +52,8 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
+	recentHandledSequences     map[string]struct{}
+	recentHandledSequenceOrder []string
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
@@ -62,6 +64,7 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		catchupGeneration:          make(map[string]uint64),
 		unresolvedConversationGaps: make(map[string]struct{}),
 		failedEvents:               make(map[string]string),
+		recentHandledSequences:     make(map[string]struct{}),
 	}
 }
 
@@ -84,6 +87,8 @@ func (p *XChatEventProcessor) SetFailedEventPersistence(failed map[string]string
 }
 
 var ErrXChatFailurePersistence = errors.New("failed to persist XChat event failure state")
+
+const recentHandledSequenceLimit = 256
 
 func (p *XChatEventProcessor) FailedEventPersistenceError() error {
 	p.sequenceStateLock.Lock()
@@ -255,8 +260,12 @@ func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousS
 		return true
 	}
 	lastSequenceID := p.lastConversationSequence[conversationID]
-	return previousSequenceID != "" && lastSequenceID != "" &&
-		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) > 0
+	if previousSequenceID == "" || lastSequenceID == "" ||
+		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) <= 0 {
+		return false
+	}
+	_, handled := p.recentHandledSequences[previousSequenceID]
+	return !handled
 }
 
 func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
@@ -337,6 +346,8 @@ func (p *XChatEventProcessor) ResetSequenceState() {
 	p.reconnectGeneration = 0
 	p.maxHandledSequenceID = ""
 	p.checkpointPublicationHolds = 0
+	p.recentHandledSequences = make(map[string]struct{})
+	p.recentHandledSequenceOrder = nil
 	p.sequenceStateLock.Unlock()
 }
 
@@ -372,6 +383,14 @@ func (p *XChatEventProcessor) recordHandledSequence(conversationID, sequenceID s
 	}
 	if sequenceID != "" && compareXChatSequenceIDs(sequenceID, p.maxHandledSequenceID) > 0 {
 		p.maxHandledSequenceID = sequenceID
+	}
+	if _, seen := p.recentHandledSequences[sequenceID]; sequenceID != "" && !seen {
+		p.recentHandledSequences[sequenceID] = struct{}{}
+		p.recentHandledSequenceOrder = append(p.recentHandledSequenceOrder, sequenceID)
+		if len(p.recentHandledSequenceOrder) > recentHandledSequenceLimit {
+			delete(p.recentHandledSequences, p.recentHandledSequenceOrder[0])
+			p.recentHandledSequenceOrder = p.recentHandledSequenceOrder[1:]
+		}
 	}
 	checkpointSequenceID := ""
 	callback := p.sequenceIDCallback
