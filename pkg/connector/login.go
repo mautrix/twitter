@@ -105,7 +105,7 @@ const (
 	castleTokenContextURL             = "https://x.com/i/jf/onboarding/web?mode=login"
 	castleTokenHeaderPrefix           = "text/plain, application/x-mautrix-twitter-castle;v="
 	castleTokenBatchSize              = 8
-	preludeDispatchIDBatchSize        = 2
+	preludeDispatchIDBatchSize        = 3
 )
 
 var castleTokenCookieNames = []string{

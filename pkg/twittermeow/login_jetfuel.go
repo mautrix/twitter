@@ -58,7 +58,6 @@ type jetfuelLoginState struct {
 	twoFactorAction    string
 	twoFactorMethods   []WebLoginAuthMethod
 	sessionToken       string
-	preludeDispatchID  string
 	userID             string
 }
 
@@ -336,13 +335,11 @@ func (wls *WebLoginSession) logUnsupportedJetfuelResponse(
 		Int("field_count", len(parsed.fields)).
 		Int("response_auth_method_count", len(parsed.authMethods())).
 		Bool("response_has_session_token", parsed.uuidValue("session_token") != "").
-		Bool("response_has_prelude_dispatch_id", parsed.uuidValue("prelude_dispatch_id") != "").
 		Bool("response_has_user_id", parsed.numericValue("user_id") != "").
 		Bool("has_completion_marker", parsed.isComplete()).
 		Bool("has_login_error", parsed.loginError() != nil).
 		Bool("has_auth_cookie", wls.client.IsLoggedIn()).
 		Bool("state_has_session_token", state != nil && state.sessionToken != "").
-		Bool("state_has_prelude_dispatch_id", state != nil && state.preludeDispatchID != "").
 		Bool("state_has_user_id", state != nil && state.userID != "").
 		Msg("Jetfuel response did not expose a supported next action")
 }
@@ -417,9 +414,7 @@ func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, act
 		return nil, fmt.Errorf("%w: jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{}
-	if wls.jetfuel.preludeDispatchID != "" {
-		form.Set("prelude_dispatch_id", wls.jetfuel.preludeDispatchID)
-	} else if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
 		form.Set("prelude_dispatch_id", id)
 	}
 	if wls.jetfuel.sessionToken != "" {
@@ -473,8 +468,8 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	if wls.jetfuel.sessionToken != "" {
 		form.Set("session_token", wls.jetfuel.sessionToken)
 	}
-	if wls.jetfuel.preludeDispatchID != "" {
-		form.Set("prelude_dispatch_id", wls.jetfuel.preludeDispatchID)
+	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+		form.Set("prelude_dispatch_id", id)
 	}
 	body, err := wls.client.jetfuelPostForm(ctx, wls.jetfuel.verificationAction, form)
 	if err != nil {
@@ -538,9 +533,6 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	}
 	if token := parsed.uuidValue("session_token"); token != "" {
 		wls.jetfuel.sessionToken = token
-	}
-	if id := parsed.uuidValue("prelude_dispatch_id"); id != "" {
-		wls.jetfuel.preludeDispatchID = id
 	}
 	if id := parsed.numericValue("user_id"); id != "" {
 		wls.jetfuel.userID = id

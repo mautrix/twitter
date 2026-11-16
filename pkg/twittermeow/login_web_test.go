@@ -471,9 +471,8 @@ func TestJetfuelLoginResponseClassifiesPhoneAuthMethodAliases(t *testing.T) {
 
 func TestJetfuelAuthMethodFormShape(t *testing.T) {
 	state := &jetfuelLoginState{
-		sessionToken:      "session-token",
-		preludeDispatchID: "prelude-id",
-		userID:            "1127993589949243392",
+		sessionToken: "session-token",
+		userID:       "1127993589949243392",
 	}
 	form := state.authMethodForm(WebLoginAuthMethod{ID: "Totp", Index: 0})
 
