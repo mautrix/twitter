@@ -85,6 +85,7 @@ var (
 	loginFieldIdentifier       = "identifier"
 	loginFieldPassword         = "password"
 	loginFieldCastleToken      = "castle_token"
+	loginFieldPreludeID        = "prelude_dispatch_id"
 	loginFieldBrowserUserAgent = "browser_user_agent"
 	loginFieldBrowserSecCHUA   = "browser_sec_ch_ua"
 	loginFieldBrowserPlatform  = "browser_sec_ch_ua_platform"
@@ -104,6 +105,7 @@ const (
 	castleTokenContextURL             = "https://x.com/i/jf/onboarding/web?mode=login"
 	castleTokenHeaderPrefix           = "text/plain, application/x-mautrix-twitter-castle;v="
 	castleTokenBatchSize              = 8
+	preludeDispatchIDBatchSize        = 2
 )
 
 var castleTokenCookieNames = []string{
@@ -179,6 +181,13 @@ func castleTokenFieldID(index int) string {
 	return fmt.Sprintf("%s_%d", loginFieldCastleToken, index)
 }
 
+func preludeDispatchIDFieldID(index int) string {
+	if index <= 1 {
+		return loginFieldPreludeID
+	}
+	return fmt.Sprintf("%s_%d", loginFieldPreludeID, index)
+}
+
 func castleTokenCookieFields() []bridgev2.LoginCookieField {
 	fields := []bridgev2.LoginCookieField{
 		{
@@ -214,6 +223,14 @@ func castleTokenCookieFields() []bridgev2.LoginCookieField {
 					Name: storageKey,
 				},
 			},
+		})
+	}
+	for index := 1; index <= preludeDispatchIDBatchSize; index++ {
+		fieldID := preludeDispatchIDFieldID(index)
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:      fieldID,
+			Pattern: `^[0-9a-fA-F-]{36}$`,
+			Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: "fi.mau.twitter." + fieldID}},
 		})
 	}
 	for _, field := range browserHeaderFields {
@@ -1221,6 +1238,11 @@ func (t *TwitterLogin) submitWebCastleTokenInput(ctx context.Context, input map[
 	t.browserHeaders = client.GetBrowserHeaders()
 	client.SetCookies(castleWebviewCookies(input))
 	client.SetNextJetfuelCastleTokens(castleTokens)
+	preludeIDs := make([]string, 0, preludeDispatchIDBatchSize)
+	for index := 1; index <= preludeDispatchIDBatchSize; index++ {
+		preludeIDs = append(preludeIDs, input[preludeDispatchIDFieldID(index)])
+	}
+	client.SetNextJetfuelPreludeDispatchIDs(preludeIDs)
 	return t.continueWebCastleLogin(ctx)
 }
 

@@ -5,6 +5,9 @@
   contextURL,
   identifier,
   castleTokenBatchSize,
+  preludeScriptURL,
+  preludeSDKKey,
+  preludeBatchSize,
 }) => {
   const cookieNames = new Set(cookieNameList);
   const castleStorageKey = "fi.mau.twitter.castle_token";
@@ -151,6 +154,9 @@
         return result;
       }
     } catch (_) {}
+    if (preludeScriptURL && preludeSDKKey) {
+      return null;
+    }
     try {
       const storage = getLocalStorage();
       if (!storage) {
@@ -245,11 +251,7 @@
     return modules;
   }
 
-  async function createTokenInContext(win, doc) {
-    const modules = installModuleCapture(win);
-    await loadScript(doc, scriptURL);
-    await waitFor(() => Object.keys(modules).length > 0, "X Castle script did not register modules", 15000);
-
+  function chunkRequire(win, modules, chunkURL) {
     const cache = {};
     function req(id) {
       const key = String(id);
@@ -258,11 +260,11 @@
       }
       const fn = modules[key];
       if (typeof fn !== "function") {
-        throw new Error("Missing X Castle module " + key);
+        throw new Error("Missing X module " + key);
       }
       const module = { exports: {} };
       cache[key] = module;
-      fn(module, module.exports, req);
+      fn.call(module.exports, module, module.exports, req);
       return module.exports;
     }
     req.d = (exports, definition) => {
@@ -279,7 +281,56 @@
       }
       Object.defineProperty(exports, "__esModule", { value: true });
     };
+    req.cw = fn => {
+      let module;
+      return () => {
+        if (fn) {
+          const init = fn;
+          fn = 0;
+          module = { exports: {} };
+          init.call(module.exports, module, module.exports);
+        }
+        return module.exports;
+      };
+    };
+    req.p = chunkURL.slice(0, chunkURL.lastIndexOf("/") + 1);
+    req.b = win.document.baseURI;
+    return req;
+  }
 
+  async function createPreludeDispatchIDsInContext(win, doc) {
+    await loadScript(doc, preludeScriptURL);
+    const modules = {};
+    for (const entry of win.webpackChunk_twitter_responsive_web || []) {
+      addModules(entry, modules);
+    }
+    const req = chunkRequire(win, modules, preludeScriptURL);
+    let dispatchSignals;
+    for (const id of Object.keys(modules)) {
+      try {
+        const exports = req(id);
+        if (exports && typeof exports.dispatchSignals === "function") {
+          dispatchSignals = exports.dispatchSignals;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (typeof dispatchSignals !== "function") {
+      throw new Error("X Prelude module is unavailable");
+    }
+    const ids = [];
+    for (let index = 0; index < preludeBatchSize; index++) {
+      ids.push(await dispatchSignals(preludeSDKKey));
+    }
+    return ids;
+  }
+
+  async function createTokenInContext(win, doc) {
+    const modules = installModuleCapture(win);
+    await loadScript(doc, scriptURL);
+    await waitFor(() => Object.keys(modules).length > 0, "X Castle script did not register modules", 15000);
+
+    const req = chunkRequire(win, modules, scriptURL);
     let configure;
     for (const id of Object.keys(modules)) {
       try {
@@ -405,6 +456,16 @@
     Object.assign(result, captureBrowserHeaders());
     for (let index = 1; index < castleTokens.length; index++) {
       result[castleTokenResultKey(index + 1)] = castleTokens[index];
+    }
+    if (preludeScriptURL && preludeSDKKey) {
+      try {
+        const preludeIDs = await createPreludeDispatchIDsInContext(context.win, context.doc);
+        preludeIDs.forEach((id, index) => {
+          result[index === 0 ? "prelude_dispatch_id" : "prelude_dispatch_id_" + (index + 1)] = id;
+        });
+      } catch (err) {
+        browserLog("prelude dispatch failed: " + (err && err.message));
+      }
     }
     copyCookies(result, document.cookie);
     copyCookies(result, context.doc.cookie);

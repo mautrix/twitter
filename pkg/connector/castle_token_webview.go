@@ -57,6 +57,10 @@ type castleTokenJSConfig struct {
 	ContextURL  string   `json:"contextURL"`
 	Identifier  string   `json:"identifier"`
 	BatchSize   int      `json:"castleTokenBatchSize"`
+
+	PreludeScriptURL string `json:"preludeScriptURL"`
+	PreludeSDKKey    string `json:"preludeSDKKey"`
+	PreludeBatchSize int    `json:"preludeBatchSize"`
 }
 
 func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier string) string {
@@ -67,6 +71,10 @@ func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier st
 		ContextURL:  castleTokenContextURL,
 		Identifier:  identifier,
 		BatchSize:   castleTokenBatchSize,
+
+		PreludeScriptURL: info.PreludeScriptURL,
+		PreludeSDKKey:    info.PreludeSDKKey,
+		PreludeBatchSize: preludeDispatchIDBatchSize,
 	})
 	if err != nil {
 		panic(fmt.Errorf("marshal Castle token extraction config: %w", err))

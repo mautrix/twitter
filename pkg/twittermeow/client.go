@@ -78,6 +78,7 @@ type Client struct {
 
 	jetfuelCastleTokens  []string
 	jetfuelCastleInfo    JetfuelCastleTokenInfo
+	jetfuelPreludeIDs    []string
 	browserHeaders       BrowserHeaders
 	jetfuelCastleTokenMu sync.Mutex
 	xchatToken           *cachedXChatToken

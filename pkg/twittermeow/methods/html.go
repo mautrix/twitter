@@ -20,6 +20,7 @@ var (
 	countryCodeRegex       = regexp.MustCompile(`"country":\s*"([A-Z]{2})"`)
 	ondemandSChunkIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.s"`)
 	ondemandCastleIDRegex  = regexp.MustCompile(`(\d+):"ondemand\.castle"`)
+	preludeChunkIDRegex    = regexp.MustCompile(`(\d+):"prelude"`)
 	castlePublicKeyRegex   = regexp.MustCompile(`"responsive_web_castle_public_key"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"`)
 	variableIndexesRegex   = regexp.MustCompile(`\[.+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\).+?\(\w{1,2}\[(\d{1,2})],16\)`)
 )
@@ -117,6 +118,10 @@ func ParseOndemandSURLFromScript(js []byte) string {
 
 func ParseOndemandCastleURLFromScript(js []byte) string {
 	return parseOndemandChunkURLFromScript(js, "ondemand.castle", ondemandCastleIDRegex)
+}
+
+func ParsePreludeURLFromScript(js []byte) string {
+	return parseOndemandChunkURLFromScript(js, "prelude", preludeChunkIDRegex)
 }
 
 func parseOndemandChunkURLFromScript(js []byte, chunkName string, chunkIDRegex *regexp.Regexp) string {
