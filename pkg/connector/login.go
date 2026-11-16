@@ -1551,6 +1551,10 @@ func handleWebLoginAuthMethodError(methods []twittermeow.WebLoginAuthMethod, err
 	if errors.Is(err, twittermeow.ErrWebLoginMissingAuthMethodState) {
 		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
 	}
+	var webErr *twittermeow.WebLoginError
+	if errors.As(err, &webErr) && webErr.Code == 0 {
+		return makeAuthMethodStep(methods, webLoginErrorInstructions(err)), nil
+	}
 	return nil, webLoginFailureError(err)
 }
 

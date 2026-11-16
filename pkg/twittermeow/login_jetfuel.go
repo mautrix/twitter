@@ -533,6 +533,9 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	if wls.jetfuel == nil {
 		wls.jetfuel = &jetfuelLoginState{}
 	}
+	if key := parsed.preludeSDKKey(); key != "" {
+		wls.client.jetfuelCastleInfo.PreludeSDKKey = key
+	}
 	if token := parsed.uuidValue("session_token"); token != "" {
 		wls.jetfuel.sessionToken = token
 	}
@@ -647,10 +650,12 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 		Str("action", action).
 		Msg("Submitting Jetfuel auth method")
 	form := wls.jetfuel.authMethodForm(method)
-	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
-		form.Set("prelude_dispatch_id", id)
-	} else if method.Kind == WebLoginAuthMethodKindSMS && wls.client.jetfuelCastleInfo.HasPrelude() {
-		return nil, fmt.Errorf("%w: text message verification needs a Prelude dispatch ID", ErrJetfuelCastleTokenRequired)
+	if method.Kind == WebLoginAuthMethodKindSMS {
+		if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+			form.Set("prelude_dispatch_id", id)
+		} else if wls.client.jetfuelCastleInfo.HasPrelude() {
+			return nil, fmt.Errorf("%w: text message verification needs a Prelude dispatch ID", ErrJetfuelCastleTokenRequired)
+		}
 	}
 	body, err := wls.client.jetfuelPostForm(ctx, action, form)
 	if err != nil {

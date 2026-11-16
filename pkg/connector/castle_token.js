@@ -299,9 +299,11 @@
   }
 
   async function createPreludeDispatchIDsInContext(win, doc) {
+    const chunk = win.webpackChunk_twitter_responsive_web = win.webpackChunk_twitter_responsive_web || [];
+    const loadedBefore = chunk.length;
     await loadScript(doc, preludeScriptURL);
     const modules = {};
-    for (const entry of win.webpackChunk_twitter_responsive_web || []) {
+    for (const entry of chunk.slice(loadedBefore)) {
       addModules(entry, modules);
     }
     const req = chunkRequire(win, modules, preludeScriptURL);
@@ -320,7 +322,12 @@
     }
     const ids = [];
     for (let index = 0; index < preludeBatchSize; index++) {
-      ids.push(await dispatchSignals(preludeSDKKey));
+      ids.push(await Promise.race([
+        dispatchSignals(preludeSDKKey),
+        sleep(10000).then(() => {
+          throw new Error("Timed out dispatching X Prelude signals");
+        }),
+      ]));
     }
     return ids;
   }

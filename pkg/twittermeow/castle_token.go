@@ -68,8 +68,6 @@ func (c *Client) HasNextJetfuelCastleToken() bool {
 	return len(c.jetfuelCastleTokens) > 0
 }
 
-// SetNextJetfuelPreludeDispatchIDs provides browser-generated Prelude dispatch IDs
-// for the next Jetfuel forms that ask for one. IDs are consumed in order and only once.
 func (c *Client) SetNextJetfuelPreludeDispatchIDs(ids []string) {
 	c.jetfuelCastleTokenMu.Lock()
 	defer c.jetfuelCastleTokenMu.Unlock()
