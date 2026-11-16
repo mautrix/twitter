@@ -457,7 +457,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 					guessedMime = "video/mp4"
 					msgType = event.MsgVideo
 				}
-			} else if isGif {
+			} else if isGif && attachmentInfo.MediaHashKey == "" {
 				isGif = false
 				clear(extraInfo)
 				guessedMime = "image/jpeg"
