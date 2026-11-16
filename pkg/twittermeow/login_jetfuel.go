@@ -59,6 +59,7 @@ type jetfuelLoginState struct {
 	twoFactorMethods   []WebLoginAuthMethod
 	sessionToken       string
 	userID             string
+	fromPreludeGate    bool
 }
 
 type jetfuelLoginResponse struct {
@@ -414,6 +415,9 @@ func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, act
 		return nil, fmt.Errorf("%w: jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{}
+	if wls.jetfuel.fromPreludeGate {
+		form.Set("from_prelude_gate", "1")
+	}
 	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
 		form.Set("prelude_dispatch_id", id)
 	}
@@ -544,6 +548,7 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	if action := parsed.beginTwoFactorAction(); action != "" {
 		wls.jetfuel.twoFactorAction = action
 		wls.jetfuel.verificationMethod = nil
+		wls.jetfuel.fromPreludeGate = parsed.hasField("from_prelude_gate")
 	}
 	if action := parsed.verificationAction(); action != "" {
 		if action != wls.jetfuel.verificationAction || parsed.isPhoneNumberChallenge() {
