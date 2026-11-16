@@ -1400,16 +1400,18 @@ func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[s
 	if methodID == "" {
 		return nil, ErrMissingLoginInput
 	}
+	freshPrelude := false
 	if method, ok := findWebLoginAuthMethod(t.webLoginMethods, methodID); ok {
 		methodID = method.ID
 		if methodID == "" {
 			methodID = method.Name
 		}
+		freshPrelude = method.Kind == twittermeow.WebLoginAuthMethodKindSMS && t.webLogin.Client().JetfuelCastleTokenInfo().HasPrelude()
 	}
 	if t.webLogin.UsesJetfuel() {
 		t.webLoginAuthMethod = methodID
 		t.webLoginCastleStage = webLoginCastleStageAuthMethod
-		if t.webLogin.Client().HasNextJetfuelCastleToken() {
+		if !freshPrelude && t.webLogin.Client().HasNextJetfuelCastleToken() {
 			return t.continueWebCastleLogin(ctx)
 		}
 		return t.makeWebLoginCastleTokenStep(""), nil
