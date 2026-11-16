@@ -628,6 +628,7 @@ const (
 	xchatSkipReasonKeyMissing    = "key_missing"
 	xchatSkipReasonKeyLoadFailed = "key_load_failed"
 	xchatSkipReasonDecryptFailed = "decrypt_failed"
+	xchatSkipReasonUndecryptable = "undecryptable"
 	xchatSkipReasonParseFailed   = "parse_failed"
 	xchatSkipReasonEmptyEntry    = "empty_entry"
 	xchatSkipReasonNoContent     = "no_content"
@@ -682,14 +683,18 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 
 		if isUserMetadata {
 			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
-			if err != nil {
+			if errors.Is(err, crypto.ErrDecryptFailed) {
+				return nil, time.Time{}, 0, xchatSkipReasonUndecryptable
+			} else if err != nil {
 				return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
 			}
 			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
 		}
 
 		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
-		if err != nil {
+		if errors.Is(err, crypto.ErrDecryptFailed) {
+			return nil, time.Time{}, 0, xchatSkipReasonUndecryptable
+		} else if err != nil {
 			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
 		}
 		entry = decrypted
