@@ -575,8 +575,7 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 		wls.jetfuel.twoFactorMethods = methods
 		wls.jetfuel.verificationMethod = nil
 	}
-	supportedMethods := supportedWebLoginAuthMethods(methods)
-	if len(supportedMethods) == 0 {
+	if len(supportedWebLoginAuthMethods(methods)) == 0 {
 		return &WebLoginResult{
 			Status:           WebLoginStatusUnsupported,
 			Challenge:        unsupportedWebLoginAuthMethodChallenge(methods),
@@ -592,7 +591,7 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 			Description: "Choose how to verify this X login.",
 			IsTwoFactor: true,
 		},
-		AuthMethods: supportedMethods,
+		AuthMethods: methods,
 	}
 }
 
@@ -1301,15 +1300,15 @@ func classifyJetfuelAuthMethod(value string) (WebLoginAuthMethod, bool) {
 			ID:          "Sms",
 			SubmitID:    jetfuelAuthMethodSubmitID("Sms", value),
 			Name:        "Text Message",
-			Description: "Text message verification is coming soon.",
+			Description: "Get a code by text message.",
 			Kind:        WebLoginAuthMethodKindSMS,
-			Supported:   false,
+			Supported:   true,
 		}, true
 	case "u2fsecuritykey", "securitykey", "securitykeypc", "passkey":
 		return WebLoginAuthMethod{
 			ID:          "U2fSecurityKey",
 			Name:        "Security Key PC",
-			Description: "Requires passkey/WebAuthn client support.",
+			Description: "Your security key only works with Login with Browser. To use it, add X with Login with Browser instead.",
 			Kind:        WebLoginAuthMethodKindUnknown,
 			Supported:   false,
 		}, true

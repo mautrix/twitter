@@ -652,6 +652,9 @@ func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine stri
 	options := make([]string, 0, len(methods))
 	for _, method := range methods {
 		if !method.Supported {
+			if method.Description != "" {
+				instructions = fmt.Sprintf("%s\n\n%s", instructions, method.Description)
+			}
 			continue
 		}
 		if method.Name == "" {
