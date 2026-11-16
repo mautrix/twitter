@@ -453,6 +453,10 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			var variantURL string
 			if err == nil {
 				variantURL = highestBitRateVariant.URL
+				if isGif {
+					guessedMime = "video/mp4"
+					msgType = event.MsgVideo
+				}
 			}
 			zerolog.Ctx(ctx).Debug().
 				Err(err).
