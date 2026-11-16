@@ -1592,6 +1592,7 @@ func isWebLoginVerificationInputError(err error) bool {
 	}
 	msg := strings.ToLower(strings.TrimSpace(webErr.Message))
 	return strings.Contains(msg, "wrong code") ||
+		strings.Contains(msg, "couldn't send you a text message") ||
 		strings.Contains(msg, "incorrect code") ||
 		strings.Contains(msg, "invalid code") ||
 		strings.Contains(msg, "code is incorrect") ||

@@ -417,10 +417,10 @@ func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, act
 		return nil, fmt.Errorf("%w: jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{}
-	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
-		form.Set("prelude_dispatch_id", id)
-	} else if wls.jetfuel.preludeDispatchID != "" {
+	if wls.jetfuel.preludeDispatchID != "" {
 		form.Set("prelude_dispatch_id", wls.jetfuel.preludeDispatchID)
+	} else if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+		form.Set("prelude_dispatch_id", id)
 	}
 	if wls.jetfuel.sessionToken != "" {
 		form.Set("session_token", wls.jetfuel.sessionToken)
