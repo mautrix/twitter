@@ -1308,7 +1308,7 @@ func classifyJetfuelAuthMethod(value string) (WebLoginAuthMethod, bool) {
 		return WebLoginAuthMethod{
 			ID:          "U2fSecurityKey",
 			Name:        "Security Key PC",
-			Description: "Your security key only works with Login with Browser. To use it, add X with Login with Browser instead.",
+			Description: "Security keys and passkeys only work with Login with Browser. To use one, add X with Login with Browser instead.",
 			Kind:        WebLoginAuthMethodKindUnknown,
 			Supported:   false,
 		}, true
