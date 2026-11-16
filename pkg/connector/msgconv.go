@@ -678,10 +678,14 @@ func (tc *TwitterClient) uploadMediaReader(
 		if audioOnly && ffmpeg.Supported() {
 			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
 			if err == nil {
+				info, err := os.Stat(outFile)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get info of converted file: %w", err)
+				}
 				content.Info.MimeType = "audio/ogg"
 				content.Info.Width = 0
 				content.Info.Height = 0
-				content.Info.Size = 0
+				content.Info.Size = int(info.Size())
 				content.MsgType = event.MsgAudio
 				content.Body += ".ogg"
 				return &bridgev2.FileStreamResult{
