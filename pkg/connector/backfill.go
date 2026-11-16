@@ -683,7 +683,9 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 
 		if isUserMetadata {
 			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
-			if err != nil {
+			if errors.Is(err, crypto.ErrDecryptFailed) {
+				return nil, time.Time{}, 0, xchatSkipReasonUndecryptable
+			} else if err != nil {
 				return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
 			}
 			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
