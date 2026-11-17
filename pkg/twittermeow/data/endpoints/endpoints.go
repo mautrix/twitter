@@ -11,6 +11,8 @@ const (
 	BASE_LOGIN_URL                 = BASE_URL + "/login"
 	BASE_FLOW_LOGIN_URL            = BASE_URL + "/i/flow/login"
 	BASE_MESSAGES_URL              = BASE_URL + "/messages"
+	ACCOUNT_ACCESS_PATH            = "/account/access"
+	ACCOUNT_ACCESS_URL             = BASE_URL + ACCOUNT_ACCESS_PATH
 	BASE_LOGOUT_URL                = BASE_URL + "/logout"
 	BASE_NOTIFICATION_SETTINGS_URL = BASE_URL + "/settings/push_notifications"
 	JETFUEL_BASE_URL               = "https://jf.x.com"

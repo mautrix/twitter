@@ -912,7 +912,8 @@ func (tc *TwitterClient) HandleConversationDataRefresh(ctx context.Context, conv
 func isAccountRestrictedError(err error) bool {
 	return errors.Is(err, twittermeow.ErrUserSuspended) ||
 		errors.Is(err, twittermeow.ErrNotActive) ||
-		errors.Is(err, twittermeow.ErrAccountTemporarilyLocked)
+		errors.Is(err, twittermeow.ErrAccountTemporarilyLocked) ||
+		errors.Is(err, twittermeow.ErrAccountAccessRequired)
 }
 
 func authErrorCode(err error) status.BridgeStateErrorCode {

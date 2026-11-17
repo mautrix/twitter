@@ -2,6 +2,7 @@ package cookies
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -79,6 +80,12 @@ func (c *Cookies) String() string {
 		out = append(out, fmt.Sprintf("%s=%s", k, v))
 	}
 	return strings.Join(out, "; ")
+}
+
+func (c *Cookies) Map() map[string]string {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return maps.Clone(c.store)
 }
 
 func (c *Cookies) Names() []string {

@@ -13,7 +13,8 @@ var (
 	ErrAlreadyPollingUpdates = errors.New("client is already polling for user updates")
 	ErrNotPollingUpdates     = errors.New("client is not polling for user updates")
 
-	ErrCloudflareChallenge = errors.New("cloudflare challenge page")
+	ErrCloudflareChallenge   = errors.New("cloudflare challenge page")
+	ErrAccountAccessRequired = errors.New("redirected to account access page")
 )
 
 type TwitterError struct {
@@ -38,7 +39,8 @@ func IsAuthError(err error) bool {
 		errors.Is(err, ErrUserSuspended) ||
 		errors.Is(err, ErrAccountSuspended) ||
 		errors.Is(err, ErrNotActive) ||
-		errors.Is(err, ErrAccountTemporarilyLocked)
+		errors.Is(err, ErrAccountTemporarilyLocked) ||
+		errors.Is(err, ErrAccountAccessRequired)
 }
 
 func (te TwitterError) Is(other error) bool {

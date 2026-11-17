@@ -37,6 +37,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -56,6 +57,7 @@ type TwitterLogin struct {
 
 	loginHTTPTransport        http.RoundTripper
 	waitingForBrowserIdentity bool
+	accountAccessClient       *twittermeow.Client
 
 	client              *twittermeow.Client
 	webLogin            *twittermeow.WebLoginSession
@@ -80,6 +82,7 @@ var (
 	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
 	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
 	LoginStepIDCookies         = "fi.mau.twitter.login.enter_cookies"
+	LoginStepIDAccountAccess   = "fi.mau.twitter.login.account_access"
 	LoginStepJuiceboxPIN       = "fi.mau.twitter.login.juicebox_pin"
 	LoginStepIDComplete        = "fi.mau.twitter.login.complete"
 	loginFieldIdentifier       = "identifier"
@@ -361,7 +364,7 @@ func wrapTwitterLoginError(err error) error {
 	}
 	mapped := ErrLoginUnknown.WithInternalError(err)
 	switch {
-	case errors.Is(err, twittermeow.ErrAccountTemporarilyLocked):
+	case errors.Is(err, twittermeow.ErrAccountTemporarilyLocked), errors.Is(err, twittermeow.ErrAccountAccessRequired):
 		mapped = ErrLoginAccountLocked
 	case errors.Is(err, twittermeow.ErrUserSuspended), errors.Is(err, twittermeow.ErrNotActive):
 		mapped = ErrLoginAccountSuspended
@@ -452,6 +455,7 @@ func (t *TwitterLogin) clearWebLoginInputs() {
 
 func (t *TwitterLogin) resetWebLoginState() {
 	t.waitingForBrowserIdentity = false
+	t.accountAccessClient = nil
 	t.clearWebLoginInputs()
 	t.webLogin = nil
 }
@@ -526,6 +530,43 @@ func (t *TwitterLogin) makeBrowserIdentityStep() *bridgev2.LoginStep {
 			WaitForURLPattern: `^https://x\.com/robots\.txt$`,
 			Hidden:            true,
 			Fields:            fields,
+		},
+	}
+}
+
+func (t *TwitterLogin) makeAccountAccessStep(client *twittermeow.Client) *bridgev2.LoginStep {
+	t.accountAccessClient = client
+	cookies := client.GetCookies()
+	initialCookies := make([]bridgev2.LoginCookie, 0, len(cookies))
+	for name, value := range cookies {
+		initialCookies = append(initialCookies, bridgev2.LoginCookie{
+			Name:   name,
+			Value:  value,
+			Domain: "." + endpoints.BASE_HOST,
+			Secure: true,
+		})
+	}
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeCookies,
+		StepID:       LoginStepIDAccountAccess,
+		Instructions: "X needs you to verify your account. Complete the steps X shows to continue.",
+		CookiesParams: &bridgev2.LoginCookiesParams{
+			URL:               endpoints.ACCOUNT_ACCESS_URL,
+			UserAgent:         t.browserHeaders.UserAgent,
+			InitialCookies:    initialCookies,
+			WaitForURLPattern: `^https://x\.com/(home)?([?#].*)?$`,
+			Fields: []bridgev2.LoginCookieField{
+				{
+					ID:       string(twitCookies.XAuthToken),
+					Required: true,
+					Sources:  []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeCookie, Name: string(twitCookies.XAuthToken)}},
+				},
+				{
+					ID:       string(twitCookies.XCt0),
+					Required: true,
+					Sources:  []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeCookie, Name: string(twitCookies.XCt0)}},
+				},
+			},
 		},
 	}
 }
@@ -737,6 +778,15 @@ func (t *TwitterLogin) startWithOverride(ctx context.Context, override *bridgev2
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
+	if t.accountAccessClient != nil {
+		client := t.accountAccessClient
+		t.accountAccessClient = nil
+		client.SetCookies(cookies)
+		if t.webLogin != nil {
+			return t.mapClientHTTPFailure(t.completeWebLogin(ctx))
+		}
+		return t.completeCookieLogin(ctx, client)
+	}
 	if t.waitingForBrowserIdentity {
 		t.waitingForBrowserIdentity = false
 		client := t.newLoginClient()
@@ -763,9 +813,14 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 	client.SetLoginHTTPTransport(t.loginHTTPTransport)
+	return t.completeCookieLogin(ctx, client)
+}
 
+func (t *TwitterLogin) completeCookieLogin(ctx context.Context, client *twittermeow.Client) (*bridgev2.LoginStep, error) {
 	profile, err := client.LoadMessagesPage(ctx)
-	if err != nil {
+	if errors.Is(err, twittermeow.ErrAccountAccessRequired) {
+		return t.makeAccountAccessStep(client), nil
+	} else if err != nil {
 		client.SetLoginHTTPTransport(nil)
 		return nil, wrapTwitterLoginError(err)
 	}
@@ -1588,7 +1643,9 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	}
 	client := t.webLogin.Client()
 	profile, err := client.LoadMessagesPage(ctx)
-	if err != nil {
+	if errors.Is(err, twittermeow.ErrAccountAccessRequired) {
+		return t.makeAccountAccessStep(client), nil
+	} else if err != nil {
 		return nil, wrapTwitterLoginError(err)
 	}
 	t.client = client
