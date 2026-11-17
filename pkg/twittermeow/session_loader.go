@@ -60,10 +60,16 @@ func (c *Client) loadPage(ctx context.Context, url string) error {
 		if strings.Contains(string(mainPageRespBody), "cf_chl_opt") {
 			err = fmt.Errorf("%w: %w", ErrCloudflareChallenge, err)
 		}
+		if isAccountAccessResponse(mainPageResp) {
+			err = fmt.Errorf("%w: %w", ErrAccountAccessRequired, err)
+		}
 		return fmt.Errorf("failed to send main page request: %w", err)
 	}
 
 	c.cookies.UpdateFromResponse(mainPageResp)
+	if isAccountAccessResponse(mainPageResp) {
+		return ErrAccountAccessRequired
+	}
 	if c.cookies.IsCookieEmpty(cookies.XGuestID) {
 		c.Logger.Err(errCookieGuestIDNotFound).Msg("No GuestID found in response headers")
 		return errCookieGuestIDNotFound
@@ -242,4 +248,9 @@ func (c *Client) calculateAnimationToken() {
 	if c.session.variableIndexes != nil && c.session.loadingAnims != nil && c.session.VerificationToken != "" {
 		c.session.AnimationToken = crypto.GenerateAnimationState(c.session.variableIndexes, c.session.loadingAnims, c.session.VerificationToken)
 	}
+}
+
+func isAccountAccessResponse(resp *http.Response) bool {
+	return resp != nil && resp.Request != nil && resp.Request.URL != nil &&
+		resp.Request.URL.Host == endpoints.BASE_HOST && resp.Request.URL.Path == endpoints.ACCOUNT_ACCESS_PATH
 }

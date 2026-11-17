@@ -125,6 +125,10 @@ func (c *Client) GetCookieString() string {
 	return c.cookies.String()
 }
 
+func (c *Client) GetCookies() map[string]string {
+	return c.cookies.Map()
+}
+
 func (c *Client) GetCookieNames() []string {
 	return c.cookies.Names()
 }

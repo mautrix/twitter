@@ -28,6 +28,8 @@ var (
 	msgStepCookiesInstructions = L.Define("login.step.cookies.instructions", "Open the Login URL in an Incognito/Private browsing mode. Then, extract the cookies as a JSON object/cURL command copied from the Network tab of your browser's DevTools. After that, close the browser **before** pasting the cookies.\n\nFor example: `{\"ct0\":\"123466-...\",\"auth_token\":\"abcde-...\"}`")
 	msgStepPrepareInstructions = L.Define("login.step.prepare.instructions", "Preparing X login.")
 
+	msgStepAccountAccessInstructions = L.Define("login.step.account_access.instructions", "X needs you to verify your account. Complete the steps X shows to continue.")
+
 	msgStepCredentialsInstructions       = L.Define("login.step.credentials.instructions", "Enter your X username, email, or phone number and password.")
 	msgStepCredentialsErrorInstructions  = L.Define("login.step.credentials.error.instructions", "{error}\n\nEnter your X username, email, or phone number and password.", withErrorComment)
 	msgStepCastleTokenInstructions       = L.Define("login.step.castle_token.instructions", "Generating an X browser token for this login.")
