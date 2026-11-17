@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.mau.fi/util/random"
+
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 )
 
@@ -61,9 +63,12 @@ type castleTokenJSConfig struct {
 	PreludeScriptURL string `json:"preludeScriptURL"`
 	PreludeSDKKey    string `json:"preludeSDKKey"`
 	PreludeBatchSize int    `json:"preludeBatchSize"`
+
+	WebviewSubmit *twittermeow.JetfuelWebviewRequest `json:"webviewSubmit"`
+	RequestID     string                             `json:"requestID"`
 }
 
-func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier string) string {
+func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier string, submit *twittermeow.JetfuelWebviewRequest) string {
 	config, err := json.Marshal(castleTokenJSConfig{
 		ScriptURL:   info.ScriptURL,
 		PublicKey:   info.PublicKey,
@@ -75,6 +80,9 @@ func castleTokenExtractJS(info twittermeow.JetfuelCastleTokenInfo, identifier st
 		PreludeScriptURL: info.PreludeScriptURL,
 		PreludeSDKKey:    info.PreludeSDKKey,
 		PreludeBatchSize: preludeDispatchIDBatchSize,
+
+		WebviewSubmit: submit,
+		RequestID:     random.String(16),
 	})
 	if err != nil {
 		panic(fmt.Errorf("marshal Castle token extraction config: %w", err))

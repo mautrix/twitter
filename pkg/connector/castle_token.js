@@ -8,6 +8,8 @@
   preludeScriptURL,
   preludeSDKKey,
   preludeBatchSize,
+  webviewSubmit,
+  requestID,
 }) => {
   const cookieNames = new Set(cookieNameList);
   const castleStorageKey = "fi.mau.twitter.castle_token";
@@ -122,6 +124,7 @@
   function storeBrowserAuthResult(result) {
     try {
       globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__ = result;
+      globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT_ID__ = requestID;
       globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = false;
       globalThis.__BEEP_BEEP_AUTH_RESULTS__ = result;
       if (typeof window !== "undefined") {
@@ -150,11 +153,11 @@
   function storedBrowserAuthResult() {
     try {
       const result = globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__;
-      if (result && result.castle_token) {
+      if (result && result.castle_token && globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT_ID__ === requestID) {
         return result;
       }
     } catch (_) {}
-    if (preludeScriptURL && preludeSDKKey) {
+    if ((preludeScriptURL && preludeSDKKey) || webviewSubmit) {
       return null;
     }
     try {
@@ -189,11 +192,11 @@
     browserLog("returning stored result");
     return existingResult;
   }
-  if (globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__) {
+  if (globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ === requestID) {
     browserLog("waiting for in-flight result");
-    return await waitFor(() => storedBrowserAuthResult(), "X Castle token generation did not finish", 30000);
+    return await waitFor(() => storedBrowserAuthResult(), "X Castle token generation did not finish", 45000);
   }
-  globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = true;
+  globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = requestID;
   resetStoredResult();
 
   function addModules(entry, modules) {
@@ -298,7 +301,7 @@
     return req;
   }
 
-  async function createPreludeDispatchIDsInContext(win, doc) {
+  async function loadPreludeDispatch(win, doc) {
     const chunk = win.webpackChunk_twitter_responsive_web = win.webpackChunk_twitter_responsive_web || [];
     const loadedBefore = chunk.length;
     await loadScript(doc, preludeScriptURL);
@@ -320,16 +323,33 @@
     if (typeof dispatchSignals !== "function") {
       throw new Error("X Prelude module is unavailable");
     }
-    const ids = [];
-    for (let index = 0; index < preludeBatchSize; index++) {
-      ids.push(await Promise.race([
-        dispatchSignals(preludeSDKKey),
-        sleep(10000).then(() => {
-          throw new Error("Timed out dispatching X Prelude signals");
-        }),
-      ]));
+    return () => Promise.race([
+      dispatchSignals(preludeSDKKey),
+      sleep(10000).then(() => {
+        throw new Error("Timed out dispatching X Prelude signals");
+      }),
+    ]);
+  }
+
+  async function submitInWebview(dispatchPrelude, castleToken) {
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(webviewSubmit.form || {})) {
+      form.set(key, value);
     }
-    return ids;
+    form.set("prelude_dispatch_id", await dispatchPrelude());
+    form.set("$castle_token", castleToken);
+    const resp = await fetch(webviewSubmit.url, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...(webviewSubmit.headers || {}), "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + 0x8000));
+    }
+    return { webview_submit_status: String(resp.status), webview_submit_body: btoa(binary) };
   }
 
   async function createTokenInContext(win, doc) {
@@ -457,6 +477,7 @@
     showBrowserLoginStatus("Completing sign-in...");
     await synthesizeCastleActivity(context.win, context.doc);
     const castleTokens = await createTokenInContext(context.win, context.doc);
+    const submitCastleToken = webviewSubmit && castleTokens.length > 1 ? castleTokens.pop() : "";
     const castleToken = castleTokens[0] || "";
     browserLog("module tokens ready, count " + castleTokens.length + ", first length " + String(castleToken || "").length);
     const result = { castle_token: castleToken };
@@ -466,10 +487,14 @@
     }
     if (preludeScriptURL && preludeSDKKey) {
       try {
-        const preludeIDs = await createPreludeDispatchIDsInContext(context.win, context.doc);
-        preludeIDs.forEach((id, index) => {
-          result[index === 0 ? "prelude_dispatch_id" : "prelude_dispatch_id_" + (index + 1)] = id;
-        });
+        const dispatchPrelude = await loadPreludeDispatch(context.win, context.doc);
+        for (let index = 0; index < preludeBatchSize; index++) {
+          result[index === 0 ? "prelude_dispatch_id" : "prelude_dispatch_id_" + (index + 1)] = await dispatchPrelude();
+        }
+        if (webviewSubmit && submitCastleToken) {
+          browserLog("sending X request from webview");
+          Object.assign(result, await submitInWebview(dispatchPrelude, submitCastleToken));
+        }
       } catch (err) {
         browserLog("prelude dispatch failed: " + (err && err.message));
       }

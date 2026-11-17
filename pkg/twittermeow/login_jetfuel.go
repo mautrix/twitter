@@ -624,20 +624,75 @@ func supportedWebLoginAuthMethods(methods []WebLoginAuthMethod) []WebLoginAuthMe
 	return supported
 }
 
-func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodID string) (*WebLoginResult, error) {
+func (wls *WebLoginSession) jetfuelAuthMethodAction(methodID string) (WebLoginAuthMethod, string, error) {
 	if wls.jetfuel == nil || len(wls.jetfuel.twoFactorMethods) == 0 {
-		return nil, ErrWebLoginMissingAuthMethodState
+		return WebLoginAuthMethod{}, "", ErrWebLoginMissingAuthMethodState
 	}
 	method, ok := wls.jetfuel.findAuthMethod(methodID)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, strings.TrimSpace(methodID))
+		return WebLoginAuthMethod{}, "", fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, strings.TrimSpace(methodID))
 	}
 	if !method.Supported {
-		return nil, fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, method.Name)
+		return WebLoginAuthMethod{}, "", fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, method.Name)
 	}
 	action := wls.jetfuel.twoFactorAction
 	if action == "" {
 		action = endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH
+	}
+	return method, action, nil
+}
+
+// JetfuelWebviewRequest is a Jetfuel form POST for the client webview to send itself. Prelude compares the
+// TLS fingerprint of the request that asks X for a text message with the one that dispatched the Prelude
+// signals, so that request has to come from the same webview.
+type JetfuelWebviewRequest struct {
+	URL     string            `json:"url"`
+	Form    map[string]string `json:"form"`
+	Headers map[string]string `json:"headers"`
+}
+
+func (wls *WebLoginSession) PrepareWebviewAuthMethodSubmit(methodID string) (*JetfuelWebviewRequest, error) {
+	if wls.backend != webLoginBackendJetfuel {
+		return nil, nil
+	}
+	method, action, err := wls.jetfuelAuthMethodAction(methodID)
+	if err != nil {
+		return nil, err
+	}
+	if method.Kind != WebLoginAuthMethodKindSMS || !wls.client.JetfuelCastleTokenInfo().HasPrelude() {
+		return nil, nil
+	}
+	fullURL := endpoints.JETFUEL_BASE_URL + ensureLeadingSlash(action)
+	req := &JetfuelWebviewRequest{
+		URL:     fullURL,
+		Form:    make(map[string]string),
+		Headers: wls.client.jetfuelWebviewHeaders(fullURL),
+	}
+	for key, values := range wls.jetfuel.authMethodForm(method) {
+		if len(values) > 0 {
+			req.Form[key] = values[0]
+		}
+	}
+	return req, nil
+}
+
+func (wls *WebLoginSession) SubmitWebviewAuthMethodResponse(ctx context.Context, methodID string, body []byte) (*WebLoginResult, error) {
+	method, _, err := wls.jetfuelAuthMethodAction(methodID)
+	if err != nil {
+		return nil, err
+	}
+	wls.client.Logger.Debug().
+		Str("method_id", method.ID).
+		Str("method_kind", string(method.Kind)).
+		Int("response_bytes", len(body)).
+		Msg("Handling Jetfuel auth method response from client webview")
+	return wls.handleJetfuelAuthMethodResponse(method, body)
+}
+
+func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodID string) (*WebLoginResult, error) {
+	method, action, err := wls.jetfuelAuthMethodAction(methodID)
+	if err != nil {
+		return nil, err
 	}
 	wls.client.Logger.Debug().
 		Str("method_id", method.ID).
@@ -658,6 +713,10 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 	if err != nil {
 		return nil, err
 	}
+	return wls.handleJetfuelAuthMethodResponse(method, body)
+}
+
+func (wls *WebLoginSession) handleJetfuelAuthMethodResponse(method WebLoginAuthMethod, body []byte) (*WebLoginResult, error) {
 	parsed := parseJetfuelLoginResponse(body)
 	if err := parsed.loginError(); err != nil {
 		return nil, err
@@ -730,6 +789,33 @@ func (c *Client) jetfuelPostForm(ctx context.Context, path string, form url.Valu
 		return nil, err
 	}
 	return c.jetfuelRequest(ctx, path, http.MethodPost, []byte(form.Encode()))
+}
+
+func (c *Client) jetfuelWebviewHeaders(fullURL string) map[string]string {
+	txID, err := crypto.SignTransaction(c.session.AnimationToken, c.session.VerificationToken, fullURL, http.MethodPost)
+	if err != nil {
+		txID = "e:"
+	}
+	authorization := c.session.bearerToken
+	if authorization == "" {
+		authorization = BearerToken
+	}
+	headers := map[string]string{
+		"authorization":             authorization,
+		"timezone":                  jetfuelTimezone(),
+		"x-client-transaction-id":   txID,
+		"x-jf-client-theme":         jetfuelHeaderTheme,
+		"x-jf-v":                    jetfuelHeaderVersion,
+		"x-twitter-active-user":     "yes",
+		"x-twitter-client-language": "en",
+	}
+	if guestToken := c.cookies.Get(cookies.XGuestToken); guestToken != "" {
+		headers["x-guest-token"] = guestToken
+	}
+	if csrfToken := c.cookies.Get(cookies.XCt0); csrfToken != "" {
+		headers["x-csrf-token"] = csrfToken
+	}
+	return headers
 }
 
 func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body []byte) ([]byte, error) {
