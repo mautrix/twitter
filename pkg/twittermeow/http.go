@@ -47,7 +47,6 @@ type MakeRequestParams struct {
 	Payload      io.Reader
 	ContentType  types.ContentType
 	DontReadBody bool
-	NoRetry      bool
 }
 
 func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
@@ -86,7 +85,7 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 				Str("response_body", string(respDat)).
 				Msg("Request failed")
 			return nil, respDat, err
-		} else if attempts > MaxHTTPRetries || params.NoRetry {
+		} else if attempts > MaxHTTPRetries {
 			log.Err(err).
 				Dur("duration", dur).
 				Msg("Request failed, giving up")
