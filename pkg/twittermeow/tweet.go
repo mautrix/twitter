@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,6 +46,10 @@ func (c *Client) GetTweetPreview(ctx context.Context, postURL string) (*types.At
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return nil, fmt.Errorf("failed to fetch tweet oEmbed response: %w", err)
 	}
 	defer resp.Body.Close()

@@ -33,6 +33,18 @@ var (
 	ErrCSRFMismatch             error = TwitterError{Code: 353}
 )
 
+var ErrCloudflareRateLimited error = cloudflareRateLimitError{}
+
+type cloudflareRateLimitError struct{}
+
+func (cloudflareRateLimitError) Error() string {
+	return "rate limited by Cloudflare (error 1015)"
+}
+
+func (cloudflareRateLimitError) Is(target error) bool {
+	return errors.Is(ErrRatelimitExceeded, target)
+}
+
 func IsAuthError(err error) bool {
 	return errors.Is(err, ErrCouldNotAuthenticate) ||
 		errors.Is(err, ErrUserSuspended) ||

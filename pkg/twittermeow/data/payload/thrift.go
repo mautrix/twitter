@@ -348,15 +348,16 @@ type MessageContents struct {
 }
 
 type MessageCreateEvent struct {
-	Contents               []byte                     `thrift:"contents,100" json:"contents,omitempty"`
-	ConversationKeyVersion *string                    `thrift:"conversation_key_version,101" json:"conversation_key_version,omitempty"`
-	ShouldNotify           *bool                      `thrift:"should_notify,102" json:"should_notify,omitempty"`
-	TtlMsec                *int64                     `thrift:"ttl_msec,103" json:"ttl_msec,omitempty"`
-	DeliveredAtMsec        *int64                     `thrift:"delivered_at_msec,104" json:"delivered_at_msec,omitempty"`
-	IsPendingPublicKey     *bool                      `thrift:"is_pending_public_key,105" json:"is_pending_public_key,omitempty"`
-	Priority               *int32                     `thrift:"priority,106" json:"priority,omitempty"`
-	AdditionalActionList   []int32                    `thrift:"additional_action_list,107" json:"additional_action_list,omitempty"`
-	SideEffects            []*MessageCreateSideEffect `thrift:"side_effects,111" json:"side_effects,omitempty"`
+	Contents                  []byte                     `thrift:"contents,100" json:"contents,omitempty"`
+	ConversationKeyVersion    *string                    `thrift:"conversation_key_version,101" json:"conversation_key_version,omitempty"`
+	ShouldNotify              *bool                      `thrift:"should_notify,102" json:"should_notify,omitempty"`
+	TtlMsec                   *int64                     `thrift:"ttl_msec,103" json:"ttl_msec,omitempty"`
+	DeliveredAtMsec           *int64                     `thrift:"delivered_at_msec,104" json:"delivered_at_msec,omitempty"`
+	IsPendingPublicKey        *bool                      `thrift:"is_pending_public_key,105" json:"is_pending_public_key,omitempty"`
+	Priority                  *int32                     `thrift:"priority,106" json:"priority,omitempty"`
+	AdditionalActionList      []int32                    `thrift:"additional_action_list,107" json:"additional_action_list,omitempty"`
+	SideEffects               []*MessageCreateSideEffect `thrift:"side_effects,111" json:"side_effects,omitempty"`
+	ContentsEncryptionVersion *int16                     `thrift:"contents_encryption_version,112" json:"contents_encryption_version,omitempty"`
 }
 
 func (mce *MessageCreateEvent) IsUserMetadata() bool {
