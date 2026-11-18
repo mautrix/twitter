@@ -1046,13 +1046,13 @@ func (c *Client) MuteConversation(ctx context.Context, conversationID string) er
 
 // AcceptMessageRequest trusts the sender of a 1:1 message request, like X's own accept button.
 // The signed AcceptMessageRequest entry is what tells the other X clients that the request was accepted.
-func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targetUserID string) error {
+func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targetUserID string) (*payload.MessageEvent, error) {
 	if targetUserID == "" || conversationID == "" {
-		return errors.New("conversation and target user IDs are required")
+		return nil, errors.New("conversation and target user IDs are required")
 	}
 	token, err := c.ensureConversationToken(ctx, conversationID)
 	if err != nil {
-		return fmt.Errorf("get conversation token: %w", err)
+		return nil, fmt.Errorf("get conversation token: %w", err)
 	}
 	messageID := uuid.NewString()
 	encodedMCE, encodedSig, err := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
@@ -1063,9 +1063,9 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 	if errors.Is(err, crypto.ErrKeyNotFound) {
 		ownKey, keyErr := c.keyManager.GetOwnSigningKey(ctx)
 		if keyErr != nil {
-			return fmt.Errorf("get own signing key: %w", keyErr)
+			return nil, fmt.Errorf("get own signing key: %w", keyErr)
 		} else if ownKey == nil || ownKey.SigningKey == nil {
-			return errors.New("own signing key is missing")
+			return nil, errors.New("own signing key is missing")
 		}
 		encodedMCE, encodedSig, err = crypto.NewMessageBuilder(nil, c.GetCurrentUserID()).
 			WithSigningKey(ownKey.SigningKey, ownKey.KeyVersion).
@@ -1075,7 +1075,7 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 			BuildForSend(ctx)
 	}
 	if err != nil {
-		return fmt.Errorf("build accept message request event: %w", err)
+		return nil, fmt.Errorf("build accept message request event: %w", err)
 	}
 	sendMCE := &payload.SendMessageMutationVariables{
 		ConversationID:            conversationID,
@@ -1088,7 +1088,7 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 	}
 	jsonBody, err := json.Marshal(payload.NewAcceptMessageRequestMutationPayload(targetUserID, sendMCE))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            endpoints.ACCEPT_MESSAGE_REQUEST_URL,
@@ -1099,7 +1099,7 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 		Body:           jsonBody,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var resp struct {
 		Data struct {
@@ -1110,19 +1110,23 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 				} `json:"send_message_create_event_response"`
 			} `json:"user_add_trust"`
 		} `json:"data"`
+		Errors []response.XChatGraphQLError `json:"errors"`
 	}
 	if err = json.Unmarshal(respBody, &resp); err != nil {
-		return fmt.Errorf("parse accept message request response: %w", err)
+		return nil, fmt.Errorf("parse accept message request response: %w", err)
+	} else if len(resp.Errors) > 0 {
+		return nil, fmt.Errorf("user_add_trust returned GraphQL errors: %w", resp.Errors[0])
 	} else if resp.Data.UserAddTrust == nil {
-		return errors.New("accept message request response had no user_add_trust result")
+		return nil, errors.New("accept message request response had no user_add_trust result")
 	} else if resp.Data.UserAddTrust.ErrorCode != "" {
-		return fmt.Errorf("accept message request failed: %s", resp.Data.UserAddTrust.ErrorCode)
+		return nil, fmt.Errorf("accept message request failed: %s", resp.Data.UserAddTrust.ErrorCode)
 	} else if rebound := resp.Data.UserAddTrust.SendMessageCreateEventResponse; rebound == nil || rebound.EncodedMessageEvent == "" {
 		c.Logger.Warn().
 			Str("conversation_id", conversationID).
 			Msg("Accept message request response had no rebound AcceptMessageRequest event")
+		return nil, nil
 	}
-	return nil
+	return DecodeSendMessageMutationMessageEvent(resp.Data.UserAddTrust.SendMessageCreateEventResponse.EncodedMessageEvent)
 }
 
 // UnmuteConversation unmutes a conversation via the XChat UnmuteConversation GraphQL endpoint.

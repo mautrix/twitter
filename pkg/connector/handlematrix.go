@@ -721,7 +721,6 @@ func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt t
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
 	if msg.Portal.MessageRequest {
-		tc.requestReadReceipts.Store(msg.Portal.PortalKey, msg)
 		return nil
 	}
 	conversationID := ParsePortalID(msg.Portal.ID)
@@ -1081,7 +1080,14 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 	conversationID := ParsePortalID(msg.Portal.ID)
 	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
 	if otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID)); otherUserID != "" && meta.IsXChatConversation() {
-		err = tc.client.AcceptMessageRequest(ctx, conversationID, otherUserID)
+		var rebound *payload.MessageEvent
+		rebound, err = tc.client.AcceptMessageRequest(ctx, conversationID, otherUserID)
+		if rebound != nil && rebound.Detail != nil && rebound.Detail.MessageFailureEvent != nil {
+			err = bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(rebound.Detail.MessageFailureEvent))).
+				WithStatus(event.MessageStatusFail).
+				WithIsCertain(true).
+				WithErrorAsMessage()
+		}
 	} else {
 		err = tc.client.AcceptConversation(ctx, ConvertConversationIDToRESTAPI(conversationID))
 		// Already-accepted conversations will throw a 279 error when trying to accept again.
@@ -1093,16 +1099,11 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 		_, ok := msg.Portal.Metadata.(*PortalMetadata)
 		if ok {
 			chatInfo := &bridgev2.ChatInfo{}
-			applyXChatTrustToChatInfo(chatInfo, true)
+			tc.applyXChatTrustToChatInfo(chatInfo, true)
 			msg.Portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
 		}
-		if receipt, ok := tc.requestReadReceipts.LoadAndDelete(msg.Portal.PortalKey); ok && !msg.Portal.MessageRequest {
-			if receiptErr := tc.HandleMatrixReadReceipt(ctx, receipt.(*bridgev2.MatrixReadReceipt)); receiptErr != nil {
-				zerolog.Ctx(ctx).Warn().Err(receiptErr).Msg("Failed to send held back read receipt after accepting message request")
-			}
-		}
 	}
-	return err
+	return withoutNotice(wrapTwitterMatrixError(err))
 }
 
 func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev2.MatrixBlockUser) error {

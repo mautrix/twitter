@@ -564,7 +564,6 @@ func (tc *TwitterClient) getTrustedChatInfo(ctx context.Context, conversationID 
 // and fetching user info from the cache. This is used as a fallback when XChat API fails.
 func (tc *TwitterClient) buildChatInfoFromConversationID(ctx context.Context, conversationID string) *bridgev2.ChatInfo {
 	log := zerolog.Ctx(ctx)
-	messageRequest := false
 
 	normalizedConversationID, parts, ok := parseDMParticipantIDs(conversationID)
 	if !ok {
@@ -579,9 +578,7 @@ func (tc *TwitterClient) buildChatInfoFromConversationID(ctx context.Context, co
 				Str("conversation_id", normalizedConversationID).
 				Msg("Could not parse 1:1 conversation ID - returning minimal ChatInfo")
 		}
-		return &bridgev2.ChatInfo{
-			MessageRequest: &messageRequest,
-		}
+		return &bridgev2.ChatInfo{}
 	}
 
 	log.Debug().
@@ -590,8 +587,7 @@ func (tc *TwitterClient) buildChatInfoFromConversationID(ctx context.Context, co
 		Msg("Built ChatInfo from conversation ID for trust event")
 
 	info := &bridgev2.ChatInfo{
-		Members:        tc.buildChatMembersFromUserIDs(ctx, normalizedConversationID, parts, nil),
-		MessageRequest: &messageRequest,
+		Members: tc.buildChatMembersFromUserIDs(ctx, normalizedConversationID, parts, nil),
 	}
 	tc.applySelfDMNameAndAvatar(ctx, normalizedConversationID, info, nil, nil)
 	return info
