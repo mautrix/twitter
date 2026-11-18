@@ -547,9 +547,6 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 	case *types.XChatPinnedConversations:
 		return tc.handleXChatPinnedConversations(ctx, evt)
 
-	case *types.XChatConversationMarkedUnread:
-		return tc.handleXChatMarkedUnread(ctx, evt)
-
 	case *types.XChatTyping:
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
 			EventMeta: simplevent.EventMeta{

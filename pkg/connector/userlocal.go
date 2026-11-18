@@ -78,7 +78,7 @@ func (tc *TwitterClient) applyPinAtCreation(ctx context.Context, conversationID 
 	userLocal := info.UserLocal
 	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
 		if portal.MXID == "" && tc.isConversationPinned(conversationID) {
-			userLocal.Tag = ptr.Ptr(event.RoomTagFavourite)
+			userLocal.Tag = ptr.Ptr(tc.connector.Config.PinnedTag)
 		}
 		return false
 	})
@@ -96,7 +96,6 @@ func (tc *TwitterClient) handleXChatPinnedConversations(ctx context.Context, evt
 		return true
 	}
 	previous := slices.Clone(meta.PinnedConversationIDs)
-	archived := slices.Clone(meta.ArchivedConversationIDs)
 	tc.userLocalLock.Unlock()
 	pinned := make([]string, 0, len(evt.ConversationIDs))
 	for _, conversationID := range evt.ConversationIDs {
@@ -113,13 +112,8 @@ func (tc *TwitterClient) handleXChatPinnedConversations(ctx context.Context, evt
 			removed = append(removed, conversationID)
 		}
 	}
-	addOK := tc.queueUserLocalPortalInfo(ctx, added, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagFavourite)}))
-	removeOK := tc.queueUserLocalPortalInfo(ctx, removed, evt.Timestamp, func(conversationID string) *bridgev2.UserLocalPortalInfo {
-		if slices.Contains(archived, conversationID) {
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagLowPriority)}
-		}
-		return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTag(""))}
-	})
+	addOK := tc.queueUserLocalPortalInfo(ctx, added, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(tc.connector.Config.PinnedTag)}))
+	removeOK := tc.queueUserLocalPortalInfo(ctx, removed, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTag(""))}))
 	if !addOK || !removeOK {
 		return false
 	}
@@ -136,48 +130,17 @@ func (tc *TwitterClient) handleXChatPinnedConversations(ctx context.Context, evt
 }
 
 func (tc *TwitterClient) handleXChatArchiveChange(ctx context.Context, evt *types.XChatConversationArchiveChange) bool {
-	meta := tc.loginMetadata()
-	if meta == nil {
-		return true
+	var tag event.RoomTag
+	if evt.Archived {
+		tag = tc.connector.Config.ArchiveTag
 	}
-	conversationIDs := make([]string, 0, len(evt.ConversationIDs))
+	var conversationIDs []string
 	for _, conversationID := range evt.ConversationIDs {
-		conversationIDs = append(conversationIDs, NormalizeConversationID(conversationID))
-	}
-	tc.userLocalLock.Lock()
-	pinned := slices.Clone(meta.PinnedConversationIDs)
-	tc.userLocalLock.Unlock()
-	if !tc.queueUserLocalPortalInfo(ctx, conversationIDs, evt.Timestamp, func(conversationID string) *bridgev2.UserLocalPortalInfo {
-		switch {
-		case evt.Archived:
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagLowPriority)}
-		case slices.Contains(pinned, conversationID):
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagFavourite)}
-		default:
-			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTag(""))}
-		}
-	}) {
-		return false
-	}
-	tc.userLocalLock.Lock()
-	defer tc.userLocalLock.Unlock()
-	changed := false
-	for _, conversationID := range conversationIDs {
-		if slices.Contains(meta.ArchivedConversationIDs, conversationID) == evt.Archived {
-			continue
-		}
-		changed = true
-		meta.ArchivedConversationIDs = slices.DeleteFunc(meta.ArchivedConversationIDs, func(id string) bool { return id == conversationID })
-		if evt.Archived {
-			meta.ArchivedConversationIDs = append(meta.ArchivedConversationIDs, conversationID)
+		if !tc.isConversationPinned(conversationID) {
+			conversationIDs = append(conversationIDs, NormalizeConversationID(conversationID))
 		}
 	}
-	if changed {
-		if err := tc.userLogin.Save(ctx); err != nil {
-			zerolog.Ctx(ctx).Err(err).Msg("Failed to save archived conversations")
-		}
-	}
-	return true
+	return tc.queueUserLocalPortalInfo(ctx, conversationIDs, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{Tag: &tag}))
 }
 
 func xchatItemArchived(item *response.XChatInboxItem) bool {
@@ -197,72 +160,4 @@ func xchatItemArchived(item *response.XChatInboxItem) bool {
 		archived = change.ArchiveConversation != nil
 	}
 	return archived
-}
-
-// handleXChatMarkedUnread bridges the user's own mark-unread from another device once, since inbox
-// snapshots replay the latest events of each conversation on every reconnect.
-func (tc *TwitterClient) handleXChatMarkedUnread(ctx context.Context, evt *types.XChatConversationMarkedUnread) bool {
-	meta := tc.loginMetadata()
-	if meta == nil {
-		return true
-	}
-	key := NormalizeConversationID(evt.ConversationID)
-	tc.userLocalLock.Lock()
-	lastSequenceID, seen := meta.MarkedUnreadSequenceIDs[key]
-	tc.userLocalLock.Unlock()
-	if evt.SequenceID == "" || compareIntStrings(evt.SequenceID, lastSequenceID) <= 0 {
-		return true
-	}
-	// The first mark-unread seen from a snapshot may be long stale, and rooms that don't exist yet only need
-	// the sequence recorded so later replays are ignored.
-	if (evt.FromSnapshot && !seen) || !tc.portalHasRoom(ctx, evt.ConversationID) {
-		tc.recordMarkedUnreadSequence(ctx, meta, key, evt.SequenceID)
-		return true
-	}
-	if !tc.userLogin.QueueRemoteEvent(&simplevent.MarkUnread{
-		EventMeta: simplevent.EventMeta{
-			Type:      bridgev2.RemoteEventMarkUnread,
-			PortalKey: tc.MakePortalKeyFromID(evt.ConversationID),
-			Sender:    tc.MakeEventSender(tc.client.GetCurrentUserID()),
-			Timestamp: evt.Timestamp,
-		},
-		Unread: true,
-	}).Success {
-		return false
-	}
-	tc.recordMarkedUnreadSequence(ctx, meta, key, evt.SequenceID)
-	return true
-}
-
-func (tc *TwitterClient) recordMarkedUnreadSequence(ctx context.Context, meta *UserLoginMetadata, key, sequenceID string) {
-	tc.userLocalLock.Lock()
-	defer tc.userLocalLock.Unlock()
-	if compareIntStrings(sequenceID, meta.MarkedUnreadSequenceIDs[key]) <= 0 {
-		return
-	}
-	if meta.MarkedUnreadSequenceIDs == nil {
-		meta.MarkedUnreadSequenceIDs = make(map[string]string)
-	}
-	meta.MarkedUnreadSequenceIDs[key] = sequenceID
-	if err := tc.userLogin.Save(ctx); err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to save marked unread sequence")
-	}
-}
-
-// setConversationPinned updates the stored list after our own pin or unpin, since X sends no snapshot back for it.
-func (tc *TwitterClient) setConversationPinned(ctx context.Context, conversationID string, pinned bool) {
-	meta := tc.loginMetadata()
-	if meta == nil {
-		return
-	}
-	conversationID = NormalizeConversationID(conversationID)
-	tc.userLocalLock.Lock()
-	defer tc.userLocalLock.Unlock()
-	meta.PinnedConversationIDs = slices.DeleteFunc(meta.PinnedConversationIDs, func(id string) bool { return id == conversationID })
-	if pinned {
-		meta.PinnedConversationIDs = append(meta.PinnedConversationIDs, conversationID)
-	}
-	if err := tc.userLogin.Save(ctx); err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to save pinned conversations")
-	}
 }

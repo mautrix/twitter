@@ -614,7 +614,10 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		return nil
 
 	case detail.MarkConversationUnreadEvent != nil:
-		return p.emitMarkedUnread(ctx, evt)
+		p.log.Debug().
+			Str("sequence_id", ptr.Val(evt.SequenceId)).
+			Msg("Ignoring MarkConversationUnreadEvent")
+		return nil
 
 	default:
 		p.log.Debug().
@@ -767,15 +770,11 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
 	}
 
-	if contents.MarkConversationUnread != nil {
-		return p.emitMarkedUnread(ctx, evt)
-	}
-
-	if contents.PinConversation != nil || contents.UnpinConversation != nil {
+	if contents.PinConversation != nil || contents.UnpinConversation != nil || contents.MarkConversationUnread != nil {
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Str("conversation_id", conversationID).
-			Msg("Ignoring pin entry, pinned chats are synced from the user metadata")
+			Msg("Ignoring pin or mark unread entry")
 		return nil
 	}
 
@@ -796,19 +795,6 @@ func conversationIDsOrSelf(ids []string, evt *payload.MessageEvent) []string {
 		return []string{conversationID}
 	}
 	return nil
-}
-
-func (p *XChatEventProcessor) emitMarkedUnread(ctx context.Context, evt *payload.MessageEvent) error {
-	if p.client == nil || ptr.Val(evt.SenderId) != p.client.GetCurrentUserID() || ptr.Val(evt.ConversationId) == "" {
-		return nil
-	}
-	_, fromSnapshot := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary)
-	return p.emitEvent(ctx, &types.XChatConversationMarkedUnread{
-		FromSnapshot:   fromSnapshot,
-		SequenceID:     ptr.Val(evt.SequenceId),
-		ConversationID: ptr.Val(evt.ConversationId),
-		Timestamp:      methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
-	})
 }
 
 func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *payload.MessageEvent) error {

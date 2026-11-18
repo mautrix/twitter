@@ -1048,20 +1048,11 @@ func (tc *TwitterClient) HandleMatrixMembership(ctx context.Context, msg *bridge
 func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.MatrixRoomTag) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	_, isFavourite := msg.Content.Tags[event.RoomTagFavourite]
-	if isFavourite == tc.isConversationPinned(conversationID) {
-		return nil
-	}
 
-	var err error
 	if isFavourite {
-		err = tc.client.SendXChatPinConversation(ctx, conversationID)
-	} else {
-		err = tc.client.SendXChatUnpinConversation(ctx, conversationID)
+		return tc.client.SendXChatPinConversation(ctx, conversationID)
 	}
-	if err == nil {
-		tc.setConversationPinned(ctx, conversationID, isFavourite)
-	}
-	return err
+	return tc.client.SendXChatUnpinConversation(ctx, conversationID)
 }
 
 func (tc *TwitterClient) HandleMarkedUnread(ctx context.Context, msg *bridgev2.MatrixMarkedUnread) error {
