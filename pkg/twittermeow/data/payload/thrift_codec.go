@@ -296,7 +296,7 @@ func thriftTypeMatches(goType reflect.Type, thriftType thrift.TType) bool {
 	switch thriftType {
 	case thrift.BOOL:
 		return goType.Kind() == reflect.Bool
-	case thrift.I32, thrift.I64:
+	case thrift.I16, thrift.I32, thrift.I64:
 		switch goType.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			return true
@@ -334,6 +334,15 @@ func readValue(ctx context.Context, proto thrift.TProtocol, v reflect.Value, goT
 			return err
 		}
 		v.SetBool(val)
+
+	case thrift.I16:
+		val, err := proto.ReadI16(ctx)
+		if err != nil {
+			return err
+		}
+		if v.CanInt() {
+			v.SetInt(int64(val))
+		}
 
 	case thrift.I32:
 		val, err := proto.ReadI32(ctx)
