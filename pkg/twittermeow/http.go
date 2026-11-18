@@ -137,14 +137,22 @@ func (c *Client) checkRateLimit(key string) error {
 }
 
 func (c *Client) updateRateLimit(key string, resp *http.Response) {
-	if resp == nil || resp.Header.Get("x-rate-limit-remaining") != "0" {
+	if resp == nil {
 		return
 	}
-	resetUnix, err := strconv.ParseInt(resp.Header.Get("x-rate-limit-reset"), 10, 64)
-	if err != nil {
-		return
+	var reset time.Time
+	if resp.Header.Get("x-rate-limit-remaining") == "0" {
+		if resetUnix, err := strconv.ParseInt(resp.Header.Get("x-rate-limit-reset"), 10, 64); err == nil {
+			reset = time.Unix(resetUnix, 0)
+		}
 	}
-	reset := time.Unix(resetUnix, 0)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if retryAfter, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
+			if retryAt := time.Now().Add(time.Duration(retryAfter) * time.Second); retryAt.After(reset) {
+				reset = retryAt
+			}
+		}
+	}
 	if time.Now().After(reset) {
 		return
 	}
