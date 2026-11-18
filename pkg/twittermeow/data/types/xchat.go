@@ -39,7 +39,6 @@ func (*XChatConversationMuteChange) isTwitterEvent() {}
 
 // XChatConversationArchiveChange is emitted when conversations are archived or unarchived on another device.
 type XChatConversationArchiveChange struct {
-	SequenceID      string
 	ConversationIDs []string
 	Archived        bool
 	Timestamp       time.Time

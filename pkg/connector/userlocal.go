@@ -11,6 +11,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -138,20 +140,14 @@ func (tc *TwitterClient) handleXChatArchiveChange(ctx context.Context, evt *type
 	if meta == nil {
 		return true
 	}
+	conversationIDs := make([]string, 0, len(evt.ConversationIDs))
+	for _, conversationID := range evt.ConversationIDs {
+		conversationIDs = append(conversationIDs, NormalizeConversationID(conversationID))
+	}
 	tc.userLocalLock.Lock()
 	pinned := slices.Clone(meta.PinnedConversationIDs)
-	var changed []string
-	for _, conversationID := range evt.ConversationIDs {
-		conversationID = NormalizeConversationID(conversationID)
-		if evt.SequenceID != "" && compareIntStrings(evt.SequenceID, meta.ArchiveSequenceIDs[conversationID]) > 0 {
-			changed = append(changed, conversationID)
-		}
-	}
 	tc.userLocalLock.Unlock()
-	if len(changed) == 0 {
-		return true
-	}
-	if !tc.queueUserLocalPortalInfo(ctx, changed, evt.Timestamp, func(conversationID string) *bridgev2.UserLocalPortalInfo {
+	if !tc.queueUserLocalPortalInfo(ctx, conversationIDs, evt.Timestamp, func(conversationID string) *bridgev2.UserLocalPortalInfo {
 		switch {
 		case evt.Archived:
 			return &bridgev2.UserLocalPortalInfo{Tag: ptr.Ptr(event.RoomTagLowPriority)}
@@ -165,23 +161,42 @@ func (tc *TwitterClient) handleXChatArchiveChange(ctx context.Context, evt *type
 	}
 	tc.userLocalLock.Lock()
 	defer tc.userLocalLock.Unlock()
-	if meta.ArchiveSequenceIDs == nil {
-		meta.ArchiveSequenceIDs = make(map[string]string)
-	}
-	for _, conversationID := range changed {
-		if compareIntStrings(evt.SequenceID, meta.ArchiveSequenceIDs[conversationID]) <= 0 {
+	changed := false
+	for _, conversationID := range conversationIDs {
+		if slices.Contains(meta.ArchivedConversationIDs, conversationID) == evt.Archived {
 			continue
 		}
-		meta.ArchiveSequenceIDs[conversationID] = evt.SequenceID
+		changed = true
 		meta.ArchivedConversationIDs = slices.DeleteFunc(meta.ArchivedConversationIDs, func(id string) bool { return id == conversationID })
 		if evt.Archived {
 			meta.ArchivedConversationIDs = append(meta.ArchivedConversationIDs, conversationID)
 		}
 	}
-	if err := tc.userLogin.Save(ctx); err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to save archived conversations")
+	if changed {
+		if err := tc.userLogin.Save(ctx); err != nil {
+			zerolog.Ctx(ctx).Err(err).Msg("Failed to save archived conversations")
+		}
 	}
 	return true
+}
+
+func xchatItemArchived(item *response.XChatInboxItem) bool {
+	var archived bool
+	var latestSequenceID string
+	for _, raw := range slices.Concat(item.LatestMessageEvents, item.EncodedMessageEvents) {
+		evt, err := twittermeow.DecodeMessageEvent(raw)
+		if err != nil || evt.Detail == nil || evt.Detail.ConversationMetadataChangeEvent == nil {
+			continue
+		}
+		change := evt.Detail.ConversationMetadataChangeEvent.ConversationMetadataChange
+		if change == nil || (change.ArchiveConversation == nil && change.UnarchiveConversation == nil) ||
+			compareIntStrings(ptr.Val(evt.SequenceId), latestSequenceID) <= 0 {
+			continue
+		}
+		latestSequenceID = ptr.Val(evt.SequenceId)
+		archived = change.ArchiveConversation != nil
+	}
+	return archived
 }
 
 // handleXChatMarkedUnread bridges the user's own mark-unread from another device once, since inbox

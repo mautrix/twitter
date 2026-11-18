@@ -577,14 +577,12 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			})
 		case change.ArchiveConversation != nil:
 			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
-				SequenceID:      ptr.Val(evt.SequenceId),
 				ConversationIDs: conversationIDsOrSelf(change.ArchiveConversation.ConversationIds, evt),
 				Archived:        true,
 				Timestamp:       ts,
 			})
 		case change.UnarchiveConversation != nil:
 			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
-				SequenceID:      ptr.Val(evt.SequenceId),
 				ConversationIDs: conversationIDsOrSelf(change.UnarchiveConversation.ConversationIds, evt),
 				Timestamp:       ts,
 			})
