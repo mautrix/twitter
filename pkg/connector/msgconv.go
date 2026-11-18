@@ -877,7 +877,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	if tweet.Status.FullText == "" && matchedURL != "" {
 		resolved, err := tc.client.GetTweetPreview(ctx, matchedURL)
 		if err != nil {
-			zerolog.Ctx(ctx).Warn().Msg("Failed to fetch rich preview for XChat post attachment")
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch rich preview for XChat post attachment")
 		} else {
 			tweet = resolved
 		}
