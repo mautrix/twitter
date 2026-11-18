@@ -109,6 +109,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	if content.Format == event.FormatHTML {
 		text = tc.matrixParser.Parse(content.FormattedBody, format.NewContext(ctx))
 	}
+	if content.MsgType == event.MsgEmote {
+		text = "/me " + text
+	}
 
 	messageID := string(msg.InputTransactionID)
 	if messageID != "" {
@@ -197,7 +200,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	switch content.MsgType {
-	case event.MsgText:
+	case event.MsgText, event.MsgEmote:
 		// nothing extra
 	case event.MsgVideo, event.MsgImage, event.MsgAudio:
 		if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
@@ -869,6 +872,9 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	if edit.Content.Format == event.FormatHTML {
 		text = tc.matrixParser.Parse(edit.Content.FormattedBody, format.NewContext(ctx))
 	}
+	if edit.Content.MsgType == event.MsgEmote {
+		text = "/me " + text
+	}
 	_, entities := buildURLAttachments(text)
 	entities = append(entities, buildMentionEntities(text)...)
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
@@ -884,6 +890,11 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	tc.client.Logger.Debug().Any("editResponse", resp).Msg("XChat edit response")
 	if meta != nil {
 		meta.EditCount++
+		if encoded := resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent; encoded != "" {
+			if sentEvt, err := twittermeow.DecodeMessageEvent(encoded); err == nil {
+				meta.LastXChatEditID = maxXChatSequenceID(meta.LastXChatEditID, ptr.Val(sentEvt.SequenceId))
+			}
+		}
 	}
 	return nil
 }

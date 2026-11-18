@@ -621,7 +621,13 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 				_ = resp.Body.Close()
 			}()
 
-			convKey := tc.getLatestConversationKey(ctx, conversationID)
+			var convKey *crypto.ConversationKey
+			if km := tc.client.GetKeyManager(); keyVersion != "" && km != nil {
+				convKey, _ = km.GetConversationKey(ctx, conversationID, keyVersion)
+			}
+			if convKey == nil || len(convKey.Key) == 0 {
+				convKey = tc.getLatestConversationKey(ctx, conversationID)
+			}
 			if convKey == nil || len(convKey.Key) == 0 {
 				log.Warn().Msg("No conversation key available for group avatar; returning raw bytes")
 				return io.ReadAll(resp.Body)
@@ -632,6 +638,7 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 			if err != nil {
 				log.Warn().Err(err).
 					Str("key_version", convKey.KeyVersion).
+					Str("event_key_version", keyVersion).
 					Msg("Failed to decrypt group avatar")
 				return nil, fmt.Errorf("failed to decrypt group avatar: %w", err)
 			}

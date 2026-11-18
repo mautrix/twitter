@@ -502,6 +502,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var attachmentURL string
 	var guessedMime string
 	var msgType event.MessageType
+	var isGif bool
 	extraInfo := map[string]any{}
 	canUseXChat := portal.Metadata.(*PortalMetadata).CanUseXChat()
 	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil {
@@ -519,10 +520,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		msgType = event.MsgImage
 		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
-		isGif := attachment.AnimatedGif != nil
+		isGif = attachment.AnimatedGif != nil
 		if isGif {
 			attachmentInfo = attachment.AnimatedGif
-			extraInfo["fi.mau.gif"] = true
 			extraInfo["fi.mau.loop"] = true
 			extraInfo["fi.mau.autoplay"] = true
 			extraInfo["fi.mau.hide_controls"] = true
@@ -552,6 +552,15 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			var variantURL string
 			if err == nil {
 				variantURL = highestBitRateVariant.URL
+				if isGif {
+					guessedMime = "video/mp4"
+					msgType = event.MsgVideo
+				}
+			} else if isGif && attachmentInfo.MediaHashKey == "" {
+				isGif = false
+				clear(extraInfo)
+				guessedMime = "image/jpeg"
+				msgType = event.MsgImage
 			}
 			zerolog.Ctx(ctx).Debug().
 				Err(err).
@@ -593,6 +602,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	content := event.MessageEventContent{
 		Info: &event.FileInfo{
 			MimeType: guessedMime,
+			MauGIF:   isGif,
 			Width:    attachmentInfo.OriginalInfo.Width,
 			Height:   attachmentInfo.OriginalInfo.Height,
 			Duration: attachmentInfo.VideoInfo.DurationMillis,
@@ -639,9 +649,8 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		content.MSC3245Voice = &event.MSC3245Voice{}
 	}
 	extra := map[string]any{}
-	// Add GIF-related fields at top level for Beeper client compatibility
-	for k, v := range extraInfo {
-		extra[k] = v
+	if len(extraInfo) > 0 {
+		content.Info.Extra = extraInfo
 	}
 	// Store OriginalAttachments for reply previews (needed for Twitter to display image thumbnails)
 	if len(msg.OriginalAttachments) > 0 {
@@ -976,7 +985,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	if tweet.Status.FullText == "" && matchedURL != "" {
 		resolved, err := tc.client.GetTweetPreview(ctx, matchedURL)
 		if err != nil {
-			zerolog.Ctx(ctx).Warn().Msg("Failed to fetch rich preview for XChat post attachment")
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch rich preview for XChat post attachment")
 		} else {
 			tweet = resolved
 		}
