@@ -1,7 +1,6 @@
 package twittermeow
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -470,7 +469,7 @@ func (c *Client) sendOnboardingTask(ctx context.Context, url string, payload onb
 				"sec-fetch-site":          "same-site",
 			},
 		}),
-		Payload:     bytes.NewReader(body),
+		Payload:     body,
 		ContentType: types.ContentTypeJSON,
 	})
 	if resp != nil {

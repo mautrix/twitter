@@ -27,15 +27,11 @@ var (
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	var pl io.Reader
-	if payload != nil {
-		pl = bytes.NewReader(payload)
-	}
 	return c.MakeRequestFull(ctx, MakeRequestParams{
 		URL:         url,
 		Method:      method,
 		Headers:     headers,
-		Payload:     pl,
+		Payload:     payload,
 		ContentType: contentType,
 	})
 }
@@ -44,7 +40,7 @@ type MakeRequestParams struct {
 	URL          string
 	Method       string
 	Headers      http.Header
-	Payload      io.Reader
+	Payload      []byte
 	ContentType  types.ContentType
 	DontReadBody bool
 }
@@ -108,7 +104,11 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 }
 
 func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
-	newRequest, err := http.NewRequestWithContext(ctx, params.Method, params.URL, params.Payload)
+	var body io.Reader
+	if params.Payload != nil {
+		body = bytes.NewReader(params.Payload)
+	}
+	newRequest, err := http.NewRequestWithContext(ctx, params.Method, params.URL, body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}
