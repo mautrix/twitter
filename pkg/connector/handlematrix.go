@@ -117,6 +117,9 @@ func (tc *TwitterClient) handleMatrixMessage(ctx context.Context, msg *bridgev2.
 	if content.Format == event.FormatHTML {
 		text = tc.matrixParser.Parse(content.FormattedBody, format.NewContext(ctx))
 	}
+	if content.MsgType == event.MsgEmote {
+		text = "/me " + text
+	}
 
 	messageID := string(msg.InputTransactionID)
 	if messageID != "" {
@@ -205,7 +208,7 @@ func (tc *TwitterClient) handleMatrixMessage(ctx context.Context, msg *bridgev2.
 	}
 
 	switch content.MsgType {
-	case event.MsgText:
+	case event.MsgText, event.MsgEmote:
 		// nothing extra
 	case event.MsgVideo, event.MsgImage, event.MsgAudio:
 		if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
@@ -975,12 +978,18 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		messageID = uuid.NewString()
 	}
 
+	updatedText := edit.Content.Body
+	if edit.Content.MsgType == event.MsgEmote {
+		updatedText = "/me " + updatedText
+	}
+	var resp *response.SendMessageMutationResponse
 	err := tc.sendXChatMutation(ctx, conversationID, func() (*response.SendMessageMutationResponse, error) {
-		resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
+		var err error
+		resp, err = tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
 			ConversationID:          conversationID,
 			MessageID:               messageID,
 			TargetMessageSequenceID: targetMessageID,
-			UpdatedText:             edit.Content.Body,
+			UpdatedText:             updatedText,
 		})
 		messageID = uuid.NewString()
 		tc.client.Logger.Debug().Any("editResponse", resp).Msg("XChat edit response")
@@ -991,6 +1000,13 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 	}
 	if meta != nil {
 		meta.EditCount++
+	}
+	if meta != nil && resp != nil {
+		if encoded := resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent; encoded != "" {
+			if sentEvt, err := twittermeow.DecodeMessageEvent(encoded); err == nil {
+				meta.LastXChatEditID = maxXChatSequenceID(meta.LastXChatEditID, ptr.Val(sentEvt.SequenceId))
+			}
+		}
 	}
 	return nil
 }
