@@ -146,11 +146,15 @@ func (c *Client) updateRateLimit(key string, resp *http.Response) {
 			reset = time.Unix(resetUnix, 0)
 		}
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if retryAfter, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
-			if retryAt := time.Now().Add(time.Duration(retryAfter) * time.Second); retryAt.After(reset) {
-				reset = retryAt
-			}
+	if retryAfter := resp.Header.Get("Retry-After"); resp.StatusCode == http.StatusTooManyRequests && retryAfter != "" {
+		var retryAt time.Time
+		if seconds, err := strconv.Atoi(retryAfter); err == nil {
+			retryAt = time.Now().Add(time.Duration(seconds) * time.Second)
+		} else if date, err := http.ParseTime(retryAfter); err == nil {
+			retryAt = date
+		}
+		if retryAt.After(reset) {
+			reset = retryAt
 		}
 	}
 	if time.Now().After(reset) {
