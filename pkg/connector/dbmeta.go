@@ -49,7 +49,8 @@ func (tc *TwitterConnector) GetDBMetaTypes() database.MetaTypes {
 // PortalMetadata stores per-conversation data in the portal.
 type PortalMetadata struct {
 	// Encryption keys for XChat messages, keyed by keyVersion
-	ConversationKeys map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
+	ConversationKeys         map[string]*ConversationKeyData `json:"conversation_keys,omitempty"`
+	ConversationKeysNotForUs map[string]string               `json:"conversation_keys_not_for_us,omitempty"`
 
 	// Server token for XChat API
 	ConversationToken string `json:"conversation_token,omitempty"`
@@ -126,9 +127,10 @@ type MessageMetadata struct {
 
 // XChatNoticeMetadata describes a message bridged as a notice, so replies and redeliveries can handle it.
 type XChatNoticeMetadata struct {
-	Type     types.MessageNoticeType  `json:"type"`
-	SenderID string                   `json:"sender_id,omitempty"`
-	CallCard *payload.ReplyAVCallCard `json:"call_card,omitempty"`
+	Type       types.MessageNoticeType  `json:"type"`
+	SenderID   string                   `json:"sender_id,omitempty"`
+	KeyVersion string                   `json:"key_version,omitempty"`
+	CallCard   *payload.ReplyAVCallCard `json:"call_card,omitempty"`
 }
 
 func (m *MessageMetadata) CopyFrom(other any) {

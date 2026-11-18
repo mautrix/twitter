@@ -37,9 +37,10 @@ func convertXChatNotice(portal *bridgev2.Portal, notice *types.MessageNotice) *b
 			Type:    event.EventMessage,
 			Content: content,
 			DBMetadata: &MessageMetadata{Notice: &XChatNoticeMetadata{
-				Type:     notice.Type,
-				SenderID: notice.SenderID,
-				CallCard: notice.CallCard,
+				Type:       notice.Type,
+				SenderID:   notice.SenderID,
+				KeyVersion: notice.KeyVersion,
+				CallCard:   notice.CallCard,
 			}},
 		}},
 	}
@@ -102,6 +103,53 @@ func (evt *undecryptableNoticeEvent) PostHandle(ctx context.Context, portal *bri
 	if err = portal.Save(ctx); err != nil {
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to save undecryptable notice key version")
 	}
+}
+
+func dedupeUndecryptableNotices(ctx context.Context, portal *bridgev2.Portal, resp *bridgev2.FetchMessagesResponse) {
+	if resp == nil {
+		return
+	}
+	meta := portal.Metadata.(*PortalMetadata)
+	var keyVersions []string
+	resp.Messages = slices.DeleteFunc(resp.Messages, func(msg *bridgev2.BackfillMessage) bool {
+		keyVersion := undecryptableNoticeKeyVersion(msg)
+		if keyVersion == "" {
+			return false
+		} else if slices.Contains(meta.UndecryptableKeyVersions, keyVersion) || slices.Contains(keyVersions, keyVersion) {
+			return true
+		}
+		keyVersions = append(keyVersions, keyVersion)
+		return false
+	})
+	if len(keyVersions) == 0 {
+		return
+	}
+	resp.CompleteCallback = func() {
+		changed := false
+		for _, msg := range resp.Messages {
+			keyVersion := undecryptableNoticeKeyVersion(msg)
+			if keyVersion != "" && !slices.Contains(meta.UndecryptableKeyVersions, keyVersion) {
+				meta.UndecryptableKeyVersions = append(meta.UndecryptableKeyVersions, keyVersion)
+				changed = true
+			}
+		}
+		if !changed {
+			return
+		} else if err := portal.Save(ctx); err != nil {
+			zerolog.Ctx(ctx).Err(err).Msg("Failed to save undecryptable notice key versions")
+		}
+	}
+}
+
+func undecryptableNoticeKeyVersion(msg *bridgev2.BackfillMessage) string {
+	if msg.ConvertedMessage == nil || len(msg.Parts) == 0 || msg.Parts[0] == nil {
+		return ""
+	}
+	meta, ok := msg.Parts[0].DBMetadata.(*MessageMetadata)
+	if !ok || meta == nil || meta.Notice == nil || meta.Notice.Type != types.MessageNoticeUndecryptable {
+		return ""
+	}
+	return meta.Notice.KeyVersion
 }
 
 func isUndecryptableNotice(existing []*database.Message) bool {

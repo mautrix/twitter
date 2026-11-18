@@ -319,33 +319,9 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		}
 		clientMsgID := evt.RequestID
 
-		if evt.MessageData.Notice == nil {
-			dbCtx := ctx
-			if dbCtx == nil {
-				dbCtx = context.TODO()
-			}
-			existing, err := tc.connector.br.DB.Message.GetAllPartsByID(dbCtx, portalKey.Receiver, MakeMessageID(msgID))
-			if err != nil {
-				log.Err(err).Str("message_id", msgID).Msg("Failed to check for an existing undecryptable notice")
-			} else if isUndecryptableNotice(existing) {
-				log.Debug().Str("message_id", msgID).Msg("Replacing undecryptable notice with the now decryptable message")
-				return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.MessageData]{
-					EventMeta: simplevent.EventMeta{
-						Type:      bridgev2.RemoteEventEdit,
-						PortalKey: portalKey,
-						Sender:    tc.MakeEventSender(evt.MessageData.SenderID),
-						Timestamp: methods.ParseMsecTimestamp(evt.Time),
-					},
-					TargetMessage:   MakeMessageID(msgID),
-					Data:            &evt.MessageData,
-					ConvertEditFunc: tc.convertNowDecryptableMessage,
-				})
-			}
-		}
-
 		msgEvt := &simplevent.Message[*types.MessageData]{
 			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventMessage,
+				Type: bridgev2.RemoteEventMessageUpsert,
 				LogContext: func(c zerolog.Context) zerolog.Context {
 					return c.
 						Str("message_id", msgID).
@@ -389,6 +365,20 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			},
 			ConvertEditFunc: tc.convertEditToMatrix,
 			HandleExistingFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (bridgev2.UpsertResult, error) {
+				if data.Notice == nil && isUndecryptableNotice(existing) {
+					zerolog.Ctx(ctx).Debug().Msg("Replacing undecryptable notice with the now decryptable message")
+					return bridgev2.UpsertResult{SubEvents: []bridgev2.RemoteEvent{&simplevent.Message[*types.MessageData]{
+						EventMeta: simplevent.EventMeta{
+							Type:      bridgev2.RemoteEventEdit,
+							PortalKey: portalKey,
+							Sender:    tc.MakeEventSender(data.SenderID),
+							Timestamp: methods.ParseMsecTimestamp(evt.Time),
+						},
+						TargetMessage:   MakeMessageID(msgID),
+						Data:            data,
+						ConvertEditFunc: tc.convertNowDecryptableMessage,
+					}}}, nil
+				}
 				for _, part := range existing {
 					meta, ok := part.Metadata.(*MessageMetadata)
 					if !ok || meta == nil {

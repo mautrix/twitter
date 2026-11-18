@@ -118,6 +118,14 @@ func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.Messag
 	return msg
 }
 
+func ConvertXChatUndecryptableNotice(evt *payload.MessageEvent) *types.Message {
+	return newXChatNoticeMessage(evt, &types.MessageNotice{
+		Type:       types.MessageNoticeUndecryptable,
+		SenderID:   ptr.Val(evt.SenderId),
+		KeyVersion: ptr.Val(evt.Detail.MessageCreateEvent.ConversationKeyVersion),
+	}, "")
+}
+
 func newXChatNoticeMessage(evt *payload.MessageEvent, notice *types.MessageNotice, keyVersion string) *types.Message {
 	seqID := ptr.Val(evt.SequenceId)
 	return &types.Message{

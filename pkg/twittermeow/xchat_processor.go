@@ -52,19 +52,7 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
-
-	keyNotForUsLock sync.Mutex
-	keyNotForUs     map[string]*keyNotForUsState
 }
-
-type keyNotForUsState struct {
-	checkedAt time.Time
-	notified  bool
-}
-
-// keyNotForUsRetryInterval is how long a conversation key version that isn't wrapped for our key pair
-// is skipped before its conversation data is fetched again.
-const keyNotForUsRetryInterval = 6 * time.Hour
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 	return &XChatEventProcessor{
@@ -74,59 +62,14 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		catchupGeneration:          make(map[string]uint64),
 		unresolvedConversationGaps: make(map[string]struct{}),
 		failedEvents:               make(map[string]string),
-		keyNotForUs:                make(map[string]*keyNotForUsState),
-	}
-}
-
-func (p *XChatEventProcessor) isKnownKeyNotForUs(conversationID, keyVersion string) bool {
-	p.keyNotForUsLock.Lock()
-	defer p.keyNotForUsLock.Unlock()
-	state, ok := p.keyNotForUs[conversationID+"|"+keyVersion]
-	return ok && time.Since(state.checkedAt) < keyNotForUsRetryInterval
-}
-
-func (p *XChatEventProcessor) markKeyNotForUs(conversationID, keyVersion string) {
-	p.keyNotForUsLock.Lock()
-	defer p.keyNotForUsLock.Unlock()
-	key := conversationID + "|" + keyVersion
-	if state, ok := p.keyNotForUs[key]; ok {
-		state.checkedAt = time.Now()
-	} else {
-		p.keyNotForUs[key] = &keyNotForUsState{checkedAt: time.Now()}
-	}
-}
-
-func (p *XChatEventProcessor) keyNotForUsNoticeSent(conversationID, keyVersion string) bool {
-	p.keyNotForUsLock.Lock()
-	defer p.keyNotForUsLock.Unlock()
-	state, ok := p.keyNotForUs[conversationID+"|"+keyVersion]
-	return !ok || state.notified
-}
-
-func (p *XChatEventProcessor) markKeyNotForUsNoticeSent(conversationID, keyVersion string) {
-	p.keyNotForUsLock.Lock()
-	defer p.keyNotForUsLock.Unlock()
-	if state, ok := p.keyNotForUs[conversationID+"|"+keyVersion]; ok {
-		state.notified = true
 	}
 }
 
 func (p *XChatEventProcessor) emitKeyNotForUsNotice(ctx context.Context, evt *payload.MessageEvent, isUserMetadata bool) error {
-	conversationID := ptr.Val(evt.ConversationId)
-	keyVersion := ptr.Val(evt.Detail.MessageCreateEvent.ConversationKeyVersion)
-	if isUserMetadata || p.isBeforeSnapshotBoundary(ctx, evt) || p.keyNotForUsNoticeSent(conversationID, keyVersion) {
+	if isUserMetadata || p.isBeforeSnapshotBoundary(ctx, evt) {
 		return nil
 	}
-	notice := &types.MessageNotice{
-		Type:       types.MessageNoticeUndecryptable,
-		SenderID:   ptr.Val(evt.SenderId),
-		KeyVersion: keyVersion,
-	}
-	if err := p.emitEvent(ctx, newXChatNoticeMessage(evt, notice, "")); err != nil {
-		return err
-	}
-	p.markKeyNotForUsNoticeSent(conversationID, keyVersion)
-	return nil
+	return p.emitEvent(ctx, ConvertXChatUndecryptableNotice(evt))
 }
 
 // SetFailedEventPersistence restores durable failures before the first connection.
@@ -698,14 +641,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		if err == nil && (convKey == nil || len(convKey.Key) == 0) {
 			err = crypto.ErrKeyNotFound
 		}
-		if errors.Is(err, crypto.ErrKeyNotFound) && p.isKnownKeyNotForUs(conversationID, keyVersion) {
-			p.log.Debug().
-				Str("sequence_id", ptr.Val(evt.SequenceId)).
-				Str("conversation_id", conversationID).
-				Str("key_version", keyVersion).
-				Msg("Skipping message with conversation key that isn't encrypted for our key pair")
-			return p.emitKeyNotForUsNotice(ctx, evt, isUserMetadata)
-		} else if errors.Is(err, crypto.ErrKeyNotFound) {
+		if errors.Is(err, crypto.ErrKeyNotFound) {
 			// Try to fetch missing keys
 			refreshErr := p.client.RefreshConversationKeys(ctx, conversationID)
 			if refreshErr != nil {
@@ -719,19 +655,17 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			if err == nil && (convKey == nil || len(convKey.Key) == 0) {
 				err = crypto.ErrKeyNotFound
 			}
-			if err != nil && isKeyNotForUs(refreshErr, keyVersion) {
-				p.log.Warn().
-					Err(refreshErr).
-					Str("sequence_id", ptr.Val(evt.SequenceId)).
-					Str("conversation_id", conversationID).
-					Str("key_version", keyVersion).
-					Msg("Conversation key for message is not encrypted for our key pair, skipping message")
-				p.markKeyNotForUs(conversationID, keyVersion)
-				return p.emitKeyNotForUsNotice(ctx, evt, isUserMetadata)
-			}
 			if err != nil && refreshErr != nil {
 				err = errors.Join(err, refreshErr)
 			}
+		}
+		if errors.Is(err, crypto.ErrKeyNotForUs) {
+			p.log.Debug().
+				Str("sequence_id", ptr.Val(evt.SequenceId)).
+				Str("conversation_id", conversationID).
+				Str("key_version", keyVersion).
+				Msg("Conversation key for message is not encrypted for our key pair, skipping message")
+			return p.emitKeyNotForUsNotice(ctx, evt, isUserMetadata)
 		}
 		if err != nil {
 			p.log.Warn().
@@ -1001,7 +935,7 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 			Str("conversation_id", conversationID).
 			Str("key_version", newKeyVersion).
 			Msg("Conversation key in key change event is not encrypted for our key pair")
-		return nil
+		return p.client.keyManager.PutConversationKeyNotForUs(ctx, conversationID, newKeyVersion)
 	} else if err != nil {
 		p.log.Err(err).
 			Str("conversation_id", conversationID).
