@@ -130,6 +130,9 @@ func (tc *TwitterClient) handleXChatPinnedConversations(ctx context.Context, evt
 }
 
 func (tc *TwitterClient) handleXChatArchiveChange(ctx context.Context, evt *types.XChatConversationArchiveChange) bool {
+	if tc.connector.Config.ArchiveTag == "" {
+		return true
+	}
 	var tag event.RoomTag
 	if evt.Archived {
 		tag = tc.connector.Config.ArchiveTag

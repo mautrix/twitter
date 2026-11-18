@@ -472,7 +472,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		mutedUntil = event.MutedForever
 	}
 	info.UserLocal = &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}
-	if xchatItemArchived(item) && !tc.isConversationPinned(conversationID) {
+	if xchatItemArchived(item) && tc.connector.Config.ArchiveTag != "" && !tc.isConversationPinned(conversationID) {
 		info.UserLocal.Tag = ptr.Ptr(tc.connector.Config.ArchiveTag)
 	}
 	tc.applyPinAtCreation(ctx, conversationID, info)
