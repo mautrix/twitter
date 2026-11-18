@@ -692,6 +692,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
+				Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
 				Msg("Failed to decrypt message contents, skipping")
 			return fmt.Errorf("decrypt XChat message contents: %w", err)
 		}
@@ -771,6 +772,12 @@ func (p *XChatEventProcessor) processGroupChangeEvent(ctx context.Context, evt *
 	case gc.GroupTitleChange != nil:
 		return p.emitEvent(ctx, convertXChatGroupTitleChange(evt, gc.GroupTitleChange))
 	case gc.GroupAvatarChange != nil:
+		if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
+			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+			if after.timestamp.IsZero() || !ts.After(after.timestamp) {
+				return nil
+			}
+		}
 		return p.emitEvent(ctx, convertXChatGroupAvatarChange(evt, gc.GroupAvatarChange))
 	case gc.GroupCreate != nil:
 		p.log.Debug().
