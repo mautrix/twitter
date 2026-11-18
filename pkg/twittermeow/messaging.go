@@ -458,6 +458,7 @@ func buildUnencryptedMessageMutationPayload(
 		SetMessageID(messageID).
 		SetConversationID(opts.ConversationID).
 		SetText(opts.Text).
+		SetTTL(opts.TTL).
 		WithSigningKey(signingKey.SigningKey, signingKey.KeyVersion)
 	for _, att := range opts.Attachments {
 		builder.AddAttachment(att)

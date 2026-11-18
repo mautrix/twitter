@@ -186,6 +186,7 @@ type XChatConversationDetail struct {
 	GroupRemovedUsers                  []XChatUserResult   `json:"group_removed_users,omitempty"`
 	GroupJoinRequestedUsers            []XChatUserResult   `json:"group_join_requested_users,omitempty"`
 	LatestGroupTitleChangeMessageEvent string              `json:"latest_group_title_change_message_event,omitempty"`
+	MessageTTLMsec                     string              `json:"message_ttl_msec,omitempty"`
 }
 
 type XChatGroupMetadata struct {
@@ -196,6 +197,7 @@ type XChatGroupMetadata struct {
 	GroupAvatarURL                string                   `json:"group_avatar_url,omitempty"`
 	GroupInviteDetails            *XChatGroupInviteDetails `json:"group_invite_details,omitempty"`
 	ScreenCaptureDetectionEnabled bool                     `json:"screen_capture_detection_enabled,omitempty"`
+	MessageTTLMsec                string                   `json:"message_ttl_msec,omitempty"`
 }
 
 type XChatGroupInviteDetails struct {
