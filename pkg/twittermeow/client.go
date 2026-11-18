@@ -449,6 +449,16 @@ var nonNumbers = regexp.MustCompile(`\D+`)
 func (c *Client) parseMainPageHTML(ctx context.Context, mainPageResp *http.Response, mainPageHTML string) error {
 	country := methods.ParseCountry(mainPageHTML)
 	if country == "" {
+		c.Logger.Warn().
+			Int("status", mainPageResp.StatusCode).
+			Str("content_type", mainPageResp.Header.Get("Content-Type")).
+			Int("body_length", len(mainPageHTML)).
+			Bool("has_initial_state", strings.Contains(mainPageHTML, "__INITIAL_STATE__")).
+			Bool("has_cloudflare_marker", strings.Contains(mainPageHTML, "cf_chl_opt") || strings.Contains(mainPageHTML, "challenge-platform")).
+			Bool("has_account_access_link", strings.Contains(mainPageHTML, "/account/access")).
+			Bool("has_login_flow_link", strings.Contains(mainPageHTML, "/i/flow/login")).
+			Bool("has_noscript_redirect", strings.Contains(mainPageHTML, "http-equiv=\"refresh\"")).
+			Msg("Main page HTML has no country code")
 		return fmt.Errorf("country code not found (HTTP %d)", mainPageResp.StatusCode)
 	}
 

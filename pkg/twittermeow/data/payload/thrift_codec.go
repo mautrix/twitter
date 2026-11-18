@@ -345,7 +345,9 @@ func readValue(ctx context.Context, proto thrift.TProtocol, v reflect.Value, goT
 		if err != nil {
 			return err
 		}
-		v.SetInt(int64(val))
+		if v.CanInt() {
+			v.SetInt(int64(val))
+		}
 
 	case thrift.I32:
 		val, err := proto.ReadI32(ctx)
