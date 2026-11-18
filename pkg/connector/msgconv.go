@@ -32,6 +32,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/mediaproxy"
 
 	"go.mau.fi/util/ffmpeg"
 
@@ -785,6 +786,14 @@ func (tc *TwitterClient) handleLegacyMedia(
 	}
 	zerolog.Ctx(ctx).Debug().Str("attachment_url", attachmentURL).Msg("Using legacy media download")
 
+	if tc.connector.directMedia {
+		userID := directMediaUserID(portal, tc.userLogin.ID)
+		var err error
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
+		addFileExtension(&content.Body, content.Info.MimeType)
+		return err
+	}
+
 	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
 	if err != nil {
 		return err
@@ -792,13 +801,6 @@ func (tc *TwitterClient) handleLegacyMedia(
 	defer func() {
 		_ = fileResp.Body.Close()
 	}()
-
-	if tc.connector.directMedia {
-		userID := directMediaUserID(portal, tc.userLogin.ID)
-		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
-		addFileExtension(&content.Body, content.Info.MimeType)
-		return err
-	}
 
 	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, func(writer io.Writer) error {
 		n, err := io.Copy(writer, fileResp.Body)
@@ -830,6 +832,12 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	getResp, err := cli.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
+	} else if getResp.StatusCode == http.StatusTooManyRequests || getResp.StatusCode >= 500 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("%w: unexpected HTTP %d", mediaproxy.ErrNetworkError, getResp.StatusCode)
+	} else if getResp.StatusCode >= 400 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("unexpected HTTP %d", getResp.StatusCode)
 	}
 	return getResp, nil
 }
@@ -908,6 +916,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {
+				defer resp.Body.Close()
 				linkPreview.ImageType = "image/jpeg"
 				linkPreview.ImageWidth = event.IntOrString(media.OriginalInfo.Width)
 				linkPreview.ImageHeight = event.IntOrString(media.OriginalInfo.Height)
