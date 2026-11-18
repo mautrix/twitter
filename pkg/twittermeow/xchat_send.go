@@ -189,17 +189,12 @@ func (c *Client) getSelfConversationID() string {
 }
 
 // SendXChatPinConversation pins a conversation via XChat.
-func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversationID string) (*response.SendMessageMutationResponse, error) {
+func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversationID string) error {
 	if targetConversationID == "" {
-		return nil, errors.New("target conversation ID is required")
+		return errors.New("target conversation ID is required")
 	}
 
 	selfConvID := c.getSelfConversationID()
-
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return nil, fmt.Errorf("get self conversation token: %w", err)
-	}
 
 	messageID := uuid.NewString()
 
@@ -208,39 +203,17 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 		SetConversationID(selfConvID).
 		SetPinConversation(targetConversationID)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build pin message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               selfConvID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	return c.sendMessageMutation(ctx, pl)
+	_, err := c.sendBuiltMessage(ctx, builder, selfConvID, messageID)
+	return err
 }
 
 // SendXChatUnpinConversation unpins a conversation via XChat.
-func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversationID string) (*response.SendMessageMutationResponse, error) {
+func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversationID string) error {
 	if targetConversationID == "" {
-		return nil, errors.New("target conversation ID is required")
+		return errors.New("target conversation ID is required")
 	}
 
 	selfConvID := c.getSelfConversationID()
-
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return nil, fmt.Errorf("get self conversation token: %w", err)
-	}
 
 	messageID := uuid.NewString()
 
@@ -249,25 +222,8 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 		SetConversationID(selfConvID).
 		SetUnpinConversation(targetConversationID)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build unpin message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               selfConvID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	return c.sendMessageMutation(ctx, pl)
+	_, err := c.sendBuiltMessage(ctx, builder, selfConvID, messageID)
+	return err
 }
 
 // SendXChatTypingNotification sends a typing indicator via XChat WebSocket.
