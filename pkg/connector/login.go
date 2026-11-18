@@ -966,7 +966,7 @@ func selectRegisteredJuiceboxKey(
 func (t *TwitterLogin) selectRegisteredJuiceboxKey(ctx context.Context, data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool, error) {
 	logger := t.User.Log.With().Str("component", "juicebox").Logger()
 	return selectRegisteredJuiceboxKey(ctx, data, func(ctx context.Context, configJSON string, authTokens map[string]string) error {
-		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, t.loginHTTPTransport, logger)
+		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, t.client.HTTP, logger)
 	})
 }
 
@@ -1071,7 +1071,7 @@ func (t *TwitterLogin) bootstrapJuiceboxPIN(ctx context.Context, pin string) (*K
 		"",
 		bootstrapData.RawSecret,
 		addResp.Data.UserAddPublicKey.TokenMap.MaxGuessCount,
-		t.loginHTTPTransport,
+		t.client.HTTP,
 		juiceboxLogger,
 	)
 	if err != nil {
@@ -1103,7 +1103,7 @@ func (t *TwitterLogin) recoverJuiceboxPIN(
 		Int("auth_tokens_count", len(authTokens)).
 		Msg("Juicebox recovery parameters")
 
-	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", t.loginHTTPTransport, juiceboxLogger)
+	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", t.client.HTTP, juiceboxLogger)
 	if err != nil {
 		if retryStep, handledErr, handled := handleRecoverPasscodeError(err); handled {
 			return nil, "", retryStep, handledErr
