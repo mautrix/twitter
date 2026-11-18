@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,12 +57,18 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 		Str("method", params.Method).
 		Str("function", "MakeRequest").
 		Logger()
+	rateLimitKey := getRateLimitKey(params.URL)
 	var attempts int
 	for {
 		attempts++
+		if err := c.checkRateLimit(rateLimitKey); err != nil {
+			log.Warn().Err(err).Msg("Not sending request to rate limited endpoint")
+			return nil, nil, err
+		}
 		start := time.Now()
 		resp, respDat, err := c.makeRequestDirect(ctx, params)
 		dur := time.Since(start)
+		c.updateRateLimit(rateLimitKey, resp)
 		if err == nil {
 			logLevel := zerolog.DebugLevel
 			if strings.Contains(params.URL, "dm/user_updates.json") {
@@ -105,6 +113,46 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 			Msg("Request failed, retrying")
 		time.Sleep(time.Duration(attempts) * 3 * time.Second)
 	}
+}
+
+func getRateLimitKey(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return parsed.Host + parsed.Path
+}
+
+func (c *Client) checkRateLimit(key string) error {
+	c.rateLimitLock.Lock()
+	defer c.rateLimitLock.Unlock()
+	reset, ok := c.rateLimitResets[key]
+	if !ok {
+		return nil
+	} else if time.Now().After(reset) {
+		delete(c.rateLimitResets, key)
+		return nil
+	}
+	return RateLimitError{Reset: reset}
+}
+
+func (c *Client) updateRateLimit(key string, resp *http.Response) {
+	if resp == nil || resp.Header.Get("x-rate-limit-remaining") != "0" {
+		return
+	}
+	resetUnix, err := strconv.ParseInt(resp.Header.Get("x-rate-limit-reset"), 10, 64)
+	if err != nil {
+		return
+	}
+	reset := time.Unix(resetUnix, 0)
+	if time.Now().After(reset) {
+		return
+	}
+	c.rateLimitLock.Lock()
+	if reset.After(c.rateLimitResets[key]) {
+		c.rateLimitResets[key] = reset
+	}
+	c.rateLimitLock.Unlock()
 }
 
 func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
@@ -152,7 +200,6 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 			respErr.StatusCode = response.StatusCode
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, &respErr)
 		} else if response.StatusCode == http.StatusTooManyRequests && bytes.Contains(responseBody, []byte("1015")) && bytes.Contains(responseBody, []byte("Cloudflare")) {
-			cloudflareCooldownUntil.Store(time.Now().Add(CloudflareCooldown).UnixMilli())
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrCloudflareRateLimited)
 		} else if response.StatusCode == http.StatusTooManyRequests {
 			return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrRatelimitExceeded)

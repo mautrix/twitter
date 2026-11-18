@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -10,17 +9,9 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-
-	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 )
 
-const (
-	defaultXChatGapCatchupMessages = 50
-	xchatGapCatchupRateLimitPause  = 15 * time.Minute
-	xchatGapMaxBatchSize           = 500
-)
-
-var errXChatGapCatchupPaused = errors.New("xchat gap catch-up paused after a rate limit")
+const defaultXChatGapCatchupMessages = 50
 
 type xchatGapCatchupState struct {
 	sync.Mutex
@@ -95,9 +86,6 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 	ctx context.Context,
 	conversationID, previousSequenceID, currentSequenceID string,
 ) error {
-	if time.Now().UnixMilli() < tc.xchatGapCatchupPausedUntil.Load() || time.Now().Before(twittermeow.CloudflareCooldownUntil()) {
-		return errXChatGapCatchupPaused
-	}
 	stateValue, _ := tc.xchatGapCatchupStates.LoadOrStore(conversationID, &xchatGapCatchupState{})
 	state := stateValue.(*xchatGapCatchupState)
 	state.Lock()
@@ -141,11 +129,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 		AnchorMessage: latestMessage,
 		Count:         count,
 	})
-	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
-		tc.xchatGapCatchupPausedUntil.Store(time.Now().Add(xchatGapCatchupRateLimitPause).UnixMilli())
-		log.Warn().Dur("pause", xchatGapCatchupRateLimitPause).Msg("X rate limited conversation catch-up, pausing catch-up requests")
-		return err
-	} else if err != nil {
+	if err != nil {
 		return err
 	}
 	if resp == nil || len(resp.Messages) == 0 {
@@ -180,7 +164,7 @@ func (tc *TwitterClient) catchupXChatConversationGap(
 		return nil
 	}
 	log.Info().Int("message_count", len(resp.Messages)).Msg("Bridging missed XChat conversation messages")
-	err = sendXChatGapBatches(len(resp.Messages), min(count, xchatGapMaxBatchSize), func(start, end int, final bool) error {
+	err = sendXChatGapBatches(len(resp.Messages), count, func(start, end int, final bool) error {
 		var completeCallback func()
 		if final {
 			completeCallback = resp.CompleteCallback

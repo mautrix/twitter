@@ -82,6 +82,9 @@ type Client struct {
 	jetfuelCastleTokenMu sync.Mutex
 	xchatToken           *cachedXChatToken
 	xchatTokenMu         sync.Mutex
+
+	rateLimitResets map[string]time.Time
+	rateLimitLock   sync.Mutex
 }
 
 const (
@@ -97,6 +100,7 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 		},
 		defaultTransport: defaultTransport,
 		Logger:           logger,
+		rateLimitResets:  make(map[string]time.Time),
 	}
 
 	cli.polling = cli.newPollingClient()

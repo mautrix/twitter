@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -37,14 +36,6 @@ var (
 
 var ErrCloudflareRateLimited error = cloudflareRateLimitError{}
 
-const CloudflareCooldown = 15 * time.Minute
-
-var cloudflareCooldownUntil atomic.Int64
-
-func CloudflareCooldownUntil() time.Time {
-	return time.UnixMilli(cloudflareCooldownUntil.Load())
-}
-
 type cloudflareRateLimitError struct{}
 
 func (cloudflareRateLimitError) Error() string {
@@ -52,6 +43,18 @@ func (cloudflareRateLimitError) Error() string {
 }
 
 func (cloudflareRateLimitError) Is(target error) bool {
+	return errors.Is(ErrRatelimitExceeded, target)
+}
+
+type RateLimitError struct {
+	Reset time.Time
+}
+
+func (e RateLimitError) Error() string {
+	return fmt.Sprintf("rate limited until %s", e.Reset.Format(time.RFC3339))
+}
+
+func (e RateLimitError) Is(target error) bool {
 	return errors.Is(ErrRatelimitExceeded, target)
 }
 
