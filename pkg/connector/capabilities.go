@@ -19,6 +19,7 @@ package connector
 import (
 	"context"
 	"maps"
+	"strings"
 	"time"
 
 	"go.mau.fi/util/jsontime"
@@ -44,7 +45,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 10
+	return 1, 11
 }
 
 const MaxTextLength = 10000
@@ -62,7 +63,7 @@ var disappearingCaps = &event.DisappearingTimerCapability{
 }
 
 var groupCaps = &event.RoomFeatures{
-	ID: "fi.mau.twitter.capabilities.2026_11_11",
+	ID: "fi.mau.twitter.capabilities.2026_11_13",
 	//Formatting: map[event.FormattingFeature]event.CapabilitySupportLevel{
 	//	event.FmtUserLink: event.CapLevelFullySupported,
 	//},
@@ -129,8 +130,15 @@ var groupCaps = &event.RoomFeatures{
 
 var dmCaps = ptr.Clone(groupCaps)
 var selfDMCaps *event.RoomFeatures
+var xchatGroupCaps = ptr.Clone(groupCaps)
 
 func init() {
+	xchatGroupCaps.State = event.StateFeatureMap{
+		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
+	}
+	xchatGroupCaps.MemberActions = nil
+	xchatGroupCaps.ID += "+xchat"
+
 	dmCaps.State = event.StateFeatureMap{
 		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
 	}
@@ -143,9 +151,17 @@ func init() {
 	dmCaps.BlockUser = true
 }
 
+func isXChatGroupPortal(portal *bridgev2.Portal) bool {
+	meta, _ := portal.Metadata.(*PortalMetadata)
+	return portal.RoomType != database.RoomTypeDM && (strings.HasPrefix(string(portal.ID), "g") || meta.IsXChatConversation())
+}
+
 func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
 	baseCaps := groupCaps
-	if portal.RoomType == database.RoomTypeDM {
+	meta, _ := portal.Metadata.(*PortalMetadata)
+	if isXChatGroupPortal(portal) {
+		baseCaps = xchatGroupCaps
+	} else if portal.RoomType == database.RoomTypeDM {
 		baseCaps = dmCaps
 		if isSelfConversationID(ParsePortalID(portal.ID), ParseUserLoginID(tc.userLogin.ID)) {
 			baseCaps = selfDMCaps
@@ -154,7 +170,7 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 
 	// Disable editing and delete-for-everyone for conversations without encryption keys.
 	// Delete-for-me remains supported via the legacy REST deletion API.
-	if meta, ok := portal.Metadata.(*PortalMetadata); ok && !meta.CanUseXChat() {
+	if meta != nil && !meta.CanUseXChat() {
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected

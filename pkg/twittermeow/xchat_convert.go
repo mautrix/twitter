@@ -38,12 +38,17 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 			msgData.Attachment = msgData.Attachments[0]
 		}
 		for _, attachment := range msgData.Attachments {
-			if attachment.Card != nil && attachment.Card.BindingValues.CardURL.StringValue != "" &&
-				!strings.Contains(msgData.Text, attachment.Card.BindingValues.CardURL.StringValue) {
+			var linkURL string
+			if attachment.Card != nil {
+				linkURL = attachment.Card.BindingValues.CardURL.StringValue
+			} else if attachment.Tweet != nil {
+				linkURL = attachment.Tweet.ExpandedURL
+			}
+			if linkURL != "" && !strings.Contains(msgData.Text, linkURL) {
 				if msgData.Text != "" {
 					msgData.Text += "\n"
 				}
-				msgData.Text += attachment.Card.BindingValues.CardURL.StringValue
+				msgData.Text += linkURL
 			}
 		}
 		msgData.OriginalAttachments = contents.Attachments

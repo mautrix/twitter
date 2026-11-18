@@ -32,6 +32,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/mediaproxy"
 
 	"go.mau.fi/util/ffmpeg"
 
@@ -410,6 +411,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var attachmentURL string
 	var guessedMime string
 	var msgType event.MessageType
+	var isGif bool
 	extraInfo := map[string]any{}
 	canUseXChat := portal.Metadata.(*PortalMetadata).CanUseXChat()
 	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil {
@@ -427,10 +429,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		msgType = event.MsgImage
 		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
-		isGif := attachment.AnimatedGif != nil
+		isGif = attachment.AnimatedGif != nil
 		if isGif {
 			attachmentInfo = attachment.AnimatedGif
-			extraInfo["fi.mau.gif"] = true
 			extraInfo["fi.mau.loop"] = true
 			extraInfo["fi.mau.autoplay"] = true
 			extraInfo["fi.mau.hide_controls"] = true
@@ -460,6 +461,15 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			var variantURL string
 			if err == nil {
 				variantURL = highestBitRateVariant.URL
+				if isGif {
+					guessedMime = "video/mp4"
+					msgType = event.MsgVideo
+				}
+			} else if isGif && attachmentInfo.MediaHashKey == "" {
+				isGif = false
+				clear(extraInfo)
+				guessedMime = "image/jpeg"
+				msgType = event.MsgImage
 			}
 			zerolog.Ctx(ctx).Debug().
 				Err(err).
@@ -501,6 +511,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	content := event.MessageEventContent{
 		Info: &event.FileInfo{
 			MimeType: guessedMime,
+			MauGIF:   isGif,
 			Width:    attachmentInfo.OriginalInfo.Width,
 			Height:   attachmentInfo.OriginalInfo.Height,
 			Duration: attachmentInfo.VideoInfo.DurationMillis,
@@ -547,9 +558,8 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		content.MSC3245Voice = &event.MSC3245Voice{}
 	}
 	extra := map[string]any{}
-	// Add GIF-related fields at top level for Beeper client compatibility
-	for k, v := range extraInfo {
-		extra[k] = v
+	if len(extraInfo) > 0 {
+		content.Info.Extra = extraInfo
 	}
 	// Store OriginalAttachments for reply previews (needed for Twitter to display image thumbnails)
 	if len(msg.OriginalAttachments) > 0 {
@@ -783,6 +793,14 @@ func (tc *TwitterClient) handleLegacyMedia(
 	}
 	zerolog.Ctx(ctx).Debug().Str("attachment_url", attachmentURL).Msg("Using legacy media download")
 
+	if tc.connector.directMedia {
+		userID := directMediaUserID(portal, tc.userLogin.ID)
+		var err error
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
+		addFileExtension(&content.Body, content.Info.MimeType)
+		return err
+	}
+
 	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
 	if err != nil {
 		return err
@@ -790,13 +808,6 @@ func (tc *TwitterClient) handleLegacyMedia(
 	defer func() {
 		_ = fileResp.Body.Close()
 	}()
-
-	if tc.connector.directMedia {
-		userID := directMediaUserID(portal, tc.userLogin.ID)
-		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
-		addFileExtension(&content.Body, content.Info.MimeType)
-		return err
-	}
 
 	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, func(writer io.Writer) error {
 		n, err := io.Copy(writer, fileResp.Body)
@@ -828,6 +839,12 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	getResp, err := cli.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
+	} else if getResp.StatusCode == http.StatusTooManyRequests || getResp.StatusCode >= 500 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("%w: unexpected HTTP %d", mediaproxy.ErrNetworkError, getResp.StatusCode)
+	} else if getResp.StatusCode >= 400 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("unexpected HTTP %d", getResp.StatusCode)
 	}
 	return getResp, nil
 }
@@ -884,7 +901,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	if tweet.Status.FullText == "" && matchedURL != "" {
 		resolved, err := tc.client.GetTweetPreview(ctx, matchedURL)
 		if err != nil {
-			zerolog.Ctx(ctx).Warn().Msg("Failed to fetch rich preview for XChat post attachment")
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch rich preview for XChat post attachment")
 		} else {
 			tweet = resolved
 		}
@@ -906,6 +923,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {
+				defer resp.Body.Close()
 				linkPreview.ImageType = "image/jpeg"
 				linkPreview.ImageWidth = event.IntOrString(media.OriginalInfo.Width)
 				linkPreview.ImageHeight = event.IntOrString(media.OriginalInfo.Height)
