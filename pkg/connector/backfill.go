@@ -679,6 +679,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 			Str("component", "xchat_backfill_decrypt").
 			Str("conversation_id", conversationID).
 			Str("key_version", keyVersion).
+			Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
 			Logger()
 
 		if isUserMetadata {
