@@ -105,7 +105,7 @@ func SecretstreamDecrypt(ciphertext io.Reader, key []byte, writeTo io.Writer) (i
 		if err != nil {
 			return 0, fmt.Errorf("write decrypted chunk at %d: %w", size, err)
 		}
-		size += n
+		size += len(chunk)
 		if tag == secretstream.TagFinal {
 			break
 		}
