@@ -196,11 +196,6 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 
 	selfConvID := c.getSelfConversationID()
 
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return fmt.Errorf("get self conversation token: %w", err)
-	}
-
 	messageID := uuid.NewString()
 
 	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
@@ -208,25 +203,7 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 		SetConversationID(selfConvID).
 		SetPinConversation(targetConversationID)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return fmt.Errorf("build pin message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               selfConvID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	_, err = c.sendMessageMutation(ctx, pl)
+	_, err := c.sendBuiltMessage(ctx, builder, selfConvID, messageID)
 	return err
 }
 
@@ -238,11 +215,6 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 
 	selfConvID := c.getSelfConversationID()
 
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return fmt.Errorf("get self conversation token: %w", err)
-	}
-
 	messageID := uuid.NewString()
 
 	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
@@ -250,25 +222,7 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 		SetConversationID(selfConvID).
 		SetUnpinConversation(targetConversationID)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return fmt.Errorf("build unpin message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               selfConvID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	_, err = c.sendMessageMutation(ctx, pl)
+	_, err := c.sendBuiltMessage(ctx, builder, selfConvID, messageID)
 	return err
 }
 
@@ -339,7 +293,7 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 	if conversationID == "" {
 		return errors.New("conversation ID is empty")
 	}
-	if item == nil || len(item.LatestConversationKeyChangeEvents) == 0 {
+	if item == nil || len(item.LatestConversationKeyChangeEvents)+len(item.EncodedMessageEvents) == 0 {
 		return nil
 	}
 
@@ -356,24 +310,37 @@ func (c *Client) processKeyChangeEventsFromItem(ctx context.Context, conversatio
 	}
 
 	var eventErrs []error
-	for index, encoded := range item.LatestConversationKeyChangeEvents {
+	keyEventCount := len(item.LatestConversationKeyChangeEvents)
+	encodedEvents := make([]string, 0, keyEventCount+len(item.EncodedMessageEvents))
+	encodedEvents = append(encodedEvents, item.LatestConversationKeyChangeEvents...)
+	encodedEvents = append(encodedEvents, item.EncodedMessageEvents...)
+	for index, encoded := range encodedEvents {
+		fromKeyList := index < keyEventCount
 		data, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
-			eventErrs = append(eventErrs, fmt.Errorf("decode conversation key event %d: %w", index, err))
+			if fromKeyList {
+				eventErrs = append(eventErrs, fmt.Errorf("decode conversation key event %d: %w", index, err))
+			}
 			continue
 		}
 		var evt payload.MessageEvent
 		if err := payload.Decode(data, &evt); err != nil {
-			eventErrs = append(eventErrs, fmt.Errorf("decode conversation key event %d thrift: %w", index, err))
+			if fromKeyList {
+				eventErrs = append(eventErrs, fmt.Errorf("decode conversation key event %d thrift: %w", index, err))
+			}
 			continue
 		}
 		if evt.Detail == nil {
-			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d has no detail", index))
+			if fromKeyList {
+				eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d has no detail", index))
+			}
 			continue
 		}
 		eventConversationID := ptr.Val(evt.ConversationId)
 		if eventConversationID != "" && eventConversationID != conversationID {
-			eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d belongs to a different conversation", index))
+			if fromKeyList {
+				eventErrs = append(eventErrs, fmt.Errorf("conversation key event %d belongs to a different conversation", index))
+			}
 			continue
 		}
 		ckce := evt.Detail.ConversationKeyChangeEvent

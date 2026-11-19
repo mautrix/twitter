@@ -62,6 +62,18 @@ func SignaturePayloadMessageDeleteEvent(messageID, senderID, conversationID stri
 	return strings.Join(append(fields, sequenceIDs...), ",")
 }
 
+// SignaturePayloadGroupChange builds the version 7 signature payload for a GroupChangeEvent,
+// named like "GroupChangeEvent.GroupTitleChange".
+func SignaturePayloadGroupChange(change, messageID, senderID, conversationID string, extras ...string) (string, error) {
+	fields := append([]string{"GroupChangeEvent." + change, messageID, senderID, conversationID}, extras...)
+	for _, field := range fields {
+		if strings.Contains(field, ",") {
+			return "", fmt.Errorf("group change signature field contains a comma")
+		}
+	}
+	return strings.Join(fields, ","), nil
+}
+
 // Sign creates an ECDSA P-256 signature over the given preimage.
 // Returns the raw 64-byte signature (r || s), base64-encoded.
 func Sign(privateKey *ecdsa.PrivateKey, preimage []byte) (string, error) {

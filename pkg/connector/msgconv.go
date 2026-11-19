@@ -17,21 +17,28 @@
 package connector
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exmime"
+	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/mediaproxy"
 
 	"go.mau.fi/util/ffmpeg"
 
@@ -42,13 +49,15 @@ import (
 )
 
 func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData) (*bridgev2.ConvertedEdit, error) {
-	existingPart := existing[0]
-	for _, part := range existing[1:] {
-		if part.PartID < existingPart.PartID {
-			existingPart = part
-		}
+	parts := slices.Clone(existing)
+	slices.SortFunc(parts, func(a, b *database.Message) int {
+		return cmp.Compare(partIndex(a.PartID), partIndex(b.PartID))
+	})
+	targetPart, previous, previousLinkPreviews := tc.findEditTargetPart(ctx, portal, parts)
+	if targetPart == nil {
+		targetPart = parts[0]
 	}
-	meta, ok := existingPart.Metadata.(*MessageMetadata)
+	meta, ok := targetPart.Metadata.(*MessageMetadata)
 	if !ok || meta == nil {
 		meta = &MessageMetadata{}
 	}
@@ -58,25 +67,118 @@ func (tc *TwitterClient) convertEditToMatrix(ctx context.Context, portal *bridge
 	} else if meta.EditCount >= editData.EditCount {
 		return nil, fmt.Errorf("%w: db edit count %d >= remote edit count %d", bridgev2.ErrIgnoringRemoteEvent, meta.EditCount, editData.EditCount)
 	}
-	originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
-	if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
-		return nil, fmt.Errorf("%w: rate limited while fetching original X message for edit: %w", bridgev2.ErrIgnoringRemoteEvent, err)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to fetch original X message for edit: %w", err)
-	}
-	editData = mergeXChatEditData(originalData, &editData)
 	editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
-	converted := tc.convertToMatrix(ctx, portal, intent, &editData)
-	if len(converted.Parts) == 0 || converted.Parts[0].Content == nil {
+	var editedPart *bridgev2.ConvertedMessagePart
+	if previous != nil {
+		editData.Attachments = nil
+		editData.Attachment = nil
+		textConverted := tc.convertToMatrix(ctx, portal, intent, &editData)
+		var textPart *bridgev2.ConvertedMessagePart
+		if len(textConverted.Parts) > 0 {
+			textPart = textConverted.Parts[0]
+		}
+		if previous.Content.MsgType.IsMedia() {
+			editedPart = bridgev2.MergeCaption(textPart, previous)
+			if len(editedPart.Content.BeeperLinkPreviews) == 0 && textPart != nil {
+				editedPart.Content.BeeperLinkPreviews = previousLinkPreviews
+			}
+		} else if textPart != nil {
+			editedPart = textPart
+			if len(editedPart.Content.BeeperLinkPreviews) == 0 {
+				editedPart.Content.BeeperLinkPreviews = previous.Content.BeeperLinkPreviews
+			}
+		}
+	} else {
+		originalData, err := tc.fetchOriginalXChatMessage(ctx, ParsePortalID(portal.ID), editData.ID)
+		if errors.Is(err, twittermeow.ErrRatelimitExceeded) {
+			return nil, fmt.Errorf("%w: rate limited while fetching original X message for edit: %w", bridgev2.ErrIgnoringRemoteEvent, err)
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to fetch original X message for edit: %w", err)
+		}
+		editData = mergeXChatEditData(originalData, &editData)
+		editData.Text = strings.TrimPrefix(editData.Text, "Edited: ")
+		converted := tc.convertToMatrix(ctx, portal, intent, &editData)
+		if len(converted.Parts) > 0 {
+			editedPart = converted.Parts[0]
+		}
+		targetPart = parts[0]
+	}
+	if editedPart == nil || editedPart.Content == nil {
 		return nil, fmt.Errorf("failed to convert edit: no message content")
 	}
-	editPart := converted.Parts[0].ToEditPart(existingPart)
+	editPart := editedPart.ToEditPart(targetPart)
 	updatedMeta := *meta
 	updatedMeta.EditCount = editData.EditCount
 	editPart.Part.Metadata = &updatedMeta
 	return &bridgev2.ConvertedEdit{
 		ModifiedParts: []*bridgev2.ConvertedEditPart{editPart},
 	}, nil
+}
+
+func partIndex(partID networkid.PartID) int {
+	if partID == "" {
+		return 0
+	}
+	idx, err := strconv.Atoi(string(partID))
+	if err != nil {
+		return math.MaxInt
+	}
+	return idx
+}
+
+var editPreservedContentKeys = map[string]struct{}{
+	"body": {}, "format": {}, "formatted_body": {}, "m.mentions": {}, "com.beeper.linkpreviews": {},
+	"msgtype": {}, "url": {}, "file": {}, "info": {}, "filename": {}, "m.relates_to": {}, "m.new_content": {},
+	"org.matrix.msc3245.voice": {}, "org.matrix.msc1767.audio": {},
+}
+
+// findEditTargetPart returns the part that holds the message text and its current content, rebuilt
+// without the old caption, so edits don't need the original from X. It returns nil when the
+// message has to be reconverted from the original (forwards and parts that failed to bridge).
+func (tc *TwitterClient) findEditTargetPart(ctx context.Context, portal *bridgev2.Portal, parts []*database.Message) (*database.Message, *bridgev2.ConvertedMessagePart, []*event.BeeperLinkPreview) {
+	if portal.MXID == "" {
+		return nil, nil, nil
+	}
+	for _, part := range parts {
+		if part.MXID == "" {
+			return nil, nil, nil
+		}
+		evt, err := tc.connector.br.Bot.GetEvent(ctx, portal.MXID, part.MXID)
+		if err != nil {
+			zerolog.Ctx(ctx).Debug().Err(err).Stringer("event_id", part.MXID).Msg("Failed to fetch Matrix event of edit target")
+			return nil, nil, nil
+		}
+		content, ok := evt.Content.Parsed.(*event.MessageEventContent)
+		if !ok || content == nil {
+			return nil, nil, nil
+		}
+		if strings.Contains(content.FormattedBody, "data-mx-forwarded-notice") {
+			return nil, nil, nil
+		}
+		switch {
+		case content.MsgType == event.MsgText || content.MsgType == event.MsgEmote:
+			return part, &bridgev2.ConvertedMessagePart{Type: event.EventMessage, Content: content}, content.BeeperLinkPreviews
+		case content.MsgType.IsMedia():
+			media := ptr.Clone(content)
+			if media.FileName != "" && media.Body != media.FileName {
+				media.Body = media.FileName
+			}
+			media.Format = ""
+			media.FormattedBody = ""
+			media.Mentions = nil
+			media.BeeperLinkPreviews = nil
+			media.RelatesTo = nil
+			media.NewContent = nil
+			extra := map[string]any{}
+			for key, value := range evt.Content.Raw {
+				if _, skip := editPreservedContentKeys[key]; !skip {
+					extra[key] = value
+				}
+			}
+			return part, &bridgev2.ConvertedMessagePart{Type: event.EventMessage, Content: media, Extra: extra}, content.BeeperLinkPreviews
+		}
+	}
+	return nil, nil, nil
 }
 
 func (tc *TwitterClient) convertXChatEditToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *types.MessageData, editID string) (*bridgev2.ConvertedEdit, error) {
@@ -165,8 +267,7 @@ func mergeXChatEditData(original, edit *types.MessageData) types.MessageData {
 	merged := *original
 	merged.ID = edit.ID
 	merged.Time = edit.Time
-	merged.Text = edit.Text
-	merged.Entities = edit.Entities
+	merged.Text, merged.Entities = twittermeow.ComposeForwardedText(original.ForwardedText, original.ForwardedEntities, edit.Text, edit.Entities)
 	merged.EditCount = edit.EditCount
 	if edit.SenderID != "" {
 		merged.SenderID = edit.SenderID
@@ -236,6 +337,10 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
+	if msg.Forwarded && len(parts) > 0 {
+		markForwarded(parts[0])
+	}
+
 	for i, part := range parts {
 		if i == 0 {
 			part.ID = ""
@@ -250,6 +355,21 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	return &bridgev2.ConvertedMessage{
 		ReplyTo: replyTo,
 		Parts:   parts,
+	}
+}
+
+func markForwarded(part *bridgev2.ConvertedMessagePart) {
+	hasCaption := part.Content.FileName != "" && part.Content.FileName != part.Content.Body
+	isMedia := part.Content.MsgType.IsMedia()
+	if isMedia && !hasCaption {
+		part.Content.FileName = part.Content.Body
+		part.Content.Body = "↷ Forwarded"
+		part.Content.Format = event.FormatHTML
+		part.Content.FormattedBody = "<p data-mx-forwarded-notice><em>↷ Forwarded</em></p>"
+	} else if isMedia || part.Content.MsgType.IsText() {
+		part.Content.EnsureHasHTML()
+		part.Content.Body = "↷ Forwarded\n\n" + part.Content.Body
+		part.Content.FormattedBody = "<p data-mx-forwarded-notice><em>↷ Forwarded</em></p>" + part.Content.FormattedBody
 	}
 }
 
@@ -403,13 +523,14 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var attachmentURL string
 	var guessedMime string
 	var msgType event.MessageType
+	var isGif bool
 	extraInfo := map[string]any{}
 	canUseXChat := portal.Metadata.(*PortalMetadata).CanUseXChat()
-	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil {
+	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && attachment.File == nil {
 		if attachment.Media != nil {
 			applyMediaInfo(attachment, attachment.Media)
 		}
-		if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && msg.Entities != nil && len(msg.Entities.Media) > 0 {
+		if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && attachment.File == nil && msg.Entities != nil && len(msg.Entities.Media) > 0 {
 			media := msg.Entities.Media[0]
 			applyMediaInfo(attachment, &media)
 		}
@@ -420,16 +541,19 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		msgType = event.MsgImage
 		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Video != nil || attachment.AnimatedGif != nil {
-		isGif := attachment.AnimatedGif != nil
+		isGif = attachment.AnimatedGif != nil
 		if isGif {
 			attachmentInfo = attachment.AnimatedGif
-			extraInfo["fi.mau.gif"] = true
 			extraInfo["fi.mau.loop"] = true
 			extraInfo["fi.mau.autoplay"] = true
 			extraInfo["fi.mau.hide_controls"] = true
 			extraInfo["fi.mau.no_audio"] = true
 			guessedMime = "image/gif"
 			msgType = event.MsgImage
+		} else if attachment.Video.AudioOnly {
+			attachmentInfo = attachment.Video
+			guessedMime = "audio/mp4"
+			msgType = event.MsgAudio
 		} else {
 			attachmentInfo = attachment.Video
 			guessedMime = "video/mp4"
@@ -453,6 +577,15 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			var variantURL string
 			if err == nil {
 				variantURL = highestBitRateVariant.URL
+				if isGif {
+					guessedMime = "video/mp4"
+					msgType = event.MsgVideo
+				}
+			} else if isGif && attachmentInfo.MediaHashKey == "" {
+				isGif = false
+				clear(extraInfo)
+				guessedMime = "image/jpeg"
+				msgType = event.MsgImage
 			}
 			zerolog.Ctx(ctx).Debug().
 				Err(err).
@@ -463,6 +596,14 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				return nil, nil, fmt.Errorf("no media URL available (variant_err=%v, variant_url=%q, media_url_https=%q, media_url=%q, expanded_url=%q, url=%q)", err, variantURL, attachmentInfo.MediaURLHTTPS, attachmentInfo.MediaURL, attachmentInfo.ExpandedURL, attachmentInfo.URL)
 			}
 		}
+	} else if attachment.File != nil {
+		attachmentInfo = attachment.File
+		guessedMime = mime.TypeByExtension(filepath.Ext(attachmentInfo.Filename))
+		if guessedMime == "" {
+			guessedMime = "application/octet-stream"
+		}
+		msgType = event.MsgFile
+		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Card != nil {
 		var urls []types.URLs
 		if msg.Entities != nil {
@@ -494,12 +635,16 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	content := event.MessageEventContent{
 		Info: &event.FileInfo{
 			MimeType: guessedMime,
+			MauGIF:   isGif,
 			Width:    attachmentInfo.OriginalInfo.Width,
 			Height:   attachmentInfo.OriginalInfo.Height,
 			Duration: attachmentInfo.VideoInfo.DurationMillis,
 		},
 		MsgType: msgType,
 		Body:    attachmentInfo.IDStr,
+	}
+	if msgType == event.MsgFile && attachmentInfo.Filename != "" {
+		content.Body = attachmentInfo.Filename
 	}
 	if content.Body == "" {
 		content.Body = strings.TrimPrefix(string(msgType), "m.")
@@ -540,9 +685,8 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		content.MSC3245Voice = &event.MSC3245Voice{}
 	}
 	extra := map[string]any{}
-	// Add GIF-related fields at top level for Beeper client compatibility
-	for k, v := range extraInfo {
-		extra[k] = v
+	if len(extraInfo) > 0 {
+		content.Info.Extra = extraInfo
 	}
 	// Store OriginalAttachments for reply previews (needed for Twitter to display image thumbnails)
 	if len(msg.OriginalAttachments) > 0 {
@@ -562,6 +706,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 
 // addFileExtension appends a file extension based on MIME type if not already present.
 func addFileExtension(body *string, mimeType string) {
+	if filepath.Ext(*body) != "" {
+		return
+	}
 	ext := exmime.ExtensionFromMimetype(mimeType)
 	if ext != "" && !strings.HasSuffix(*body, ext) {
 		*body += ext
@@ -658,10 +805,14 @@ func (tc *TwitterClient) uploadMediaReader(
 		if audioOnly && ffmpeg.Supported() {
 			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
 			if err == nil {
+				info, err := os.Stat(outFile)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get info of converted file: %w", err)
+				}
 				content.Info.MimeType = "audio/ogg"
 				content.Info.Width = 0
 				content.Info.Height = 0
-				content.Info.Size = 0
+				content.Info.Size = int(info.Size())
 				content.MsgType = event.MsgAudio
 				content.Body += ".ogg"
 				return &bridgev2.FileStreamResult{
@@ -680,7 +831,7 @@ func (tc *TwitterClient) uploadMediaReader(
 				return nil, err
 			}
 			mime := http.DetectContentType(prefix[:n])
-			if mime != "application/octet-stream" {
+			if mime != "application/octet-stream" && ((content.MsgType != event.MsgFile && content.MsgType != event.MsgAudio) || content.Info.MimeType == "" || content.Info.MimeType == "application/octet-stream") {
 				content.Info.MimeType = mime
 			}
 		}
@@ -776,6 +927,14 @@ func (tc *TwitterClient) handleLegacyMedia(
 	}
 	zerolog.Ctx(ctx).Debug().Str("attachment_url", attachmentURL).Msg("Using legacy media download")
 
+	if tc.connector.directMedia {
+		userID := directMediaUserID(portal, tc.userLogin.ID)
+		var err error
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
+		addFileExtension(&content.Body, content.Info.MimeType)
+		return err
+	}
+
 	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
 	if err != nil {
 		return err
@@ -783,13 +942,6 @@ func (tc *TwitterClient) handleLegacyMedia(
 	defer func() {
 		_ = fileResp.Body.Close()
 	}()
-
-	if tc.connector.directMedia {
-		userID := directMediaUserID(portal, tc.userLogin.ID)
-		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
-		addFileExtension(&content.Body, content.Info.MimeType)
-		return err
-	}
 
 	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, func(writer io.Writer) error {
 		n, err := io.Copy(writer, fileResp.Body)
@@ -821,6 +973,12 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	getResp, err := cli.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
+	} else if getResp.StatusCode == http.StatusTooManyRequests || getResp.StatusCode >= 500 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("%w: unexpected HTTP %d", mediaproxy.ErrNetworkError, getResp.StatusCode)
+	} else if getResp.StatusCode >= 400 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("unexpected HTTP %d", getResp.StatusCode)
 	}
 	return getResp, nil
 }
@@ -877,7 +1035,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 	if tweet.Status.FullText == "" && matchedURL != "" {
 		resolved, err := tc.client.GetTweetPreview(ctx, matchedURL)
 		if err != nil {
-			zerolog.Ctx(ctx).Warn().Msg("Failed to fetch rich preview for XChat post attachment")
+			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch rich preview for XChat post attachment")
 		} else {
 			tweet = resolved
 		}
@@ -899,6 +1057,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {
+				defer resp.Body.Close()
 				linkPreview.ImageType = "image/jpeg"
 				linkPreview.ImageWidth = event.IntOrString(media.OriginalInfo.Width)
 				linkPreview.ImageHeight = event.IntOrString(media.OriginalInfo.Height)
