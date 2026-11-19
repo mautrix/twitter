@@ -411,13 +411,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			Msg("Failed to decode XChat send message response")
 		msg.RemovePending(txnID)
 		return nil, bridgev2.WrapErrorInStatus(fmt.Errorf("failed to decode XChat send message response: %w", err)).WithSendNotice(true).WithErrorAsMessage()
-	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
-		msg.RemovePending(txnID)
-		return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
-			WithStatus(event.MessageStatusFail).
-			WithIsCertain(true).
-			WithSendNotice(true).
-			WithErrorAsMessage()
 	} else if evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
 		zerolog.Ctx(ctx).Debug().
 			Str("conversation_id", conversationID).
@@ -479,23 +472,6 @@ func buildReplyingToPreview(
 		preview.Attachments = attachments
 	}
 	return preview
-}
-
-func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
-	switch payload.FailureType(ptr.Val(failure.FailureType)) {
-	case payload.FailureTypeInvalidSenderSignature:
-		return "X rejected this message: invalid sender signature"
-	case payload.FailureTypeContentsTooLarge:
-		return "X rejected this message: contents too large"
-	case payload.FailureTypeRecipientHasNotTrustedConversation:
-		return "X rejected this message: recipient has not trusted this conversation"
-	case payload.FailureTypeInvalidSignatureVersion:
-		return "X rejected this message: invalid signature version"
-	case payload.FailureTypeSignatureVerificationFailed:
-		return "X rejected this message: signature verification failed"
-	default:
-		return fmt.Sprintf("X rejected this message: failure type %d", ptr.Val(failure.FailureType))
-	}
 }
 
 // sendDirectMessageREST sends a message via the REST API for conversations
@@ -948,15 +924,21 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		messageID = uuid.NewString()
 	}
 
-	updatedText := edit.Content.Body
-	if edit.Content.MsgType == event.MsgEmote {
-		updatedText = "/me " + updatedText
+	text := edit.Content.Body
+	if edit.Content.Format == event.FormatHTML {
+		text = tc.matrixParser.Parse(edit.Content.FormattedBody, format.NewContext(ctx))
 	}
+	if edit.Content.MsgType == event.MsgEmote {
+		text = "/me " + text
+	}
+	_, entities := buildURLAttachments(text)
+	entities = append(entities, buildMentionEntities(text)...)
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
 		ConversationID:          conversationID,
 		MessageID:               messageID,
 		TargetMessageSequenceID: targetMessageID,
-		UpdatedText:             updatedText,
+		UpdatedText:             text,
+		Entities:                entities,
 	})
 	if err != nil {
 		return wrapTwitterMatrixError(err)
@@ -1194,6 +1176,13 @@ func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.Matrix
 func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
 	conversationID := ParsePortalID(msg.Portal.ID)
 	if msg.Content.IsMuted() {
+		// X only has indefinite mutes, so timed mutes stay local to Beeper.
+		if msg.Content.GetMuteDuration() >= 0 {
+			if msg.PrevContent != nil && msg.PrevContent.GetMuteDuration() < 0 {
+				return tc.client.UnmuteConversation(ctx, conversationID)
+			}
+			return nil
+		}
 		return tc.client.MuteConversation(ctx, conversationID)
 	}
 	return tc.client.UnmuteConversation(ctx, conversationID)
@@ -1201,11 +1190,15 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 
 func (tc *TwitterClient) isXChatConversationTrusted(ctx context.Context, conversationID string) bool {
 	resp, err := tc.client.GetConversationData(ctx, payload.NewInboxPageConversationDataQueryVariables(conversationID, true))
+	var item response.XChatInboxItem
+	if err == nil {
+		item, err = resp.Item(conversationID)
+	}
 	if err != nil {
 		zerolog.Ctx(ctx).Warn().Err(err).Str("conversation_id", conversationID).Msg("Failed to check X Chat trust after accept returned 279")
 		return false
 	}
-	trusted := xchatInboxItemTrust(&resp.Data.GetInboxPageConversationData.Data)
+	trusted := xchatInboxItemTrust(&item)
 	return trusted != nil && *trusted
 }
 
@@ -1244,7 +1237,19 @@ func wrapTwitterMatrixError(err error) error {
 	}
 	var twitterErrs *twittermeow.TwitterErrors
 	hasTwitterErrs := errors.As(err, &twitterErrs)
+	var sendFailure twittermeow.XChatSendFailure
 	switch {
+	case errors.As(err, &sendFailure):
+		status := event.MessageStatusFail
+		if sendFailure.Retriable() {
+			status = event.MessageStatusRetriable
+		}
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage(sendFailure.Error()).
+			WithStatus(status).
+			WithErrorReason(event.MessageStatusNetworkError).
+			WithIsCertain(true).
+			WithSendNotice(true)
 	case errors.Is(err, twittermeow.ErrRatelimitExceeded), hasTwitterErrs && twitterErrs.StatusCode == http.StatusTooManyRequests:
 		return bridgev2.WrapErrorInStatus(err).
 			WithMessage("rate limited by X").
