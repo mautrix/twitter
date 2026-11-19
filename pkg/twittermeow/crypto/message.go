@@ -350,6 +350,7 @@ type MessageBuilder struct {
 	// Pin/unpin fields
 	pinConversation   *payload.PinConversation
 	unpinConversation *payload.UnpinConversation
+	acceptRequest     bool
 
 	// Crypto fields (per-call overrides)
 	conversationKey     []byte
@@ -432,6 +433,12 @@ func (b *MessageBuilder) SetUnpinConversation(targetConversationID string) *Mess
 	return b
 }
 
+// SetAcceptMessageRequest makes the event an AcceptMessageRequest entry.
+func (b *MessageBuilder) SetAcceptMessageRequest() *MessageBuilder {
+	b.acceptRequest = true
+	return b
+}
+
 // AddAttachment adds a media/url/post attachment.
 func (b *MessageBuilder) AddAttachment(att *payload.MessageAttachment) *MessageBuilder {
 	b.attachments = append(b.attachments, att)
@@ -508,6 +515,8 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 		entryContents.PinConversation = b.pinConversation
 	} else if b.unpinConversation != nil {
 		entryContents.UnpinConversation = b.unpinConversation
+	} else if b.acceptRequest {
+		entryContents.AcceptMessageRequest = &payload.AcceptMessageRequest{}
 	} else {
 		contents := &payload.MessageContents{
 			MessageText:       &b.text,
@@ -552,6 +561,9 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	}
 	if !unencrypted && keyVersion != "" {
 		mce.ConversationKeyVersion = &keyVersion
+	}
+	if b.acceptRequest {
+		mce.AdditionalActionList = []int32{int32(payload.AdditionalActionFetchConvIfMissingCkey)}
 	}
 
 	// Get signing key

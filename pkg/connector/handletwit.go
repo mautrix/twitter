@@ -639,7 +639,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Msg("Failed to get chat info for trusted conversation")
 			return false
 		}
-		applyXChatTrustToChatInfo(chatInfo, true)
+		tc.applyXChatTrustToChatInfo(chatInfo, true)
 
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
@@ -792,7 +792,7 @@ func (tc *TwitterClient) HandlePollingEvent(evt types.TwitterEvent, inbox *respo
 		if chatInfo == nil {
 			return false
 		}
-		applyXChatTrustToChatInfo(chatInfo, true)
+		tc.applyXChatTrustToChatInfo(chatInfo, true)
 
 		return tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{

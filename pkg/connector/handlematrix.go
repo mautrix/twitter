@@ -87,7 +87,7 @@ func selectMessageSendMode(meta *PortalMetadata) messageSendMode {
 }
 
 func (tc *TwitterClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
-	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText {
+	if !msg.IsTyping || msg.Type != bridgev2.TypingTypeText || msg.Portal.MessageRequest {
 		return nil
 	}
 
@@ -774,6 +774,9 @@ func matrixReadReceiptTimes(msg *bridgev2.MatrixReadReceipt) (readUpTo, readAt t
 }
 
 func (tc *TwitterClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
+	if msg.Portal.MessageRequest {
+		return nil
+	}
 	conversationID := ParsePortalID(msg.Portal.ID)
 	readUpTo, readAt := matrixReadReceiptTimes(msg)
 
@@ -1168,21 +1171,31 @@ func (tc *TwitterClient) isXChatConversationTrusted(ctx context.Context, convers
 }
 
 func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, msg *bridgev2.MatrixAcceptMessageRequest) error {
+	var err error
 	conversationID := ParsePortalID(msg.Portal.ID)
-	err := tc.client.AcceptConversation(ctx, ConvertConversationIDToRESTAPI(conversationID))
-	// Already-accepted conversations will throw a 279 error when trying to accept again.
-	if errors.Is(err, twittermeow.ErrConversationDoesntExist) && (!strings.HasPrefix(conversationID, "g") || tc.isXChatConversationTrusted(ctx, conversationID)) {
-		err = nil
+	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
+	if otherUserID := dmOtherUserID(msg.Portal.ID, ParseUserLoginID(tc.userLogin.ID)); otherUserID != "" && meta.IsXChatConversation() {
+		var rebound *payload.MessageEvent
+		rebound, err = tc.client.AcceptMessageRequest(ctx, conversationID, otherUserID)
+		if rebound != nil && rebound.Detail != nil && rebound.Detail.MessageFailureEvent != nil {
+			err = twittermeow.XChatSendFailure{Type: payload.FailureType(ptr.Val(rebound.Detail.MessageFailureEvent.FailureType))}
+		}
+	} else {
+		err = tc.client.AcceptConversation(ctx, ConvertConversationIDToRESTAPI(conversationID))
+		// Already-accepted conversations will throw a 279 error when trying to accept again.
+		if errors.Is(err, twittermeow.ErrConversationDoesntExist) && (!strings.HasPrefix(conversationID, "g") || tc.isXChatConversationTrusted(ctx, conversationID)) {
+			err = nil
+		}
 	}
 	if err == nil && msg != nil && msg.Portal != nil {
 		_, ok := msg.Portal.Metadata.(*PortalMetadata)
 		if ok {
 			chatInfo := &bridgev2.ChatInfo{}
-			applyXChatTrustToChatInfo(chatInfo, true)
+			tc.applyXChatTrustToChatInfo(chatInfo, true)
 			msg.Portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
 		}
 	}
-	return err
+	return withoutNotice(wrapTwitterMatrixError(err))
 }
 
 func (tc *TwitterClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev2.MatrixBlockUser) error {
