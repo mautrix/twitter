@@ -10,6 +10,7 @@ import (
 	"io"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,14 +89,13 @@ func (c *Client) fetchXChatGroupState(ctx context.Context, conversationID string
 			StartCall:          ptr.Ptr(false),
 		},
 	}
-	for _, r := range detail.GroupMembersResults {
-		state.memberIDs = append(state.memberIDs, r.RestID)
-	}
-	for _, r := range detail.GroupAdminsResults {
-		state.adminIDs = append(state.adminIDs, r.RestID)
+	if state.memberIDs, err = xchatUserResultIDs(detail.GroupMembersResults); err != nil {
+		return nil, err
+	} else if state.adminIDs, err = xchatUserResultIDs(detail.GroupAdminsResults); err != nil {
+		return nil, err
 	}
 	if detail.GroupCreatedByUserResults != nil {
-		state.createdBy = detail.GroupCreatedByUserResults.RestID
+		state.createdBy = xchatUserResultID(*detail.GroupCreatedByUserResults)
 	}
 	if settings := meta.AdminSettings; settings != nil {
 		state.adminSettings = &payload.GroupMemberAdminSettings{
@@ -407,4 +407,25 @@ func compareNumericStrings(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+func xchatUserResultID(r response.XChatUserResult) string {
+	if id := strings.TrimSpace(r.RestID); id != "" {
+		return id
+	} else if r.Result != nil {
+		return strings.TrimSpace(r.Result.RestID)
+	}
+	return ""
+}
+
+func xchatUserResultIDs(results []response.XChatUserResult) ([]string, error) {
+	ids := make([]string, 0, len(results))
+	for _, r := range results {
+		id := xchatUserResultID(r)
+		if id == "" {
+			return nil, errors.New("group member list has a user without an ID")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
