@@ -184,6 +184,7 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 					Height: int(ptr.Val(media.Dimensions.Height)),
 				}
 			}
+			info.VideoInfo.DurationMillis = int(ptr.Val(media.DurationMillis))
 
 			mediaType := payload.MediaType(ptr.Val(media.Type))
 			switch mediaType {
@@ -200,6 +201,9 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 				info.Type = "audio"
 				info.AudioOnly = true
 				converted.Video = &info
+			case payload.MediaTypeFile, payload.MediaTypeSvg:
+				info.Type = "file"
+				converted.File = &info
 			default:
 				info.Type = "photo"
 				converted.Photo = &info
