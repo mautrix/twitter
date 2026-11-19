@@ -329,11 +329,12 @@ type Message struct {
 }
 
 type MessageAttachment struct {
-	Media       *MediaAttachment       `thrift:"media,1" json:"media,omitempty"`
-	Post        *PostAttachment        `thrift:"post,2" json:"post,omitempty"`
-	Url         *UrlAttachment         `thrift:"url,3" json:"url,omitempty"`
-	UnifiedCard *UnifiedCardAttachment `thrift:"unified_card,4" json:"unified_card,omitempty"`
-	Money       *MoneyAttachment       `thrift:"money,5" json:"money,omitempty"`
+	Media          *MediaAttachment          `thrift:"media,1" json:"media,omitempty"`
+	Post           *PostAttachment           `thrift:"post,2" json:"post,omitempty"`
+	Url            *UrlAttachment            `thrift:"url,3" json:"url,omitempty"`
+	UnifiedCard    *UnifiedCardAttachment    `thrift:"unified_card,4" json:"unified_card,omitempty"`
+	Money          *MoneyAttachment          `thrift:"money,5" json:"money,omitempty"`
+	PaymentReceipt *PaymentReceiptAttachment `thrift:"payment_receipt,7" json:"payment_receipt,omitempty"`
 }
 
 type MessageContents struct {
@@ -510,6 +511,9 @@ type ParentNode struct {
 }
 
 type PhoneNumberRichTextContent struct {
+}
+
+type PaymentReceiptAttachment struct {
 }
 
 type PinConversation struct {

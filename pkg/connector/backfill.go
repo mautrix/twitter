@@ -682,8 +682,12 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 			Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
 			Logger()
 
+		contentsKey, err := crypto.MessageContentsKey(convKey.Key, evt, mce)
+		if err != nil {
+			return nil, time.Time{}, 0, xchatSkipReasonDecryptFailed
+		}
 		if isUserMetadata {
-			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
+			err = crypto.DecryptUserMetadataBytes(contentsBytes, contentsKey)
 			if errors.Is(err, crypto.ErrDecryptFailed) {
 				return nil, time.Time{}, 0, xchatSkipReasonUndecryptable
 			} else if err != nil {
@@ -692,7 +696,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
 		}
 
-		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
+		decrypted, err := crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, contentsKey, &debugLog)
 		if errors.Is(err, crypto.ErrDecryptFailed) {
 			return nil, time.Time{}, 0, xchatSkipReasonUndecryptable
 		} else if err != nil {

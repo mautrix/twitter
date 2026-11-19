@@ -7,6 +7,7 @@ import (
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -31,7 +32,7 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 
 	// Convert attachments
 	if len(contents.Attachments) > 0 {
-		msgData.Attachments = convertXChatAttachments(contents.Attachments)
+		msgData.Attachments = convertXChatAttachments(evt, contents.Attachments)
 		if len(msgData.Attachments) > 0 {
 			msgData.Attachment = msgData.Attachments[0]
 		}
@@ -155,13 +156,20 @@ func convertXChatEntities(entities []*payload.RichTextEntity) *types.Entities {
 }
 
 // convertXChatAttachments converts XChat MessageAttachments to ordered types.Attachments.
-func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.Attachment {
+func convertXChatAttachments(evt *payload.MessageEvent, attachments []*payload.MessageAttachment) []*types.Attachment {
 	result := make([]*types.Attachment, 0, len(attachments))
+	var mce *payload.MessageCreateEvent
+	if evt.Detail != nil {
+		mce = evt.Detail.MessageCreateEvent
+	}
 
+	position := 0
 	for _, att := range attachments {
-		if att == nil {
+		if att == nil || att.PaymentReceipt != nil {
 			continue
 		}
+		index := position
+		position++
 
 		converted := &types.Attachment{}
 		if att.Media != nil {
@@ -238,6 +246,13 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 					},
 				},
 			}
+		}
+
+		switch {
+		case att.Media != nil:
+			converted.XChatKeyInfo = crypto.NewAttachmentKeyInfo(evt, mce, att.Media.AttachmentId, index)
+		case att.Url != nil:
+			converted.XChatKeyInfo = crypto.NewAttachmentKeyInfo(evt, mce, att.Url.AttachmentId, index)
 		}
 
 		result = append(result, converted)
