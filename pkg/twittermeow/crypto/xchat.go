@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -118,6 +119,45 @@ func UnwrapConversationKey(keyB64, privScalarB64 string) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected conversation key length: %d", len(plaintext))
 	}
 	return plaintext, nil
+}
+
+// WrapConversationKey encrypts a conversation key for a participant's public key (base64 SPKI).
+// It's the inverse of UnwrapConversationKey: ephemeral P-256 public key || AES-GCM ciphertext.
+func WrapConversationKey(conversationKey []byte, publicKeySPKI string) (string, error) {
+	if len(conversationKey) != 32 {
+		return "", fmt.Errorf("conversation key must be 32 bytes, got %d", len(conversationKey))
+	}
+	recipient, err := ParsePublicKeySPKI(publicKeySPKI)
+	if err != nil {
+		return "", err
+	}
+	recipientECDH, err := recipient.ECDH()
+	if err != nil {
+		return "", fmt.Errorf("convert recipient key: %w", err)
+	}
+	ephemeral, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		return "", fmt.Errorf("generate ephemeral key: %w", err)
+	}
+	shared, err := ephemeral.ECDH(recipientECDH)
+	if err != nil {
+		return "", fmt.Errorf("ecdh: %w", err)
+	}
+	ephPub := ephemeral.PublicKey().Bytes()
+	kdfOut, err := kdf2SHA256(shared, ephPub, 32)
+	if err != nil {
+		return "", fmt.Errorf("kdf: %w", err)
+	}
+	block, err := aes.NewCipher(kdfOut[:16])
+	if err != nil {
+		return "", fmt.Errorf("aes init: %w", err)
+	}
+	gcm, err := cipher.NewGCMWithNonceSize(block, 16)
+	if err != nil {
+		return "", fmt.Errorf("gcm init: %w", err)
+	}
+	blob := gcm.Seal(ephPub, kdfOut[16:], conversationKey, nil)
+	return base64.StdEncoding.EncodeToString(blob), nil
 }
 
 func kdf2SHA256(shared, other []byte, length int) ([]byte, error) {

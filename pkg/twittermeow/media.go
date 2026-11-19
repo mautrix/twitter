@@ -221,7 +221,10 @@ func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID
 	if err != nil {
 		return nil, fmt.Errorf("get conversation key: %w", err)
 	}
+	return c.uploadXChatMediaWithKey(ctx, conversationID, messageID, mediaBytes, convKey)
+}
 
+func (c *Client) uploadXChatMediaWithKey(ctx context.Context, conversationID, messageID string, mediaBytes []byte, convKey *crypto.ConversationKey) (*XChatMediaUploadResult, error) {
 	// Encrypt media using secretstream (XChaCha20-Poly1305)
 	encryptedBytes, err := crypto.SecretstreamEncrypt(mediaBytes, convKey.Key)
 	if err != nil {
@@ -311,7 +314,16 @@ func (c *Client) initializeXChatMediaUpload(ctx context.Context, conversationID,
 		Msg("InitializeXChatMediaUpload response")
 
 	var resp response.InitializeXChatMediaUploadResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	if err = json.Unmarshal(respBody, &resp); err != nil {
+		return nil, err
+	} else if len(resp.Errors) > 0 {
+		return nil, resp.Errors[0]
+	} else if result := resp.Data.XChatInitializeMediaUpload; result.UploadError != "" {
+		return nil, fmt.Errorf("upload error: %s", result.UploadError)
+	} else if result.ResumeUploadURL == "" || result.MediaHashKey == "" {
+		return nil, fmt.Errorf("response is missing the upload URL")
+	}
+	return &resp, nil
 }
 
 // uploadMediaBytes uploads media bytes to ton.x.com in 512KB chunks.
@@ -405,7 +417,14 @@ func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, m
 		Msg("FinalizeXChatMediaUpload response")
 
 	var resp response.FinalizeXChatMediaUploadResponse
-	return &resp, json.Unmarshal(respBody, &resp)
+	if err = json.Unmarshal(respBody, &resp); err != nil {
+		return nil, err
+	} else if len(resp.Errors) > 0 {
+		return nil, resp.Errors[0]
+	} else if uploadErr := resp.Data.XChatFinalizeMediaUpload.UploadError; uploadErr != "" {
+		return nil, fmt.Errorf("upload error: %s", uploadErr)
+	}
+	return &resp, nil
 }
 
 // DownloadXChatMedia downloads and decrypts encrypted media from XChat.

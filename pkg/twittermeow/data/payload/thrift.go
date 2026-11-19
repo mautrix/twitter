@@ -107,6 +107,7 @@ type ConversationKeyChangeEvent struct {
 	ConversationKeyVersion      *string                       `thrift:"conversation_key_version,1" json:"conversation_key_version,omitempty"`
 	ConversationParticipantKeys []*ConversationParticipantKey `thrift:"conversation_participant_keys,2" json:"conversation_participant_keys,omitempty"`
 	RatchetTree                 *KeyRotation                  `thrift:"ratchet_tree,3" json:"ratchet_tree,omitempty"`
+	ForKeyRotation              *bool                         `thrift:"for_key_rotation,5" json:"for_key_rotation,omitempty"`
 }
 
 type ConversationMetadataChange struct {
@@ -203,7 +204,8 @@ type GroupChange struct {
 }
 
 type GroupChangeEvent struct {
-	GroupChange *GroupChange `thrift:"group_change,1" json:"group_change,omitempty"`
+	GroupChange    *GroupChange `thrift:"group_change,1" json:"group_change,omitempty"`
+	ForKeyRotation *bool        `thrift:"for_key_rotation,2" json:"for_key_rotation,omitempty"`
 }
 
 type GroupCreate struct {
@@ -241,10 +243,25 @@ type GroupMemberAddChange struct {
 	ConversationKeyVersion  *string  `thrift:"conversation_key_version,6" json:"conversation_key_version,omitempty"`
 	CurrentTtlMsec          *int64   `thrift:"current_ttl_msec,7" json:"current_ttl_msec,omitempty"`
 	CurrentPendingMemberIds []string `thrift:"current_pending_member_ids,8" json:"current_pending_member_ids,omitempty"`
+
+	ScreenCaptureBlockingEnabled *bool                     `thrift:"screen_capture_blocking_enabled,9" json:"screen_capture_blocking_enabled,omitempty"`
+	GroupInviteEnable            *GroupInviteEnable        `thrift:"group_invite_enable,11" json:"group_invite_enable,omitempty"`
+	AdminSettings                *GroupMemberAdminSettings `thrift:"admin_settings,12" json:"admin_settings,omitempty"`
+	GroupCreatedByUserId         *string                   `thrift:"group_created_by_user_id,14" json:"group_created_by_user_id,omitempty"`
+}
+
+type GroupMemberAdminSettings struct {
+	EditGroupInfo      *bool `thrift:"edit_group_info,1" json:"edit_group_info,omitempty"`
+	EditMessageTtl     *bool `thrift:"edit_message_ttl,2" json:"edit_message_ttl,omitempty"`
+	BlockScreenCapture *bool `thrift:"block_screen_capture,3" json:"block_screen_capture,omitempty"`
+	AddMember          *bool `thrift:"add_member,4" json:"add_member,omitempty"`
+	SendMessage        *bool `thrift:"send_message,5" json:"send_message,omitempty"`
+	StartCall          *bool `thrift:"start_call,6" json:"start_call,omitempty"`
 }
 
 type GroupMemberRemoveChange struct {
-	MemberIds []string `thrift:"member_ids,1" json:"member_ids,omitempty"`
+	MemberIds              []string `thrift:"member_ids,1" json:"member_ids,omitempty"`
+	ConversationKeyVersion *string  `thrift:"conversation_key_version,2" json:"conversation_key_version,omitempty"`
 }
 
 type GroupTitleChange struct {

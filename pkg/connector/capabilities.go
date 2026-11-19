@@ -43,7 +43,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 11
+	return 1, 12
 }
 
 const MaxTextLength = 10000
@@ -120,8 +120,11 @@ func init() {
 		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
 		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
 	}
-	xchatGroupCaps.MemberActions = nil
-	xchatGroupCaps.ID += "+xchat.2"
+	xchatGroupCaps.MemberActions = event.MemberFeatureMap{
+		event.MemberActionInvite: event.CapLevelFullySupported,
+		event.MemberActionKick:   event.CapLevelFullySupported,
+	}
+	xchatGroupCaps.ID += "+xchat.3"
 
 	dmCaps.State = nil
 	dmCaps.MemberActions = nil
@@ -158,6 +161,7 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps.Delete = event.CapLevelRejected
 		if baseCaps == xchatGroupCaps {
 			caps.State = nil
+			caps.MemberActions = nil
 		}
 		caps.ID += "+no-edit+no-delete"
 		return caps
