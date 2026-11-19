@@ -923,15 +923,21 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		messageID = uuid.NewString()
 	}
 
-	updatedText := edit.Content.Body
-	if edit.Content.MsgType == event.MsgEmote {
-		updatedText = "/me " + updatedText
+	text := edit.Content.Body
+	if edit.Content.Format == event.FormatHTML {
+		text = tc.matrixParser.Parse(edit.Content.FormattedBody, format.NewContext(ctx))
 	}
+	if edit.Content.MsgType == event.MsgEmote {
+		text = "/me " + text
+	}
+	_, entities := buildURLAttachments(text)
+	entities = append(entities, buildMentionEntities(text)...)
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
 		ConversationID:          conversationID,
 		MessageID:               messageID,
 		TargetMessageSequenceID: targetMessageID,
-		UpdatedText:             updatedText,
+		UpdatedText:             text,
+		Entities:                entities,
 	})
 	if err != nil {
 		return wrapTwitterMatrixError(err)
