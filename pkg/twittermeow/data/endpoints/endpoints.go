@@ -42,6 +42,7 @@ const (
 	GENERATE_XCHAT_TOKEN_MUTATION_URL  = API_BASE_URL + "/graphql/Qh3fZRjPPtPoHYR_2sCZsA/GenerateXChatTokenMutation"
 	SEND_MESSAGE_MUTATION_URL          = API_BASE_URL + "/graphql/LkAIEchf8AGj-WgeLoTVcw/SendMessageMutation"
 	DELETE_MESSAGE_MUTATION_URL        = API_BASE_URL + "/graphql/4gsDQKEmYkOtvsSIpHXdQA/DeleteMessageMutation"
+	EDIT_GROUP_CONVERSATION_URL        = API_BASE_URL + "/graphql/r2vVejQICfaWiPDV_5p44A/EditGroupConversationMutation"
 	MUTE_CONVERSATION_URL              = API_BASE_URL + "/graphql/Dy7geJg7CL5dqhsl6QBteg/MuteConversation"
 	UNMUTE_CONVERSATION_URL            = API_BASE_URL + "/graphql/LnNSeGu4vnbwqXAvh7OlGQ/UnmuteConversation"
 	DELETE_CONVERSATION_MUTATION_URL   = API_BASE_URL + "/graphql/9nsAnKrQvpifR3UmdtIdOg/ConversationDeletion"
@@ -62,6 +63,7 @@ const (
 	INITIALIZE_XCHAT_MEDIA_UPLOAD_URL = API_BASE_URL + "/graphql/g2n9PB_uaRYv_SFvQokEFw/InitializeXChatMediaUpload"
 	FINALIZE_XCHAT_MEDIA_UPLOAD_URL   = API_BASE_URL + "/graphql/UK24H5vBa5MJspBmjZyFVQ/FinalizeXChatMediaUpload"
 	TON_UPLOAD_BASE_URL               = "https://ton.x.com"
+	XCHAT_MEDIA_BASE_URL              = TON_UPLOAD_BASE_URL + "/i/ton/data/xchat_media"
 
 	JOT_CLIENT_EVENT_URL = API_BASE_URL + "/1.1/jot/client_event.json"
 	JOT_CES_P2_URL       = API_BASE_URL + "/1.1/jot/ces/p2"
