@@ -52,6 +52,9 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
+	recentHandledSequences     map[string]struct{}
+	recentHandledSequenceOrder []string
+	liveSequenceBoundary       *string
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
@@ -62,6 +65,7 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		catchupGeneration:          make(map[string]uint64),
 		unresolvedConversationGaps: make(map[string]struct{}),
 		failedEvents:               make(map[string]string),
+		recentHandledSequences:     make(map[string]struct{}),
 	}
 }
 
@@ -84,6 +88,8 @@ func (p *XChatEventProcessor) SetFailedEventPersistence(failed map[string]string
 }
 
 var ErrXChatFailurePersistence = errors.New("failed to persist XChat event failure state")
+
+const recentHandledSequenceLimit = 256
 
 func (p *XChatEventProcessor) FailedEventPersistenceError() error {
 	p.sequenceStateLock.Lock()
@@ -255,8 +261,17 @@ func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousS
 		return true
 	}
 	lastSequenceID := p.lastConversationSequence[conversationID]
-	return previousSequenceID != "" && lastSequenceID != "" &&
-		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) > 0
+	if previousSequenceID == "" || lastSequenceID == "" ||
+		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) <= 0 {
+		return false
+	}
+	if _, handled := p.recentHandledSequences[previousSequenceID]; handled {
+		return false
+	}
+	// The missed event may belong to any conversation, so make the next live
+	// event in every conversation verify its history, like after a reconnect.
+	p.reconnectGeneration++
+	return true
 }
 
 func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
@@ -313,6 +328,33 @@ func (p *XChatEventProcessor) CapHandledSequenceID(limit string) {
 	}
 }
 
+func (p *XChatEventProcessor) SetLiveSequenceBoundary(sequenceID string) {
+	p.sequenceStateLock.Lock()
+	p.liveSequenceBoundary = ptr.Ptr(sequenceID)
+	p.sequenceStateLock.Unlock()
+}
+
+func (p *XChatEventProcessor) hasLiveSequenceGap(sequenceID, previousSequenceID string) bool {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	return p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 &&
+		(previousSequenceID == "" || compareXChatSequenceIDs(previousSequenceID, *p.liveSequenceBoundary) > 0)
+}
+
+func (p *XChatEventProcessor) recordLiveSequence(sequenceID string, failed bool) {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if failed {
+		// A durably tracked failure is a known predecessor, not a published success.
+		if _, pending := p.failedEvents[sequenceID]; !pending || p.persistenceErr != nil {
+			return
+		}
+	}
+	if p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 {
+		*p.liveSequenceBoundary = sequenceID
+	}
+}
+
 func (p *XChatEventProcessor) ConversationRecoveryPending(conversationID string) bool {
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
@@ -337,6 +379,9 @@ func (p *XChatEventProcessor) ResetSequenceState() {
 	p.reconnectGeneration = 0
 	p.maxHandledSequenceID = ""
 	p.checkpointPublicationHolds = 0
+	p.recentHandledSequences = make(map[string]struct{})
+	p.recentHandledSequenceOrder = nil
+	p.liveSequenceBoundary = nil
 	p.sequenceStateLock.Unlock()
 }
 
@@ -372,6 +417,14 @@ func (p *XChatEventProcessor) recordHandledSequence(conversationID, sequenceID s
 	}
 	if sequenceID != "" && compareXChatSequenceIDs(sequenceID, p.maxHandledSequenceID) > 0 {
 		p.maxHandledSequenceID = sequenceID
+	}
+	if _, seen := p.recentHandledSequences[sequenceID]; sequenceID != "" && !seen {
+		p.recentHandledSequences[sequenceID] = struct{}{}
+		p.recentHandledSequenceOrder = append(p.recentHandledSequenceOrder, sequenceID)
+		if len(p.recentHandledSequenceOrder) > recentHandledSequenceLimit {
+			delete(p.recentHandledSequences, p.recentHandledSequenceOrder[0])
+			p.recentHandledSequenceOrder = p.recentHandledSequenceOrder[1:]
+		}
 	}
 	checkpointSequenceID := ""
 	callback := p.sequenceIDCallback
@@ -417,6 +470,12 @@ func normalizeXChatSequenceID(sequenceID string) (string, bool) {
 		return "0", true
 	}
 	return sequenceID, true
+}
+
+type xchatLiveMessageKey struct{}
+
+func (p *XChatEventProcessor) processLiveMessage(ctx context.Context, msg *payload.Message) error {
+	return p.ProcessMessage(context.WithValue(ctx, xchatLiveMessageKey{}, true), msg)
 }
 
 // ProcessMessage handles a decoded payload.Message from the websocket.
@@ -481,6 +540,8 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	sequenceID := ptr.Val(evt.SequenceId)
 	conversationID := ptr.Val(evt.ConversationId)
 	previousSequenceID := ptr.Val(evt.PreviousSequenceId)
+	live, _ := ctx.Value(xchatLiveMessageKey{}).(bool)
+	liveSequenceVerified := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
@@ -490,12 +551,19 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		} else {
 			err = errors.Join(err, p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil))
 		}
+		if liveSequenceVerified && ctx.Err() == nil {
+			p.recordLiveSequence(sequenceID, err != nil)
+		}
 		if err == nil {
 			p.recordHandledSequence(conversationID, sequenceID)
 		} else {
 			p.markConversationGapUnresolved(conversationID)
 		}
 	}()
+	if live && p.hasLiveSequenceGap(sequenceID, previousSequenceID) {
+		return fmt.Errorf("XChat live sequence gap before %s (previous event %q); account-wide inbox catch-up required", sequenceID, previousSequenceID)
+	}
+	liveSequenceVerified = live
 	if allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil {
 		p.log.Info().
 			Str("conversation_id", conversationID).
