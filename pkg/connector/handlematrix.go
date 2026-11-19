@@ -409,13 +409,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			Msg("Failed to decode XChat send message response")
 		msg.RemovePending(txnID)
 		return nil, bridgev2.WrapErrorInStatus(fmt.Errorf("failed to decode XChat send message response: %w", err)).WithSendNotice(true).WithErrorAsMessage()
-	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
-		msg.RemovePending(txnID)
-		return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
-			WithStatus(event.MessageStatusFail).
-			WithIsCertain(true).
-			WithSendNotice(true).
-			WithErrorAsMessage()
 	} else if evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
 		zerolog.Ctx(ctx).Debug().
 			Str("conversation_id", conversationID).
@@ -477,23 +470,6 @@ func buildReplyingToPreview(
 		preview.Attachments = attachments
 	}
 	return preview
-}
-
-func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
-	switch payload.FailureType(ptr.Val(failure.FailureType)) {
-	case payload.FailureTypeInvalidSenderSignature:
-		return "X rejected this message: invalid sender signature"
-	case payload.FailureTypeContentsTooLarge:
-		return "X rejected this message: contents too large"
-	case payload.FailureTypeRecipientHasNotTrustedConversation:
-		return "X rejected this message: recipient has not trusted this conversation"
-	case payload.FailureTypeInvalidSignatureVersion:
-		return "X rejected this message: invalid signature version"
-	case payload.FailureTypeSignatureVerificationFailed:
-		return "X rejected this message: signature verification failed"
-	default:
-		return fmt.Sprintf("X rejected this message: failure type %d", ptr.Val(failure.FailureType))
-	}
 }
 
 // sendDirectMessageREST sends a message via the REST API for conversations
@@ -1184,7 +1160,19 @@ func wrapTwitterMatrixError(err error) error {
 	}
 	var twitterErrs *twittermeow.TwitterErrors
 	hasTwitterErrs := errors.As(err, &twitterErrs)
+	var sendFailure twittermeow.XChatSendFailure
 	switch {
+	case errors.As(err, &sendFailure):
+		status := event.MessageStatusFail
+		if sendFailure.Retriable() {
+			status = event.MessageStatusRetriable
+		}
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage(sendFailure.Error()).
+			WithStatus(status).
+			WithErrorReason(event.MessageStatusNetworkError).
+			WithIsCertain(true).
+			WithSendNotice(true)
 	case errors.Is(err, twittermeow.ErrRatelimitExceeded), hasTwitterErrs && twitterErrs.StatusCode == http.StatusTooManyRequests:
 		return bridgev2.WrapErrorInStatus(err).
 			WithMessage("rate limited by X").
