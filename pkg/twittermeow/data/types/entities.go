@@ -6,6 +6,7 @@ type Attachment struct {
 	Video       *AttachmentInfo  `json:"video,omitempty"`
 	AnimatedGif *AttachmentInfo  `json:"animated_gif,omitempty"`
 	Photo       *AttachmentInfo  `json:"photo,omitempty"`
+	File        *AttachmentInfo  `json:"file,omitempty"`
 	Card        *AttachmentCard  `json:"card,omitempty"`
 	Tweet       *AttachmentTweet `json:"tweet,omitempty"`
 
