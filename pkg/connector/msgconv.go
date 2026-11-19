@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +38,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/mediaproxy"
 
 	"go.mau.fi/util/ffmpeg"
 
@@ -264,8 +267,7 @@ func mergeXChatEditData(original, edit *types.MessageData) types.MessageData {
 	merged := *original
 	merged.ID = edit.ID
 	merged.Time = edit.Time
-	merged.Text = edit.Text
-	merged.Entities = edit.Entities
+	merged.Text, merged.Entities = twittermeow.ComposeForwardedText(original.ForwardedText, original.ForwardedEntities, edit.Text, edit.Entities)
 	merged.EditCount = edit.EditCount
 	if edit.SenderID != "" {
 		merged.SenderID = edit.SenderID
@@ -335,6 +337,10 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
+	if msg.Forwarded && len(parts) > 0 {
+		markForwarded(parts[0])
+	}
+
 	for i, part := range parts {
 		if i == 0 {
 			part.ID = ""
@@ -349,6 +355,21 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 	return &bridgev2.ConvertedMessage{
 		ReplyTo: replyTo,
 		Parts:   parts,
+	}
+}
+
+func markForwarded(part *bridgev2.ConvertedMessagePart) {
+	hasCaption := part.Content.FileName != "" && part.Content.FileName != part.Content.Body
+	isMedia := part.Content.MsgType.IsMedia()
+	if isMedia && !hasCaption {
+		part.Content.FileName = part.Content.Body
+		part.Content.Body = "↷ Forwarded"
+		part.Content.Format = event.FormatHTML
+		part.Content.FormattedBody = "<p data-mx-forwarded-notice><em>↷ Forwarded</em></p>"
+	} else if isMedia || part.Content.MsgType.IsText() {
+		part.Content.EnsureHasHTML()
+		part.Content.Body = "↷ Forwarded\n\n" + part.Content.Body
+		part.Content.FormattedBody = "<p data-mx-forwarded-notice><em>↷ Forwarded</em></p>" + part.Content.FormattedBody
 	}
 }
 
@@ -505,11 +526,11 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 	var isGif bool
 	extraInfo := map[string]any{}
 	canUseXChat := portal.Metadata.(*PortalMetadata).CanUseXChat()
-	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil {
+	if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && attachment.File == nil {
 		if attachment.Media != nil {
 			applyMediaInfo(attachment, attachment.Media)
 		}
-		if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && msg.Entities != nil && len(msg.Entities.Media) > 0 {
+		if attachment.Photo == nil && attachment.Video == nil && attachment.AnimatedGif == nil && attachment.File == nil && msg.Entities != nil && len(msg.Entities.Media) > 0 {
 			media := msg.Entities.Media[0]
 			applyMediaInfo(attachment, &media)
 		}
@@ -529,6 +550,10 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			extraInfo["fi.mau.no_audio"] = true
 			guessedMime = "image/gif"
 			msgType = event.MsgImage
+		} else if attachment.Video.AudioOnly {
+			attachmentInfo = attachment.Video
+			guessedMime = "audio/mp4"
+			msgType = event.MsgAudio
 		} else {
 			attachmentInfo = attachment.Video
 			guessedMime = "video/mp4"
@@ -571,6 +596,14 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 				return nil, nil, fmt.Errorf("no media URL available (variant_err=%v, variant_url=%q, media_url_https=%q, media_url=%q, expanded_url=%q, url=%q)", err, variantURL, attachmentInfo.MediaURLHTTPS, attachmentInfo.MediaURL, attachmentInfo.ExpandedURL, attachmentInfo.URL)
 			}
 		}
+	} else if attachment.File != nil {
+		attachmentInfo = attachment.File
+		guessedMime = mime.TypeByExtension(filepath.Ext(attachmentInfo.Filename))
+		if guessedMime == "" {
+			guessedMime = "application/octet-stream"
+		}
+		msgType = event.MsgFile
+		attachmentURL = resolveLegacyAttachmentURL(attachmentInfo, "")
 	} else if attachment.Card != nil {
 		var urls []types.URLs
 		if msg.Entities != nil {
@@ -609,6 +642,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		},
 		MsgType: msgType,
 		Body:    attachmentInfo.IDStr,
+	}
+	if msgType == event.MsgFile && attachmentInfo.Filename != "" {
+		content.Body = attachmentInfo.Filename
 	}
 	if content.Body == "" {
 		content.Body = strings.TrimPrefix(string(msgType), "m.")
@@ -670,6 +706,9 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 
 // addFileExtension appends a file extension based on MIME type if not already present.
 func addFileExtension(body *string, mimeType string) {
+	if filepath.Ext(*body) != "" {
+		return
+	}
 	ext := exmime.ExtensionFromMimetype(mimeType)
 	if ext != "" && !strings.HasSuffix(*body, ext) {
 		*body += ext
@@ -766,10 +805,14 @@ func (tc *TwitterClient) uploadMediaReader(
 		if audioOnly && ffmpeg.Supported() {
 			outFile, err := ffmpeg.ConvertPath(ctx, file.(*os.File).Name(), ".ogg", []string{}, []string{"-vn", "-c:a", "libopus"}, false)
 			if err == nil {
+				info, err := os.Stat(outFile)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get info of converted file: %w", err)
+				}
 				content.Info.MimeType = "audio/ogg"
 				content.Info.Width = 0
 				content.Info.Height = 0
-				content.Info.Size = 0
+				content.Info.Size = int(info.Size())
 				content.MsgType = event.MsgAudio
 				content.Body += ".ogg"
 				return &bridgev2.FileStreamResult{
@@ -788,7 +831,7 @@ func (tc *TwitterClient) uploadMediaReader(
 				return nil, err
 			}
 			mime := http.DetectContentType(prefix[:n])
-			if mime != "application/octet-stream" {
+			if mime != "application/octet-stream" && ((content.MsgType != event.MsgFile && content.MsgType != event.MsgAudio) || content.Info.MimeType == "" || content.Info.MimeType == "application/octet-stream") {
 				content.Info.MimeType = mime
 			}
 		}
@@ -884,6 +927,14 @@ func (tc *TwitterClient) handleLegacyMedia(
 	}
 	zerolog.Ctx(ctx).Debug().Str("attachment_url", attachmentURL).Msg("Using legacy media download")
 
+	if tc.connector.directMedia {
+		userID := directMediaUserID(portal, tc.userLogin.ID)
+		var err error
+		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
+		addFileExtension(&content.Body, content.Info.MimeType)
+		return err
+	}
+
 	fileResp, err := downloadFile(ctx, tc.client, attachmentURL)
 	if err != nil {
 		return err
@@ -891,13 +942,6 @@ func (tc *TwitterClient) handleLegacyMedia(
 	defer func() {
 		_ = fileResp.Body.Close()
 	}()
-
-	if tc.connector.directMedia {
-		userID := directMediaUserID(portal, tc.userLogin.ID)
-		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, MakeMediaID(userID, attachmentURL))
-		addFileExtension(&content.Body, content.Info.MimeType)
-		return err
-	}
 
 	return tc.uploadMediaReader(ctx, portal, intent, content, fileResp.ContentLength, audioOnly, func(writer io.Writer) error {
 		n, err := io.Copy(writer, fileResp.Body)
@@ -929,6 +973,12 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 	getResp, err := cli.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
+	} else if getResp.StatusCode == http.StatusTooManyRequests || getResp.StatusCode >= 500 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("%w: unexpected HTTP %d", mediaproxy.ErrNetworkError, getResp.StatusCode)
+	} else if getResp.StatusCode >= 400 {
+		_ = getResp.Body.Close()
+		return nil, fmt.Errorf("unexpected HTTP %d", getResp.StatusCode)
 	}
 	return getResp, nil
 }
@@ -1007,6 +1057,7 @@ func (tc *TwitterClient) attachmentTweetToMatrix(ctx context.Context, portal *br
 			if err != nil {
 				zerolog.Ctx(ctx).Err(err).Msg("failed to download tweet image")
 			} else {
+				defer resp.Body.Close()
 				linkPreview.ImageType = "image/jpeg"
 				linkPreview.ImageWidth = event.IntOrString(media.OriginalInfo.Width)
 				linkPreview.ImageHeight = event.IntOrString(media.OriginalInfo.Height)
