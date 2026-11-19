@@ -718,7 +718,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
-	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
+	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0 || HasForwardedText(contents.Message.ForwardedMessage)) {
 		if p.isBeforeSnapshotBoundary(ctx, evt) {
 			return nil
 		}
