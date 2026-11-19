@@ -657,14 +657,6 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 					Msg("Conversation key for message is not encrypted for our key pair, skipping message")
 				return nil
 			}
-			if errors.Is(err, crypto.ErrKeyNotFound) && refreshErr == nil && p.hasNewerConversationKey(ctx, conversationID, keyVersion) {
-				p.log.Warn().
-					Str("sequence_id", ptr.Val(evt.SequenceId)).
-					Str("conversation_id", conversationID).
-					Str("key_version", keyVersion).
-					Msg("Conversation key for message is superseded and X no longer returns it, skipping message")
-				return nil
-			}
 			if err != nil && refreshErr != nil {
 				err = errors.Join(err, refreshErr)
 			}
@@ -702,9 +694,6 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Int("contents_len", len(contentsBytes)).
 				Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
 				Msg("Failed to decrypt message contents, skipping")
-			if errors.Is(err, crypto.ErrDecryptFailed) {
-				return nil
-			}
 			return fmt.Errorf("decrypt XChat message contents: %w", err)
 		}
 	} else {
@@ -756,11 +745,6 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
 
 	return p.emitConversationCreate(ctx, evt)
-}
-
-func (p *XChatEventProcessor) hasNewerConversationKey(ctx context.Context, conversationID, keyVersion string) bool {
-	latest, err := p.client.keyManager.GetLatestConversationKey(ctx, conversationID)
-	return err == nil && latest != nil && methods.CompareSnowflake(latest.KeyVersion, keyVersion) > 0
 }
 
 func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *payload.MessageEvent) error {
