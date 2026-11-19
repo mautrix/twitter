@@ -700,6 +700,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
+				Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
 				Msg("Failed to decrypt message contents, skipping")
 			if errors.Is(err, crypto.ErrDecryptFailed) {
 				return nil
