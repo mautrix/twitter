@@ -50,6 +50,7 @@ import (
 var (
 	_ bridgev2.ReactionHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI     = (*TwitterClient)(nil)
+	_ bridgev2.MarkedUnreadHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI            = (*TwitterClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI          = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI             = (*TwitterClient)(nil)
@@ -1052,6 +1053,14 @@ func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.Matrix
 		return tc.client.SendXChatPinConversation(ctx, conversationID)
 	}
 	return tc.client.SendXChatUnpinConversation(ctx, conversationID)
+}
+
+func (tc *TwitterClient) HandleMarkedUnread(ctx context.Context, msg *bridgev2.MatrixMarkedUnread) error {
+	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
+	if !msg.Content.Unread || !meta.CanUseXChat() {
+		return nil
+	}
+	return tc.client.SendXChatMarkConversationUnread(ctx, NormalizeConversationID(ParsePortalID(msg.Portal.ID)))
 }
 
 func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {

@@ -99,6 +99,11 @@ func SignMarkConversationReadEvent(privateKey *ecdsa.PrivateKey, messageID, send
 	return Sign(privateKey, preimage)
 }
 
+// SignMarkConversationUnreadEvent creates a signature for an empty MarkConversationUnreadEvent.
+func SignMarkConversationUnreadEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID string) (string, error) {
+	return Sign(privateKey, []byte(fmt.Sprintf("MarkConversationUnreadEvent,%s,%s,%s", messageID, senderID, conversationID)))
+}
+
 // SignMessageDeleteEvent creates a signature for a MessageDeleteEvent.
 func SignMessageDeleteEvent(privateKey *ecdsa.PrivateKey, messageID, senderID, conversationID string, action payload.DeleteMessageAction, sequenceIDs []string) (string, error) {
 	preimage := SignaturePreimageMessageDeleteEvent(messageID, senderID, conversationID, action, sequenceIDs)

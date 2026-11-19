@@ -29,6 +29,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
@@ -466,6 +467,15 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		info.Type = ptr.Ptr(database.RoomTypeDM)
 		tc.applySelfDMNameAndAvatar(ctx, conversationID, info, users, nil)
 	}
+	mutedUntil := bridgev2.Unmuted
+	if detail.IsMuted {
+		mutedUntil = event.MutedForever
+	}
+	info.UserLocal = &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}
+	if xchatItemArchived(item) && tc.connector.Config.ArchiveTag != "" && !tc.isConversationPinned(conversationID) {
+		info.UserLocal.Tag = ptr.Ptr(tc.connector.Config.ArchiveTag)
+	}
+	tc.applyPinAtCreation(ctx, conversationID, info)
 
 	return info
 }

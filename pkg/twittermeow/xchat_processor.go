@@ -560,6 +560,33 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		return p.processMessageFailure(ctx, evt, detail.MessageFailureEvent)
 
 	case detail.ConversationMetadataChangeEvent != nil:
+		change := detail.ConversationMetadataChangeEvent.ConversationMetadataChange
+		ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+		switch {
+		case change == nil:
+		case change.MuteConversation != nil:
+			return p.emitEvent(ctx, &types.XChatConversationMuteChange{
+				ConversationIDs: change.MuteConversation.MutedConversationIds,
+				Muted:           true,
+				Timestamp:       ts,
+			})
+		case change.UnmuteConversation != nil:
+			return p.emitEvent(ctx, &types.XChatConversationMuteChange{
+				ConversationIDs: change.UnmuteConversation.UnmutedConversationIds,
+				Timestamp:       ts,
+			})
+		case change.ArchiveConversation != nil:
+			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
+				ConversationIDs: conversationIDsOrSelf(change.ArchiveConversation.ConversationIds, evt),
+				Archived:        true,
+				Timestamp:       ts,
+			})
+		case change.UnarchiveConversation != nil:
+			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
+				ConversationIDs: conversationIDsOrSelf(change.UnarchiveConversation.ConversationIds, evt),
+				Timestamp:       ts,
+			})
+		}
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Msg("Ignoring ConversationMetadataChangeEvent")
@@ -678,11 +705,17 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			Str("key_version", keyVersion).
 			Logger()
 		if isUserMetadata {
-			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
+			meta, err := crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
 			if err != nil {
 				return fmt.Errorf("decrypt XChat user metadata: %w", err)
+			} else if !mce.HasPinnedConversationsSideEffect() {
+				return nil
 			}
-			return nil
+			return p.emitEvent(ctx, &types.XChatPinnedConversations{
+				SequenceID:      ptr.Val(evt.SequenceId),
+				ConversationIDs: meta.PinnedConversationIds,
+				Timestamp:       methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec)),
+			})
 		}
 
 		contents, err = crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
@@ -737,6 +770,14 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
 	}
 
+	if contents.PinConversation != nil || contents.UnpinConversation != nil || contents.MarkConversationUnread != nil {
+		p.log.Debug().
+			Str("sequence_id", ptr.Val(evt.SequenceId)).
+			Str("conversation_id", conversationID).
+			Msg("Ignoring pin or mark unread entry")
+		return nil
+	}
+
 	// Empty MessageCreateEvent - this often happens when a message request is accepted.
 	// Emit a ConversationCreate event so the connector can create the room and backfill.
 	p.log.Debug().
@@ -745,6 +786,15 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
 
 	return p.emitConversationCreate(ctx, evt)
+}
+
+func conversationIDsOrSelf(ids []string, evt *payload.MessageEvent) []string {
+	if len(ids) > 0 {
+		return ids
+	} else if conversationID := ptr.Val(evt.ConversationId); conversationID != "" {
+		return []string{conversationID}
+	}
+	return nil
 }
 
 func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *payload.MessageEvent) error {
