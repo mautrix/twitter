@@ -569,7 +569,7 @@ func isProbablyEncryptedGroupName(encName string) bool {
 }
 
 // syncUntrustedChannels fetches and syncs message requests and legacy groups via the REST API.
-func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
+func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context, includeTrustedDMs bool) error {
 	log := zerolog.Ctx(ctx)
 
 	reqQuery := ptr.Ptr(payload.DMRequestQuery{}.Default())
@@ -608,6 +608,8 @@ func (tc *TwitterClient) syncUntrustedChannels(ctx context.Context) error {
 			if isTrustedRESTGroup(conv) {
 				legacyGroupCount++
 				tc.syncTrustedRESTGroup(ctx, conv, inbox)
+			} else if includeTrustedDMs {
+				tc.resyncTrustedRESTDM(ctx, conv, inbox)
 			}
 			continue
 		}
@@ -664,6 +666,31 @@ func (tc *TwitterClient) syncTrustedRESTGroup(ctx context.Context, conv *types.C
 	})
 	if !result.Success {
 		zerolog.Ctx(ctx).Warn().Err(result.Error).Msg("Failed to queue trusted REST group resync")
+	}
+}
+
+func (tc *TwitterClient) resyncTrustedRESTDM(ctx context.Context, conv *types.Conversation, inbox *response.TwitterInboxData) {
+	portalKey, portal, err := tc.resolvePollingPortal(ctx, conv.ConversationID)
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to resolve trusted REST DM portal")
+		return
+	} else if isXChatPortalForLogin(portal, tc.userLogin.ID) {
+		return
+	}
+	latestMessageTS := methods.ParseMsecTimestamp(conv.SortTimestamp)
+	if latestMessageTS.IsZero() {
+		latestMessageTS = methods.ParseSnowflake(conv.SortEventID)
+	}
+	result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
+		EventMeta: simplevent.EventMeta{
+			Type: bridgev2.RemoteEventChatResync, PortalKey: portalKey,
+			CreatePortal: true, Timestamp: latestMessageTS,
+		},
+		ChatInfo: tc.conversationToChatInfo(ctx, conv, inbox), LatestMessageTS: latestMessageTS,
+		BundledBackfillData: conv,
+	})
+	if !result.Success {
+		zerolog.Ctx(ctx).Warn().Err(result.Error).Msg("Failed to queue trusted REST DM resync")
 	}
 }
 

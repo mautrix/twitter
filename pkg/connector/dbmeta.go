@@ -90,6 +90,7 @@ type UserLoginMetadata struct {
 	// Migration tracking fields
 	MigratedAt           *time.Time `json:"migrated_at,omitempty"`            // When encryption keys were first obtained via migration
 	PendingEncryptedSync bool       `json:"pending_encrypted_sync,omitempty"` // True if encrypted rooms need full backfill after migration
+	MigrationReauthSince *time.Time `json:"migration_reauth_since,omitempty"`
 }
 
 type XChatInboxCursorData struct {

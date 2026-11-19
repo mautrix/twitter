@@ -22,6 +22,7 @@ func init() {
 	status.BridgeStateHumanErrors.Update(status.BridgeStateErrorMap{
 		"twitter-not-logged-in":       "You're not logged into X. Please log in again.",
 		"twitter-migration-reauth":    "X Chat needs a passcode update. Please log in and enter your passcode.",
+		"twitter-migration-expired":   "You were logged out of X because the X Chat passcode wasn't entered for 30 days. Log in again to keep using X.",
 		"twitter-invalid-credentials": "Your X session has expired. Please log in again.",
 		"twitter-account-restricted":  "Your X account is suspended or locked. Check the X app for details.",
 		"twitter-load-error":          "Couldn't connect to X.",
