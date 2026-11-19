@@ -52,6 +52,8 @@ type PortalMetadata struct {
 	// Server token for XChat API
 	ConversationToken string `json:"conversation_token,omitempty"`
 	XChatTrusted      *bool  `json:"xchat_trusted,omitempty"`
+	// Sequence ID of the newest disappearing timer change or message whose timer was applied to the portal
+	DisappearTimerSequenceID string `json:"disappear_timer_sequence_id,omitempty"`
 }
 
 // CanUseXChat returns true if this conversation has encryption keys

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -465,6 +466,13 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 	} else {
 		info.Type = ptr.Ptr(database.RoomTypeDM)
 		tc.applySelfDMNameAndAvatar(ctx, conversationID, info, users, nil)
+	}
+	ttlMsec := detail.MessageTTLMsec
+	if detail.GroupMetadata != nil {
+		ttlMsec = detail.GroupMetadata.MessageTTLMsec
+	}
+	if ttl, err := strconv.ParseInt(ttlMsec, 10, 64); err == nil {
+		info.Disappear = ptr.Ptr(xchatDisappearSetting(time.Duration(ttl) * time.Millisecond))
 	}
 
 	return info
