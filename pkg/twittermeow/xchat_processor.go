@@ -343,9 +343,15 @@ func (p *XChatEventProcessor) hasLiveSequenceGap(sequenceID, previousSequenceID 
 		(previousSequenceID == "" || compareXChatSequenceIDs(previousSequenceID, *p.liveSequenceBoundary) > 0)
 }
 
-func (p *XChatEventProcessor) recordLiveSequence(sequenceID string) {
+func (p *XChatEventProcessor) recordLiveSequence(sequenceID string, failed bool) {
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
+	if failed {
+		// A durably tracked failure is a known predecessor, not a published success.
+		if _, pending := p.failedEvents[sequenceID]; !pending || p.persistenceErr != nil {
+			return
+		}
+	}
 	if p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 {
 		*p.liveSequenceBoundary = sequenceID
 	}
@@ -537,6 +543,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	conversationID := ptr.Val(evt.ConversationId)
 	previousSequenceID := ptr.Val(evt.PreviousSequenceId)
 	live, _ := ctx.Value(xchatLiveMessageKey{}).(bool)
+	liveSequenceVerified := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
@@ -546,10 +553,10 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		} else {
 			err = errors.Join(err, p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil))
 		}
+		if liveSequenceVerified && ctx.Err() == nil {
+			p.recordLiveSequence(sequenceID, err != nil)
+		}
 		if err == nil {
-			if live {
-				p.recordLiveSequence(sequenceID)
-			}
 			p.recordHandledSequence(conversationID, sequenceID)
 		} else {
 			p.markConversationGapUnresolved(conversationID)
@@ -558,6 +565,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	if live && p.hasLiveSequenceGap(sequenceID, previousSequenceID) {
 		return fmt.Errorf("XChat live sequence gap before %s (previous event %q); account-wide inbox catch-up required", sequenceID, previousSequenceID)
 	}
+	liveSequenceVerified = live
 	needsCatchup := allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil
 	var keyMissing bool
 	var refreshed *xchatConversationKeysRefresh
