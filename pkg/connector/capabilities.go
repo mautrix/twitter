@@ -45,7 +45,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 11
+	return 1, 12
 }
 
 func supportedIfFFmpeg() event.CapabilitySupportLevel {
@@ -173,9 +173,12 @@ var selfDMCaps *event.RoomFeatures
 var xchatGroupCaps = ptr.Clone(groupCaps)
 
 func init() {
-	xchatGroupCaps.State = nil
+	xchatGroupCaps.State = event.StateFeatureMap{
+		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
+	}
 	xchatGroupCaps.MemberActions = nil
-	xchatGroupCaps.ID += "+xchat"
+	xchatGroupCaps.ID += "+xchat.2"
 
 	dmCaps.State = nil
 	dmCaps.MemberActions = nil
@@ -210,6 +213,9 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected
+		if baseCaps == xchatGroupCaps {
+			caps.State = nil
+		}
 		caps.File = maps.Clone(baseCaps.File)
 		delete(caps.File, event.MsgFile)
 		delete(caps.File, event.MsgAudio)
