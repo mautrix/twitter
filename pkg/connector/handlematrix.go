@@ -647,6 +647,13 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 
 	// Get message text
 	messageText := content.Body
+	if strings.Contains(content.FormattedBody, "data-mx-forwarded-notice") {
+		if messageText == "↷ Forwarded" {
+			messageText = content.FileName
+		} else {
+			messageText = strings.TrimPrefix(messageText, "↷ Forwarded\n\n")
+		}
+	}
 
 	// Get sender display name
 	var senderDisplayName string
