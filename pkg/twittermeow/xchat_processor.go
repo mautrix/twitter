@@ -54,6 +54,7 @@ type XChatEventProcessor struct {
 	checkpointPublicationHolds int
 	recentHandledSequences     map[string]struct{}
 	recentHandledSequenceOrder []string
+	liveSequenceBoundary       *string
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
@@ -327,6 +328,27 @@ func (p *XChatEventProcessor) CapHandledSequenceID(limit string) {
 	}
 }
 
+func (p *XChatEventProcessor) SetLiveSequenceBoundary(sequenceID string) {
+	p.sequenceStateLock.Lock()
+	p.liveSequenceBoundary = ptr.Ptr(sequenceID)
+	p.sequenceStateLock.Unlock()
+}
+
+func (p *XChatEventProcessor) hasLiveSequenceGap(sequenceID, previousSequenceID string) bool {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	return p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 &&
+		(previousSequenceID == "" || compareXChatSequenceIDs(previousSequenceID, *p.liveSequenceBoundary) > 0)
+}
+
+func (p *XChatEventProcessor) recordLiveSequence(sequenceID string) {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	if p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 {
+		*p.liveSequenceBoundary = sequenceID
+	}
+}
+
 func (p *XChatEventProcessor) ConversationRecoveryPending(conversationID string) bool {
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
@@ -353,6 +375,7 @@ func (p *XChatEventProcessor) ResetSequenceState() {
 	p.checkpointPublicationHolds = 0
 	p.recentHandledSequences = make(map[string]struct{})
 	p.recentHandledSequenceOrder = nil
+	p.liveSequenceBoundary = nil
 	p.sequenceStateLock.Unlock()
 }
 
@@ -443,6 +466,12 @@ func normalizeXChatSequenceID(sequenceID string) (string, bool) {
 	return sequenceID, true
 }
 
+type xchatLiveMessageKey struct{}
+
+func (p *XChatEventProcessor) processLiveMessage(ctx context.Context, msg *payload.Message) error {
+	return p.ProcessMessage(context.WithValue(ctx, xchatLiveMessageKey{}, true), msg)
+}
+
 // ProcessMessage handles a decoded payload.Message from the websocket.
 // It may emit zero or more TwitterEvent objects via the event handler.
 func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.Message) (err error) {
@@ -505,6 +534,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	sequenceID := ptr.Val(evt.SequenceId)
 	conversationID := ptr.Val(evt.ConversationId)
 	previousSequenceID := ptr.Val(evt.PreviousSequenceId)
+	live, _ := ctx.Value(xchatLiveMessageKey{}).(bool)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
@@ -515,11 +545,17 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			err = errors.Join(err, p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil))
 		}
 		if err == nil {
+			if live {
+				p.recordLiveSequence(sequenceID)
+			}
 			p.recordHandledSequence(conversationID, sequenceID)
 		} else {
 			p.markConversationGapUnresolved(conversationID)
 		}
 	}()
+	if live && p.hasLiveSequenceGap(sequenceID, previousSequenceID) {
+		return fmt.Errorf("XChat live sequence gap before %s (previous event %q); account-wide inbox catch-up required", sequenceID, previousSequenceID)
+	}
 	if allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil {
 		p.log.Info().
 			Str("conversation_id", conversationID).
