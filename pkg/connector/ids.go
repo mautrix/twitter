@@ -27,6 +27,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
@@ -145,6 +146,7 @@ type EncryptedMediaInfo struct {
 	ConversationID string
 	MediaHashKey   string
 	KeyVersion     string
+	KeyInfo        *crypto.AttachmentKeyInfo
 }
 
 // MakeMediaID creates a version 1 media ID for legacy (non-encrypted) media.
@@ -189,6 +191,13 @@ func MakeEncryptedMediaID(info EncryptedMediaInfo) networkid.MediaID {
 	keyVersionBytes := []byte(info.KeyVersion)
 	mediaID = binary.AppendUvarint(mediaID, uint64(len(keyVersionBytes)))
 	mediaID = append(mediaID, keyVersionBytes...)
+
+	if info.KeyInfo != nil {
+		for _, field := range []string{info.KeyInfo.SenderID, info.KeyInfo.MessageID, info.KeyInfo.AttachmentID} {
+			mediaID = binary.AppendUvarint(mediaID, uint64(len(field)))
+			mediaID = append(mediaID, field...)
+		}
+	}
 
 	return mediaID
 }
@@ -276,6 +285,26 @@ func parseMediaIDV2(buf *bytes.Reader) (*EncryptedMediaInfo, error) {
 		return nil, err
 	}
 	info.KeyVersion = string(bs)
+
+	if buf.Len() > 0 {
+		fields := make([]string, 3)
+		for i := range fields {
+			size, err = binary.ReadUvarint(buf)
+			if err != nil {
+				return nil, err
+			}
+			bs = make([]byte, size)
+			if _, err := io.ReadFull(buf, bs); err != nil {
+				return nil, err
+			}
+			fields[i] = string(bs)
+		}
+		info.KeyInfo = &crypto.AttachmentKeyInfo{
+			SenderID:     fields[0],
+			MessageID:    fields[1],
+			AttachmentID: fields[2],
+		}
+	}
 
 	return info, nil
 }
