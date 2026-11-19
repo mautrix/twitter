@@ -824,21 +824,29 @@ func (tc *TwitterClient) syncDMBlock(ctx context.Context, portal *bridgev2.Porta
 	}
 }
 
-// xchatGroupPowerLevels lets X admins change power levels and lets everyone edit the group info
-// unless X restricts that to admins. The homeserver defaults (100 for power levels, 50 for name
-// and avatar) would otherwise block actions X allows.
+// xchatGroupPowerLevels mirrors X's group permissions: admins change power levels and remove
+// members, and everyone edits the group info and adds members unless X restricts that to admins.
+// The homeserver defaults (100 for power levels, 50 for name and avatar) would otherwise block
+// actions X allows.
 func xchatGroupPowerLevels(metadata *response.XChatGroupMetadata) *bridgev2.PowerLevelOverrides {
 	overrides := &bridgev2.PowerLevelOverrides{
+		Kick:   ptr.Ptr(xchatAdminPowerLevel),
 		Events: map[event.Type]int{event.StatePowerLevels: xchatAdminPowerLevel},
 	}
-	// Without group metadata the response is partial, so keep the current group info levels.
+	// Without group metadata the response is partial, so keep the current group info and invite levels.
 	if metadata == nil {
 		return overrides
 	}
-	editInfoLevel := xchatMemberPowerLevel
-	if metadata.AdminSettings != nil && metadata.AdminSettings.EditGroupInfo {
-		editInfoLevel = xchatAdminPowerLevel
+	editInfoLevel, inviteLevel := xchatMemberPowerLevel, xchatMemberPowerLevel
+	if metadata.AdminSettings != nil {
+		if metadata.AdminSettings.EditGroupInfo {
+			editInfoLevel = xchatAdminPowerLevel
+		}
+		if metadata.AdminSettings.AddMember {
+			inviteLevel = xchatAdminPowerLevel
+		}
 	}
+	overrides.Invite = &inviteLevel
 	overrides.Events[event.StateRoomName] = editInfoLevel
 	overrides.Events[event.StateRoomAvatar] = editInfoLevel
 	overrides.Events[event.StateTopic] = editInfoLevel
