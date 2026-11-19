@@ -210,7 +210,7 @@ func (sc *StreamClient) heartbeat(ctx context.Context) {
 		return
 	}
 
-	_, _, err = sc.client.makeAPIRequest(ctx, apiRequestOpts{
+	resp, _, err := sc.client.makeAPIRequest(ctx, apiRequestOpts{
 		URL:         endpoints.PIPELINE_UPDATE_URL,
 		Method:      http.MethodPost,
 		ContentType: types.ContentTypeForm,
@@ -219,8 +219,7 @@ func (sc *StreamClient) heartbeat(ctx context.Context) {
 			"livepipeline-session": sc.sessionID,
 		},
 	})
-	if err != nil {
-		zerolog.Ctx(ctx).Err(err)
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return
 	}
 	sc.conversationMu.Lock()
