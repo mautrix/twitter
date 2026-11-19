@@ -18,10 +18,12 @@ package connector
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.mau.fi/util/exgjson"
 	"go.mau.fi/util/exstrings"
+	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
@@ -203,9 +206,18 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	switch content.MsgType {
 	case event.MsgText, event.MsgEmote:
 		// nothing extra
-	case event.MsgVideo, event.MsgImage, event.MsgAudio:
-		if content.FileName != "" && (content.Body == content.FileName || content.Body == "") {
+	case event.MsgVideo, event.MsgImage, event.MsgAudio, event.MsgFile, event.CapMsgSticker:
+		if content.FileName == "" || content.Body == content.FileName {
 			opts.Text = ""
+		}
+		if content.Info == nil {
+			content.Info = &event.FileInfo{}
+		}
+		if content.MsgType == event.CapMsgSticker || content.MSC3245Voice != nil {
+			opts.Text = ""
+		}
+		if (content.MsgType == event.MsgFile || content.MsgType == event.CapMsgSticker) && sendMode != messageSendXChatEncrypted {
+			return nil, fmt.Errorf("%w %s", bridgev2.ErrUnsupportedMessageType, content.MsgType)
 		}
 
 		if sendMode != messageSendREST {
@@ -215,22 +227,40 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			}
 
 			mimeType := content.Info.MimeType
-			// Convert audio to mp4 if needed
-			if content.MsgType == event.MsgAudio && mimeType != "video/mp4" {
-				converted, err := tc.client.ConvertAudioPayload(ctx, data, mimeType)
-				if err != nil {
-					return nil, err
+			var attType payload.MediaType
+			if sendMode == messageSendXChatEncrypted {
+				attType = xchatMediaType(content)
+				if attType == payload.MediaTypeGif && mimeType != "image/gif" {
+					converted, err := tc.client.ConvertGIFPayload(ctx, data, mimeType)
+					if err != nil || len(converted) > maxXChatGIFSize {
+						zerolog.Ctx(ctx).Warn().Err(err).Int("converted_size", len(converted)).Msg("Sending GIF as a video instead of converting it")
+						attType = payload.MediaTypeVideo
+					} else {
+						data = converted
+						mimeType = "image/gif"
+					}
 				}
-				data = converted
-				mimeType = "video/mp4"
-			}
-
-			attType := payload.MediaTypeImage
-			switch content.MsgType {
-			case event.MsgVideo:
-				attType = payload.MediaTypeVideo
-			case event.MsgAudio:
-				attType = payload.MediaTypeAudio
+				if attType == payload.MediaTypeAudio && mimeType != "audio/mp4" {
+					data, err = tc.client.ConvertVoicePayload(ctx, data, mimeType)
+					if err != nil {
+						return nil, err
+					}
+				}
+			} else {
+				attType = payload.MediaTypeImage
+				switch content.MsgType {
+				case event.MsgVideo:
+					attType = payload.MediaTypeVideo
+				case event.MsgAudio:
+					attType = payload.MediaTypeAudio
+					if mimeType != "video/mp4" {
+						data, err = tc.client.ConvertAudioPayload(ctx, data, mimeType)
+						if err != nil {
+							return nil, err
+						}
+						mimeType = "video/mp4"
+					}
+				}
 			}
 			width := int64(content.Info.Width)
 			height := int64(content.Info.Height)
@@ -238,7 +268,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 
 			if sendMode == messageSendXChatEncrypted {
 				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
-				if err != nil {
+				if errors.Is(err, twittermeow.ErrXChatMediaSizeUnsupported) {
+					return nil, bridgev2.ErrMediaTooLarge
+				} else if err != nil {
 					return nil, wrapTwitterMatrixError(err)
 				}
 
@@ -246,18 +278,32 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 					Str("media_hash_key", uploadResult.MediaHashKey).
 					Msg("Successfully uploaded encrypted media to XChat")
 
-				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{
-					Media: &payload.MediaAttachment{
-						MediaHashKey: &uploadResult.MediaHashKey,
-						Type:         ptr.Ptr(int32(attType)),
-						Dimensions: &payload.MediaDimensions{
-							Width:  &width,
-							Height: &height,
-						},
-						FilesizeBytes: &size,
-						Filename:      ptr.Ptr(content.FileName),
+				filename := content.FileName
+				if filename == "" && attType == payload.MediaTypeFile {
+					filename = content.Body
+				} else if attType == payload.MediaTypeAudio && filename != "" {
+					filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".m4a"
+				} else if attType == payload.MediaTypeGif && mimeType == "image/gif" && filename != "" {
+					filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".gif"
+				}
+				media := &payload.MediaAttachment{
+					MediaHashKey: &uploadResult.MediaHashKey,
+					Type:         ptr.Ptr(int32(attType)),
+					Dimensions: &payload.MediaDimensions{
+						Width:  &width,
+						Height: &height,
 					},
-				})
+					FilesizeBytes: &size,
+					Filename:      ptr.Ptr(filename),
+				}
+				duration := content.Info.Duration
+				if duration <= 0 && content.MSC1767Audio != nil {
+					duration = content.MSC1767Audio.Duration
+				}
+				if duration > 0 && (attType == payload.MediaTypeAudio || attType == payload.MediaTypeVideo || attType == payload.MediaTypeGif) {
+					media.DurationMillis = ptr.Ptr(int64(duration))
+				}
+				opts.Attachments = append(opts.Attachments, &payload.MessageAttachment{Media: media})
 			} else {
 				mediaCategory := payload.MEDIA_CATEGORY_DM_IMAGE
 				switch content.MsgType {
@@ -335,6 +381,9 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 	if err != nil {
 		msg.RemovePending(txnID)
 		if sendMode == messageSendXChatEncrypted && errors.Is(err, crypto.ErrKeyNotFound) {
+			if msg.Content.MsgType == event.MsgFile || msg.Content.MsgType == event.CapMsgSticker {
+				return nil, fmt.Errorf("%w %s without an X Chat conversation token", bridgev2.ErrUnsupportedMessageType, msg.Content.MsgType)
+			}
 			zerolog.Ctx(ctx).Debug().
 				Str("conversation_id", conversationID).
 				Msg("Falling back to REST API for message send (key/token not found)")
@@ -361,13 +410,6 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			Msg("Failed to decode XChat send message response")
 		msg.RemovePending(txnID)
 		return nil, bridgev2.WrapErrorInStatus(fmt.Errorf("failed to decode XChat send message response: %w", err)).WithSendNotice(true).WithErrorAsMessage()
-	} else if evt != nil && evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
-		msg.RemovePending(txnID)
-		return nil, bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(evt.Detail.MessageFailureEvent))).
-			WithStatus(event.MessageStatusFail).
-			WithIsCertain(true).
-			WithSendNotice(true).
-			WithErrorAsMessage()
 	} else if evt != nil && evt.SequenceId != nil && *evt.SequenceId != "" {
 		zerolog.Ctx(ctx).Debug().
 			Str("conversation_id", conversationID).
@@ -383,6 +425,28 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		DB:            dbMsg,
 		RemovePending: txnID,
 	}, nil
+}
+
+func xchatMediaType(content *event.MessageEventContent) payload.MediaType {
+	switch content.MsgType {
+	case event.MsgVideo:
+		if content.Info.MauGIF && ffmpeg.Supported() {
+			return payload.MediaTypeGif
+		}
+		return payload.MediaTypeVideo
+	case event.MsgAudio:
+		if content.MSC3245Voice != nil {
+			return payload.MediaTypeAudio
+		}
+		return payload.MediaTypeFile
+	case event.MsgFile:
+		return payload.MediaTypeFile
+	default:
+		if content.Info.MimeType == "image/gif" {
+			return payload.MediaTypeGif
+		}
+		return payload.MediaTypeImage
+	}
 }
 
 func buildReplyingToPreview(
@@ -407,23 +471,6 @@ func buildReplyingToPreview(
 		preview.Attachments = attachments
 	}
 	return preview
-}
-
-func xchatSendFailureMessage(failure *payload.MessageFailureEvent) string {
-	switch payload.FailureType(ptr.Val(failure.FailureType)) {
-	case payload.FailureTypeInvalidSenderSignature:
-		return "X rejected this message: invalid sender signature"
-	case payload.FailureTypeContentsTooLarge:
-		return "X rejected this message: contents too large"
-	case payload.FailureTypeRecipientHasNotTrustedConversation:
-		return "X rejected this message: recipient has not trusted this conversation"
-	case payload.FailureTypeInvalidSignatureVersion:
-		return "X rejected this message: invalid signature version"
-	case payload.FailureTypeSignatureVerificationFailed:
-		return "X rejected this message: signature verification failed"
-	default:
-		return fmt.Sprintf("X rejected this message: failure type %d", ptr.Val(failure.FailureType))
-	}
 }
 
 // sendDirectMessageREST sends a message via the REST API for conversations
@@ -577,6 +624,13 @@ func (tc *TwitterClient) fetchReplyInfoFromMatrix(ctx context.Context, portal *b
 
 	// Get message text
 	messageText := content.Body
+	if strings.Contains(content.FormattedBody, "data-mx-forwarded-notice") {
+		if messageText == "↷ Forwarded" {
+			messageText = content.FileName
+		} else {
+			messageText = strings.TrimPrefix(messageText, "↷ Forwarded\n\n")
+		}
+	}
 
 	// Get sender display name
 	var senderDisplayName string
@@ -872,15 +926,21 @@ func (tc *TwitterClient) HandleMatrixEdit(ctx context.Context, edit *bridgev2.Ma
 		messageID = uuid.NewString()
 	}
 
-	updatedText := edit.Content.Body
-	if edit.Content.MsgType == event.MsgEmote {
-		updatedText = "/me " + updatedText
+	text := edit.Content.Body
+	if edit.Content.Format == event.FormatHTML {
+		text = tc.matrixParser.Parse(edit.Content.FormattedBody, format.NewContext(ctx))
 	}
+	if edit.Content.MsgType == event.MsgEmote {
+		text = "/me " + text
+	}
+	_, entities := buildURLAttachments(text)
+	entities = append(entities, buildMentionEntities(text)...)
 	resp, err := tc.client.SendEncryptedEdit(ctx, twittermeow.SendEncryptedEditOpts{
 		ConversationID:          conversationID,
 		MessageID:               messageID,
 		TargetMessageSequenceID: targetMessageID,
-		UpdatedText:             updatedText,
+		UpdatedText:             text,
+		Entities:                entities,
 	})
 	if err != nil {
 		return wrapTwitterMatrixError(err)
@@ -970,7 +1030,7 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 	if msg.Portal.RoomType == database.RoomTypeDM {
 		return false, bridgev2.ErrRoomMetadataNotAllowed
 	} else if isXChatGroupPortal(msg.Portal) {
-		return false, bridgev2.ErrRoomMetadataNotSupported
+		return tc.handleXChatGroupAvatar(ctx, msg)
 	}
 
 	if msg.Content.URL != "" || msg.Content.MSC3414File != nil {
@@ -1006,11 +1066,35 @@ func (tc *TwitterClient) HandleMatrixRoomAvatar(ctx context.Context, msg *bridge
 	return false, errors.New("avatar not found")
 }
 
+func (tc *TwitterClient) handleXChatGroupAvatar(ctx context.Context, msg *bridgev2.MatrixRoomAvatar) (bool, error) {
+	if msg.Content.URL == "" && msg.Content.MSC3414File == nil {
+		return false, fmt.Errorf("%w: removing X Chat group avatars", bridgev2.ErrRoomMetadataNotSupported)
+	}
+	data, err := msg.Portal.Bridge.Bot.DownloadMedia(ctx, msg.Content.URL, msg.Content.MSC3414File)
+	if err != nil {
+		return false, fmt.Errorf("failed to download avatar: %w", err)
+	}
+	avatarURL, err := tc.client.EditXChatGroupAvatar(ctx, ParsePortalID(msg.Portal.ID), data)
+	if err != nil {
+		return false, withoutNotice(wrapTwitterMatrixError(err))
+	}
+	msg.Portal.AvatarID = networkid.AvatarID(avatarURL)
+	msg.Portal.AvatarMXC = msg.Content.URL
+	msg.Portal.AvatarHash = sha256.Sum256(data)
+	return true, nil
+}
+
 func (tc *TwitterClient) HandleMatrixRoomName(ctx context.Context, msg *bridgev2.MatrixRoomName) (bool, error) {
 	if msg.Portal.RoomType == database.RoomTypeDM {
 		return false, bridgev2.ErrRoomMetadataNotAllowed
 	} else if isXChatGroupPortal(msg.Portal) {
-		return false, bridgev2.ErrRoomMetadataNotSupported
+		err := tc.client.EditXChatGroupTitle(ctx, ParsePortalID(msg.Portal.ID), msg.Content.Name)
+		if err != nil {
+			return false, withoutNotice(wrapTwitterMatrixError(err))
+		}
+		msg.Portal.Name = msg.Content.Name
+		msg.Portal.NameSet = true
+		return true, nil
 	}
 
 	updateNameParams := &payload.DMRequestQuery{
@@ -1083,10 +1167,7 @@ func (tc *TwitterClient) HandleMatrixAcceptMessageRequest(ctx context.Context, m
 		var rebound *payload.MessageEvent
 		rebound, err = tc.client.AcceptMessageRequest(ctx, conversationID, otherUserID)
 		if rebound != nil && rebound.Detail != nil && rebound.Detail.MessageFailureEvent != nil {
-			err = bridgev2.WrapErrorInStatus(errors.New(xchatSendFailureMessage(rebound.Detail.MessageFailureEvent))).
-				WithStatus(event.MessageStatusFail).
-				WithIsCertain(true).
-				WithErrorAsMessage()
+			err = twittermeow.XChatSendFailure{Type: payload.FailureType(ptr.Val(rebound.Detail.MessageFailureEvent.FailureType))}
 		}
 	} else {
 		err = tc.client.AcceptConversation(ctx, ConvertConversationIDToRESTAPI(conversationID))
@@ -1123,7 +1204,19 @@ func wrapTwitterMatrixError(err error) error {
 	}
 	var twitterErrs *twittermeow.TwitterErrors
 	hasTwitterErrs := errors.As(err, &twitterErrs)
+	var sendFailure twittermeow.XChatSendFailure
 	switch {
+	case errors.As(err, &sendFailure):
+		status := event.MessageStatusFail
+		if sendFailure.Retriable() {
+			status = event.MessageStatusRetriable
+		}
+		return bridgev2.WrapErrorInStatus(err).
+			WithMessage(sendFailure.Error()).
+			WithStatus(status).
+			WithErrorReason(event.MessageStatusNetworkError).
+			WithIsCertain(true).
+			WithSendNotice(true)
 	case errors.Is(err, twittermeow.ErrRatelimitExceeded), hasTwitterErrs && twitterErrs.StatusCode == http.StatusTooManyRequests:
 		return bridgev2.WrapErrorInStatus(err).
 			WithMessage("rate limited by X").

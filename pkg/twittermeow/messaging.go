@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
+	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
@@ -544,17 +545,66 @@ func (c *Client) sendMessageMutation(ctx context.Context, pl *payload.SendMessag
 	if resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent == "" {
 		return nil, fmt.Errorf("send message mutation returned no encoded message event")
 	}
+	evt, err := DecodeSendMessageMutationMessageEvent(resp.Data.XChatSendCreateMessageEvent.EncodedMessageEvent)
+	if err != nil {
+		return nil, fmt.Errorf("decode send message mutation response: %w", err)
+	} else if evt.Detail != nil && evt.Detail.MessageFailureEvent != nil {
+		return nil, XChatSendFailure{Type: payload.FailureType(ptr.Val(evt.Detail.MessageFailureEvent.FailureType))}
+	}
 	return &resp, nil
+}
+
+func (c *Client) sendBuiltMessage(ctx context.Context, builder *crypto.MessageBuilder, conversationID, messageID string) (*response.SendMessageMutationResponse, error) {
+	for attempt := 0; ; attempt++ {
+		keyVersion := c.latestConversationKeyVersion(ctx, conversationID)
+		encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("build message event: %w", err)
+		}
+		var sigPtr *string
+		if encodedSig != "" {
+			sigPtr = &encodedSig
+		}
+		resp, err := c.sendMessageMutation(ctx, payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
+			ConversationID:               conversationID,
+			MessageID:                    messageID,
+			EncodedMessageCreateEvent:    encodedMCE,
+			EncodedMessageEventSignature: sigPtr,
+		}))
+		var failure XChatSendFailure
+		if attempt > 0 || !errors.As(err, &failure) || failure.Type != payload.FailureTypeNonLatestCkeyVersion {
+			return resp, err
+		}
+		if refreshErr := c.RefreshConversationKeys(ctx, conversationID); refreshErr != nil {
+			c.Logger.Warn().Err(refreshErr).Str("conversation_id", conversationID).Msg("Failed to refresh conversation keys after stale key send failure")
+		}
+		newKeyVersion := c.latestConversationKeyVersion(ctx, conversationID)
+		if newKeyVersion == "" || newKeyVersion == keyVersion {
+			return nil, err
+		}
+		c.Logger.Debug().
+			Str("conversation_id", conversationID).
+			Str("message_id", messageID).
+			Str("old_key_version", keyVersion).
+			Str("new_key_version", newKeyVersion).
+			Msg("Resending message with newer conversation key")
+	}
+}
+
+func (c *Client) latestConversationKeyVersion(ctx context.Context, conversationID string) string {
+	if c.keyManager == nil {
+		return ""
+	}
+	key, err := c.keyManager.GetLatestConversationKey(ctx, conversationID)
+	if err != nil || key == nil {
+		return ""
+	}
+	return key.KeyVersion
 }
 
 // SendXChatReaction sends a reaction add/remove via the XChat protocol.
 // targetMessageSequenceID must be the XChat message sequence ID of the message being reacted to.
 func (c *Client) SendXChatReaction(ctx context.Context, conversationID, targetMessageSequenceID, emoji string, remove, encrypted bool) (*response.SendMessageMutationResponse, error) {
-	token, err := c.ensureConversationToken(ctx, conversationID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation token: %w", err)
-	}
-
 	messageID := uuid.NewString()
 
 	var builder *crypto.MessageBuilder
@@ -578,25 +628,7 @@ func (c *Client) SendXChatReaction(ctx context.Context, conversationID, targetMe
 		builder.SetReactionAdd(targetMessageSequenceID, emoji)
 	}
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build reaction: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               conversationID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	return c.sendMessageMutation(ctx, pl)
+	return c.sendBuiltMessage(ctx, builder, conversationID, messageID)
 }
 
 // SendEncryptedEdit sends a message edit via the XChat protocol.
@@ -609,11 +641,6 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 		return nil, fmt.Errorf("target message sequence ID is required")
 	}
 
-	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation token: %w", err)
-	}
-
 	messageID := opts.MessageID
 	if messageID == "" {
 		messageID = uuid.NewString()
@@ -624,35 +651,11 @@ func (c *Client) SendEncryptedEdit(ctx context.Context, opts SendEncryptedEditOp
 		SetConversationID(opts.ConversationID).
 		SetMessageEdit(opts.TargetMessageSequenceID, opts.UpdatedText, opts.Entities)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build edit: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               opts.ConversationID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	return c.sendMessageMutation(ctx, pl)
+	return c.sendBuiltMessage(ctx, builder, opts.ConversationID, messageID)
 }
 
 // SendEncryptedMessage sends an encrypted message via the XChat protocol.
 func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMessageOpts) (*response.SendMessageMutationResponse, error) {
-	// Get the server-provided conversation token for this conversation
-	token, err := c.ensureConversationToken(ctx, opts.ConversationID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation token: %w", err)
-	}
-
 	messageID := opts.MessageID
 	if messageID == "" {
 		messageID = uuid.NewString()
@@ -679,25 +682,7 @@ func (c *Client) SendEncryptedMessage(ctx context.Context, opts SendEncryptedMes
 		builder.SetEntities(opts.Entities)
 	}
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               opts.ConversationID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	return c.sendMessageMutation(ctx, pl)
+	return c.sendBuiltMessage(ctx, builder, opts.ConversationID, messageID)
 }
 
 func (c *Client) getXChatInboxPage(ctx context.Context, url string, variables FormEncoder, opName, responseKey string) (*response.XChatInboxPage, error) {

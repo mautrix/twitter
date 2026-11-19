@@ -34,6 +34,10 @@ const (
 	FailureTypeGenericError                       FailureType = 14
 	FailureTypeSenderNotGroupMember               FailureType = 15
 	FailureTypeInvalidSignatureVersion            FailureType = 16
+	FailureTypeInvalidPinRequest                  FailureType = 17
+	FailureTypeTooManyPins                        FailureType = 18
+	FailureTypeInvalidXMoneyToken                 FailureType = 19
+	FailureTypeRecipientNotMessageable            FailureType = 20
 )
 
 type MediaType int32
