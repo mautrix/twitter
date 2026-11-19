@@ -349,14 +349,16 @@ func (p *GetInboxPageRequestQueryVariables) Encode() ([]byte, error) {
 }
 
 type GetInboxPageConversationDataQueryVariables struct {
-	ConversationID        string `json:"conversation_id"`
-	IncludeUserPublicKeys bool   `json:"include_user_public_keys"`
+	ConversationIDs                      []string `json:"conversation_ids"`
+	IncludeUserPublicKeys                bool     `json:"include_user_public_keys"`
+	IncludeParticipantsResultsForPreview bool     `json:"include_participants_results_for_inbox_preview"`
 }
 
 func NewInboxPageConversationDataQueryVariables(conversationID string, includeKeys bool) *GetInboxPageConversationDataQueryVariables {
 	return &GetInboxPageConversationDataQueryVariables{
-		ConversationID:        conversationID,
-		IncludeUserPublicKeys: includeKeys,
+		ConversationIDs:                      []string{conversationID},
+		IncludeUserPublicKeys:                includeKeys,
+		IncludeParticipantsResultsForPreview: true,
 	}
 }
 

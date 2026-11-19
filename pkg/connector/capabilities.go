@@ -190,10 +190,12 @@ var xchatGroupCaps = ptr.Clone(groupCaps)
 
 func init() {
 	xchatGroupCaps.State = event.StateFeatureMap{
+		event.StateRoomName.Type:                {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type:              {Level: event.CapLevelFullySupported},
 		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
 	}
 	xchatGroupCaps.MemberActions = nil
-	xchatGroupCaps.ID += "+xchat"
+	xchatGroupCaps.ID += "+xchat.2"
 
 	dmCaps.State = event.StateFeatureMap{
 		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
@@ -233,6 +235,9 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps.DisappearingTimer = nil
 		caps.State = maps.Clone(baseCaps.State)
 		delete(caps.State, event.StateBeeperDisappearingTimer.Type)
+		if baseCaps == xchatGroupCaps {
+			caps.State = nil
+		}
 		caps.File = maps.Clone(baseCaps.File)
 		delete(caps.File, event.MsgFile)
 		delete(caps.File, event.MsgAudio)
