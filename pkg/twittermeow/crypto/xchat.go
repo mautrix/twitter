@@ -50,7 +50,7 @@ func SecretboxDecrypt(nonceCiphertext, key []byte) ([]byte, error) {
 
 	plaintext, ok := secretbox.Open(nil, ciphertext, nonce, k)
 	if !ok {
-		return nil, errors.New("secretbox decrypt failed")
+		return nil, ErrDecryptFailed
 	}
 	return plaintext, nil
 }

@@ -94,6 +94,38 @@ func NewDeleteMessageMutationPayload(vars DeleteMessageMutationVariables) *Delet
 	}
 }
 
+type EditGroupFieldName string
+
+const (
+	EditGroupFieldTitle  EditGroupFieldName = "Title"
+	EditGroupFieldAvatar EditGroupFieldName = "Avatar"
+)
+
+type EditGroupConversationMutationVariables struct {
+	ConversationID         string                         `json:"conversation_id"`
+	ConversationKeyVersion string                         `json:"conversation_key_version"`
+	GroupName              *string                        `json:"group_name,omitempty"`
+	AvatarURL              *string                        `json:"avatar_url,omitempty"`
+	ModifiedFields         []EditGroupFieldName           `json:"modified_fields"`
+	ActionSignatures       []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+type EditGroupConversationMutationPayload struct {
+	OperationName string                                 `json:"operationName"`
+	Variables     EditGroupConversationMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                       `json:"extensions"`
+}
+
+func NewEditGroupConversationMutationPayload(vars EditGroupConversationMutationVariables) *EditGroupConversationMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "r2vVejQICfaWiPDV_5p44A"
+	return &EditGroupConversationMutationPayload{
+		OperationName: "EditGroupConversationMutation",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 // MuteConversationMutationVariables contains the variables for the MuteConversation mutation
 type MuteConversationMutationVariables struct {
 	ConversationIDs  []string                       `json:"conversationIds"`
