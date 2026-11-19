@@ -1148,11 +1148,15 @@ func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMut
 
 func (tc *TwitterClient) isXChatConversationTrusted(ctx context.Context, conversationID string) bool {
 	resp, err := tc.client.GetConversationData(ctx, payload.NewInboxPageConversationDataQueryVariables(conversationID, true))
+	var item response.XChatInboxItem
+	if err == nil {
+		item, err = resp.Item(conversationID)
+	}
 	if err != nil {
 		zerolog.Ctx(ctx).Warn().Err(err).Str("conversation_id", conversationID).Msg("Failed to check X Chat trust after accept returned 279")
 		return false
 	}
-	trusted := xchatInboxItemTrust(&resp.Data.GetInboxPageConversationData.Data)
+	trusted := xchatInboxItemTrust(&item)
 	return trusted != nil && *trusted
 }
 
