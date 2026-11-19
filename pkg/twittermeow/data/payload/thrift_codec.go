@@ -159,6 +159,8 @@ func goTypeToThriftType(t reflect.Type, originalType reflect.Type) thrift.TType 
 	switch t.Kind() {
 	case reflect.Bool:
 		return thrift.BOOL
+	case reflect.Int16:
+		return thrift.I16
 	case reflect.Int32:
 		return thrift.I32
 	case reflect.Int64:
@@ -190,6 +192,9 @@ func writeValue(ctx context.Context, proto thrift.TProtocol, v reflect.Value, or
 	switch v.Kind() {
 	case reflect.Bool:
 		return proto.WriteBool(ctx, v.Bool())
+
+	case reflect.Int16:
+		return proto.WriteI16(ctx, int16(v.Int()))
 
 	case reflect.Int32:
 		return proto.WriteI32(ctx, int32(v.Int()))
