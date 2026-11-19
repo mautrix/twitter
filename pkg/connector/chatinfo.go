@@ -512,9 +512,6 @@ func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
 				return nil, err
 			}
 			defer resp.Body.Close()
-			if resp.StatusCode >= 400 {
-				return nil, fmt.Errorf("failed to download avatar: HTTP %d", resp.StatusCode)
-			}
 			return io.ReadAll(resp.Body)
 		},
 		Remove: avatarURL == "",
@@ -678,7 +675,7 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 
 	// Try 2: Fetch via REST API
 	log.Debug().Msg("Fetching conversation via REST API")
-	restConvID := ConvertConversationIDToREST(conversationID)
+	restConvID := ConvertConversationIDToRESTAPI(conversationID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	resp, err := tc.client.FetchConversationContext(ctx, restConvID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {
