@@ -136,7 +136,10 @@ func (c *Client) refreshConversationToken(ctx context.Context, conversationID st
 		return fmt.Errorf("fetch conversation data: %w", err)
 	}
 
-	item := resp.Data.GetInboxPageConversationData.Data
+	item, err := resp.Item(conversationID)
+	if err != nil {
+		return err
+	}
 	encoded := make([]string, 0, len(item.LatestMessageEvents)+len(item.EncodedMessageEvents)+len(item.LatestConversationKeyChangeEvents)+2)
 	encoded = append(encoded, item.LatestMessageEvents...)
 	encoded = append(encoded, item.EncodedMessageEvents...)
@@ -195,11 +198,6 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 
 	selfConvID := c.getSelfConversationID()
 
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return fmt.Errorf("get self conversation token: %w", err)
-	}
-
 	messageID := uuid.NewString()
 
 	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
@@ -207,25 +205,7 @@ func (c *Client) SendXChatPinConversation(ctx context.Context, targetConversatio
 		SetConversationID(selfConvID).
 		SetPinConversation(targetConversationID)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return fmt.Errorf("build pin message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               selfConvID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	_, err = c.sendMessageMutation(ctx, pl)
+	_, err := c.sendBuiltMessage(ctx, builder, selfConvID, messageID)
 	return err
 }
 
@@ -237,11 +217,6 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 
 	selfConvID := c.getSelfConversationID()
 
-	token, err := c.ensureConversationToken(ctx, selfConvID)
-	if err != nil {
-		return fmt.Errorf("get self conversation token: %w", err)
-	}
-
 	messageID := uuid.NewString()
 
 	builder := crypto.NewMessageBuilder(c.keyManager, c.GetCurrentUserID()).
@@ -249,25 +224,7 @@ func (c *Client) SendXChatUnpinConversation(ctx context.Context, targetConversat
 		SetConversationID(selfConvID).
 		SetUnpinConversation(targetConversationID)
 
-	encodedMCE, encodedSig, err := builder.BuildForSend(ctx)
-	if err != nil {
-		return fmt.Errorf("build unpin message: %w", err)
-	}
-
-	var sigPtr *string
-	if encodedSig != "" {
-		sigPtr = &encodedSig
-	}
-
-	pl := payload.NewSendMessageMutationPayload(payload.SendMessageMutationVariables{
-		ConversationID:               selfConvID,
-		MessageID:                    messageID,
-		ConversationToken:            token,
-		EncodedMessageCreateEvent:    encodedMCE,
-		EncodedMessageEventSignature: sigPtr,
-	})
-
-	_, err = c.sendMessageMutation(ctx, pl)
+	_, err := c.sendBuiltMessage(ctx, builder, selfConvID, messageID)
 	return err
 }
 
@@ -316,7 +273,10 @@ func (c *Client) RefreshConversationKeys(ctx context.Context, conversationID str
 		return fmt.Errorf("fetch conversation data: %w", err)
 	}
 
-	item := resp.Data.GetInboxPageConversationData.Data
+	item, err := resp.Item(conversationID)
+	if err != nil {
+		return fmt.Errorf("fetch conversation data: %w", err)
+	}
 
 	// Sync room data even if one key event was malformed: the response may still
 	// contain complete member/profile data and other usable keys.

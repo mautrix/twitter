@@ -29,7 +29,7 @@ func TestRefreshConversationKeysDoesNotBlockOnConversationDataCallback(t *testin
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
 			Body: io.NopCloser(strings.NewReader(
-				`{"data":{"get_inbox_page_conversation_data":{"data":{"conversation_detail":{"conversation_id":"1:2"}}}}}`,
+				`{"data":{"get_inbox_page_conversation_data":{"items":[{"conversation_detail":{"conversation_id":"1:2"}}]}}}`,
 			)),
 		}, nil
 	})}

@@ -52,12 +52,15 @@ type InitializeXChatMediaUploadResponse struct {
 			UploadError     string `json:"upload_error"`
 		} `json:"xchat_initialize_media_upload"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }
 
 type FinalizeXChatMediaUploadResponse struct {
 	Data struct {
 		XChatFinalizeMediaUpload struct {
-			TypeName string `json:"__typename"`
+			TypeName    string `json:"__typename"`
+			UploadError string `json:"upload_error"`
 		} `json:"xchat_finalize_media_upload"`
 	} `json:"data"`
+	Errors []XChatGraphQLError `json:"errors,omitempty"`
 }

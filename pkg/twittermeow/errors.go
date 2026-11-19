@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
 
 var (
@@ -45,6 +47,63 @@ func (cloudflareRateLimitError) Error() string {
 
 func (cloudflareRateLimitError) Is(target error) bool {
 	return errors.Is(ErrRatelimitExceeded, target)
+}
+
+type XChatSendFailure struct {
+	Type payload.FailureType
+}
+
+func (f XChatSendFailure) Error() string {
+	switch f.Type {
+	case payload.FailureTypeInternalError, payload.FailureTypeGenericError, payload.FailureTypeEmptyDetail:
+		return "X couldn't deliver this message, try again later"
+	case payload.FailureTypeContentsTooLarge:
+		return "X rejected this message: contents too large"
+	case payload.FailureTypeTooManyMessages:
+		return "X rejected this message: you're sending messages too fast"
+	case payload.FailureTypeInvalidSenderSignature:
+		return "X rejected this message: invalid sender signature"
+	case payload.FailureTypeNonLatestCkeyVersion:
+		return "X rejected this message: the chat's encryption key changed"
+	case payload.FailureTypeRecipientHasNotTrustedConversation:
+		return "X rejected this message: recipient has not trusted this conversation"
+	case payload.FailureTypeRecipientKeyHasChanged:
+		return "X rejected this message: the recipient's encryption key changed"
+	case payload.FailureTypeOnlyEncryptedMessagesAllowed:
+		return "X rejected this message: only encrypted messages are allowed in this chat"
+	case payload.FailureTypeRequesterNotAdmin:
+		return "X rejected this message: only group admins can do that"
+	case payload.FailureTypeFlaggedAsSpam:
+		return "X rejected this message: flagged as spam"
+	case payload.FailureTypeRateLimitUpsell:
+		return "X rejected this message: you've reached the message request limit"
+	case payload.FailureTypeSignatureVerificationFailed:
+		return "X rejected this message: signature verification failed"
+	case payload.FailureTypeSenderNotGroupMember:
+		return "X rejected this message: you're not a member of this group"
+	case payload.FailureTypeInvalidSignatureVersion:
+		return "X rejected this message: invalid signature version"
+	case payload.FailureTypeInvalidPinRequest:
+		return "X rejected this message: invalid pin request"
+	case payload.FailureTypeTooManyPins:
+		return "X rejected this message: too many pinned messages"
+	case payload.FailureTypeInvalidXMoneyToken:
+		return "X rejected this message: invalid payment token"
+	case payload.FailureTypeRecipientNotMessageable:
+		return "X rejected this message: this account can't receive your messages"
+	default:
+		return fmt.Sprintf("X rejected this message: failure type %d", f.Type)
+	}
+}
+
+func (f XChatSendFailure) Retriable() bool {
+	switch f.Type {
+	case payload.FailureTypeEmptyDetail, payload.FailureTypeInternalError, payload.FailureTypeTooManyMessages,
+		payload.FailureTypeNonLatestCkeyVersion, payload.FailureTypeGenericError:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsAuthError(err error) bool {
