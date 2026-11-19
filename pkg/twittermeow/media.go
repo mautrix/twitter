@@ -455,6 +455,7 @@ func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, m
 func (c *Client) DownloadXChatMedia(
 	ctx context.Context,
 	conversationID, mediaHashKey, keyVersion string,
+	keyInfo *crypto.AttachmentKeyInfo,
 	into io.Writer,
 ) (size int, err error) {
 	var convKey *crypto.ConversationKey
@@ -498,7 +499,12 @@ func (c *Client) DownloadXChatMedia(
 		return 0, fmt.Errorf("download request: %w", err)
 	}
 
-	size, err = crypto.SecretstreamDecrypt(resp.Body, convKey.Key, into)
+	mediaKey, err := keyInfo.Key(convKey.Key)
+	if err != nil {
+		_ = resp.Body.Close()
+		return 0, fmt.Errorf("derive attachment key: %w", err)
+	}
+	size, err = crypto.SecretstreamDecrypt(resp.Body, mediaKey, into)
 	_ = resp.Body.Close()
 	if err != nil {
 		return 0, fmt.Errorf("decrypt media: %w", err)

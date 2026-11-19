@@ -69,7 +69,7 @@ func (tc *TwitterConnector) downloadEncryptedMedia(ctx context.Context, info *En
 
 	return &mediaproxy.GetMediaResponseFile{
 		Callback: func(w *os.File) (*mediaproxy.FileMeta, error) {
-			_, err := client.client.DownloadXChatMedia(ctx, info.ConversationID, info.MediaHashKey, info.KeyVersion, w)
+			_, err := client.client.DownloadXChatMedia(ctx, info.ConversationID, info.MediaHashKey, info.KeyVersion, info.KeyInfo, w)
 			if err != nil {
 				return nil, fmt.Errorf("download and decrypt XChat media: %w", err)
 			}

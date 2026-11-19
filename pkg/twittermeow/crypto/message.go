@@ -323,7 +323,11 @@ func DecryptMessageEvent(ctx context.Context, km *KeyManager, event *payload.Mes
 		return nil, fmt.Errorf("get conversation key: %w", err)
 	}
 
-	return DecryptMessageContentsBytes(mce.Contents, convKey.Key)
+	contentsKey, err := MessageContentsKey(convKey.Key, event, mce)
+	if err != nil {
+		return nil, fmt.Errorf("derive message key: %w", err)
+	}
+	return DecryptMessageContentsBytes(mce.Contents, contentsKey)
 }
 
 // DecryptWithKey decrypts message contents using a provided key directly.
