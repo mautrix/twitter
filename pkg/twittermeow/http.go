@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,12 +57,18 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 		Str("method", params.Method).
 		Str("function", "MakeRequest").
 		Logger()
+	rateLimitKey := getRateLimitKey(params.URL)
 	var attempts int
 	for {
 		attempts++
+		if err := c.checkRateLimit(rateLimitKey); err != nil {
+			log.Warn().Err(err).Msg("Not sending request to rate limited endpoint")
+			return nil, nil, err
+		}
 		start := time.Now()
 		resp, respDat, err := c.makeRequestDirect(ctx, params)
 		dur := time.Since(start)
+		c.updateRateLimit(rateLimitKey, resp)
 		if err == nil {
 			logLevel := zerolog.DebugLevel
 			if strings.Contains(params.URL, "dm/user_updates.json") {
@@ -105,6 +113,58 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 			Msg("Request failed, retrying")
 		time.Sleep(time.Duration(attempts) * 3 * time.Second)
 	}
+}
+
+func getRateLimitKey(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return parsed.Host + parsed.Path
+}
+
+func (c *Client) checkRateLimit(key string) error {
+	c.rateLimitLock.Lock()
+	defer c.rateLimitLock.Unlock()
+	reset, ok := c.rateLimitResets[key]
+	if !ok {
+		return nil
+	} else if time.Now().After(reset) {
+		delete(c.rateLimitResets, key)
+		return nil
+	}
+	return RateLimitError{Reset: reset}
+}
+
+func (c *Client) updateRateLimit(key string, resp *http.Response) {
+	if resp == nil {
+		return
+	}
+	var reset time.Time
+	if resp.Header.Get("x-rate-limit-remaining") == "0" {
+		if resetUnix, err := strconv.ParseInt(resp.Header.Get("x-rate-limit-reset"), 10, 64); err == nil {
+			reset = time.Unix(resetUnix, 0)
+		}
+	}
+	if retryAfter := resp.Header.Get("Retry-After"); resp.StatusCode == http.StatusTooManyRequests && retryAfter != "" {
+		var retryAt time.Time
+		if seconds, err := strconv.Atoi(retryAfter); err == nil {
+			retryAt = time.Now().Add(time.Duration(seconds) * time.Second)
+		} else if date, err := http.ParseTime(retryAfter); err == nil {
+			retryAt = date
+		}
+		if retryAt.After(reset) {
+			reset = retryAt
+		}
+	}
+	if time.Now().After(reset) {
+		return
+	}
+	c.rateLimitLock.Lock()
+	if reset.After(c.rateLimitResets[key]) {
+		c.rateLimitResets[key] = reset
+	}
+	c.rateLimitLock.Unlock()
 }
 
 func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
