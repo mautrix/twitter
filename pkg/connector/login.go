@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -540,10 +541,22 @@ func (t *TwitterLogin) makeAccountAccessStep(client *twittermeow.Client) *bridge
 	initialCookies := make([]bridgev2.LoginCookie, 0, len(cookies))
 	for name, value := range cookies {
 		initialCookies = append(initialCookies, bridgev2.LoginCookie{
-			Name:   name,
-			Value:  value,
-			Domain: "." + endpoints.BASE_HOST,
-			Secure: true,
+			Name:     name,
+			Value:    value,
+			Domain:   "." + endpoints.BASE_HOST,
+			Secure:   true,
+			HTTPOnly: name == "auth_token" || name == "att" || name == "kdt",
+		})
+	}
+	fields := make([]bridgev2.LoginCookieField, 0)
+	for _, name := range accountAccessCookieNames(client) {
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:       name,
+			Required: name == "auth_token" || name == "ct0" || name == "twid",
+			Sources: []bridgev2.LoginCookieFieldSource{
+				{Type: bridgev2.LoginCookieTypeCookie, Name: name, CookieDomain: "x.com"},
+				{Type: bridgev2.LoginCookieTypeCookie, Name: name, CookieDomain: ".x.com"},
+			},
 		})
 	}
 	return &bridgev2.LoginStep{
@@ -555,20 +568,15 @@ func (t *TwitterLogin) makeAccountAccessStep(client *twittermeow.Client) *bridge
 			UserAgent:         t.browserHeaders.UserAgent,
 			InitialCookies:    initialCookies,
 			WaitForURLPattern: `^https://x\.com/(home)?([?#].*)?$`,
-			Fields: []bridgev2.LoginCookieField{
-				{
-					ID:       string(twitCookies.XAuthToken),
-					Required: true,
-					Sources:  []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeCookie, Name: string(twitCookies.XAuthToken)}},
-				},
-				{
-					ID:       string(twitCookies.XCt0),
-					Required: true,
-					Sources:  []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeCookie, Name: string(twitCookies.XCt0)}},
-				},
-			},
+			Fields:            fields,
 		},
 	}
+}
+
+func accountAccessCookieNames(client *twittermeow.Client) []string {
+	names := slices.Concat(client.GetCookieNames(), castleTokenCookieNames, []string{"auth_token", "ct0", "att", "kdt", "twid", "lang", "dtab_local"})
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
@@ -780,8 +788,22 @@ func (t *TwitterLogin) startWithOverride(ctx context.Context, override *bridgev2
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
 	if t.accountAccessClient != nil {
 		client := t.accountAccessClient
+		browserUserID, err := url.QueryUnescape(cookies["twid"])
+		browserUserID = strings.TrimPrefix(browserUserID, "u=")
+		if _, parseErr := strconv.ParseUint(browserUserID, 10, 64); err != nil || parseErr != nil || cookies["auth_token"] == "" || cookies["ct0"] == "" {
+			return nil, ErrMissingLoginInput
+		}
+		if expectedUserID := client.GetCurrentUserID(); expectedUserID != "" && expectedUserID != browserUserID {
+			return nil, ErrLoginBadCookies.WithMessage("Complete verification with the same X account, or restart login to use a different account.")
+		}
+		browserCookies := make(map[string]string)
+		for _, name := range accountAccessCookieNames(client) {
+			if value := strings.TrimSpace(cookies[name]); value != "" {
+				browserCookies[name] = value
+			}
+		}
+		client.ReplaceCookies(browserCookies)
 		t.accountAccessClient = nil
-		client.SetCookies(cookies)
 		if t.webLogin != nil {
 			return t.mapClientHTTPFailure(t.completeWebLogin(ctx))
 		}

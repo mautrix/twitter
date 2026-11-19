@@ -88,6 +88,12 @@ func (c *Cookies) Map() map[string]string {
 	return maps.Clone(c.store)
 }
 
+func (c *Cookies) Replace(store map[string]string) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.store = maps.Clone(store)
+}
+
 func (c *Cookies) Names() []string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
