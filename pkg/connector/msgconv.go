@@ -885,11 +885,11 @@ func (tc *TwitterClient) tryHandleXChatMedia(
 		})
 		var err error
 		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, encMediaID)
-		if err != nil {
-			return true, fmt.Errorf("failed to generate direct media URI: %w", err)
+		if err == nil {
+			addFileExtension(&content.Body, content.Info.MimeType)
+			return true, nil
 		}
-		addFileExtension(&content.Body, content.Info.MimeType)
-		return true, nil
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to generate XChat direct media URI, uploading instead")
 	}
 
 	if !canUseXChat {
