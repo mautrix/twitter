@@ -129,6 +129,10 @@ func (c *Client) GetCookies() map[string]string {
 	return c.cookies.Map()
 }
 
+func (c *Client) ReplaceCookies(values map[string]string) {
+	c.cookies.Replace(values)
+}
+
 func (c *Client) GetCookieNames() []string {
 	return c.cookies.Names()
 }
