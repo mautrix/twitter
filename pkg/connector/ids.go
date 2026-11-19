@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -193,10 +194,9 @@ func MakeEncryptedMediaID(info EncryptedMediaInfo) networkid.MediaID {
 	mediaID = append(mediaID, keyVersionBytes...)
 
 	if info.KeyInfo != nil {
-		for _, field := range []string{info.KeyInfo.SenderID, info.KeyInfo.MessageID, info.KeyInfo.AttachmentID} {
-			mediaID = binary.AppendUvarint(mediaID, uint64(len(field)))
-			mediaID = append(mediaID, field...)
-		}
+		mediaID = appendKeyInfoField(mediaID, info.KeyInfo.SenderID)
+		mediaID = appendKeyInfoField(mediaID, info.KeyInfo.MessageID)
+		mediaID = appendAttachmentIDField(mediaID, info.KeyInfo.MessageID, info.KeyInfo.AttachmentID)
 	}
 
 	return mediaID
@@ -287,24 +287,96 @@ func parseMediaIDV2(buf *bytes.Reader) (*EncryptedMediaInfo, error) {
 	info.KeyVersion = string(bs)
 
 	if buf.Len() > 0 {
-		fields := make([]string, 3)
-		for i := range fields {
-			size, err = binary.ReadUvarint(buf)
-			if err != nil {
-				return nil, err
-			}
-			bs = make([]byte, size)
-			if _, err := io.ReadFull(buf, bs); err != nil {
-				return nil, err
-			}
-			fields[i] = string(bs)
+		keyInfo := &crypto.AttachmentKeyInfo{}
+		if keyInfo.SenderID, err = readKeyInfoField(buf, nil); err != nil {
+			return nil, fmt.Errorf("read sender ID: %w", err)
+		} else if keyInfo.MessageID, err = readKeyInfoField(buf, nil); err != nil {
+			return nil, fmt.Errorf("read message ID: %w", err)
+		} else if keyInfo.AttachmentID, err = readKeyInfoField(buf, &keyInfo.MessageID); err != nil {
+			return nil, fmt.Errorf("read attachment ID: %w", err)
 		}
-		info.KeyInfo = &crypto.AttachmentKeyInfo{
-			SenderID:     fields[0],
-			MessageID:    fields[1],
-			AttachmentID: fields[2],
-		}
+		info.KeyInfo = keyInfo
 	}
 
 	return info, nil
+}
+
+const (
+	keyInfoFieldString byte = iota
+	keyInfoFieldUint
+	keyInfoFieldUUID
+	keyInfoFieldMessageID
+	keyInfoFieldMessageIDIndex
+)
+
+func parseCanonicalUint(val string) (uint64, bool) {
+	u, err := strconv.ParseUint(val, 10, 64)
+	return u, err == nil && strconv.FormatUint(u, 10) == val
+}
+
+func appendKeyInfoField(buf []byte, val string) []byte {
+	if u, ok := parseCanonicalUint(val); ok {
+		return binary.AppendUvarint(append(buf, keyInfoFieldUint), u)
+	} else if u, err := uuid.Parse(val); err == nil && u.String() == val {
+		return append(append(buf, keyInfoFieldUUID), u[:]...)
+	}
+	buf = binary.AppendUvarint(append(buf, keyInfoFieldString), uint64(len(val)))
+	return append(buf, val...)
+}
+
+func appendAttachmentIDField(buf []byte, messageID, attachmentID string) []byte {
+	if attachmentID == messageID {
+		return append(buf, keyInfoFieldMessageID)
+	} else if suffix, ok := strings.CutPrefix(attachmentID, messageID+"#"); ok {
+		if index, ok := parseCanonicalUint(suffix); ok {
+			return binary.AppendUvarint(append(buf, keyInfoFieldMessageIDIndex), index)
+		}
+	}
+	return appendKeyInfoField(buf, attachmentID)
+}
+
+func readKeyInfoField(buf *bytes.Reader, messageID *string) (string, error) {
+	fieldType, err := buf.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	switch fieldType {
+	case keyInfoFieldString:
+		size, err := binary.ReadUvarint(buf)
+		if err != nil {
+			return "", err
+		} else if size > uint64(buf.Len()) {
+			return "", io.ErrUnexpectedEOF
+		}
+		bs := make([]byte, size)
+		if _, err = io.ReadFull(buf, bs); err != nil {
+			return "", err
+		}
+		return string(bs), nil
+	case keyInfoFieldUint:
+		u, err := binary.ReadUvarint(buf)
+		if err != nil {
+			return "", err
+		}
+		return strconv.FormatUint(u, 10), nil
+	case keyInfoFieldUUID:
+		var u uuid.UUID
+		if _, err = io.ReadFull(buf, u[:]); err != nil {
+			return "", err
+		}
+		return u.String(), nil
+	case keyInfoFieldMessageID:
+		if messageID != nil {
+			return *messageID, nil
+		}
+	case keyInfoFieldMessageIDIndex:
+		if messageID != nil {
+			index, err := binary.ReadUvarint(buf)
+			if err != nil {
+				return "", err
+			}
+			return *messageID + "#" + strconv.FormatUint(index, 10), nil
+		}
+	}
+	return "", fmt.Errorf("unknown field type %d", fieldType)
 }
