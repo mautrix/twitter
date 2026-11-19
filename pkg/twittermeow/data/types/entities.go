@@ -1,6 +1,10 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
+)
 
 type Attachment struct {
 	Video       *AttachmentInfo  `json:"video,omitempty"`
@@ -17,6 +21,9 @@ type Attachment struct {
 	URLBannerMediaHashKey string `json:"url_banner_media_hash_key,omitempty"`
 
 	XChatKind string `json:"-"`
+
+	// nil when the media uses the conversation key.
+	XChatKeyInfo *crypto.AttachmentKeyInfo `json:"-"`
 }
 type URLs struct {
 	URL         string `json:"url,omitempty"`

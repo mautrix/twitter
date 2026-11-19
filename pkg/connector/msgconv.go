@@ -44,6 +44,7 @@ import (
 
 	"go.mau.fi/mautrix-twitter/pkg/connector/twitterfmt"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
@@ -674,7 +675,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 		Bool("use_xchat_path", useXChatMedia).
 		Msg("Media download decision")
 
-	handled, err := tc.tryHandleXChatMedia(ctx, portal, intent, msg, attachmentInfo, attachmentURL, audioOnly, &content, canUseXChat)
+	handled, err := tc.tryHandleXChatMedia(ctx, portal, intent, msg, attachmentInfo, attachment.XChatKeyInfo, attachmentURL, audioOnly, &content, canUseXChat)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -856,6 +857,7 @@ func (tc *TwitterClient) tryHandleXChatMedia(
 	intent bridgev2.MatrixAPI,
 	msg *types.MessageData,
 	attachmentInfo *types.AttachmentInfo,
+	keyInfo *crypto.AttachmentKeyInfo,
 	attachmentURL string,
 	audioOnly bool,
 	content *event.MessageEventContent,
@@ -879,6 +881,7 @@ func (tc *TwitterClient) tryHandleXChatMedia(
 			ConversationID: conversationID,
 			MediaHashKey:   attachmentInfo.MediaHashKey,
 			KeyVersion:     msg.ConversationKeyVersion,
+			KeyInfo:        keyInfo,
 		})
 		var err error
 		content.URL, err = tc.connector.br.Matrix.GenerateContentURI(ctx, encMediaID)
@@ -897,7 +900,7 @@ func (tc *TwitterClient) tryHandleXChatMedia(
 	}
 
 	err := tc.uploadMediaReader(ctx, portal, intent, content, -1, audioOnly, func(writer io.Writer) error {
-		size, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion, writer)
+		size, err := tc.client.DownloadXChatMedia(ctx, conversationID, attachmentInfo.MediaHashKey, msg.ConversationKeyVersion, keyInfo, writer)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrFailedToDownload, err)
 		}
@@ -1010,7 +1013,7 @@ func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bri
 	if attachment.URLBannerMediaHashKey != "" && portal.Metadata.(*PortalMetadata).CanUseXChat() {
 		var err error
 		preview.ImageURL, _, err = intent.UploadMediaStream(ctx, portal.MXID, -1, false, func(file io.Writer) (*bridgev2.FileStreamResult, error) {
-			size, err := tc.client.DownloadXChatMedia(ctx, ParsePortalID(portal.ID), attachment.URLBannerMediaHashKey, keyVersion, file)
+			size, err := tc.client.DownloadXChatMedia(ctx, ParsePortalID(portal.ID), attachment.URLBannerMediaHashKey, keyVersion, attachment.XChatKeyInfo, file)
 			if err != nil {
 				return nil, err
 			}
