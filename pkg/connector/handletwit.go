@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
@@ -523,6 +524,35 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 			},
 			ChatInfoChange: &bridgev2.ChatInfoChange{
 				ChatInfo: chatInfo,
+			},
+		}))
+
+	case *types.XChatGroupAdminChange:
+		level := xchatMemberPowerLevel
+		if evt.IsAdmin {
+			level = xchatAdminPowerLevel
+		}
+		memberChanges := &bridgev2.ChatMemberList{
+			MemberMap: make(bridgev2.ChatMemberMap, len(evt.AdminIDs)),
+		}
+		for _, userID := range evt.AdminIDs {
+			memberChanges.MemberMap.Set(bridgev2.ChatMember{
+				EventSender:    tc.MakeEventSender(userID),
+				Membership:     event.MembershipJoin,
+				PrevMembership: event.MembershipJoin,
+				PowerLevel:     ptr.Ptr(level),
+			})
+		}
+		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventChatInfoChange,
+				Sender:      tc.MakeEventSender(evt.SenderID),
+				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
+				StreamOrder: methods.ParseSnowflakeInt(evt.ID),
+				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{
+				MemberChanges: memberChanges,
 			},
 		}))
 

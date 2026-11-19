@@ -150,6 +150,8 @@ type XChatInboxItem struct {
 	LatestNotifiableMessageCreateEvent string                      `json:"latest_notifiable_message_create_event,omitempty"`
 	LatestReadEventsPerParticipant     []XChatParticipantReadEvent `json:"latest_read_events_per_participant,omitempty"`
 	HasMore                            bool                        `json:"has_more,omitempty"`
+	LatestPinnedMessageEvents          []string                    `json:"latest_pinned_message_events,omitempty"`
+	PMKBundle                          []json.RawMessage           `json:"pmk_bundle,omitempty"`
 }
 
 func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
@@ -204,6 +206,8 @@ type XChatConversationDetail struct {
 	GroupRemovedUsers                  []XChatUserResult   `json:"group_removed_users,omitempty"`
 	GroupJoinRequestedUsers            []XChatUserResult   `json:"group_join_requested_users,omitempty"`
 	LatestGroupTitleChangeMessageEvent string              `json:"latest_group_title_change_message_event,omitempty"`
+	GroupCreatedByUserResults          *XChatUserResult    `json:"group_created_by_user_results,omitempty"`
+	LatestGroupDescriptionChangeEvent  string              `json:"latest_group_description_change_message_event,omitempty"`
 }
 
 type XChatGroupMetadata struct {
@@ -214,6 +218,19 @@ type XChatGroupMetadata struct {
 	GroupAvatarURL                string                   `json:"group_avatar_url,omitempty"`
 	GroupInviteDetails            *XChatGroupInviteDetails `json:"group_invite_details,omitempty"`
 	ScreenCaptureDetectionEnabled bool                     `json:"screen_capture_detection_enabled,omitempty"`
+	AdminSettings                 *XChatGroupAdminSettings `json:"admin_settings,omitempty"`
+	MessageTTLMsec                string                   `json:"message_ttl_msec,omitempty"`
+	ScreenCaptureBlockingEnabled  bool                     `json:"screen_capture_blocking_enabled,omitempty"`
+}
+
+// XChatGroupAdminSettings lists the group actions X restricts to admins.
+type XChatGroupAdminSettings struct {
+	EditGroupInfo      bool `json:"edit_group_info,omitempty"`
+	EditMessageTTL     bool `json:"edit_message_ttl,omitempty"`
+	BlockScreenCapture bool `json:"block_screen_capture,omitempty"`
+	AddMember          bool `json:"add_member,omitempty"`
+	SendMessage        bool `json:"send_message,omitempty"`
+	StartCall          bool `json:"start_call,omitempty"`
 }
 
 type XChatGroupInviteDetails struct {
