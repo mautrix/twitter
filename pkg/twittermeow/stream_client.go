@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,13 +25,15 @@ import (
 type StreamClient struct {
 	client *Client
 
-	stop              atomic.Pointer[context.CancelFunc]
-	oldConversationID string
-	conversationID    string
-	sessionID         string
-	heartbeatInterval time.Duration
-	shortCircuit      chan struct{}
-	streamStopped     *exsync.Event
+	stop                atomic.Pointer[context.CancelFunc]
+	conversationMu      sync.Mutex
+	conversationID      string
+	conversationVersion uint64
+	pendingUnsubscribe  map[string]uint64
+	sessionID           string
+	heartbeatInterval   time.Duration
+	shortCircuit        chan struct{}
+	streamStopped       *exsync.Event
 }
 
 func (c *Client) newStreamClient() *StreamClient {
@@ -44,17 +49,28 @@ func (c *Client) newStreamClient() *StreamClient {
 
 func (sc *StreamClient) startOrUpdateEventStream(conversationID string) {
 	ctx := sc.client.Logger.With().Str("action", "event stream").Logger().WithContext(context.TODO())
-	if sc.conversationID == "" {
-		sc.conversationID = conversationID
+	sc.conversationMu.Lock()
+	oldConversationID := sc.conversationID
+	if oldConversationID == conversationID {
+		sc.conversationMu.Unlock()
+		return
+	}
+	sc.conversationID = conversationID
+	sc.conversationVersion++
+	if oldConversationID != "" {
+		if sc.pendingUnsubscribe == nil {
+			sc.pendingUnsubscribe = make(map[string]uint64)
+		}
+		sc.pendingUnsubscribe[oldConversationID] = sc.conversationVersion
+	}
+	sc.conversationMu.Unlock()
+	if oldConversationID == "" {
 		go sc.start(ctx)
 	} else {
-		sc.oldConversationID = sc.conversationID
-		sc.conversationID = conversationID
 		select {
-		case <-sc.shortCircuit:
+		case sc.shortCircuit <- struct{}{}:
 		default:
 		}
-		sc.shortCircuit <- struct{}{}
 	}
 }
 
@@ -75,9 +91,10 @@ func (sc *StreamClient) start(ctx context.Context) {
 		return
 	}
 
-	q := url.Values{
-		"topic": []string{getSubscriptionTopic(sc.conversationID)},
-	}
+	sc.conversationMu.Lock()
+	conversationID := sc.conversationID
+	sc.conversationMu.Unlock()
+	q := url.Values{"topic": []string{getSubscriptionTopic(conversationID)}}
 	eventsURL.RawQuery = q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, eventsURL.String(), nil)
@@ -172,12 +189,20 @@ func (sc *StreamClient) startHeartbeat(ctx context.Context) {
 }
 
 func (sc *StreamClient) heartbeat(ctx context.Context) {
-	payload := &payload.UpdateSubscriptionsPayload{
-		SubTopics:   getSubscriptionTopic(sc.conversationID),
-		UnsubTopics: getSubscriptionTopic(sc.oldConversationID),
+	sc.conversationMu.Lock()
+	conversationID := sc.conversationID
+	pendingUnsubscribe := maps.Clone(sc.pendingUnsubscribe)
+	sc.conversationMu.Unlock()
+	unsubTopics := make([]string, 0, len(pendingUnsubscribe))
+	for oldConversationID := range pendingUnsubscribe {
+		if oldConversationID != conversationID {
+			unsubTopics = append(unsubTopics, getSubscriptionTopic(oldConversationID))
+		}
 	}
-	if sc.oldConversationID != "" {
-		sc.oldConversationID = ""
+	slices.Sort(unsubTopics)
+	payload := &payload.UpdateSubscriptionsPayload{
+		SubTopics:   getSubscriptionTopic(conversationID),
+		UnsubTopics: strings.Join(unsubTopics, ","),
 	}
 	encodedPayload, err := payload.Encode()
 	if err != nil {
@@ -196,13 +221,25 @@ func (sc *StreamClient) heartbeat(ctx context.Context) {
 	})
 	if err != nil {
 		zerolog.Ctx(ctx).Err(err)
+		return
 	}
+	sc.conversationMu.Lock()
+	for oldConversationID, version := range pendingUnsubscribe {
+		if sc.pendingUnsubscribe[oldConversationID] == version {
+			delete(sc.pendingUnsubscribe, oldConversationID)
+		}
+	}
+	sc.conversationMu.Unlock()
 }
 
 func (sc *StreamClient) stopStream() {
 	if cancel := sc.stop.Load(); cancel != nil {
 		(*cancel)()
 	}
+	sc.conversationMu.Lock()
 	sc.conversationID = ""
+	sc.pendingUnsubscribe = nil
+	sc.conversationVersion++
+	sc.conversationMu.Unlock()
 	sc.sessionID = ""
 }

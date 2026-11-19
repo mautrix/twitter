@@ -28,6 +28,7 @@ var (
 	ErrResponseReadFailed   = errors.New("failed to read response body")
 	ErrMaxRetriesReached    = errors.New("maximum retries reached")
 	errRequestNotDispatched = errors.New("request failed before obtaining a connection")
+	errRequestReplayBlocked = errors.New("transport attempted to replay a request after sending headers")
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
@@ -133,12 +134,27 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 	readOnly := isReadOnlyRequest(params)
 	traceComplete := c.HTTP.Transport == c.defaultTransport
 	var getConn, gotConn atomic.Bool
+	var cancel context.CancelCauseFunc
 	if !readOnly && traceComplete {
+		ctx, cancel = context.WithCancelCause(ctx)
+		var wroteHeaders atomic.Bool
 		ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 			GetConn: func(string) { getConn.Store(true) },
-			GotConn: func(httptrace.GotConnInfo) { gotConn.Store(true) },
+			GotConn: func(httptrace.GotConnInfo) {
+				gotConn.Store(true)
+				if wroteHeaders.Load() {
+					cancel(errRequestReplayBlocked)
+				}
+			},
+			WroteHeaders: func() { wroteHeaders.Store(true) },
 		})
 	}
+	dontCloseBody := false
+	defer func() {
+		if cancel != nil && !dontCloseBody {
+			cancel(nil)
+		}
+	}()
 	var body io.Reader
 	if params.Payload != nil {
 		body = bytes.NewReader(params.Payload)
@@ -173,7 +189,6 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		httpClient = &clientCopy
 	}
 	response, err := httpClient.Do(newRequest)
-	dontCloseBody := false
 	defer func() {
 		if response != nil && response.Body != nil && !dontCloseBody {
 			_ = response.Body.Close()
@@ -182,6 +197,9 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 	if err != nil {
 		if errors.Is(err, ErrRedirectAttempted) {
 			return response, nil, err
+		}
+		if errors.Is(context.Cause(ctx), errRequestReplayBlocked) {
+			err = errRequestReplayBlocked
 		}
 		requestErr := fmt.Errorf("%w: %w", ErrRequestFailed, err)
 		var opErr *net.OpError
@@ -199,6 +217,9 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		}
 	} else {
 		dontCloseBody = true
+		if cancel != nil {
+			response.Body = &cancelOnCloseBody{ReadCloser: response.Body, cancel: cancel}
+		}
 	}
 	c.Logger.Trace().
 		Int("status_code", response.StatusCode).
@@ -222,4 +243,14 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 	}
 
 	return response, responseBody, nil
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelCauseFunc
+}
+
+func (body *cancelOnCloseBody) Close() error {
+	defer body.cancel(nil)
+	return body.ReadCloser.Close()
 }
