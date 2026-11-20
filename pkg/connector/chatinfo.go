@@ -501,7 +501,7 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 }
 
 func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
-	if strings.HasPrefix(avatarURL, "http://") && isPublicCDNURL(avatarURL) {
+	if strings.HasPrefix(avatarURL, "http://") && twittermeow.IsPublicCDNURL(avatarURL) {
 		avatarURL = "https://" + strings.TrimPrefix(avatarURL, "http://")
 	}
 	return &bridgev2.Avatar{
