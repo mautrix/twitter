@@ -18,6 +18,13 @@ const (
 	attachmentKeySalt = "xchat-attachment-key"
 )
 
+const MaxContentsEncryptionVersion = 1
+
+func SupportsContentsEncryption(mce *payload.MessageCreateEvent) bool {
+	version := ptr.Val(mce.ContentsEncryptionVersion)
+	return version >= 0 && version <= MaxContentsEncryptionVersion
+}
+
 // UsesMessageKey reports whether a MessageCreateEvent's contents and media are
 // encrypted under a key derived for that message instead of the conversation key.
 func UsesMessageKey(mce *payload.MessageCreateEvent) bool {

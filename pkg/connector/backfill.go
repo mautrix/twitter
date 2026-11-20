@@ -661,7 +661,7 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	contentsBytes := mce.Contents
 	isUserMetadata := isEncryptedXChatBackfillMessage(mce) && mce.IsUserMetadata()
 
-	if ptr.Val(mce.ContentsEncryptionVersion) != 0 {
+	if !crypto.SupportsContentsEncryption(mce) {
 		if isUserMetadata {
 			return nil, time.Time{}, 0, xchatSkipReasonUserMetadata
 		}
