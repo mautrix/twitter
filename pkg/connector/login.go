@@ -543,15 +543,17 @@ func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
-					Type:        bridgev2.LoginInputFieldTypeUsername,
-					ID:          loginFieldIdentifier,
-					Name:        "Username, email, or phone",
-					Description: "The identifier you use to sign in to X.",
+					Type:           bridgev2.LoginInputFieldTypeUsername,
+					ID:             loginFieldIdentifier,
+					Name:           "Username, email, or phone",
+					Description:    "The identifier you use to sign in to X.",
+					AutofillDomain: "x.com",
 				},
 				{
-					Type: bridgev2.LoginInputFieldTypePassword,
-					ID:   loginFieldPassword,
-					Name: "Password",
+					Type:           bridgev2.LoginInputFieldTypePassword,
+					ID:             loginFieldPassword,
+					Name:           "Password",
+					AutofillDomain: "x.com",
 				},
 			},
 		},
@@ -597,6 +599,7 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 	instructions := "X needs additional verification for this login."
 	fieldName := "Verification"
 	fieldType := bridgev2.LoginInputFieldTypeToken
+	var autofillDomain string
 	if challenge != nil {
 		if challenge.Description != "" {
 			instructions = challenge.Description
@@ -607,6 +610,7 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 		case twittermeow.WebLoginChallengeInputKindPhoneNumber:
 			fieldName = "Phone number"
 			fieldType = bridgev2.LoginInputFieldTypePhoneNumber
+			autofillDomain = "x.com"
 			if instructions == "" {
 				instructions = "Enter the phone number associated with your X account."
 			}
@@ -636,9 +640,10 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
-					Type: fieldType,
-					ID:   loginFieldVerificationCode,
-					Name: fieldName,
+					Type:           fieldType,
+					ID:             loginFieldVerificationCode,
+					Name:           fieldName,
+					AutofillDomain: autofillDomain,
 				},
 			},
 		},
