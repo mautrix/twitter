@@ -112,6 +112,9 @@ func (tc *TwitterConnector) LoadUserLogin(ctx context.Context, login *bridgev2.U
 		client.SetBrowserHeaders(*meta.BrowserHeaders)
 	}
 	client.SetCurrentUserID(ParseUserLoginID(login.ID))
+	if err := tc.initProxy(client); err != nil {
+		log.Err(err).Msg("Failed to set proxy")
+	}
 	login.Client = NewTwitterClient(login, tc, client)
 	return nil
 }
@@ -190,6 +193,17 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 	}
 
 	tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateConnecting})
+	for retryDelay := 5 * time.Second; ; retryDelay = min(retryDelay*2, 5*time.Minute) {
+		err := tc.connector.applyProxy(ctx, tc.client, "connect")
+		if err == nil {
+			break
+		}
+		log.Err(err).Dur("retry_in", retryDelay).Msg("Failed to set proxy, retrying")
+		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateTransientDisconnect, Error: "twitter-proxy-error"})
+		if !waitForXChatInboxRetry(ctx, retryDelay) {
+			return
+		}
+	}
 	if err := tc.restoreXChatFailedEvents(); err != nil {
 		log.Err(err).Msg("Failed to load pending XChat event failures")
 		tc.userLogin.BridgeState.Send(status.BridgeState{StateEvent: status.StateUnknownError, Error: "twitter-failed-events-load-failed"})

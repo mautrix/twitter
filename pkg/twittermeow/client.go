@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -58,7 +59,9 @@ type Client struct {
 	LogRedactedLoginResponses bool
 	jetfuelLoginIdentifier    string
 
-	defaultTransport http.RoundTripper
+	defaultTransport *req.Transport
+	proxy            atomic.Pointer[proxyState]
+	websocketHTTP    *http.Client
 
 	eventHandler              EventHandler
 	streamEventHandler        StreamEventHandler
@@ -98,6 +101,11 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 		defaultTransport: defaultTransport,
 		Logger:           logger,
 	}
+
+	defaultTransport.SetProxy(cli.proxyFunc)
+	wsTransport := http.DefaultTransport.(*http.Transport).Clone()
+	wsTransport.Proxy = cli.proxyFunc
+	cli.websocketHTTP = &http.Client{Transport: wsTransport}
 
 	cli.polling = cli.newPollingClient()
 	cli.stream = cli.newStreamClient()
@@ -162,6 +170,59 @@ func (c *Client) GetXChatProcessor() *XChatEventProcessor {
 // This replaces the current KeyManager with a new one using the provided store.
 func (c *Client) SetKeyStore(store crypto.KeyStore) {
 	c.keyManager = crypto.NewKeyManager(store)
+}
+
+// ErrProxyNotSet is returned for requests made after RequireProxy and before SetProxy.
+var ErrProxyNotSet = errors.New("proxy not set yet")
+
+type proxyState struct {
+	addr     string
+	url      *url.URL
+	required bool
+}
+
+func (c *Client) proxyFunc(req *http.Request) (*url.URL, error) {
+	state := c.proxy.Load()
+	if state == nil {
+		return http.ProxyFromEnvironment(req)
+	} else if state.required {
+		return nil, ErrProxyNotSet
+	} else if state.url != nil {
+		return state.url, nil
+	}
+	return http.ProxyFromEnvironment(req)
+}
+
+func (c *Client) swapProxy(state *proxyState) {
+	old := c.proxy.Swap(state)
+	if old != nil && old.addr == state.addr && old.required == state.required {
+		return
+	}
+	c.defaultTransport.CloseIdleConnections()
+	c.websocketHTTP.CloseIdleConnections()
+}
+
+// RequireProxy makes requests to X and the XChat websocket fail until SetProxy is called.
+func (c *Client) RequireProxy() {
+	c.swapProxy(&proxyState{required: true})
+}
+
+// SetProxy routes requests to X and the XChat websocket through the given http, https or socks5
+// proxy URL. An empty URL connects directly.
+func (c *Client) SetProxy(proxyAddr string) error {
+	state := &proxyState{addr: proxyAddr}
+	if proxyAddr != "" {
+		proxyURL, err := url.Parse(proxyAddr)
+		if err != nil {
+			// The parse error repeats the URL, which may contain credentials.
+			return errors.New("invalid proxy URL")
+		} else if proxyURL.Host == "" {
+			return errors.New("proxy URL has no host")
+		}
+		state.url = proxyURL
+	}
+	c.swapProxy(state)
+	return nil
 }
 
 func (c *Client) SetLoginHTTPTransport(transport http.RoundTripper) {
@@ -664,11 +725,41 @@ func (c *Client) SetActiveConversation(conversationID string) {
 	c.stream.startOrUpdateEventStream(conversationID)
 }
 
+func isDomainOrSubdomain(host, domain string) bool {
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+// IsXURL reports whether rawURL is an https URL on X's media host that may receive the user's cookies.
+func IsXURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Port() != "" {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "ton.x.com", "ton.twitter.com":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsPublicCDNURL reports whether rawURL is on X's public media CDN, which needs no authentication.
+func IsPublicCDNURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return false
+	}
+	return isDomainOrSubdomain(strings.ToLower(parsed.Hostname()), "twimg.com")
+}
+
 // FetchRaw performs an authenticated request to the given URL and returns the response and body.
 // Useful for downloading blobs that still require the standard auth headers (cookies, bearer, etc).
-func (c *Client) FetchRaw(ctx context.Context, url string) (*http.Response, error) {
+func (c *Client) FetchRaw(ctx context.Context, rawURL string) (*http.Response, error) {
+	if !IsXURL(rawURL) {
+		return nil, fmt.Errorf("refusing authenticated request to non-X URL %q", rawURL)
+	}
 	resp, _, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
+		URL:            rawURL,
 		Method:         http.MethodGet,
 		Origin:         endpoints.BASE_URL,
 		WithClientUUID: false,

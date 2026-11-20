@@ -275,14 +275,15 @@ var _ bridgev2.LoginProcessWithParams = (*TwitterLogin)(nil)
 const (
 	pinLength           = 4
 	pinRegex            = "^[0-9]{4}$"
-	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat"
+	passcodeBodyRecover = "To retrieve your encrypted messages, please enter your passcode below. For more information see: https://help.x.com/en/using-x/about-chat\n\n" + passcodeResetHint
+	passcodeResetHint   = "Forgot your passcode? Use \"Forgot passcode\" in X Chat on x.com or the X app. Changing it from a phone where X Chat is already open keeps your history; a full reset removes access to older encrypted messages. Then log in again."
 	passcodeBodySetup   = "No PIN code is registered yet. Create your X Chat PIN below."
 )
 
 var (
 	ErrJuiceboxLocked = bridgev2.RespError{
 		ErrCode:    "FI.MAU.TWITTER.JUICEBOX_LOCKED",
-		Err:        "Too many incorrect passcode attempts. X Chat is locked.",
+		Err:        "Too many incorrect passcode attempts. X Chat is locked. Change your passcode from a phone where X Chat is already open to keep your history, or reset it with \"Forgot passcode\" in X Chat on x.com or the X app, then log in again.",
 		StatusCode: http.StatusForbidden,
 	}
 	ErrJuiceboxRateLimited = bridgev2.RespError{
@@ -591,15 +592,17 @@ func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
-					Type:        bridgev2.LoginInputFieldTypeUsername,
-					ID:          loginFieldIdentifier,
-					Name:        "Username, email, or phone",
-					Description: "The identifier you use to sign in to X.",
+					Type:           bridgev2.LoginInputFieldTypeUsername,
+					ID:             loginFieldIdentifier,
+					Name:           "Username, email, or phone",
+					Description:    "The identifier you use to sign in to X.",
+					AutofillDomain: "x.com",
 				},
 				{
-					Type: bridgev2.LoginInputFieldTypePassword,
-					ID:   loginFieldPassword,
-					Name: "Password",
+					Type:           bridgev2.LoginInputFieldTypePassword,
+					ID:             loginFieldPassword,
+					Name:           "Password",
+					AutofillDomain: "x.com",
 				},
 			},
 		},
@@ -645,6 +648,7 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 	instructions := "X needs additional verification for this login."
 	fieldName := "Verification"
 	fieldType := bridgev2.LoginInputFieldTypeToken
+	var autofillDomain string
 	if challenge != nil {
 		if challenge.Description != "" {
 			instructions = challenge.Description
@@ -655,6 +659,7 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 		case twittermeow.WebLoginChallengeInputKindPhoneNumber:
 			fieldName = "Phone number"
 			fieldType = bridgev2.LoginInputFieldTypePhoneNumber
+			autofillDomain = "x.com"
 			if instructions == "" {
 				instructions = "Enter the phone number associated with your X account."
 			}
@@ -684,9 +689,10 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 		UserInputParams: &bridgev2.LoginUserInputParams{
 			Fields: []bridgev2.LoginInputDataField{
 				{
-					Type: fieldType,
-					ID:   loginFieldVerificationCode,
-					Name: fieldName,
+					Type:           fieldType,
+					ID:             loginFieldVerificationCode,
+					Name:           fieldName,
+					AutofillDomain: autofillDomain,
 				},
 			},
 		},
@@ -835,6 +841,9 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 
 	client := twittermeow.NewClient(cookieStruct, nil, t.User.Log.With().Str("component", "login_twitter_client").Logger())
 	client.SetLoginHTTPTransport(t.loginHTTPTransport)
+	if err := t.applyLoginProxy(ctx, client); err != nil {
+		return nil, err
+	}
 	return t.completeCookieLogin(ctx, client)
 }
 
@@ -881,6 +890,10 @@ func (t *TwitterLogin) ensureClientForPIN(ctx context.Context) (string, error) {
 		cookieStruct := twitCookies.NewCookiesFromString(t.Cookies)
 		t.client = twittermeow.NewClient(cookieStruct, nil, t.log().With().Str("component", "login_twitter_client").Logger())
 		t.client.SetLoginHTTPTransport(t.loginHTTPTransport)
+		if err := t.applyLoginProxy(ctx, t.client); err != nil {
+			t.client = nil
+			return "", err
+		}
 		if t.browserHeaders.UserAgent != "" {
 			t.client.SetBrowserHeaders(t.browserHeaders)
 		}
@@ -1035,7 +1048,7 @@ func selectRegisteredJuiceboxKey(
 func (t *TwitterLogin) selectRegisteredJuiceboxKey(ctx context.Context, data *response.GetPublicKeysResponse) (response.PublicKeyWithTokenMap, bool, error) {
 	logger := t.User.Log.With().Str("component", "juicebox").Logger()
 	return selectRegisteredJuiceboxKey(ctx, data, func(ctx context.Context, configJSON string, authTokens map[string]string) error {
-		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, t.loginHTTPTransport, logger)
+		return CheckJuiceboxRegistration(ctx, configJSON, authTokens, t.client.HTTP, logger)
 	})
 }
 
@@ -1140,7 +1153,7 @@ func (t *TwitterLogin) bootstrapJuiceboxPIN(ctx context.Context, pin string) (*K
 		"",
 		bootstrapData.RawSecret,
 		addResp.Data.UserAddPublicKey.TokenMap.MaxGuessCount,
-		t.loginHTTPTransport,
+		t.client.HTTP,
 		juiceboxLogger,
 	)
 	if err != nil {
@@ -1172,7 +1185,7 @@ func (t *TwitterLogin) recoverJuiceboxPIN(
 		Int("auth_tokens_count", len(authTokens)).
 		Msg("Juicebox recovery parameters")
 
-	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", t.loginHTTPTransport, juiceboxLogger)
+	keys, err := RecoverKeysFromJuicebox(ctx, juiceboxConfigJSON, authTokens, pin, "", t.client.HTTP, juiceboxLogger)
 	if err != nil {
 		if retryStep, handledErr, handled := handleRecoverPasscodeError(err); handled {
 			return nil, "", retryStep, handledErr
@@ -1238,8 +1251,20 @@ func (t *TwitterLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 	return t.mapClientHTTPFailure(t.startCredentialsLogin(ctx))
 }
 
+// applyLoginProxy doesn't call get_proxy_url when login requests go through the user's device.
+func (t *TwitterLogin) applyLoginProxy(ctx context.Context, client *twittermeow.Client) error {
+	if t.loginHTTPTransport != nil {
+		return t.tc.initProxy(client)
+	}
+	return t.tc.applyProxy(ctx, client, "login")
+}
+
 func (t *TwitterLogin) startCredentialsLogin(ctx context.Context) (*bridgev2.LoginStep, error) {
-	t.webLogin = twittermeow.NewWebLoginSession(t.newLoginClient())
+	client := t.newLoginClient()
+	if err := t.applyLoginProxy(ctx, client); err != nil {
+		return nil, err
+	}
+	t.webLogin = twittermeow.NewWebLoginSession(client)
 
 	result, err := t.webLogin.Start(ctx)
 	if err != nil {
@@ -1801,7 +1826,13 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 
 	// The client becomes persistent in NewLogin below, so detach the login-scoped
 	// transport before exposing it to the long-lived bridge client.
+	usedDeviceTransport := t.loginHTTPTransport != nil
 	t.finishLoginHTTPTransport()
+	if usedDeviceTransport {
+		if err := t.tc.applyProxy(ctx, t.client, "login"); err != nil {
+			t.User.Log.Warn().Err(err).Msg("Failed to set proxy after device login, requests are blocked until connect sets it")
+		}
+	}
 
 	remoteProfile := &status.RemoteProfile{
 		Username: strings.TrimSpace(t.profile.ScreenName),

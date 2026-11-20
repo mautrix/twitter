@@ -501,7 +501,7 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 }
 
 func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
-	if strings.HasPrefix(avatarURL, "http://") && isPublicCDNURL(avatarURL) {
+	if strings.HasPrefix(avatarURL, "http://") && twittermeow.IsPublicCDNURL(avatarURL) {
 		avatarURL = "https://" + strings.TrimPrefix(avatarURL, "http://")
 	}
 	return &bridgev2.Avatar{
@@ -512,9 +512,6 @@ func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
 				return nil, err
 			}
 			defer resp.Body.Close()
-			if resp.StatusCode >= 400 {
-				return nil, fmt.Errorf("failed to download avatar: HTTP %d", resp.StatusCode)
-			}
 			return io.ReadAll(resp.Body)
 		},
 		Remove: avatarURL == "",
@@ -612,6 +609,16 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 		Get: func(ctx context.Context) ([]byte, error) {
 			log := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Str("url", avatarURL).Logger()
 
+			if twittermeow.IsPublicCDNURL(avatarURL) {
+				resp, err := downloadFile(ctx, tc.client, avatarURL)
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to download group avatar")
+					return nil, err
+				}
+				defer resp.Body.Close()
+				return io.ReadAll(resp.Body)
+			}
+
 			resp, err := tc.client.FetchRaw(ctx, avatarURL)
 			if err != nil {
 				log.Warn().Err(err).Msg("Failed to download group avatar")
@@ -678,7 +685,7 @@ func (tc *TwitterClient) getOrFetchChatInfoForPolling(ctx context.Context, conve
 
 	// Try 2: Fetch via REST API
 	log.Debug().Msg("Fetching conversation via REST API")
-	restConvID := ConvertConversationIDToREST(conversationID)
+	restConvID := ConvertConversationIDToRESTAPI(conversationID)
 	reqQuery := payload.DMRequestQuery{}.Default()
 	resp, err := tc.client.FetchConversationContext(ctx, restConvID, &reqQuery, payload.CONTEXT_FETCH_DM_CONVERSATION)
 	if err != nil {

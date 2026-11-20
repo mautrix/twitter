@@ -12,6 +12,9 @@ type MessageData struct {
 	Attachment             *Attachment `json:"attachment,omitempty"`
 	ReplyData              ReplyData   `json:"reply_data,omitempty"`
 	EditCount              int         `json:"edit_count,omitempty"`
+	Forwarded              bool        `json:"-"`
+	ForwardedText          string      `json:"-"`
+	ForwardedEntities      *Entities   `json:"-"`
 	ConversationKeyVersion string      `json:"conversation_key_version,omitempty"`
 
 	// Attachments holds the ordered attachments from XChat messages.
