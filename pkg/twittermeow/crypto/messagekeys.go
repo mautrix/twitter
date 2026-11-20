@@ -17,6 +17,12 @@ const (
 	attachmentKeySalt = "xchat-attachment-key"
 )
 
+const maxContentsEncryptionVersion = 1
+
+func SupportsContentsEncryption(mce *payload.MessageCreateEvent) bool {
+	return ptr.Val(mce.ContentsEncryptionVersion) <= maxContentsEncryptionVersion
+}
+
 func usesMessageKey(mce *payload.MessageCreateEvent) bool {
 	return mce != nil && ptr.Val(mce.ContentsEncryptionVersion) >= 1
 }
