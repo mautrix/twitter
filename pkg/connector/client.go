@@ -541,7 +541,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 				Dur("retry_in", retryDelay).
 				Bool("has_polling_cursor", hasPollingCursor).
 				Msg("Failed to fetch initial inbox state for untrusted conversations, retrying")
-			if !pollingStarted && hasPollingCursor {
+			if !pollingStarted && hasPollingCursor && ctx.Err() == nil {
 				tc.client.StartPolling(ctx)
 				pollingStarted = true
 			}
@@ -550,7 +550,7 @@ func (tc *TwitterClient) connect(ctx context.Context) {
 			}
 			retryDelay = min(retryDelay*2, 30*time.Minute)
 		}
-		if !pollingStarted {
+		if !pollingStarted && ctx.Err() == nil {
 			tc.client.StartPolling(ctx)
 		}
 	}()
