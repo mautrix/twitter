@@ -675,8 +675,8 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	isUserMetadata := isEncryptedMessageCreateEvent(mce) && mce.IsUserMetadata()
 
-	if version := ptr.Val(mce.ContentsEncryptionVersion); version != 0 {
-		return p.handleUnsupportedContentsEncryption(ctx, evt, version, isUserMetadata)
+	if !crypto.SupportsContentsEncryption(mce) {
+		return p.handleUnsupportedContentsEncryption(ctx, evt, ptr.Val(mce.ContentsEncryptionVersion), isUserMetadata)
 	}
 
 	if len(contentsBytes) == 0 {
