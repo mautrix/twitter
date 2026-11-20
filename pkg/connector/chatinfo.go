@@ -609,6 +609,16 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 		Get: func(ctx context.Context) ([]byte, error) {
 			log := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Str("url", avatarURL).Logger()
 
+			if twittermeow.IsPublicCDNURL(avatarURL) {
+				resp, err := downloadFile(ctx, tc.client, avatarURL)
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to download group avatar")
+					return nil, err
+				}
+				defer resp.Body.Close()
+				return io.ReadAll(resp.Body)
+			}
+
 			resp, err := tc.client.FetchRaw(ctx, avatarURL)
 			if err != nil {
 				log.Warn().Err(err).Msg("Failed to download group avatar")
