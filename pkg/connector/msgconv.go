@@ -744,8 +744,9 @@ func normalizeMediaURL(raw string) string {
 		return trimmed
 	}
 	if strings.HasPrefix(trimmed, "http://") {
-		if isPublicCDNURL(trimmed) {
-			return "https://" + strings.TrimPrefix(trimmed, "http://")
+		upgraded := "https://" + strings.TrimPrefix(trimmed, "http://")
+		if twittermeow.IsPublicCDNURL(trimmed) || twittermeow.IsXURL(upgraded) {
+			return upgraded
 		}
 		return trimmed
 	}
@@ -959,15 +960,17 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 		return nil, fmt.Errorf("failed to prepare request: %w", err)
 	}
 
-	if isPublicCDNURL(url) {
+	if twittermeow.IsPublicCDNURL(url) {
 		// Public CDN URLs use minimal headers - no auth, no Origin/Referer
 		req.Header.Set("User-Agent", cli.GetUserAgent())
 		req.Header.Set("Accept", "*/*")
-	} else {
+	} else if twittermeow.IsXURL(url) {
 		// Authenticated requests use full headers with cookies
 		headers := cli.GetBaseHeaders()
 		headers.Set("Cookie", cli.GetCookieString())
 		req.Header = headers
+	} else {
+		return nil, fmt.Errorf("refusing to download media from non-X URL %q", url)
 	}
 
 	getResp, err := cli.HTTP.Do(req)
@@ -981,13 +984,6 @@ func downloadFile(ctx context.Context, cli *twittermeow.Client, url string) (*ht
 		return nil, fmt.Errorf("unexpected HTTP %d", getResp.StatusCode)
 	}
 	return getResp, nil
-}
-
-// isPublicCDNURL returns true for Twitter CDN URLs that don't require authentication.
-func isPublicCDNURL(url string) bool {
-	return strings.Contains(url, "pbs.twimg.com") ||
-		strings.Contains(url, "abs.twimg.com") ||
-		strings.Contains(url, "video.twimg.com")
 }
 
 func (tc *TwitterClient) attachmentCardToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, attachment *types.Attachment, urls []types.URLs, keyVersion string) *event.BeeperLinkPreview {

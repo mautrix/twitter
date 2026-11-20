@@ -717,11 +717,41 @@ func (c *Client) SetActiveConversation(conversationID string) {
 	c.stream.startOrUpdateEventStream(conversationID)
 }
 
+func isDomainOrSubdomain(host, domain string) bool {
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+// IsXURL reports whether rawURL is an https URL on X's media host that may receive the user's cookies.
+func IsXURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Port() != "" {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "ton.x.com", "ton.twitter.com":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsPublicCDNURL reports whether rawURL is on X's public media CDN, which needs no authentication.
+func IsPublicCDNURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return false
+	}
+	return isDomainOrSubdomain(strings.ToLower(parsed.Hostname()), "twimg.com")
+}
+
 // FetchRaw performs an authenticated request to the given URL and returns the response and body.
 // Useful for downloading blobs that still require the standard auth headers (cookies, bearer, etc).
-func (c *Client) FetchRaw(ctx context.Context, url string) (*http.Response, error) {
+func (c *Client) FetchRaw(ctx context.Context, rawURL string) (*http.Response, error) {
+	if !IsXURL(rawURL) {
+		return nil, fmt.Errorf("refusing authenticated request to non-X URL %q", rawURL)
+	}
 	resp, _, err := c.makeAPIRequest(ctx, apiRequestOpts{
-		URL:            url,
+		URL:            rawURL,
 		Method:         http.MethodGet,
 		Origin:         endpoints.BASE_URL,
 		WithClientUUID: false,
