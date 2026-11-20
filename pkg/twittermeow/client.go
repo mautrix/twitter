@@ -1,12 +1,10 @@
 package twittermeow
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -667,6 +665,7 @@ type apiRequestOpts struct {
 	WithClientUUID   bool
 	Headers          map[string]string
 	DontReadResponse bool
+	ReadOnly         bool
 }
 
 func (c *Client) makeAPIRequest(ctx context.Context, opts apiRequestOpts) (*http.Response, []byte, error) {
@@ -698,18 +697,15 @@ func (c *Client) makeAPIRequest(ctx context.Context, opts apiRequestOpts) (*http
 		WithXClientUUID:     opts.WithClientUUID,
 	}
 	headers := c.buildHeaders(headerOpts)
-	var payload io.Reader
-	if opts.Body != nil {
-		payload = bytes.NewReader(opts.Body)
-	}
 
 	return c.MakeRequestFull(ctx, MakeRequestParams{
 		URL:          opts.URL,
 		Method:       opts.Method,
 		Headers:      headers,
-		Payload:      payload,
+		Payload:      opts.Body,
 		ContentType:  opts.ContentType,
 		DontReadBody: opts.DontReadResponse,
+		ReadOnly:     opts.ReadOnly,
 	})
 }
 

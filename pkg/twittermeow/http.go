@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -19,23 +22,21 @@ import (
 var MaxHTTPRetries = 5
 
 var (
-	ErrRedirectAttempted   = errors.New("redirect attempted")
-	ErrRequestCreateFailed = errors.New("failed to create request")
-	ErrRequestFailed       = errors.New("failed to send request")
-	ErrResponseReadFailed  = errors.New("failed to read response body")
-	ErrMaxRetriesReached   = errors.New("maximum retries reached")
+	ErrRedirectAttempted    = errors.New("redirect attempted")
+	ErrRequestCreateFailed  = errors.New("failed to create request")
+	ErrRequestFailed        = errors.New("failed to send request")
+	ErrResponseReadFailed   = errors.New("failed to read response body")
+	ErrMaxRetriesReached    = errors.New("maximum retries reached")
+	errRequestNotDispatched = errors.New("request failed before obtaining a connection")
+	errRequestReplayBlocked = errors.New("transport attempted to replay a request after sending headers")
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
-	var pl io.Reader
-	if payload != nil {
-		pl = bytes.NewReader(payload)
-	}
 	return c.MakeRequestFull(ctx, MakeRequestParams{
 		URL:         url,
 		Method:      method,
 		Headers:     headers,
-		Payload:     pl,
+		Payload:     payload,
 		ContentType: contentType,
 	})
 }
@@ -44,9 +45,11 @@ type MakeRequestParams struct {
 	URL          string
 	Method       string
 	Headers      http.Header
-	Payload      io.Reader
+	Payload      []byte
 	ContentType  types.ContentType
 	DontReadBody bool
+	// ReadOnly permits retries for read-only operations that use a mutation method such as POST.
+	ReadOnly bool
 }
 
 func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
@@ -85,6 +88,11 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 				Str("response_body", string(respDat)).
 				Msg("Request failed")
 			return nil, respDat, err
+		} else if !canRetryRequest(params, err) && !errors.Is(err, ErrRedirectAttempted) {
+			log.Err(err).
+				Dur("duration", dur).
+				Msg("Request failed, automatic replay is unsafe")
+			return resp, respDat, err
 		} else if attempts > MaxHTTPRetries {
 			log.Err(err).
 				Dur("duration", dur).
@@ -107,20 +115,80 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 	}
 }
 
+func isReadOnlyRequest(params MakeRequestParams) bool {
+	if params.ReadOnly {
+		return true
+	}
+	switch params.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	return false
+}
+
+func canRetryRequest(params MakeRequestParams, err error) bool {
+	return isReadOnlyRequest(params) || errors.Is(err, errRequestNotDispatched)
+}
+
 func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
-	newRequest, err := http.NewRequestWithContext(ctx, params.Method, params.URL, params.Payload)
+	readOnly := isReadOnlyRequest(params)
+	traceComplete := c.HTTP.Transport == c.defaultTransport
+	var getConn, gotConn atomic.Bool
+	var cancel context.CancelCauseFunc
+	if !readOnly && traceComplete {
+		ctx, cancel = context.WithCancelCause(ctx)
+		var wroteHeaders atomic.Bool
+		ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			GetConn: func(string) { getConn.Store(true) },
+			GotConn: func(httptrace.GotConnInfo) {
+				gotConn.Store(true)
+				if wroteHeaders.Load() {
+					cancel(errRequestReplayBlocked)
+				}
+			},
+			WroteHeaders: func() { wroteHeaders.Store(true) },
+		})
+	}
+	dontCloseBody := false
+	defer func() {
+		if cancel != nil && !dontCloseBody {
+			cancel(nil)
+		}
+	}()
+	var body io.Reader
+	if params.Payload != nil {
+		body = bytes.NewReader(params.Payload)
+	}
+	newRequest, err := http.NewRequestWithContext(ctx, params.Method, params.URL, body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}
 
+	if !readOnly {
+		// The transport can replay a mutation internally when it has a rewind function.
+		newRequest.GetBody = nil
+	}
 	if params.ContentType != types.ContentTypeNone {
 		params.Headers.Set("content-type", string(params.ContentType))
 	}
 
 	newRequest.Header = params.Headers
 
-	response, err := c.HTTP.Do(newRequest)
-	dontCloseBody := false
+	httpClient := c.HTTP
+	if !readOnly {
+		clientCopy := *httpClient
+		previousCheckRedirect := httpClient.CheckRedirect
+		clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if previousCheckRedirect != nil {
+				if err := previousCheckRedirect(req, via); err != nil {
+					return err
+				}
+			}
+			return ErrRedirectAttempted
+		}
+		httpClient = &clientCopy
+	}
+	response, err := httpClient.Do(newRequest)
 	defer func() {
 		if response != nil && response.Body != nil && !dontCloseBody {
 			_ = response.Body.Close()
@@ -130,7 +198,15 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		if errors.Is(err, ErrRedirectAttempted) {
 			return response, nil, err
 		}
-		return nil, nil, fmt.Errorf("%w: %w", ErrRequestFailed, err)
+		if errors.Is(context.Cause(ctx), errRequestReplayBlocked) {
+			err = errRequestReplayBlocked
+		}
+		requestErr := fmt.Errorf("%w: %w", ErrRequestFailed, err)
+		var opErr *net.OpError
+		if traceComplete && getConn.Load() && !gotConn.Load() && errors.As(err, &opErr) && opErr.Op == "dial" {
+			requestErr = fmt.Errorf("%w: %w", errRequestNotDispatched, requestErr)
+		}
+		return nil, nil, requestErr
 	}
 
 	var responseBody []byte
@@ -141,6 +217,9 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		}
 	} else {
 		dontCloseBody = true
+		if cancel != nil {
+			response.Body = &cancelOnCloseBody{ReadCloser: response.Body, cancel: cancel}
+		}
 	}
 	c.Logger.Trace().
 		Int("status_code", response.StatusCode).
@@ -164,4 +243,14 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 	}
 
 	return response, responseBody, nil
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelCauseFunc
+}
+
+func (body *cancelOnCloseBody) Close() error {
+	defer body.cancel(nil)
+	return body.ReadCloser.Close()
 }
