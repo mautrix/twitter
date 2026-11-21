@@ -174,7 +174,11 @@ func convertXChatAttachments(evt *payload.MessageEvent, attachments []*payload.M
 
 	position := 0
 	for _, att := range attachments {
-		if att == nil || att.Payment != nil {
+		if att == nil {
+			continue
+		}
+		if att.Payment != nil {
+			result = append(result, &types.Attachment{})
 			continue
 		}
 		index := position
