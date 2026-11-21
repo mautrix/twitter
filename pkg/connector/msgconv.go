@@ -629,7 +629,7 @@ func (tc *TwitterClient) twitterAttachmentToMatrix(ctx context.Context, portal *
 			Content: &content,
 		}, []int{0, 0}, nil
 	} else {
-		return nil, nil, fmt.Errorf("unsupported attachment type")
+		return nil, nil, fmt.Errorf("unsupported attachment type %q", attachment.XChatKind)
 	}
 
 	content := event.MessageEventContent{
