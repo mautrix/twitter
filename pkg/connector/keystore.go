@@ -55,6 +55,12 @@ func (ks *userLoginKeyStore) GetConversationKey(ctx context.Context, conversatio
 		return nil, err
 	}
 
+	if _, ok := meta.ConversationKeys[keyVersion]; !ok {
+		if signingKeyVersion, ok := meta.ConversationKeysNotForUs[keyVersion]; ok && signingKeyVersion == ks.meta.SigningKeyVersion {
+			return nil, crypto.ErrKeyNotForUs
+		}
+	}
+
 	if meta.ConversationKeys == nil {
 		log.Info().
 			Str("conversation_id", conversationID).
@@ -144,6 +150,24 @@ func (ks *userLoginKeyStore) PutConversationKey(ctx context.Context, key *crypto
 		portal.UpdateCapabilities(ctx, ks.login, true)
 	}
 	return err
+}
+
+func (ks *userLoginKeyStore) PutConversationKeyNotForUs(ctx context.Context, conversationID, keyVersion string) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
+	meta, portal, err := ks.getPortalMetadata(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	if signingKeyVersion, ok := meta.ConversationKeysNotForUs[keyVersion]; ok && signingKeyVersion == ks.meta.SigningKeyVersion {
+		return nil
+	}
+	if meta.ConversationKeysNotForUs == nil {
+		meta.ConversationKeysNotForUs = make(map[string]string)
+	}
+	meta.ConversationKeysNotForUs[keyVersion] = ks.meta.SigningKeyVersion
+	return portal.Save(ctx)
 }
 
 func (ks *userLoginKeyStore) DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error {
