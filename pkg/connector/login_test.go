@@ -802,7 +802,7 @@ func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
 		ScriptURL: "https://abs.twimg.com/responsive-web/client-web/ondemand.castle.1ff15ffa.js",
 		PublicKey: "castle-public-key",
 	}
-	step := makeCastleTokenStep(info, "test-user", "")
+	step := makeCastleTokenStep(info, "test-user", "", nil)
 
 	if step.Type != bridgev2.LoginStepTypeCookies {
 		t.Fatalf("Type = %s, want cookies webview step", step.Type)

@@ -37,6 +37,7 @@ var (
 	jetfuelNumericIDRegex        = regexp.MustCompile(`\b[0-9]{5,30}\b`)
 	jetfuelUUIDRegex             = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 	jetfuelDiagnosticActionRegex = regexp.MustCompile(`^/onboarding/web/actions/[a-z][a-z0-9_]{1,80}$`)
+	jetfuelPreludeSDKKeyRegex    = regexp.MustCompile(`sdk_[A-Za-z0-9]{16,}`)
 	jetfuelActionAliases         = map[string]string{
 		"begin_login":            endpoints.JETFUEL_BEGIN_LOGIN_PATH,
 		"login_enter_password":   endpoints.JETFUEL_LOGIN_ENTER_PASSWORD_PATH,
@@ -57,8 +58,8 @@ type jetfuelLoginState struct {
 	twoFactorAction    string
 	twoFactorMethods   []WebLoginAuthMethod
 	sessionToken       string
-	preludeDispatchID  string
 	userID             string
+	fromPreludeGate    bool
 }
 
 type jetfuelLoginResponse struct {
@@ -107,6 +108,9 @@ func (wls *WebLoginSession) startJetfuel(ctx context.Context) (*WebLoginResult, 
 		wls.client.jetfuelCastleInfo = castleInfo
 	}
 	parsed := parseJetfuelLoginResponse(body)
+	if key := parsed.preludeSDKKey(); key != "" {
+		wls.client.jetfuelCastleInfo.PreludeSDKKey = key
+	}
 	if !parsed.hasPath(endpoints.JETFUEL_BEGIN_LOGIN_PATH) && !parsed.hasField("username_or_email") {
 		return nil, fmt.Errorf("%w: jetfuel login page did not expose a username action", ErrWebLoginUnexpectedSubtask)
 	}
@@ -332,13 +336,11 @@ func (wls *WebLoginSession) logUnsupportedJetfuelResponse(
 		Int("field_count", len(parsed.fields)).
 		Int("response_auth_method_count", len(parsed.authMethods())).
 		Bool("response_has_session_token", parsed.uuidValue("session_token") != "").
-		Bool("response_has_prelude_dispatch_id", parsed.uuidValue("prelude_dispatch_id") != "").
 		Bool("response_has_user_id", parsed.numericValue("user_id") != "").
 		Bool("has_completion_marker", parsed.isComplete()).
 		Bool("has_login_error", parsed.loginError() != nil).
 		Bool("has_auth_cookie", wls.client.IsLoggedIn()).
 		Bool("state_has_session_token", state != nil && state.sessionToken != "").
-		Bool("state_has_prelude_dispatch_id", state != nil && state.preludeDispatchID != "").
 		Bool("state_has_user_id", state != nil && state.userID != "").
 		Msg("Jetfuel response did not expose a supported next action")
 }
@@ -413,8 +415,11 @@ func (wls *WebLoginSession) submitJetfuelBeginTwoFactor(ctx context.Context, act
 		return nil, fmt.Errorf("%w: jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
 	}
 	form := url.Values{}
-	if wls.jetfuel.preludeDispatchID != "" {
-		form.Set("prelude_dispatch_id", wls.jetfuel.preludeDispatchID)
+	if wls.jetfuel.fromPreludeGate {
+		form.Set("from_prelude_gate", "1")
+	}
+	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+		form.Set("prelude_dispatch_id", id)
 	}
 	if wls.jetfuel.sessionToken != "" {
 		form.Set("session_token", wls.jetfuel.sessionToken)
@@ -467,8 +472,8 @@ func (wls *WebLoginSession) submitJetfuelText(ctx context.Context, text string) 
 	if wls.jetfuel.sessionToken != "" {
 		form.Set("session_token", wls.jetfuel.sessionToken)
 	}
-	if wls.jetfuel.preludeDispatchID != "" {
-		form.Set("prelude_dispatch_id", wls.jetfuel.preludeDispatchID)
+	if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+		form.Set("prelude_dispatch_id", id)
 	}
 	body, err := wls.client.jetfuelPostForm(ctx, wls.jetfuel.verificationAction, form)
 	if err != nil {
@@ -527,11 +532,11 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	if wls.jetfuel == nil {
 		wls.jetfuel = &jetfuelLoginState{}
 	}
+	if key := parsed.preludeSDKKey(); key != "" {
+		wls.client.jetfuelCastleInfo.PreludeSDKKey = key
+	}
 	if token := parsed.uuidValue("session_token"); token != "" {
 		wls.jetfuel.sessionToken = token
-	}
-	if id := parsed.uuidValue("prelude_dispatch_id"); id != "" {
-		wls.jetfuel.preludeDispatchID = id
 	}
 	if id := parsed.numericValue("user_id"); id != "" {
 		wls.jetfuel.userID = id
@@ -543,6 +548,7 @@ func (wls *WebLoginSession) updateJetfuelState(parsed jetfuelLoginResponse) {
 	if action := parsed.beginTwoFactorAction(); action != "" {
 		wls.jetfuel.twoFactorAction = action
 		wls.jetfuel.verificationMethod = nil
+		wls.jetfuel.fromPreludeGate = parsed.hasField("from_prelude_gate")
 	}
 	if action := parsed.verificationAction(); action != "" {
 		if action != wls.jetfuel.verificationAction || parsed.isPhoneNumberChallenge() {
@@ -575,8 +581,7 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 		wls.jetfuel.twoFactorMethods = methods
 		wls.jetfuel.verificationMethod = nil
 	}
-	supportedMethods := supportedWebLoginAuthMethods(methods)
-	if len(supportedMethods) == 0 {
+	if len(supportedWebLoginAuthMethods(methods)) == 0 {
 		return &WebLoginResult{
 			Status:           WebLoginStatusUnsupported,
 			Challenge:        unsupportedWebLoginAuthMethodChallenge(methods),
@@ -592,7 +597,7 @@ func (wls *WebLoginSession) jetfuelAuthMethodChoiceResult(parsed jetfuelLoginRes
 			Description: "Choose how to verify this X login.",
 			IsTwoFactor: true,
 		},
-		AuthMethods: supportedMethods,
+		AuthMethods: methods,
 	}
 }
 
@@ -619,20 +624,75 @@ func supportedWebLoginAuthMethods(methods []WebLoginAuthMethod) []WebLoginAuthMe
 	return supported
 }
 
-func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodID string) (*WebLoginResult, error) {
+func (wls *WebLoginSession) jetfuelAuthMethodAction(methodID string) (WebLoginAuthMethod, string, error) {
 	if wls.jetfuel == nil || len(wls.jetfuel.twoFactorMethods) == 0 {
-		return nil, ErrWebLoginMissingAuthMethodState
+		return WebLoginAuthMethod{}, "", ErrWebLoginMissingAuthMethodState
 	}
 	method, ok := wls.jetfuel.findAuthMethod(methodID)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, strings.TrimSpace(methodID))
+		return WebLoginAuthMethod{}, "", fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, strings.TrimSpace(methodID))
 	}
 	if !method.Supported {
-		return nil, fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, method.Name)
+		return WebLoginAuthMethod{}, "", fmt.Errorf("%w: %s", ErrWebLoginUnsupportedAuthMethod, method.Name)
 	}
 	action := wls.jetfuel.twoFactorAction
 	if action == "" {
 		action = endpoints.JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH
+	}
+	return method, action, nil
+}
+
+// JetfuelWebviewRequest is a Jetfuel form POST for the client webview to send itself. Prelude compares the
+// TLS fingerprint of the request that asks X for a text message with the one that dispatched the Prelude
+// signals, so that request has to come from the same webview.
+type JetfuelWebviewRequest struct {
+	URL     string            `json:"url"`
+	Form    map[string]string `json:"form"`
+	Headers map[string]string `json:"headers"`
+}
+
+func (wls *WebLoginSession) PrepareWebviewAuthMethodSubmit(methodID string) (*JetfuelWebviewRequest, error) {
+	if wls.backend != webLoginBackendJetfuel {
+		return nil, nil
+	}
+	method, action, err := wls.jetfuelAuthMethodAction(methodID)
+	if err != nil {
+		return nil, err
+	}
+	if method.Kind != WebLoginAuthMethodKindSMS || !wls.client.JetfuelCastleTokenInfo().HasPrelude() {
+		return nil, nil
+	}
+	fullURL := endpoints.JETFUEL_BASE_URL + ensureLeadingSlash(action)
+	req := &JetfuelWebviewRequest{
+		URL:     fullURL,
+		Form:    make(map[string]string),
+		Headers: wls.client.jetfuelWebviewHeaders(fullURL),
+	}
+	for key, values := range wls.jetfuel.authMethodForm(method) {
+		if len(values) > 0 {
+			req.Form[key] = values[0]
+		}
+	}
+	return req, nil
+}
+
+func (wls *WebLoginSession) SubmitWebviewAuthMethodResponse(ctx context.Context, methodID string, body []byte) (*WebLoginResult, error) {
+	method, _, err := wls.jetfuelAuthMethodAction(methodID)
+	if err != nil {
+		return nil, err
+	}
+	wls.client.Logger.Debug().
+		Str("method_id", method.ID).
+		Str("method_kind", string(method.Kind)).
+		Int("response_bytes", len(body)).
+		Msg("Handling Jetfuel auth method response from client webview")
+	return wls.handleJetfuelAuthMethodResponse(method, body)
+}
+
+func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodID string) (*WebLoginResult, error) {
+	method, action, err := wls.jetfuelAuthMethodAction(methodID)
+	if err != nil {
+		return nil, err
 	}
 	wls.client.Logger.Debug().
 		Str("method_id", method.ID).
@@ -641,10 +701,22 @@ func (wls *WebLoginSession) submitJetfuelAuthMethod(ctx context.Context, methodI
 		Int("method_index", method.Index).
 		Str("action", action).
 		Msg("Submitting Jetfuel auth method")
-	body, err := wls.client.jetfuelPostForm(ctx, action, wls.jetfuel.authMethodForm(method))
+	form := wls.jetfuel.authMethodForm(method)
+	if method.Kind == WebLoginAuthMethodKindSMS {
+		if id := wls.client.takeNextJetfuelPreludeDispatchID(); id != "" {
+			form.Set("prelude_dispatch_id", id)
+		} else if wls.client.jetfuelCastleInfo.HasPrelude() {
+			return nil, fmt.Errorf("%w: text message verification needs a Prelude dispatch ID", ErrJetfuelCastleTokenRequired)
+		}
+	}
+	body, err := wls.client.jetfuelPostForm(ctx, action, form)
 	if err != nil {
 		return nil, err
 	}
+	return wls.handleJetfuelAuthMethodResponse(method, body)
+}
+
+func (wls *WebLoginSession) handleJetfuelAuthMethodResponse(method WebLoginAuthMethod, body []byte) (*WebLoginResult, error) {
 	parsed := parseJetfuelLoginResponse(body)
 	if err := parsed.loginError(); err != nil {
 		return nil, err
@@ -717,6 +789,33 @@ func (c *Client) jetfuelPostForm(ctx context.Context, path string, form url.Valu
 		return nil, err
 	}
 	return c.jetfuelRequest(ctx, path, http.MethodPost, []byte(form.Encode()))
+}
+
+func (c *Client) jetfuelWebviewHeaders(fullURL string) map[string]string {
+	txID, err := crypto.SignTransaction(c.session.AnimationToken, c.session.VerificationToken, fullURL, http.MethodPost)
+	if err != nil {
+		txID = "e:"
+	}
+	authorization := c.session.bearerToken
+	if authorization == "" {
+		authorization = BearerToken
+	}
+	headers := map[string]string{
+		"authorization":             authorization,
+		"timezone":                  jetfuelTimezone(),
+		"x-client-transaction-id":   txID,
+		"x-jf-client-theme":         jetfuelHeaderTheme,
+		"x-jf-v":                    jetfuelHeaderVersion,
+		"x-twitter-active-user":     "yes",
+		"x-twitter-client-language": "en",
+	}
+	if guestToken := c.cookies.Get(cookies.XGuestToken); guestToken != "" {
+		headers["x-guest-token"] = guestToken
+	}
+	if csrfToken := c.cookies.Get(cookies.XCt0); csrfToken != "" {
+		headers["x-csrf-token"] = csrfToken
+	}
+	return headers
 }
 
 func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body []byte) ([]byte, error) {
@@ -1301,15 +1400,15 @@ func classifyJetfuelAuthMethod(value string) (WebLoginAuthMethod, bool) {
 			ID:          "Sms",
 			SubmitID:    jetfuelAuthMethodSubmitID("Sms", value),
 			Name:        "Text Message",
-			Description: "Text message verification is coming soon.",
+			Description: "Get a code by text message.",
 			Kind:        WebLoginAuthMethodKindSMS,
-			Supported:   false,
+			Supported:   true,
 		}, true
 	case "u2fsecuritykey", "securitykey", "securitykeypc", "passkey":
 		return WebLoginAuthMethod{
 			ID:          "U2fSecurityKey",
 			Name:        "Security Key PC",
-			Description: "Requires passkey/WebAuthn client support.",
+			Description: "Security keys and passkeys only work with Login with Browser. To use one, add X with Login with Browser instead.",
 			Kind:        WebLoginAuthMethodKindUnknown,
 			Supported:   false,
 		}, true
@@ -1433,6 +1532,15 @@ func isJetfuelPhoneNumberChallengeText(text string) bool {
 		strings.Contains(text, "associated")
 }
 
+func (jfr jetfuelLoginResponse) preludeSDKKey() string {
+	for _, str := range jfr.strings {
+		if key := jetfuelPreludeSDKKeyRegex.FindString(str); key != "" {
+			return key
+		}
+	}
+	return ""
+}
+
 func (jfr jetfuelLoginResponse) isComplete() bool {
 	text := jfr.text()
 	return strings.Contains(text, "/home") || strings.Contains(text, "open_account")
@@ -1451,6 +1559,8 @@ func (jfr jetfuelLoginResponse) loginError() error {
 		return &WebLoginError{Code: 32, Message: "This email or username is not registered yet."}
 	case isJetfuelBadCredentialsText(text):
 		return &WebLoginError{Code: 32, Message: "Wrong password"}
+	case strings.Contains(text, "couldn't send you a text message"):
+		return &WebLoginError{Message: "We couldn't send you a text message. Please check the number you entered."}
 	case strings.Contains(text, "could not log you in") || strings.Contains(text, "couldn't log you in"):
 		return &WebLoginError{Code: 399, Message: "Could not log you in now. Please try again later."}
 	default:

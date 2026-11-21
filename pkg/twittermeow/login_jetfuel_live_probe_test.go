@@ -178,8 +178,8 @@ func TestLiveJetfuelVerificationResponseProbe(t *testing.T) {
 	if session.jetfuel.sessionToken != "" {
 		form.Set("session_token", session.jetfuel.sessionToken)
 	}
-	if session.jetfuel.preludeDispatchID != "" {
-		form.Set("prelude_dispatch_id", session.jetfuel.preludeDispatchID)
+	if id := client.takeNextJetfuelPreludeDispatchID(); id != "" {
+		form.Set("prelude_dispatch_id", id)
 	}
 	body, err := client.jetfuelPostForm(ctx, session.jetfuel.verificationAction, form)
 	if err != nil {
