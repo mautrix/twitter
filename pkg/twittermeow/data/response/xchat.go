@@ -110,7 +110,15 @@ func (r *GetInboxPageConversationDataResponse) Item(conversationID string) (XCha
 			return item, nil
 		}
 	}
-	return XChatInboxItem{}, fmt.Errorf("%w: %s", ErrConversationDataMissing, conversationID)
+	returnedIDs := make([]string, len(items))
+	for i, item := range items {
+		returnedIDs[i] = item.ConversationDetail.ConversationID
+	}
+	errorCodes := make([]int, len(r.Errors))
+	for i, gqlErr := range r.Errors {
+		errorCodes[i] = gqlErr.Code
+	}
+	return XChatInboxItem{}, fmt.Errorf("%w: %s (returned %d items %v, error codes %v)", ErrConversationDataMissing, conversationID, len(items), returnedIDs, errorCodes)
 }
 
 type XChatInboxPage struct {
