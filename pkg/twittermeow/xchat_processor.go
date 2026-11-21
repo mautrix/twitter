@@ -675,8 +675,8 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	isUserMetadata := isEncryptedMessageCreateEvent(mce) && mce.IsUserMetadata()
 
-	if version := ptr.Val(mce.ContentsEncryptionVersion); version != 0 {
-		return p.handleUnsupportedContentsEncryption(ctx, evt, version, isUserMetadata)
+	if !crypto.SupportsContentsEncryption(mce) {
+		return p.handleUnsupportedContentsEncryption(ctx, evt, ptr.Val(mce.ContentsEncryptionVersion), isUserMetadata)
 	}
 
 	if len(contentsBytes) == 0 {
@@ -742,15 +742,25 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			Str("conversation_id", conversationID).
 			Str("key_version", keyVersion).
 			Logger()
+		contentsKey, err := crypto.MessageContentsKey(convKey.Key, evt, mce)
+		if err != nil {
+			p.log.Warn().
+				Err(err).
+				Str("sequence_id", ptr.Val(evt.SequenceId)).
+				Str("conversation_id", conversationID).
+				Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
+				Msg("Failed to derive message key, skipping message")
+			return fmt.Errorf("derive XChat message key: %w", err)
+		}
 		if isUserMetadata {
-			err = crypto.DecryptUserMetadataBytes(contentsBytes, convKey.Key)
+			err = crypto.DecryptUserMetadataBytes(contentsBytes, contentsKey)
 			if err != nil {
 				return fmt.Errorf("decrypt XChat user metadata: %w", err)
 			}
 			return nil
 		}
 
-		contents, err = crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, convKey.Key, &debugLog)
+		contents, err = crypto.DecryptMessageEntryContentsBytesDebug(contentsBytes, contentsKey, &debugLog)
 		if err != nil {
 			p.log.Warn().
 				Err(err).
