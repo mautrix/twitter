@@ -253,10 +253,35 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 			}
 		}
 
+		converted.XChatKind = xchatAttachmentKind(att)
+
 		result = append(result, converted)
 	}
 
 	return result
+}
+
+func xchatAttachmentKind(att *payload.MessageAttachment) string {
+	switch {
+	case att.Media != nil:
+		return "media"
+	case att.Post != nil:
+		return "post"
+	case att.Url != nil:
+		return "url"
+	case att.UnifiedCard != nil:
+		return "unified_card"
+	case att.Money != nil:
+		return "money"
+	case att.Jetfuel != nil:
+		return "jetfuel"
+	case att.Payment != nil:
+		return "payment_receipt"
+	case att.BotMessage != nil:
+		return "bot_message_" + strconv.Itoa(int(ptr.Val(att.BotMessage.Type)))
+	default:
+		return "unknown"
+	}
 }
 
 // convertXChatReplyPreview converts XChat ReplyingToPreview to types.ReplyData
