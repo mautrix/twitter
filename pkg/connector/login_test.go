@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/l10n"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 
@@ -169,7 +170,7 @@ func TestSubmitPINClientHTTPFailureIsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitUserInput() error = %v, want retry step", err)
 	}
-	if step == nil || step.StepID != LoginStepJuiceboxPIN || !strings.Contains(step.Instructions.Text, clientHTTPFailureInstructions) {
+	if step == nil || step.StepID != LoginStepJuiceboxPIN || !strings.Contains(step.Instructions.Text, msgErrClientHTTPFailure.Message().Text) {
 		t.Fatalf("SubmitUserInput() step = %#v, want retryable PIN step", step)
 	}
 	if login.client != client || login.loginHTTPTransport == nil {
@@ -618,7 +619,7 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	step, err := login.Wait(context.Background())
-	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions.Text, clientHTTPFailureInstructions) || scriptRequests != 1 {
+	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions.Text, msgErrClientHTTPFailure.Message().Text) || scriptRequests != 1 {
 		t.Fatalf("script failure did not return credentials retry: step=%v err=%v requests=%d", step, err, scriptRequests)
 	}
 	if login.webLogin != nil || login.webLoginPassword != "" || login.loginHTTPTransport == nil {
@@ -755,7 +756,7 @@ func TestMakeAuthMethodStepUsesNativeSelect(t *testing.T) {
 		{ID: "BackupCode", Name: "Backup Code", Supported: true},
 		{ID: "U2fSecurityKey", Name: "Security Key PC", Supported: false},
 	}
-	step := makeAuthMethodStep(methods, "")
+	step := makeAuthMethodStep(methods, l10n.Message{})
 
 	if step.Type != bridgev2.LoginStepTypeUserInput {
 		t.Fatalf("Type = %s, want user input", step.Type)
@@ -793,7 +794,7 @@ func TestWebLoginUnsupportedInstructionsUsesChallengeDescription(t *testing.T) {
 		},
 	}
 
-	if got := webLoginUnsupportedInstructions(result); got != "Text message verification is coming soon." {
+	if got := webLoginUnsupportedInstructions(result).Text; got != "Text message verification is coming soon." {
 		t.Fatalf("webLoginUnsupportedInstructions() = %q", got)
 	}
 }
@@ -806,7 +807,7 @@ func TestMakeCastleTokenStepUsesClientWebviewExtraction(t *testing.T) {
 		ScriptURL: "https://abs.twimg.com/responsive-web/client-web/ondemand.castle.1ff15ffa.js",
 		PublicKey: "castle-public-key",
 	}
-	step := makeCastleTokenStep(info, "test-user", "")
+	step := makeCastleTokenStep(info, "test-user", l10n.Message{})
 
 	if step.Type != bridgev2.LoginStepTypeCookies {
 		t.Fatalf("Type = %s, want cookies webview step", step.Type)
@@ -1073,7 +1074,7 @@ func TestMakeVerificationStepUsesPhoneNumberInput(t *testing.T) {
 	step := makeVerificationStep(&twittermeow.WebLoginChallenge{
 		Description: "Enter the phone number associated with your X account.",
 		InputKind:   twittermeow.WebLoginChallengeInputKindPhoneNumber,
-	}, "")
+	}, l10n.Message{})
 
 	if step.UserInputParams == nil || len(step.UserInputParams.Fields) != 1 {
 		t.Fatalf("UserInputParams = %#v, want one field", step.UserInputParams)

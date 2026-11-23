@@ -6,7 +6,7 @@ import (
 
 var L = l10n.NewNamespace("mautrix-twitter")
 
-var withErrorComment = l10n.WithComment("error is an English error message from the bridge or from X")
+var withErrorComment = l10n.WithComment("error is a message explaining what went wrong; it may be a localized bridge message or untranslated text from X")
 
 var (
 	msgFlowCookiesName         = L.Define("login.flow.cookies.name", "Cookies")
@@ -46,4 +46,41 @@ var (
 		"login.step.complete.instructions", "Successfully logged into X as @{username}",
 		l10n.WithComment("username is the X handle of the account, without the @"),
 	)
+
+	msgErrClientHTTPFailure        = L.Define("login.error.client_http_failure", "The request did not complete on this device. Please try again.")
+	msgErrSessionExpired           = L.Define("login.error.session_expired", "The X login session expired. Enter your X login details again.")
+	msgErrCastleMetadataMissing    = L.Define("login.error.castle_metadata_missing", "X did not provide the browser-token metadata needed for native login. Try again.")
+	msgErrNoLoginStep              = L.Define("login.error.no_login_step", "X did not return a login step. Try again.")
+	msgErrNoAuthMethods            = L.Define("login.error.no_auth_methods", "X returned a verification method chooser without any methods. Try again.")
+	msgErrNeedsPassword            = L.Define("login.error.needs_password", "X still needs your password. Enter your login details again.")
+	msgErrNeedsIdentifier          = L.Define("login.error.needs_identifier", "X still needs your username, email, or phone. Enter your login details again.")
+	msgErrAccountIDUnreadable      = L.Define("login.error.account_id_unreadable", "Couldn't read your X account ID. Please enter your login details again.")
+	msgErrChooseVerificationMethod = L.Define("login.error.choose_verification_method", "Choose a verification method.")
+	msgErrEnterVerificationCode    = L.Define("login.error.enter_verification_code", "Enter the X verification code.")
+	msgErrInvalidPasscode          = L.Define("login.error.invalid_passcode", "Invalid passcode.")
+	msgErrInvalidPasscodeGuesses   = L.DefinePlural(
+		"login.error.invalid_passcode_guesses", "count",
+		"Invalid passcode. You have {count} guess remaining.",
+		"Invalid passcode. You have {count} guesses remaining.",
+	)
+	msgErrLoginRejected           = L.Define("login.error.login_rejected", "X rejected this login. Please check the details and try again.")
+	msgErrBadCredentials          = L.Define("login.error.bad_credentials", "X rejected the username or password. Check the details and try again.")
+	msgErrRateLimited             = L.Define("login.error.rate_limited", "X rejected this login attempt. Wait a bit, then try again.")
+	msgErrLoginRejectedWithReason = L.Define(
+		"login.error.login_rejected_with_reason", "X rejected this login: {reason}",
+		l10n.WithComment("reason is untranslated text from X"),
+	)
+	msgErrPasswordRejected      = L.Define("login.error.password_rejected", "X didn't accept this login. Check your password and try again.")
+	msgErrUnsupportedChallenge  = L.Define("login.error.unsupported_challenge", "X returned a login challenge this bridge does not support yet.")
+	msgErrAuthMethodUnavailable = L.Define("login.error.auth_method_unavailable", "That X verification method is not available for this login.")
+	msgErrAuthMethodExpired     = L.Define("login.error.auth_method_expired", "The X verification method selection expired. Enter your X login details again.")
+	msgErrLoginFailed           = L.Define(
+		"login.error.login_failed", "X login failed: {error}",
+		l10n.WithComment("error is an untranslated error message from the bridge or from X"),
+	)
+
+	msgErrWebviewInvalidToken       = L.Define("login.error.webview_invalid_token", "The X webview returned an invalid browser token.")
+	msgErrWebviewNoToken            = L.Define("login.error.webview_no_token", "The X webview did not return a browser token.")
+	msgErrWebviewInvalidFingerprint = L.Define("login.error.webview_invalid_fingerprint", "The X webview did not return a valid browser fingerprint.")
+	msgErrFreshTokenNeeded          = L.Define("login.error.fresh_token_needed", "X needs a fresh browser token to continue this login.")
 )
