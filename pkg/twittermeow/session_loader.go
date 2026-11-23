@@ -55,24 +55,6 @@ func (c *Client) loadPage(ctx context.Context, url string) error {
 		"sec-fetch-user":            "?1",
 		"sec-fetch-dest":            "document",
 	}
-	previousCheckRedirect := c.HTTP.CheckRedirect
-	c.HTTP.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if isXCookieResponse(req.Response) {
-			c.cookies.UpdateFromResponse(req.Response)
-		}
-		if previousCheckRedirect != nil {
-			if err := previousCheckRedirect(req, via); err != nil {
-				return err
-			}
-		} else if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		if req.URL.Scheme == "https" && req.URL.Host == endpoints.BASE_HOST {
-			req.Header.Set("Cookie", c.cookies.String())
-		}
-		return nil
-	}
-	defer func() { c.HTTP.CheckRedirect = previousCheckRedirect }()
 	mainPageResp, mainPageRespBody, err := c.MakeRequest(ctx, url, http.MethodGet, c.buildHeaders(HeaderOpts{Extra: extraHeaders, WithCookies: true}), nil, types.ContentTypeNone)
 	if mainPageResp != nil && (err == nil || isXCookieResponse(mainPageResp)) {
 		c.cookies.UpdateFromResponse(mainPageResp)
@@ -270,11 +252,24 @@ func (c *Client) calculateAnimationToken() {
 	}
 }
 
+func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if isXCookieResponse(req.Response) {
+		c.cookies.UpdateFromResponse(req.Response)
+	}
+	if req.URL.Scheme == "https" && req.URL.Host == endpoints.BASE_HOST {
+		req.Header.Set("Cookie", c.cookies.String())
+	}
+	return nil
+}
+
 func isXCookieResponse(resp *http.Response) bool {
 	return resp != nil && resp.Request != nil && resp.Request.URL != nil &&
 		resp.Request.URL.Scheme == "https" && resp.Request.URL.Host == endpoints.BASE_HOST
 }
 
 func isAccountAccessResponse(resp *http.Response) bool {
-	return isXCookieResponse(resp) && resp.Request.URL.Path == endpoints.ACCOUNT_ACCESS_PATH
+	return isXCookieResponse(resp) && strings.TrimSuffix(resp.Request.URL.Path, "/") == endpoints.ACCOUNT_ACCESS_PATH
 }
