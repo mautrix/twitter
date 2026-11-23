@@ -169,7 +169,7 @@ func TestSubmitPINClientHTTPFailureIsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitUserInput() error = %v, want retry step", err)
 	}
-	if step == nil || step.StepID != LoginStepJuiceboxPIN || !strings.Contains(step.Instructions, clientHTTPFailureInstructions) {
+	if step == nil || step.StepID != LoginStepJuiceboxPIN || !strings.Contains(step.Instructions.Text, clientHTTPFailureInstructions) {
 		t.Fatalf("SubmitUserInput() step = %#v, want retryable PIN step", step)
 	}
 	if login.client != client || login.loginHTTPTransport == nil {
@@ -239,7 +239,7 @@ func TestHandleWebLoginCredentialsErrorRetriesRecoverableErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleWebLoginCredentialsError(temporary limit) error = %v", err)
 	}
-	if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, "Wait a bit") {
+	if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions.Text, "Wait a bit") {
 		t.Fatalf("handleWebLoginCredentialsError(temporary limit) step = %#v, want retryable credentials step", step)
 	}
 }
@@ -505,7 +505,7 @@ gt=123456789
 	if err != nil {
 		t.Fatalf("continueWebCastleLogin() error = %v", err)
 	}
-	if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, "Wait a bit") {
+	if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions.Text, "Wait a bit") {
 		t.Fatalf("continueWebCastleLogin() step = %#v, want retryable credentials step", step)
 	}
 	if login.webLoginCastleStage != "" {
@@ -618,7 +618,7 @@ func TestCredentialsBootstrapScriptFailureIsRetryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	step, err := login.Wait(context.Background())
-	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, clientHTTPFailureInstructions) || scriptRequests != 1 {
+	if err != nil || step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions.Text, clientHTTPFailureInstructions) || scriptRequests != 1 {
 		t.Fatalf("script failure did not return credentials retry: step=%v err=%v requests=%d", step, err, scriptRequests)
 	}
 	if login.webLogin != nil || login.webLoginPassword != "" || login.loginHTTPTransport == nil {
@@ -721,7 +721,7 @@ gt=123456789
 			if err != nil {
 				t.Fatalf("continueWebCastleLogin() error = %v", err)
 			}
-			if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions, tc.wantInstructions) {
+			if step == nil || step.StepID != LoginStepIDCredentials || !strings.Contains(step.Instructions.Text, tc.wantInstructions) {
 				t.Fatalf("continueWebCastleLogin() step = %#v, want credentials step containing %q", step, tc.wantInstructions)
 			}
 			if passwordRequestCount != 1 {
@@ -773,11 +773,15 @@ func TestMakeAuthMethodStepUsesNativeSelect(t *testing.T) {
 	if field.ID != loginFieldAuthMethod {
 		t.Fatalf("field.ID = %s, want %s", field.ID, loginFieldAuthMethod)
 	}
-	if strings.Join(field.Options, ",") != "Authenticator App,Backup Code" {
+	optionValues := make([]string, len(field.Options))
+	for i, opt := range field.Options {
+		optionValues[i] = opt.Value
+	}
+	if strings.Join(optionValues, ",") != "Authenticator App,Backup Code" {
 		t.Fatalf("field.Options = %#v", field.Options)
 	}
-	if strings.Contains(step.Instructions, "not supported") {
-		t.Fatalf("Instructions = %q, want no unsupported caveat", step.Instructions)
+	if strings.Contains(step.Instructions.Text, "not supported") {
+		t.Fatalf("Instructions = %q, want no unsupported caveat", step.Instructions.Text)
 	}
 }
 
@@ -1078,10 +1082,10 @@ func TestMakeVerificationStepUsesPhoneNumberInput(t *testing.T) {
 	if field.Type != bridgev2.LoginInputFieldTypePhoneNumber {
 		t.Fatalf("field.Type = %s, want phone_number", field.Type)
 	}
-	if field.Name != "Phone number" {
-		t.Fatalf("field.Name = %q, want Phone number", field.Name)
+	if field.Name.Text != "Phone number" {
+		t.Fatalf("field.Name = %q, want Phone number", field.Name.Text)
 	}
-	if !strings.Contains(step.Instructions, "phone number") {
-		t.Fatalf("Instructions = %q, want phone number prompt", step.Instructions)
+	if !strings.Contains(step.Instructions.Text, "phone number") {
+		t.Fatalf("Instructions = %q, want phone number prompt", step.Instructions.Text)
 	}
 }

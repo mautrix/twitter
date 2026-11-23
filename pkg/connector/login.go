@@ -33,6 +33,8 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/status"
 
+	"go.mau.fi/util/l10n"
+
 	"go.mau.fi/mautrix-twitter/pkg/juiceboxgo"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
@@ -379,13 +381,13 @@ func wrapTwitterLoginError(err error) error {
 func (tc *TwitterConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
 		{
-			Name:        "Cookies",
-			Description: "Log in with your X account using your cookies",
+			Name:        msgFlowCookiesName.Message(),
+			Description: msgFlowCookiesDescription.Message(),
 			ID:          LoginFlowIDCookies,
 		},
 		{
-			Name:        "Username/password",
-			Description: "Log in with your X username, email, or phone number and password",
+			Name:        msgFlowPasswordName.Message(),
+			Description: msgFlowPasswordDescription.Message(),
 			ID:          LoginFlowIDPassword,
 		},
 	}
@@ -481,7 +483,7 @@ func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
 		StepID:       LoginStepIDCookies,
-		Instructions: "Open the Login URL in an Incognito/Private browsing mode. Then, extract the cookies as a JSON object/cURL command copied from the Network tab of your browser's DevTools. After that, close the browser **before** pasting the cookies.\n\nFor example: `{\"ct0\":\"123466-...\",\"auth_token\":\"abcde-...\"}`",
+		Instructions: msgStepCookiesInstructions.Message(),
 		CookiesParams: &bridgev2.LoginCookiesParams{
 			URL: "https://x.com/i/flow/login",
 			Fields: []bridgev2.LoginCookieField{
@@ -520,7 +522,7 @@ func (t *TwitterLogin) makeBrowserIdentityStep() *bridgev2.LoginStep {
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
 		StepID:       LoginStepIDBrowserIdentity,
-		Instructions: "Preparing X login.",
+		Instructions: msgStepPrepareInstructions.Message(),
 		CookiesParams: &bridgev2.LoginCookiesParams{
 			URL:               castleTokenWebviewURL,
 			ExtractJS:         browserIdentityExtractJS,
@@ -532,9 +534,9 @@ func (t *TwitterLogin) makeBrowserIdentityStep() *bridgev2.LoginStep {
 }
 
 func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
-	instructions := "Enter your X username, email, or phone number and password."
+	instructions := msgStepCredentialsInstructions.Message()
 	if errorLine != "" {
-		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+		instructions = msgStepCredentialsErrorInstructions.Render(l10n.Params{"error": errorLine})
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -545,14 +547,14 @@ func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
 				{
 					Type:           bridgev2.LoginInputFieldTypeUsername,
 					ID:             loginFieldIdentifier,
-					Name:           "Username, email, or phone",
-					Description:    "The identifier you use to sign in to X.",
+					Name:           msgFieldIdentifierName.Message(),
+					Description:    msgFieldIdentifierDescription.Message(),
 					AutofillDomain: "x.com",
 				},
 				{
 					Type:           bridgev2.LoginInputFieldTypePassword,
 					ID:             loginFieldPassword,
-					Name:           "Password",
+					Name:           msgFieldPasswordName.Message(),
 					AutofillDomain: "x.com",
 				},
 			},
@@ -561,9 +563,9 @@ func makeCredentialsStep(errorLine string) *bridgev2.LoginStep {
 }
 
 func makeCastleTokenStep(info twittermeow.JetfuelCastleTokenInfo, identifier, errorLine string) *bridgev2.LoginStep {
-	instructions := "Generating an X browser token for this login."
+	instructions := msgStepCastleTokenInstructions.Message()
 	if errorLine != "" {
-		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+		instructions = msgStepCastleTokenErrorInstructions.Render(l10n.Params{"error": errorLine})
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
@@ -596,42 +598,41 @@ func (t *TwitterLogin) makeWebLoginCastleTokenStep(errorLine string) *bridgev2.L
 }
 
 func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine string) *bridgev2.LoginStep {
-	instructions := "X needs additional verification for this login."
-	fieldName := "Verification"
+	var remoteInstructions string
+	fieldName := msgFieldVerificationName.Message()
 	fieldType := bridgev2.LoginInputFieldTypeToken
 	var autofillDomain string
 	if challenge != nil {
 		if challenge.Description != "" {
-			instructions = challenge.Description
+			remoteInstructions = challenge.Description
 		} else if challenge.Hint != "" {
-			instructions = challenge.Hint
+			remoteInstructions = challenge.Hint
 		}
 		switch challenge.InputKind {
 		case twittermeow.WebLoginChallengeInputKindPhoneNumber:
-			fieldName = "Phone number"
+			fieldName = msgFieldVerificationPhoneName.Message()
 			fieldType = bridgev2.LoginInputFieldTypePhoneNumber
 			autofillDomain = "x.com"
-			if instructions == "" {
-				instructions = "Enter the phone number associated with your X account."
-			}
 		case twittermeow.WebLoginChallengeInputKindCode:
-			fieldName = "Verification code"
+			fieldName = msgFieldVerificationCodeName.Message()
 			fieldType = bridgev2.LoginInputFieldType2FACode
-			if instructions == "" {
-				instructions = "Enter the verification code from X."
-			}
 		default:
 			if challenge.IsTwoFactor {
-				fieldName = "Verification code"
+				fieldName = msgFieldVerificationCodeName.Message()
 				fieldType = bridgev2.LoginInputFieldType2FACode
-				if instructions == "" {
-					instructions = "Enter the verification code from X."
-				}
 			}
 		}
 	}
-	if errorLine != "" {
-		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+	var instructions l10n.Message
+	switch {
+	case remoteInstructions != "" && errorLine != "":
+		instructions = l10n.Unlocalized(fmt.Sprintf("%s\n\n%s", errorLine, remoteInstructions))
+	case remoteInstructions != "":
+		instructions = l10n.Unlocalized(remoteInstructions)
+	case errorLine != "":
+		instructions = msgStepVerificationErrorInstructions.Render(l10n.Params{"error": errorLine})
+	default:
+		instructions = msgStepVerificationInstructions.Message()
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -651,9 +652,9 @@ func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine st
 }
 
 func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine string) *bridgev2.LoginStep {
-	instructions := "Choose how to verify this X login."
+	instructions := msgStepAuthMethodInstructions.Message()
 	if errorLine != "" {
-		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+		instructions = msgStepAuthMethodErrorInstructions.Render(l10n.Params{"error": errorLine})
 	}
 	options := make([]string, 0, len(methods))
 	for _, method := range methods {
@@ -675,9 +676,9 @@ func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine stri
 				{
 					Type:        bridgev2.LoginInputFieldTypeSelect,
 					ID:          loginFieldAuthMethod,
-					Name:        "Verification method",
-					Description: "Choose the method X should use for this login.",
-					Options:     options,
+					Name:        msgFieldAuthMethodName.Message(),
+					Description: msgFieldAuthMethodDescription.Message(),
+					Options:     bridgev2.UnlocalizedOptions(options...),
 				},
 			},
 		},
@@ -685,14 +686,18 @@ func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine stri
 }
 
 func makePINStep(errorLine string, isSetup bool) *bridgev2.LoginStep {
-	instructions := passcodeBodyRecover
-	fieldName := "Passcode"
+	instructions := msgStepPINInstructions.Message()
+	fieldName := msgFieldPINName.Message()
 	if isSetup {
-		instructions = passcodeBodySetup
-		fieldName = "Create your PIN code"
+		instructions = msgStepPINSetupInstructions.Message()
+		fieldName = msgFieldPINSetupName.Message()
 	}
 	if errorLine != "" {
-		instructions = fmt.Sprintf("%s\n\n%s", errorLine, instructions)
+		if isSetup {
+			instructions = msgStepPINSetupErrorInstructions.Render(l10n.Params{"error": errorLine})
+		} else {
+			instructions = msgStepPINErrorInstructions.Render(l10n.Params{"error": errorLine})
+		}
 	}
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeUserInput,
@@ -755,7 +760,7 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		return &bridgev2.LoginStep{
 			Type:         bridgev2.LoginStepTypeDisplayAndWait,
 			StepID:       LoginStepIDPrepareLogin,
-			Instructions: "Preparing X login.",
+			Instructions: msgStepPrepareInstructions.Message(),
 			DisplayAndWaitParams: &bridgev2.LoginDisplayAndWaitParams{
 				Type: bridgev2.LoginDisplayTypeNothing,
 			},
@@ -1808,7 +1813,7 @@ func (t *TwitterLogin) submitPINInput(ctx context.Context, input map[string]stri
 	return &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeComplete,
 		StepID:       LoginStepIDComplete,
-		Instructions: fmt.Sprintf("Successfully logged into X as @%s", ul.UserLogin.RemoteName),
+		Instructions: msgStepCompleteInstructions.Render(l10n.Params{"username": ul.UserLogin.RemoteName}),
 		CompleteParams: &bridgev2.LoginCompleteParams{
 			UserLoginID: ul.ID,
 			UserLogin:   ul,
