@@ -15,6 +15,8 @@ type Attachment struct {
 
 	// XChat-specific fields for URL attachment images
 	URLBannerMediaHashKey string `json:"url_banner_media_hash_key,omitempty"`
+
+	XChatKind string `json:"-"`
 }
 type URLs struct {
 	URL         string `json:"url,omitempty"`
