@@ -3,7 +3,6 @@ package methods
 import (
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +65,6 @@ func SortMessagesByTime(messages []*types.Message) {
 }
 
 func CreateConversationID(conversationIDs []string) string {
-	sort.Strings(conversationIDs)
+	slices.SortFunc(conversationIDs, CompareSnowflake)
 	return strings.Join(conversationIDs, ":")
 }
