@@ -259,7 +259,7 @@ func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
 	if isXCookieResponse(req.Response) {
 		c.cookies.UpdateFromResponse(req.Response)
 	}
-	if req.URL.Scheme == "https" && req.URL.Host == endpoints.BASE_HOST {
+	if req.URL.Scheme == "https" && req.URL.Host == endpoints.BASE_HOST && via[0].Header.Get("Cookie") != "" {
 		req.Header.Set("Cookie", c.cookies.String())
 	}
 	return nil
