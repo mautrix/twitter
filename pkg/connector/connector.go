@@ -35,6 +35,7 @@ type TwitterConnector struct {
 }
 
 var _ bridgev2.NetworkConnector = (*TwitterConnector)(nil)
+var _ bridgev2.ProxyingNetwork = (*TwitterConnector)(nil)
 
 func (tc *TwitterConnector) Init(bridge *bridgev2.Bridge) {
 	tc.br = bridge

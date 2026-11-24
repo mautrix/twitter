@@ -1173,7 +1173,7 @@ func (t *TwitterLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 	return t.mapClientHTTPFailure(t.startCredentialsLogin(ctx))
 }
 
-// applyLoginProxy doesn't call get_proxy_url when login requests go through the user's device.
+// applyLoginProxy doesn't call the proxy lookup when login requests go through the user's device.
 func (t *TwitterLogin) applyLoginProxy(ctx context.Context, client *twittermeow.Client) error {
 	if t.loginHTTPTransport != nil {
 		return t.tc.initProxy(client)
