@@ -76,6 +76,7 @@ const (
 	JETFUEL_LANDING_PATH                = "/onboarding/web/landing"
 	JETFUEL_LOGIN_PATH                  = "/onboarding/web?mode=login"
 	JETFUEL_BEGIN_LOGIN_PATH            = "/onboarding/web/actions/begin_login"
+	JETFUEL_BEGIN_SIGNUP_SSO_PATH       = "/onboarding/web/actions/begin_signup_sso"
 	JETFUEL_LOGIN_ENTER_PASSWORD_PATH   = "/onboarding/web/actions/login_enter_password"
 	JETFUEL_BEGIN_TWO_FACTOR_AUTH_PATH  = "/onboarding/web/actions/begin_two_factor_auth"
 	JETFUEL_FINISH_TWO_FACTOR_AUTH_PATH = "/onboarding/web/actions/finish_two_factor_auth"

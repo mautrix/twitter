@@ -225,6 +225,15 @@ func (wls *WebLoginSession) SubmitCombinedCredentials(ctx context.Context, ident
 	return wls.SubmitCredentials(ctx, identifier, password)
 }
 
+// SubmitSSO submits a Google or Apple sign-in result as x.com's own buttons do: the JSON of the
+// Google Identity Services credential response, or of AppleID.auth.signIn()'s result.
+func (wls *WebLoginSession) SubmitSSO(ctx context.Context, provider, response string) (*WebLoginResult, error) {
+	if wls.backend != webLoginBackendJetfuel {
+		return nil, fmt.Errorf("%w: SSO login is unsupported for %s login", ErrWebLoginUnexpectedSubtask, wls.backend)
+	}
+	return wls.submitJetfuelSSO(ctx, provider, response)
+}
+
 func (wls *WebLoginSession) SubmitPassword(ctx context.Context, password string) (*WebLoginResult, error) {
 	if wls.backend == webLoginBackendJetfuel {
 		return wls.submitJetfuelPassword(ctx, password)
