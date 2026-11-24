@@ -84,7 +84,7 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 				Dur("duration", dur).
 				Str("response_body", string(respDat)).
 				Msg("Request failed")
-			return nil, respDat, err
+			return resp, respDat, err
 		} else if attempts > MaxHTTPRetries {
 			log.Err(err).
 				Dur("duration", dur).

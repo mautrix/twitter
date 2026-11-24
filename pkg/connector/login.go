@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,6 +40,7 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow"
 	twitCookies "go.mau.fi/mautrix-twitter/pkg/twittermeow/cookies"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
+	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/endpoints"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/response"
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
@@ -58,6 +60,8 @@ type TwitterLogin struct {
 
 	loginHTTPTransport        http.RoundTripper
 	waitingForBrowserIdentity bool
+	accountAccessClient       *twittermeow.Client
+	accountAccessAttempts     int
 
 	client              *twittermeow.Client
 	webLogin            *twittermeow.WebLoginSession
@@ -82,6 +86,7 @@ var (
 	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
 	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
 	LoginStepIDCookies         = "fi.mau.twitter.login.enter_cookies"
+	LoginStepIDAccountAccess   = "fi.mau.twitter.login.account_access"
 	LoginStepJuiceboxPIN       = "fi.mau.twitter.login.juicebox_pin"
 	LoginStepIDComplete        = "fi.mau.twitter.login.complete"
 	loginFieldIdentifier       = "identifier"
@@ -364,7 +369,7 @@ func wrapTwitterLoginError(err error) error {
 	}
 	mapped := ErrLoginUnknown.WithInternalError(err)
 	switch {
-	case errors.Is(err, twittermeow.ErrAccountTemporarilyLocked):
+	case errors.Is(err, twittermeow.ErrAccountTemporarilyLocked), errors.Is(err, twittermeow.ErrAccountAccessRequired):
 		mapped = ErrLoginAccountLocked
 	case errors.Is(err, twittermeow.ErrUserSuspended), errors.Is(err, twittermeow.ErrNotActive):
 		mapped = ErrLoginAccountSuspended
@@ -453,6 +458,8 @@ func (t *TwitterLogin) clearWebLoginInputs() {
 
 func (t *TwitterLogin) resetWebLoginState() {
 	t.waitingForBrowserIdentity = false
+	t.accountAccessClient = nil
+	t.accountAccessAttempts = 0
 	t.clearWebLoginInputs()
 	t.webLogin = nil
 }
@@ -529,6 +536,58 @@ func (t *TwitterLogin) makeBrowserIdentityStep() *bridgev2.LoginStep {
 			Fields:            fields,
 		},
 	}
+}
+
+const maxAccountAccessAttempts = 3
+
+func (t *TwitterLogin) makeAccountAccessStep(client *twittermeow.Client) (*bridgev2.LoginStep, error) {
+	// Preloaded cookies auto-submit once the webview reaches /home, so cap re-issues when X keeps redirecting the bridge.
+	if t.accountAccessAttempts >= maxAccountAccessAttempts {
+		t.accountAccessClient = nil
+		return nil, ErrLoginAccountLocked
+	}
+	t.accountAccessAttempts++
+	t.accountAccessClient = client
+	cookies := client.GetCookies()
+	initialCookies := make([]bridgev2.LoginCookie, 0, len(cookies))
+	for name, value := range cookies {
+		initialCookies = append(initialCookies, bridgev2.LoginCookie{
+			Name:     name,
+			Value:    value,
+			Domain:   "." + endpoints.BASE_HOST,
+			Secure:   true,
+			HTTPOnly: name == "auth_token" || name == "att" || name == "kdt",
+		})
+	}
+	fields := make([]bridgev2.LoginCookieField, 0)
+	for _, name := range accountAccessCookieNames(client) {
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:       name,
+			Required: name == "auth_token" || name == "ct0" || name == "twid",
+			Sources: []bridgev2.LoginCookieFieldSource{
+				{Type: bridgev2.LoginCookieTypeCookie, Name: name, CookieDomain: "x.com"},
+				{Type: bridgev2.LoginCookieTypeCookie, Name: name, CookieDomain: ".x.com"},
+			},
+		})
+	}
+	return &bridgev2.LoginStep{
+		Type:         bridgev2.LoginStepTypeCookies,
+		StepID:       LoginStepIDAccountAccess,
+		Instructions: msgStepAccountAccessInstructions.Message(),
+		CookiesParams: &bridgev2.LoginCookiesParams{
+			URL:               endpoints.ACCOUNT_ACCESS_URL,
+			UserAgent:         t.browserHeaders.UserAgent,
+			InitialCookies:    initialCookies,
+			WaitForURLPattern: `^https://x\.com/(home)?([?#].*)?$`,
+			Fields:            fields,
+		},
+	}, nil
+}
+
+func accountAccessCookieNames(client *twittermeow.Client) []string {
+	names := slices.Concat(client.GetCookieNames(), castleTokenCookieNames, []string{"auth_token", "ct0", "att", "kdt", "twid", "lang", "dtab_local"})
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 func makeCredentialsStep(errorLine l10n.Message) *bridgev2.LoginStep {
@@ -746,6 +805,29 @@ func (t *TwitterLogin) startWithOverride(ctx context.Context, override *bridgev2
 }
 
 func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]string) (*bridgev2.LoginStep, error) {
+	if t.accountAccessClient != nil {
+		client := t.accountAccessClient
+		browserUserID, err := url.QueryUnescape(cookies["twid"])
+		browserUserID = strings.TrimPrefix(browserUserID, "u=")
+		if _, parseErr := strconv.ParseUint(browserUserID, 10, 64); err != nil || parseErr != nil || cookies["auth_token"] == "" || cookies["ct0"] == "" {
+			return nil, ErrMissingLoginInput
+		}
+		if expectedUserID := client.GetCurrentUserID(); expectedUserID != "" && expectedUserID != browserUserID {
+			return nil, ErrLoginBadCookies.WithMessage("Complete verification with the same X account, or restart login to use a different account.")
+		}
+		browserCookies := make(map[string]string)
+		for _, name := range accountAccessCookieNames(client) {
+			if value := strings.TrimSpace(cookies[name]); value != "" {
+				browserCookies[name] = value
+			}
+		}
+		client.ReplaceCookies(browserCookies)
+		t.accountAccessClient = nil
+		if t.webLogin != nil {
+			return t.mapClientHTTPFailure(t.completeWebLogin(ctx))
+		}
+		return t.completeCookieLogin(ctx, client)
+	}
 	if t.waitingForBrowserIdentity {
 		t.waitingForBrowserIdentity = false
 		client := t.newLoginClient()
@@ -775,9 +857,14 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 	if err := t.applyLoginProxy(ctx, client); err != nil {
 		return nil, err
 	}
+	return t.completeCookieLogin(ctx, client)
+}
 
+func (t *TwitterLogin) completeCookieLogin(ctx context.Context, client *twittermeow.Client) (*bridgev2.LoginStep, error) {
 	profile, err := client.LoadMessagesPage(ctx)
-	if err != nil {
+	if errors.Is(err, twittermeow.ErrAccountAccessRequired) {
+		return t.makeAccountAccessStep(client)
+	} else if err != nil {
 		client.SetLoginHTTPTransport(nil)
 		return nil, wrapTwitterLoginError(err)
 	}
@@ -1612,7 +1699,10 @@ func (t *TwitterLogin) completeWebLogin(ctx context.Context) (*bridgev2.LoginSte
 	}
 	client := t.webLogin.Client()
 	profile, err := client.LoadMessagesPage(ctx)
-	if err != nil {
+	if errors.Is(err, twittermeow.ErrAccountAccessRequired) {
+		t.clearWebLoginInputs()
+		return t.makeAccountAccessStep(client)
+	} else if err != nil {
 		return nil, wrapTwitterLoginError(err)
 	}
 	t.client = client

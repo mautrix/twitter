@@ -102,6 +102,7 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 		Logger:           logger,
 	}
 
+	cli.HTTP.CheckRedirect = cli.checkRedirect
 	defaultTransport.SetProxy(cli.proxyFunc)
 	wsTransport := http.DefaultTransport.(*http.Transport).Clone()
 	wsTransport.Proxy = cli.proxyFunc
@@ -123,6 +124,14 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 
 func (c *Client) GetCookieString() string {
 	return c.cookies.String()
+}
+
+func (c *Client) GetCookies() map[string]string {
+	return c.cookies.Map()
+}
+
+func (c *Client) ReplaceCookies(values map[string]string) {
+	c.cookies.Replace(values)
 }
 
 func (c *Client) GetCookieNames() []string {
@@ -648,7 +657,7 @@ func (c *Client) performJotClientEvent(ctx context.Context, category payload.Jot
 }
 
 func (c *Client) enableRedirects() {
-	c.HTTP.CheckRedirect = nil
+	c.HTTP.CheckRedirect = c.checkRedirect
 }
 
 func (c *Client) disableRedirects() {
