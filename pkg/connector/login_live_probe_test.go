@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/bridgeconfig"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/id"
 
@@ -29,7 +30,7 @@ func TestLiveNativeLoginFlowProbe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	tc := &TwitterConnector{}
+	tc := &TwitterConnector{br: &bridgev2.Bridge{Config: &bridgeconfig.BridgeConfig{}}}
 	user := &bridgev2.User{
 		User: &database.User{
 			MXID: id.UserID("@highest:beeper.com"),
