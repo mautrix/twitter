@@ -108,6 +108,7 @@ func (c *Client) MarkConversationRead(ctx context.Context, params *payload.MarkC
 	_, _, err = c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            url,
 		Method:         http.MethodPost,
+		Idempotent:     true,
 		WithClientUUID: true,
 		Body:           encodedQueryBody,
 		ContentType:    types.ContentTypeForm,

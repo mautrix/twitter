@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -24,6 +26,8 @@ var (
 	ErrRequestFailed       = errors.New("failed to send request")
 	ErrResponseReadFailed  = errors.New("failed to read response body")
 	ErrMaxRetriesReached   = errors.New("maximum retries reached")
+
+	errRequestNotSent = errors.New("request failed before obtaining a connection")
 )
 
 func (c *Client) MakeRequest(ctx context.Context, url string, method string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
@@ -36,6 +40,17 @@ func (c *Client) MakeRequest(ctx context.Context, url string, method string, hea
 	})
 }
 
+func (c *Client) makeIdempotentPost(ctx context.Context, url string, headers http.Header, payload []byte, contentType types.ContentType) (*http.Response, []byte, error) {
+	return c.MakeRequestFull(ctx, MakeRequestParams{
+		URL:         url,
+		Method:      http.MethodPost,
+		Headers:     headers,
+		Payload:     payload,
+		ContentType: contentType,
+		Idempotent:  true,
+	})
+}
+
 type MakeRequestParams struct {
 	URL          string
 	Method       string
@@ -43,6 +58,8 @@ type MakeRequestParams struct {
 	Payload      []byte
 	ContentType  types.ContentType
 	DontReadBody bool
+	// Idempotent allows retrying a non-GET request after it may have reached the server.
+	Idempotent bool
 }
 
 func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
@@ -81,19 +98,24 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 				Str("response_body", string(respDat)).
 				Msg("Request failed")
 			return nil, respDat, err
-		} else if attempts > MaxHTTPRetries {
-			log.Err(err).
-				Dur("duration", dur).
-				Msg("Request failed, giving up")
-			return nil, nil, fmt.Errorf("%w: %w", ErrMaxRetriesReached, err)
 		} else if errors.Is(err, ErrRedirectAttempted) {
 			c.Logger.Err(err).
 				Str("location", resp.Header.Get("Location")).
 				Dur("duration", dur).
 				Msg("Redirect attempted")
 			return resp, nil, err
+		} else if attempts > MaxHTTPRetries {
+			log.Err(err).
+				Dur("duration", dur).
+				Msg("Request failed, giving up")
+			return nil, nil, fmt.Errorf("%w: %w", ErrMaxRetriesReached, err)
 		} else if ctx.Err() != nil {
 			return resp, nil, ctx.Err()
+		} else if !canRetryRequest(params, err) {
+			log.Err(err).
+				Dur("duration", dur).
+				Msg("Request failed after it may have reached the server, not retrying")
+			return nil, respDat, err
 		}
 		log.Err(err).
 			Dur("duration", dur).
@@ -103,7 +125,20 @@ func (c *Client) MakeRequestFull(ctx context.Context, params MakeRequestParams) 
 	}
 }
 
+func canRetryRequest(params MakeRequestParams, err error) bool {
+	switch params.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	return params.Idempotent || errors.Is(err, errRequestNotSent)
+}
+
 func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams) (*http.Response, []byte, error) {
+	var getConn, gotConn atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) { getConn.Store(true) },
+		GotConn: func(httptrace.GotConnInfo) { gotConn.Store(true) },
+	})
 	var body io.Reader
 	if params.Payload != nil {
 		body = bytes.NewReader(params.Payload)
@@ -113,11 +148,11 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		return nil, nil, fmt.Errorf("%w: %w", ErrRequestCreateFailed, err)
 	}
 
+	// An abandoned attempt's transport goroutine may still read the previous header map.
+	newRequest.Header = params.Headers.Clone()
 	if params.ContentType != types.ContentTypeNone {
-		params.Headers.Set("content-type", string(params.ContentType))
+		newRequest.Header.Set("content-type", string(params.ContentType))
 	}
-
-	newRequest.Header = params.Headers
 
 	response, err := c.HTTP.Do(newRequest)
 	dontCloseBody := false
@@ -130,7 +165,12 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		if errors.Is(err, ErrRedirectAttempted) {
 			return response, nil, err
 		}
-		return nil, nil, fmt.Errorf("%w: %w", ErrRequestFailed, err)
+		err = fmt.Errorf("%w: %w", ErrRequestFailed, err)
+		// Transports that don't report GetConn give no proof the request wasn't sent.
+		if getConn.Load() && !gotConn.Load() {
+			err = fmt.Errorf("%w: %w", errRequestNotSent, err)
+		}
+		return nil, nil, err
 	}
 
 	var responseBody []byte
@@ -146,6 +186,9 @@ func (c *Client) makeRequestDirect(ctx context.Context, params MakeRequestParams
 		Int("status_code", response.StatusCode).
 		Str("response_body", string(responseBody)).
 		Msg("Raw HTTP response")
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return response, responseBody, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrRedirectAttempted)
+	}
 	if response.StatusCode >= 400 {
 		var respErr TwitterErrors
 		if json.Unmarshal(responseBody, &respErr) == nil {

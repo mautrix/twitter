@@ -188,6 +188,7 @@ func (sc *StreamClient) heartbeat(ctx context.Context) {
 	_, _, err = sc.client.makeAPIRequest(ctx, apiRequestOpts{
 		URL:         endpoints.PIPELINE_UPDATE_URL,
 		Method:      http.MethodPost,
+		Idempotent:  true,
 		ContentType: types.ContentTypeForm,
 		Body:        encodedPayload,
 		Headers: map[string]string{
