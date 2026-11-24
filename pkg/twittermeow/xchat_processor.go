@@ -255,19 +255,12 @@ func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousS
 	}
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
-	if _, unresolved := p.unresolvedConversationGaps[conversationID]; unresolved {
-		return true, false
-	}
-	if p.catchupGeneration[conversationID] < p.reconnectGeneration {
-		return true, false
-	}
 	lastSequenceID := p.lastConversationSequence[conversationID]
-	if previousSequenceID == "" || lastSequenceID == "" ||
-		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) <= 0 {
-		return false, false
-	}
 	_, handled := p.recentHandledSequences[previousSequenceID]
-	return !handled, !handled
+	previousUnhandled = previousSequenceID != "" && !handled &&
+		(lastSequenceID == "" || compareXChatSequenceIDs(previousSequenceID, lastSequenceID) > 0)
+	_, unresolved := p.unresolvedConversationGaps[conversationID]
+	return unresolved || p.catchupGeneration[conversationID] < p.reconnectGeneration || previousUnhandled, previousUnhandled
 }
 
 func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
