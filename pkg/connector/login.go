@@ -473,6 +473,35 @@ func (tc *TwitterConnector) CreateLogin(_ context.Context, user *bridgev2.User, 
 	}, nil
 }
 
+// Hides Google and Apple sign-in, which don't work in webviews.
+const cookieLoginExtractJS = `(() => {
+	if (!window.__mautrixTwitterLogin) {
+		window.__mautrixTwitterLogin = true;
+		const hideSSO = () => {
+			if (!/^\/i\/(flow|jf)\//.test(location.pathname)) return;
+			const starts = [
+				...document.querySelectorAll('iframe[src*="accounts.google.com/gsi"]'),
+				...[...document.querySelectorAll("button")].filter(b => b.textContent.length < 60 && /\bapple\b/i.test(b.textContent)),
+			];
+			for (const start of starts) {
+				let box = start;
+				while (box.parentElement && ![...box.parentElement.querySelectorAll("button, input")].some(el => !box.contains(el))) box = box.parentElement;
+				if (box.parentElement) box.style.setProperty("display", "none", "important");
+			}
+		};
+		const start = () => {
+			if (!document.head) return setTimeout(start, 50);
+			const style = document.createElement("style");
+			style.textContent = '[data-testid="google_sign_in_container"], [data-testid="google_placeholder_button"], [data-testid="apple_sign_in_button"], [data-testid="apple_sign_in_button"] + div { display: none !important; }';
+			document.head.appendChild(style);
+			hideSSO();
+			new MutationObserver(hideSSO).observe(document.documentElement, { childList: true, subtree: true });
+		};
+		start();
+	}
+	return Promise.resolve({});
+})()`
+
 func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 	if !t.useCookieLogin {
 		t.browserHeaders = twittermeow.BrowserHeaders{}
@@ -483,7 +512,8 @@ func (t *TwitterLogin) start(_ context.Context) (*bridgev2.LoginStep, error) {
 		StepID:       LoginStepIDCookies,
 		Instructions: msgStepCookiesInstructions.Message(),
 		CookiesParams: &bridgev2.LoginCookiesParams{
-			URL: "https://x.com/i/flow/login",
+			URL:       "https://x.com/i/flow/login",
+			ExtractJS: cookieLoginExtractJS,
 			Fields: []bridgev2.LoginCookieField{
 				{
 					ID:       "ct0",
