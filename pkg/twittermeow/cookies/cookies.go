@@ -3,10 +3,11 @@ package cookies
 import (
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"go.mau.fi/util/shape"
 )
 
 type XCookieName string
@@ -84,12 +85,7 @@ func (c *Cookies) String() string {
 func (c *Cookies) Names() []string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	names := make([]string, 0, len(c.store))
-	for name := range c.store {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
+	return shape.Keys(c.store)
 }
 
 func (c *Cookies) IsCookieEmpty(key XCookieName) bool {
