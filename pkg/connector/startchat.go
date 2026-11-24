@@ -79,7 +79,7 @@ func (tc *TwitterClient) createDMWithUser(ctx context.Context, userID string) (*
 
 	perms := permissions.Permissions.GetPermissionsForUser(userID)
 	if perms == nil || !perms.CanDM || perms.ErrorCode > 0 {
-		return nil, bridgev2.RespError(mautrix.MForbidden.WithMessage("You can't send direct messages to this X user"))
+		return nil, bridgev2.ErrCannotMessageUser.WithMessage("You can't send direct messages to this X user")
 	}
 
 	conversationID := methods.CreateConversationID([]string{userID, ParseUserLoginID(tc.userLogin.ID)})
