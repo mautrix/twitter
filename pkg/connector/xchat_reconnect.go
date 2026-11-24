@@ -31,7 +31,6 @@ type xchatInboxCatchupState struct {
 
 type xchatInboxCatchupResult struct {
 	MaxSequenceID      string
-	CoveredSequenceID  string
 	MessagePullVersion *int
 	Pages              int
 	Items              int
@@ -44,11 +43,10 @@ type xchatInboxPageProcessResult struct {
 }
 
 type xchatInboxCatchupOps struct {
-	FetchInitial  func(context.Context, *payload.GetInitialXChatPageQueryVariables) (response.XChatInboxPage, error)
-	FetchNext     func(context.Context, *payload.GetInboxPageRequestQueryVariables) (response.XChatInboxPage, error)
-	ProcessPage   func(context.Context, response.XChatInboxPage) (xchatInboxPageProcessResult, error)
-	Checkpoint    func(context.Context, *payload.XChatCursor, string, *int) error
-	SnapshotReady func(string)
+	FetchInitial func(context.Context, *payload.GetInitialXChatPageQueryVariables) (response.XChatInboxPage, error)
+	FetchNext    func(context.Context, *payload.GetInboxPageRequestQueryVariables) (response.XChatInboxPage, error)
+	ProcessPage  func(context.Context, response.XChatInboxPage) (xchatInboxPageProcessResult, error)
+	Checkpoint   func(context.Context, *payload.XChatCursor, string, *int) error
 }
 
 func cloneXChatInt(value *int) *int {
@@ -81,7 +79,6 @@ func runXChatInboxCatchup(
 ) (xchatInboxCatchupResult, error) {
 	result := xchatInboxCatchupResult{
 		MaxSequenceID:      state.MaxSequenceID,
-		CoveredSequenceID:  state.MaxSequenceID,
 		MessagePullVersion: cloneXChatInt(state.MessagePullVersion),
 	}
 	cursor := cloneXChatCursor(state.Cursor)
@@ -109,7 +106,6 @@ func runXChatInboxCatchup(
 		if page.MaxUserSequenceID != nil {
 			pendingMaxSequenceID = maxXChatSequenceID(pendingMaxSequenceID, *page.MaxUserSequenceID)
 		}
-		result.CoveredSequenceID = pendingMaxSequenceID
 		if page.MessagePullVersion != nil {
 			pendingMessagePullVersion = cloneXChatInt(page.MessagePullVersion)
 		}
@@ -449,7 +445,6 @@ func (tc *TwitterClient) syncXChatInboxAfterConnect(
 				CheckpointBlocked: processor.SequenceCheckpointBlocked(),
 			}, err
 		},
-		SnapshotReady: processor.SetLiveSequenceBoundary,
 	}
 	var result xchatInboxCatchupResult
 	for {
@@ -572,11 +567,6 @@ func runXChatPriorityCatchup(ctx context.Context, state xchatInboxCatchupState, 
 	}
 	if err != nil {
 		return result, err
-	}
-	// Only the completed account snapshot covers predecessors; subsequent socket
-	// frames must prove their own continuity before they can extend this cut.
-	if ops.SnapshotReady != nil {
-		ops.SnapshotReady(result.CoveredSequenceID)
 	}
 	if !fallback {
 		if err = prepare(ctx, pages); err != nil {

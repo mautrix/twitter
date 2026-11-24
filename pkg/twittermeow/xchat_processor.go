@@ -54,7 +54,6 @@ type XChatEventProcessor struct {
 	checkpointPublicationHolds int
 	recentHandledSequences     map[string]struct{}
 	recentHandledSequenceOrder []string
-	liveSequenceBoundary       *string
 
 	unsupportedEncryptionLogged sync.Map
 }
@@ -250,30 +249,25 @@ func (p *XChatEventProcessor) MarkReconnected() {
 	p.sequenceStateLock.Unlock()
 }
 
-func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousSequenceID string) bool {
+func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousSequenceID string) (needed, previousUnhandled bool) {
 	if conversationID == "" {
-		return false
+		return false, false
 	}
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
 	if _, unresolved := p.unresolvedConversationGaps[conversationID]; unresolved {
-		return true
+		return true, false
 	}
 	if p.catchupGeneration[conversationID] < p.reconnectGeneration {
-		return true
+		return true, false
 	}
 	lastSequenceID := p.lastConversationSequence[conversationID]
 	if previousSequenceID == "" || lastSequenceID == "" ||
 		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) <= 0 {
-		return false
+		return false, false
 	}
-	if _, handled := p.recentHandledSequences[previousSequenceID]; handled {
-		return false
-	}
-	// The missed event may belong to any conversation, so make the next live
-	// event in every conversation verify its history, like after a reconnect.
-	p.reconnectGeneration++
-	return true
+	_, handled := p.recentHandledSequences[previousSequenceID]
+	return !handled, !handled
 }
 
 func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
@@ -330,33 +324,6 @@ func (p *XChatEventProcessor) CapHandledSequenceID(limit string) {
 	}
 }
 
-func (p *XChatEventProcessor) SetLiveSequenceBoundary(sequenceID string) {
-	p.sequenceStateLock.Lock()
-	p.liveSequenceBoundary = ptr.Ptr(sequenceID)
-	p.sequenceStateLock.Unlock()
-}
-
-func (p *XChatEventProcessor) hasLiveSequenceGap(sequenceID, previousSequenceID string) bool {
-	p.sequenceStateLock.Lock()
-	defer p.sequenceStateLock.Unlock()
-	return p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 &&
-		(previousSequenceID == "" || compareXChatSequenceIDs(previousSequenceID, *p.liveSequenceBoundary) > 0)
-}
-
-func (p *XChatEventProcessor) recordLiveSequence(sequenceID string, failed bool) {
-	p.sequenceStateLock.Lock()
-	defer p.sequenceStateLock.Unlock()
-	if failed {
-		// A durably tracked failure is a known predecessor, not a published success.
-		if _, pending := p.failedEvents[sequenceID]; !pending || p.persistenceErr != nil {
-			return
-		}
-	}
-	if p.liveSequenceBoundary != nil && compareXChatSequenceIDs(sequenceID, *p.liveSequenceBoundary) > 0 {
-		*p.liveSequenceBoundary = sequenceID
-	}
-}
-
 func (p *XChatEventProcessor) ConversationRecoveryPending(conversationID string) bool {
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
@@ -383,7 +350,6 @@ func (p *XChatEventProcessor) ResetSequenceState() {
 	p.checkpointPublicationHolds = 0
 	p.recentHandledSequences = make(map[string]struct{})
 	p.recentHandledSequenceOrder = nil
-	p.liveSequenceBoundary = nil
 	p.sequenceStateLock.Unlock()
 }
 
@@ -474,12 +440,6 @@ func normalizeXChatSequenceID(sequenceID string) (string, bool) {
 	return sequenceID, true
 }
 
-type xchatLiveMessageKey struct{}
-
-func (p *XChatEventProcessor) processLiveMessage(ctx context.Context, msg *payload.Message) error {
-	return p.ProcessMessage(context.WithValue(ctx, xchatLiveMessageKey{}, true), msg)
-}
-
 // ProcessMessage handles a decoded payload.Message from the websocket.
 // It may emit zero or more TwitterEvent objects via the event handler.
 func (p *XChatEventProcessor) ProcessMessage(ctx context.Context, msg *payload.Message) (err error) {
@@ -542,8 +502,6 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	sequenceID := ptr.Val(evt.SequenceId)
 	conversationID := ptr.Val(evt.ConversationId)
 	previousSequenceID := ptr.Val(evt.PreviousSequenceId)
-	live, _ := ctx.Value(xchatLiveMessageKey{}).(bool)
-	liveSequenceVerified := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
@@ -553,20 +511,22 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		} else {
 			err = errors.Join(err, p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil))
 		}
-		if liveSequenceVerified && ctx.Err() == nil {
-			p.recordLiveSequence(sequenceID, err != nil)
-		}
 		if err == nil {
 			p.recordHandledSequence(conversationID, sequenceID)
 		} else {
 			p.markConversationGapUnresolved(conversationID)
 		}
 	}()
-	if live && p.hasLiveSequenceGap(sequenceID, previousSequenceID) {
-		return fmt.Errorf("XChat live sequence gap before %s (previous event %q); account-wide inbox catch-up required", sequenceID, previousSequenceID)
+	needsCatchup, previousUnhandled := false, false
+	if allowGapCatchup && p.gapHandler != nil {
+		needsCatchup, previousUnhandled = p.needsConversationCatchup(conversationID, previousSequenceID)
 	}
-	liveSequenceVerified = live
-	needsCatchup := allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil
+	if previousUnhandled {
+		// The missed event may belong to any conversation, so every conversation re-verifies like after a reconnect.
+		p.sequenceStateLock.Lock()
+		p.reconnectGeneration++
+		p.sequenceStateLock.Unlock()
+	}
 	var keyMissing bool
 	var refreshed *xchatConversationKeysRefresh
 	if needsCatchup {
