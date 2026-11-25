@@ -505,6 +505,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		keyMissing, refreshed = p.messageKeyMissing(ctx, evt)
 	}
 	if needsCatchup && keyMissing {
+		p.markConversationGapUnresolved(conversationID)
 		p.log.Debug().
 			Str("conversation_id", conversationID).
 			Str("current_sequence_id", sequenceID).
