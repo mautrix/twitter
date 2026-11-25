@@ -699,7 +699,7 @@ func (p *XChatEventProcessor) messageKeyMissing(ctx context.Context, evt *payloa
 		return false, nil
 	}
 	refreshed := &xchatConversationKeysRefresh{err: p.client.RefreshConversationKeys(ctx, conversationID)}
-	keyUnavailable := refreshed.err == nil || errors.Is(refreshed.err, response.ErrConversationDataMissing) || isKeyNotForUs(refreshed.err, keyVersion)
+	keyUnavailable := refreshed.err == nil || errors.Is(refreshed.err, response.ErrConversationDataMissing)
 	return keyUnavailable && keyMissing(), refreshed
 }
 
