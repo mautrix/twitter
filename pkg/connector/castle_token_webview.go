@@ -37,12 +37,6 @@ const browserHeadersExtractJS = `function captureBrowserHeaders() {
 const browserIdentityExtractJS = `(() => {
 ` + browserHeadersExtractJS + `
   const result = captureBrowserHeaders();
-  const chromium = Array.from(navigator.userAgentData?.brands || [])
-    .find(item => item.brand === "Chromium");
-  if (chromium && /^\d+$/.test(String(chromium.version))) {
-    result.browser_user_agent = result.browser_user_agent.replace(/\bChrome\/\d+\.\d+\.\d+\.\d+\b/,
-      "Chrome/" + chromium.version + ".0.0.0");
-  }
   globalThis.__BEEP_BEEP_AUTH_RESULTS__ = result;
   return result;
 })()`
