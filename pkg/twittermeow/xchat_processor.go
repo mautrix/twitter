@@ -364,6 +364,21 @@ func (p *XChatEventProcessor) finishCheckpointBatch(success bool) {
 	}
 }
 
+func (p *XChatEventProcessor) failureRecorded(conversationID, sequenceID string) bool {
+	p.sequenceStateLock.Lock()
+	defer p.sequenceStateLock.Unlock()
+	return conversationID != "" && p.failedEvents[sequenceID] == conversationID
+}
+
+func (p *XChatEventProcessor) recordConversationSequence(conversationID, sequenceID string) {
+	p.sequenceStateLock.Lock()
+	if conversationID != "" && sequenceID != "" &&
+		compareXChatSequenceIDs(sequenceID, p.lastConversationSequence[conversationID]) > 0 {
+		p.lastConversationSequence[conversationID] = sequenceID
+	}
+	p.sequenceStateLock.Unlock()
+}
+
 // recordHandledSequence records successful per-conversation progress, but only
 // publishes the global maximum after all known conversation gaps are repaired.
 func (p *XChatEventProcessor) recordHandledSequence(conversationID, sequenceID string) {
@@ -487,13 +502,18 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("panic processing XChat message event (%T)", recovered)
 		}
+		keyMissing := errors.Is(err, crypto.ErrKeyNotFound)
 		if ctx.Err() != nil {
 			err = errors.Join(err, ctx.Err())
-		} else {
-			err = errors.Join(err, p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil))
+			keyMissing = false
+		} else if failureErr := p.updateFailedEvent(ctx, conversationID, sequenceID, err != nil); failureErr != nil {
+			err = errors.Join(err, failureErr)
+			keyMissing = false
 		}
 		if err == nil {
 			p.recordHandledSequence(conversationID, sequenceID)
+		} else if keyMissing && p.failureRecorded(conversationID, sequenceID) {
+			p.recordConversationSequence(conversationID, sequenceID)
 		} else {
 			p.markConversationGapUnresolved(conversationID)
 		}
