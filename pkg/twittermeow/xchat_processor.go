@@ -500,12 +500,9 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	}()
 	needsCatchup := allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil
 	var keyMissing bool
+	var refreshed *xchatConversationKeysRefresh
 	if needsCatchup {
-		var refreshed *xchatConversationKeysRefresh
 		keyMissing, refreshed = p.messageKeyMissing(ctx, evt)
-		if refreshed != nil {
-			ctx = context.WithValue(ctx, xchatConversationKeysRefreshedKey{}, refreshed)
-		}
 	}
 	if needsCatchup && keyMissing {
 		p.log.Debug().
@@ -547,6 +544,9 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	// Process based on event type
 	switch {
 	case detail.MessageCreateEvent != nil:
+		if refreshed != nil {
+			ctx = context.WithValue(ctx, xchatConversationKeysRefreshedKey{}, refreshed)
+		}
 		return p.processMessageCreateEvent(ctx, evt, detail.MessageCreateEvent)
 
 	case detail.MessageDeleteEvent != nil:
