@@ -698,7 +698,8 @@ func (p *XChatEventProcessor) messageKeyMissing(ctx context.Context, evt *payloa
 		return false, nil
 	}
 	refreshed := &xchatConversationKeysRefresh{err: p.client.RefreshConversationKeys(ctx, conversationID)}
-	return refreshed.err == nil && keyMissing(), refreshed
+	keyUnavailable := refreshed.err == nil || errors.Is(refreshed.err, response.ErrConversationDataMissing) || isKeyNotForUs(refreshed.err, keyVersion)
+	return keyUnavailable && keyMissing(), refreshed
 }
 
 // processMessageCreateEvent handles a MessageCreateEvent, decrypting or parsing contents.
