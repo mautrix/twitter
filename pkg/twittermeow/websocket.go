@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -394,7 +395,7 @@ func (xc *xchatWebsocketClient) runConnection(
 				readErr = fmt.Errorf("read XChat websocket: %w", err)
 				status := websocket.CloseStatus(err)
 				refreshToken = status != -1
-				if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+				if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway || errors.Is(err, io.EOF) {
 					log.Debug().Err(err).Uint32("status", uint32(status)).Msg("XChat websocket closed by server")
 				} else if readCtx.Err() != nil {
 					log.Debug().Err(err).Msg("XChat websocket read stopped by context")
