@@ -535,6 +535,10 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
 	case *types.XChatTyping:
+		typingType := bridgev2.TypingTypeText
+		if evt.ActivityType == payload.MessageActivityTypeRecordingVoiceMessage {
+			typingType = bridgev2.TypingTypeRecordingMedia
+		}
 		tc.userLogin.QueueRemoteEvent(&simplevent.Typing{
 			EventMeta: simplevent.EventMeta{
 				Type:      bridgev2.RemoteEventTyping,
@@ -542,8 +546,33 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 				Sender:    tc.MakeEventSender(evt.SenderID),
 			},
 			Timeout: 3 * time.Second,
+			Type:    typingType,
 		})
 		return true
+
+	case *types.XChatUnsupportedMessage:
+		streamOrder := methods.ParseSnowflakeInt(evt.SequenceID)
+		if ctx == nil || ctx.Value(ensurePortalContextKey{}) == nil {
+			if _, err := tc.ensurePortalForConversation(ctx, evt.ConversationID, ""); err != nil {
+				log.Warn().Err(err).Str("conversation_id", evt.ConversationID).
+					Msg("Failed to ensure portal before handling unsupported XChat message")
+				return false
+			}
+		}
+		return tc.queueXChatRemoteEventWithPortalRepair(ctx, evt.ConversationID, &simplevent.Message[*types.XChatUnsupportedMessage]{
+			EventMeta: simplevent.EventMeta{
+				Type:        bridgev2.RemoteEventMessage,
+				PortalKey:   tc.MakePortalKeyFromID(evt.ConversationID),
+				Sender:      tc.MakeEventSender(evt.SenderID),
+				StreamOrder: streamOrder,
+				Timestamp:   methods.ParseMsecTimestamp(evt.Time),
+			},
+			ID:   MakeMessageID(evt.SequenceID),
+			Data: evt,
+			ConvertMessageFunc: func(context.Context, *bridgev2.Portal, bridgev2.MatrixAPI, *types.XChatUnsupportedMessage) (*bridgev2.ConvertedMessage, error) {
+				return unsupportedEncryptionNotice(), nil
+			},
+		})
 
 	case *types.XChatKeyChange:
 		log.Info().
@@ -965,4 +994,14 @@ func (tc *TwitterClient) updateTwitterUserInfo(ctx context.Context, inbox *respo
 		}
 		ghost.UpdateInfo(ctx, tc.connector.wrapUserInfo(tc.client, update))
 	}
+}
+
+func unsupportedEncryptionNotice() *bridgev2.ConvertedMessage {
+	return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
+		Type: event.EventMessage,
+		Content: &event.MessageEventContent{
+			MsgType: event.MsgNotice,
+			Body:    "This message uses an X Chat encryption format the bridge can't read yet. Open X to view it.",
+		},
+	}}}
 }

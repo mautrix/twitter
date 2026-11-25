@@ -6,6 +6,7 @@ type Attachment struct {
 	Video       *AttachmentInfo  `json:"video,omitempty"`
 	AnimatedGif *AttachmentInfo  `json:"animated_gif,omitempty"`
 	Photo       *AttachmentInfo  `json:"photo,omitempty"`
+	File        *AttachmentInfo  `json:"file,omitempty"`
 	Card        *AttachmentCard  `json:"card,omitempty"`
 	Tweet       *AttachmentTweet `json:"tweet,omitempty"`
 
@@ -14,6 +15,8 @@ type Attachment struct {
 
 	// XChat-specific fields for URL attachment images
 	URLBannerMediaHashKey string `json:"url_banner_media_hash_key,omitempty"`
+
+	XChatKind string `json:"-"`
 }
 type URLs struct {
 	URL         string `json:"url,omitempty"`

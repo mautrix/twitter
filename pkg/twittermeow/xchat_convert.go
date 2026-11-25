@@ -3,6 +3,7 @@ package twittermeow
 import (
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
@@ -28,6 +29,14 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 	if len(contents.Entities) > 0 {
 		msgData.Entities = convertXChatEntities(contents.Entities)
 	}
+	if fwd := contents.ForwardedMessage; fwd != nil {
+		msgData.Forwarded = true
+		msgData.ForwardedText = ptr.Val(fwd.MessageText)
+		if len(fwd.Entities) > 0 {
+			msgData.ForwardedEntities = convertXChatEntities(fwd.Entities)
+		}
+		msgData.Text, msgData.Entities = ComposeForwardedText(msgData.ForwardedText, msgData.ForwardedEntities, msgData.Text, msgData.Entities)
+	}
 
 	// Convert attachments
 	if len(contents.Attachments) > 0 {
@@ -36,12 +45,17 @@ func convertXChatMessageToTwitterMessage(evt *payload.MessageEvent, contents *pa
 			msgData.Attachment = msgData.Attachments[0]
 		}
 		for _, attachment := range msgData.Attachments {
-			if attachment.Card != nil && attachment.Card.BindingValues.CardURL.StringValue != "" &&
-				!strings.Contains(msgData.Text, attachment.Card.BindingValues.CardURL.StringValue) {
+			var linkURL string
+			if attachment.Card != nil {
+				linkURL = attachment.Card.BindingValues.CardURL.StringValue
+			} else if attachment.Tweet != nil {
+				linkURL = attachment.Tweet.ExpandedURL
+			}
+			if linkURL != "" && !strings.Contains(msgData.Text, linkURL) {
 				if msgData.Text != "" {
 					msgData.Text += "\n"
 				}
-				msgData.Text += attachment.Card.BindingValues.CardURL.StringValue
+				msgData.Text += linkURL
 			}
 		}
 		msgData.OriginalAttachments = contents.Attachments
@@ -179,6 +193,7 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 					Height: int(ptr.Val(media.Dimensions.Height)),
 				}
 			}
+			info.VideoInfo.DurationMillis = int(ptr.Val(media.DurationMillis))
 
 			mediaType := payload.MediaType(ptr.Val(media.Type))
 			switch mediaType {
@@ -195,6 +210,9 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 				info.Type = "audio"
 				info.AudioOnly = true
 				converted.Video = &info
+			case payload.MediaTypeFile, payload.MediaTypeSvg:
+				info.Type = "file"
+				converted.File = &info
 			default:
 				info.Type = "photo"
 				converted.Photo = &info
@@ -235,10 +253,35 @@ func convertXChatAttachments(attachments []*payload.MessageAttachment) []*types.
 			}
 		}
 
+		converted.XChatKind = xchatAttachmentKind(att)
+
 		result = append(result, converted)
 	}
 
 	return result
+}
+
+func xchatAttachmentKind(att *payload.MessageAttachment) string {
+	switch {
+	case att.Media != nil:
+		return "media"
+	case att.Post != nil:
+		return "post"
+	case att.Url != nil:
+		return "url"
+	case att.UnifiedCard != nil:
+		return "unified_card"
+	case att.Money != nil:
+		return "money"
+	case att.Jetfuel != nil:
+		return "jetfuel"
+	case att.Payment != nil:
+		return "payment_receipt"
+	case att.BotMessage != nil:
+		return "bot_message_" + strconv.Itoa(int(ptr.Val(att.BotMessage.Type)))
+	default:
+		return "unknown"
+	}
 }
 
 // convertXChatReplyPreview converts XChat ReplyingToPreview to types.ReplyData
@@ -452,4 +495,67 @@ func ConvertXChatUserToUser(xu *response.XChatUser) *types.User {
 	}
 
 	return user
+}
+
+func HasForwardedText(fwd *payload.ForwardedMessage) bool {
+	return fwd != nil && ptr.Val(fwd.MessageText) != ""
+}
+
+// ComposeForwardedText puts the forwarded text first and the sender's own comment after it, like X does.
+func ComposeForwardedText(fwdText string, fwdEntities *types.Entities, text string, entities *types.Entities) (string, *types.Entities) {
+	if fwdText == "" {
+		return text, entities
+	} else if text == "" {
+		return fwdText, fwdEntities
+	}
+	prefix := fwdText + "\n\n"
+	offset := utf8.RuneCountInString(prefix)
+	combined := &types.Entities{}
+	for _, src := range []*types.Entities{fwdEntities, entities} {
+		if src == nil {
+			continue
+		}
+		shift := 0
+		if src == entities {
+			shift = offset
+		}
+		for _, url := range src.URLs {
+			url.Indices = shiftIndices(url.Indices, shift)
+			combined.URLs = append(combined.URLs, url)
+		}
+		for _, mention := range src.UserMentions {
+			mention.Indices = shiftIndices(mention.Indices, shift)
+			combined.UserMentions = append(combined.UserMentions, mention)
+		}
+		combined.Hashtags = append(combined.Hashtags, shiftIndexedEntities(src.Hashtags, shift)...)
+		combined.Symbols = append(combined.Symbols, shiftIndexedEntities(src.Symbols, shift)...)
+		combined.Media = append(combined.Media, src.Media...)
+	}
+	return prefix + text, combined
+}
+
+func shiftIndices(indices []int, shift int) []int {
+	shifted := make([]int, len(indices))
+	for i, idx := range indices {
+		shifted[i] = idx + shift
+	}
+	return shifted
+}
+
+func shiftIndexedEntities(entities []any, shift int) []any {
+	shifted := make([]any, 0, len(entities))
+	for _, entity := range entities {
+		if m, ok := entity.(map[string]any); ok {
+			if indices, ok := m["indices"].([]int); ok {
+				copied := make(map[string]any, len(m))
+				for k, v := range m {
+					copied[k] = v
+				}
+				copied["indices"] = shiftIndices(indices, shift)
+				entity = copied
+			}
+		}
+		shifted = append(shifted, entity)
+	}
+	return shifted
 }

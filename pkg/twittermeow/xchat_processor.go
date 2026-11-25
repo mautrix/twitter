@@ -52,6 +52,8 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
+
+	unsupportedEncryptionLogged sync.Map
 }
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
@@ -496,7 +498,19 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			p.markConversationGapUnresolved(conversationID)
 		}
 	}()
-	if allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil {
+	needsCatchup := allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil
+	var keyMissing bool
+	var refreshed *xchatConversationKeysRefresh
+	if needsCatchup {
+		keyMissing, refreshed = p.messageKeyMissing(ctx, evt)
+	}
+	if needsCatchup && keyMissing {
+		p.markConversationGapUnresolved(conversationID)
+		p.log.Debug().
+			Str("conversation_id", conversationID).
+			Str("current_sequence_id", sequenceID).
+			Msg("Skipping XChat conversation catch-up because the live event's conversation key is missing")
+	} else if needsCatchup {
 		p.log.Info().
 			Str("conversation_id", conversationID).
 			Str("previous_sequence_id", previousSequenceID).
@@ -531,6 +545,9 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	// Process based on event type
 	switch {
 	case detail.MessageCreateEvent != nil:
+		if refreshed != nil {
+			ctx = context.WithValue(ctx, xchatConversationKeysRefreshedKey{}, refreshed)
+		}
 		return p.processMessageCreateEvent(ctx, evt, detail.MessageCreateEvent)
 
 	case detail.MessageDeleteEvent != nil:
@@ -542,6 +559,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			ConversationID: convID,
 			SenderID:       senderID,
 			Timestamp:      time.Now(),
+			ActivityType:   payload.MessageActivityType(ptr.Val(detail.MessageTypingEvent.ActivityType)),
 		})
 
 	case detail.GroupChangeEvent != nil:
@@ -592,6 +610,15 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			Msg("Ignoring MarkConversationUnreadEvent")
 		return nil
 
+	case detail.GrokMessageEvent != nil, detail.GrokResponseEvent != nil,
+		detail.PinMessageEvent != nil, detail.UnpinMessageEvent != nil, detail.PmkBundleUpdateEvent != nil:
+		p.log.Debug().
+			Str("sequence_id", ptr.Val(evt.SequenceId)).
+			Str("conversation_id", ptr.Val(evt.ConversationId)).
+			Str("detail_type", xchatEventDetailType(detail)).
+			Msg("Ignoring unsupported MessageEventDetail")
+		return nil
+
 	default:
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
@@ -601,8 +628,79 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	}
 }
 
+func xchatEventDetailType(detail *payload.MessageEventDetail) string {
+	switch {
+	case detail.GrokMessageEvent != nil:
+		return "grok_message"
+	case detail.GrokResponseEvent != nil:
+		return "grok_response"
+	case detail.PinMessageEvent != nil:
+		return "pin_message"
+	case detail.UnpinMessageEvent != nil:
+		return "unpin_message"
+	case detail.PmkBundleUpdateEvent != nil:
+		return "pmk_bundle_update"
+	default:
+		return "unknown"
+	}
+}
+
+// handleUnsupportedContentsEncryption skips a message the bridge can't read without failing
+// the event, so it neither blocks the inbox checkpoint nor drops the websocket.
+func (p *XChatEventProcessor) handleUnsupportedContentsEncryption(ctx context.Context, evt *payload.MessageEvent, version int16, isUserMetadata bool) error {
+	conversationID := ptr.Val(evt.ConversationId)
+	logEvt := p.log.Debug()
+	if _, alreadyLogged := p.unsupportedEncryptionLogged.LoadOrStore(conversationID, struct{}{}); !alreadyLogged {
+		logEvt = p.log.Error()
+	}
+	logEvt.
+		Str("sequence_id", ptr.Val(evt.SequenceId)).
+		Str("conversation_id", conversationID).
+		Int16("contents_encryption_version", version).
+		Msg("MessageCreateEvent uses an unsupported contents encryption version")
+	if isUserMetadata {
+		return nil
+	}
+	if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
+		ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+		if after.timestamp.IsZero() || ts.Before(after.timestamp) ||
+			ts.Equal(after.timestamp) && ptr.Val(evt.SequenceId) == after.sequenceID {
+			return nil
+		}
+	}
+	return p.emitEvent(ctx, &types.XChatUnsupportedMessage{
+		SequenceID:     ptr.Val(evt.SequenceId),
+		ConversationID: conversationID,
+		SenderID:       ptr.Val(evt.SenderId),
+		Time:           ptr.Val(evt.CreatedAtMsec),
+		Version:        version,
+	})
+}
+
 func isEncryptedMessageCreateEvent(mce *payload.MessageCreateEvent) bool {
 	return mce != nil && ptr.Val(mce.ConversationKeyVersion) != ""
+}
+
+func (p *XChatEventProcessor) messageKeyMissing(ctx context.Context, evt *payload.MessageEvent) (bool, *xchatConversationKeysRefresh) {
+	if evt.Detail == nil {
+		return false, nil
+	}
+	mce := evt.Detail.MessageCreateEvent
+	if !isEncryptedMessageCreateEvent(mce) || ptr.Val(mce.ContentsEncryptionVersion) != 0 || len(mce.Contents) == 0 {
+		return false, nil
+	}
+	conversationID := ptr.Val(evt.ConversationId)
+	keyVersion := ptr.Val(mce.ConversationKeyVersion)
+	keyMissing := func() bool {
+		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+		return errors.Is(err, crypto.ErrKeyNotFound) || err == nil && (convKey == nil || len(convKey.Key) == 0)
+	}
+	if !keyMissing() {
+		return false, nil
+	}
+	refreshed := &xchatConversationKeysRefresh{err: p.client.RefreshConversationKeys(ctx, conversationID)}
+	keyUnavailable := refreshed.err == nil || errors.Is(refreshed.err, response.ErrConversationDataMissing)
+	return keyUnavailable && keyMissing(), refreshed
 }
 
 // processMessageCreateEvent handles a MessageCreateEvent, decrypting or parsing contents.
@@ -613,6 +711,10 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	contentsBytes := mce.Contents
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
 	isUserMetadata := isEncryptedMessageCreateEvent(mce) && mce.IsUserMetadata()
+
+	if version := ptr.Val(mce.ContentsEncryptionVersion); version != 0 {
+		return p.handleUnsupportedContentsEncryption(ctx, evt, version, isUserMetadata)
+	}
 
 	if len(contentsBytes) == 0 {
 		if isUserMetadata {
@@ -636,7 +738,12 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		}
 		if errors.Is(err, crypto.ErrKeyNotFound) {
 			// Try to fetch missing keys
-			refreshErr := p.client.RefreshConversationKeys(ctx, conversationID)
+			var refreshErr error
+			if refreshed, ok := ctx.Value(xchatConversationKeysRefreshedKey{}).(*xchatConversationKeysRefresh); ok {
+				refreshErr = refreshed.err
+			} else {
+				refreshErr = p.client.RefreshConversationKeys(ctx, conversationID)
+			}
 			if refreshErr != nil {
 				p.log.Warn().Err(refreshErr).
 					Str("conversation_id", conversationID).
@@ -692,6 +799,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 				Str("sequence_id", ptr.Val(evt.SequenceId)).
 				Str("conversation_id", conversationID).
 				Int("contents_len", len(contentsBytes)).
+				Int16("contents_encryption_version", ptr.Val(mce.ContentsEncryptionVersion)).
 				Msg("Failed to decrypt message contents, skipping")
 			return fmt.Errorf("decrypt XChat message contents: %w", err)
 		}
@@ -711,7 +819,7 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
-	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0) {
+	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0 || HasForwardedText(contents.Message.ForwardedMessage)) {
 		if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
 			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
 			// REST and XChat IDs cannot be ordered against each other on timestamp ties.
@@ -990,6 +1098,27 @@ func (p *XChatEventProcessor) processInstruction(ctx context.Context, inst *payl
 			Bool("has_token", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.Token) != "").
 			Str("public_key_version", ptr.Val(inst.DisplayTemporaryPasscodeInstruction.LatestPublicKeyVersion)).
 			Msg("Received DisplayTemporaryPasscodeInstruction")
+		return nil
+
+	case inst.DeviceEnrollmentInstruction != nil:
+		p.log.Debug().
+			Int32("status", ptr.Val(inst.DeviceEnrollmentInstruction.Status)).
+			Msg("Ignoring DeviceEnrollmentInstruction")
+		return nil
+
+	case inst.MigrateUserMetadataInstruction != nil:
+		p.log.Debug().
+			Bool("should_migrate", ptr.Val(inst.MigrateUserMetadataInstruction.ShouldMigrate)).
+			Msg("Ignoring MigrateUserMetadataInstruction")
+		return nil
+
+	case inst.MessageRequestInfoInstruction != nil:
+		p.log.Debug().Msg("Message request info changed, polling REST updates now")
+		p.client.polling.doShortCircuit()
+		return nil
+
+	case inst.XNumberPromptInstruction != nil, inst.OpenInboxInstruction != nil:
+		p.log.Trace().Msg("Ignoring UI MessageInstruction")
 		return nil
 
 	default:
@@ -1296,6 +1425,12 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 }
 
 type xchatSnapshotMessageBoundaryKey struct{}
+
+type xchatConversationKeysRefreshedKey struct{}
+
+type xchatConversationKeysRefresh struct {
+	err error
+}
 
 type xchatSnapshotMessageBoundary struct {
 	timestamp  time.Time
