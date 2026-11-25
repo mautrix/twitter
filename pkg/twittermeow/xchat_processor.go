@@ -498,7 +498,19 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			p.markConversationGapUnresolved(conversationID)
 		}
 	}()
-	if allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil {
+	needsCatchup := allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil
+	var keyMissing bool
+	var refreshed *xchatConversationKeysRefresh
+	if needsCatchup {
+		keyMissing, refreshed = p.messageKeyMissing(ctx, evt)
+	}
+	if needsCatchup && keyMissing {
+		p.markConversationGapUnresolved(conversationID)
+		p.log.Debug().
+			Str("conversation_id", conversationID).
+			Str("current_sequence_id", sequenceID).
+			Msg("Skipping XChat conversation catch-up because the live event's conversation key is missing")
+	} else if needsCatchup {
 		p.log.Info().
 			Str("conversation_id", conversationID).
 			Str("previous_sequence_id", previousSequenceID).
@@ -533,6 +545,9 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	// Process based on event type
 	switch {
 	case detail.MessageCreateEvent != nil:
+		if refreshed != nil {
+			ctx = context.WithValue(ctx, xchatConversationKeysRefreshedKey{}, refreshed)
+		}
 		return p.processMessageCreateEvent(ctx, evt, detail.MessageCreateEvent)
 
 	case detail.MessageDeleteEvent != nil:
@@ -666,6 +681,28 @@ func isEncryptedMessageCreateEvent(mce *payload.MessageCreateEvent) bool {
 	return mce != nil && ptr.Val(mce.ConversationKeyVersion) != ""
 }
 
+func (p *XChatEventProcessor) messageKeyMissing(ctx context.Context, evt *payload.MessageEvent) (bool, *xchatConversationKeysRefresh) {
+	if evt.Detail == nil {
+		return false, nil
+	}
+	mce := evt.Detail.MessageCreateEvent
+	if !isEncryptedMessageCreateEvent(mce) || ptr.Val(mce.ContentsEncryptionVersion) != 0 || len(mce.Contents) == 0 {
+		return false, nil
+	}
+	conversationID := ptr.Val(evt.ConversationId)
+	keyVersion := ptr.Val(mce.ConversationKeyVersion)
+	keyMissing := func() bool {
+		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+		return errors.Is(err, crypto.ErrKeyNotFound) || err == nil && (convKey == nil || len(convKey.Key) == 0)
+	}
+	if !keyMissing() {
+		return false, nil
+	}
+	refreshed := &xchatConversationKeysRefresh{err: p.client.RefreshConversationKeys(ctx, conversationID)}
+	keyUnavailable := refreshed.err == nil || errors.Is(refreshed.err, response.ErrConversationDataMissing)
+	return keyUnavailable && keyMissing(), refreshed
+}
+
 // processMessageCreateEvent handles a MessageCreateEvent, decrypting or parsing contents.
 // Encrypted events declare a conversation key version. Signed plaintext XChat
 // events omit it and contain directly encoded Thrift.
@@ -701,7 +738,12 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		}
 		if errors.Is(err, crypto.ErrKeyNotFound) {
 			// Try to fetch missing keys
-			refreshErr := p.client.RefreshConversationKeys(ctx, conversationID)
+			var refreshErr error
+			if refreshed, ok := ctx.Value(xchatConversationKeysRefreshedKey{}).(*xchatConversationKeysRefresh); ok {
+				refreshErr = refreshed.err
+			} else {
+				refreshErr = p.client.RefreshConversationKeys(ctx, conversationID)
+			}
 			if refreshErr != nil {
 				p.log.Warn().Err(refreshErr).
 					Str("conversation_id", conversationID).
@@ -1383,6 +1425,12 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 }
 
 type xchatSnapshotMessageBoundaryKey struct{}
+
+type xchatConversationKeysRefreshedKey struct{}
+
+type xchatConversationKeysRefresh struct {
+	err error
+}
 
 type xchatSnapshotMessageBoundary struct {
 	timestamp  time.Time
