@@ -329,7 +329,7 @@ type MediaAttachment struct {
 	LegacyMediaUrlHttps   *string          `thrift:"legacy_media_url_https,8" json:"legacy_media_url_https,omitempty"`
 	LegacyMediaPreviewUrl *string          `thrift:"legacy_media_preview_url,9" json:"legacy_media_preview_url,omitempty"`
 	GrokTag               *string          `thrift:"grok_tag,10" json:"grok_tag,omitempty"`
-	PlaintextSha256       *string          `thrift:"plaintext_sha256,11" json:"plaintext_sha256,omitempty"`
+	PlaintextSha256       []byte           `thrift:"plaintext_sha256,11" json:"plaintext_sha256,omitempty"`
 }
 
 type MediaDimensions struct {
