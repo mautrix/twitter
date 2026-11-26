@@ -19,7 +19,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.0
 	github.com/tidwall/gjson v1.20.0
-	go.mau.fi/util v0.11.2-0.20261123232031-42f343a1bef8
+	go.mau.fi/util v0.11.2-0.20261124193158-ca7820d78067
 	golang.org/x/crypto v0.59.0
 	golang.org/x/sync v0.25.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -55,6 +55,7 @@ require (
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	maunium.net/go/mauflag v1.0.0 // indirect
 )
