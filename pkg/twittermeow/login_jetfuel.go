@@ -200,6 +200,50 @@ func (wls *WebLoginSession) submitJetfuelCredentials(ctx context.Context, identi
 	return wls.submitJetfuelPassword(ctx, password)
 }
 
+func (wls *WebLoginSession) submitJetfuelSSO(ctx context.Context, provider, response string) (*WebLoginResult, error) {
+	switch provider {
+	case "google", "apple":
+	default:
+		return nil, fmt.Errorf("unsupported SSO provider %q", provider)
+	}
+	if strings.TrimSpace(response) == "" {
+		return nil, fmt.Errorf("x %s sign-in response is required", provider)
+	}
+	if wls.jetfuel == nil {
+		return nil, fmt.Errorf("%w: jetfuel session state is missing", ErrWebLoginUnexpectedSubtask)
+	}
+	body, err := wls.client.jetfuelPostForm(ctx, endpoints.JETFUEL_BEGIN_SIGNUP_SSO_PATH, url.Values{
+		provider + "_sso": {response},
+	})
+	if err != nil {
+		return nil, err
+	}
+	parsed := parseJetfuelLoginResponse(body)
+	if err := parsed.loginError(); err != nil {
+		return nil, err
+	}
+	wls.updateJetfuelState(parsed)
+	if wls.client.IsLoggedIn() || parsed.isComplete() {
+		return &WebLoginResult{Status: WebLoginStatusComplete}, nil
+	}
+	if result := wls.jetfuelAuthMethodChoiceResult(parsed); result != nil {
+		return result, nil
+	}
+	if action := parsed.beginTwoFactorAction(); action != "" {
+		return wls.submitJetfuelBeginTwoFactor(ctx, action)
+	}
+	if action := parsed.verificationAction(); action != "" {
+		wls.jetfuel.verificationAction = action
+		wls.jetfuel.verificationFields = parsed.verificationCodeFields()
+		return &WebLoginResult{
+			Status:           WebLoginStatusNeedsText,
+			CurrentSubtaskID: "JetfuelVerification",
+			Challenge:        parsed.verificationChallenge(),
+		}, nil
+	}
+	return wls.handleUnsupportedJetfuelResponse(ctx, provider+"_sso", endpoints.JETFUEL_BEGIN_SIGNUP_SSO_PATH, parsed)
+}
+
 func isJetfuelPrePasswordParityError(err error) bool {
 	if errors.Is(err, ErrJetfuelIdentifierNoSupportedAction) {
 		return true
