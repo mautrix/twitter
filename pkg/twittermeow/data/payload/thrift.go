@@ -427,6 +427,7 @@ func (mce *MessageCreateEvent) IsUserMetadata() bool {
 }
 
 type MessageCreateSideEffect struct {
+	AdditionalAction *int32    `thrift:"additional_action,1" json:"additional_action,omitempty"`
 	PinConversations *struct{} `thrift:"pin_conversations,3" json:"pin_conversations,omitempty"`
 	SetNicknames     *struct{} `thrift:"set_nicknames,4" json:"set_nicknames,omitempty"`
 	SetVerifiedUsers *struct{} `thrift:"set_verified_users,5" json:"set_verified_users,omitempty"`

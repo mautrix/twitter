@@ -88,8 +88,8 @@ func xchatInboxItemTrust(item *response.XChatInboxItem) *bool {
 	return trusted
 }
 
-func applyXChatTrustToChatInfo(info *bridgev2.ChatInfo, trusted bool) {
-	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
+func (tc *TwitterClient) applyXChatTrustToChatInfo(info *bridgev2.ChatInfo, trusted bool) {
+	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(ctx context.Context, portal *bridgev2.Portal) bool {
 		meta, ok := portal.Metadata.(*PortalMetadata)
 		if !ok || meta == nil {
 			return false
@@ -101,6 +101,17 @@ func applyXChatTrustToChatInfo(info *bridgev2.ChatInfo, trusted bool) {
 		messageRequest := !effectiveTrusted
 		changed := portal.MessageRequest != messageRequest
 		portal.MessageRequest = messageRequest
+		if changed && !messageRequest {
+			userPortal, err := tc.userLogin.Bridge.DB.UserPortal.Get(ctx, tc.userLogin.UserLogin, portal.PortalKey)
+			if err != nil {
+				zerolog.Ctx(ctx).Err(err).Msg("Failed to get user portal to mark accepted message request as read")
+			} else if userPortal != nil && !userPortal.LastRead.IsZero() {
+				err = tc.HandleMatrixReadReceipt(ctx, &bridgev2.MatrixReadReceipt{Portal: portal, ReadUpTo: userPortal.LastRead})
+				if err != nil {
+					zerolog.Ctx(ctx).Err(err).Msg("Failed to mark accepted message request as read")
+				}
+			}
+		}
 		if meta.XChatTrusted == nil || *meta.XChatTrusted != effectiveTrusted {
 			meta.XChatTrusted = ptr.Ptr(effectiveTrusted)
 			changed = true
@@ -138,7 +149,7 @@ func (tc *TwitterClient) syncXChatTrust(
 	}
 
 	chatInfo := &bridgev2.ChatInfo{}
-	applyXChatTrustToChatInfo(chatInfo, *trusted)
+	tc.applyXChatTrustToChatInfo(chatInfo, *trusted)
 	if current := bridgev2.GetRemoteEventFromContext(ctx); current != nil && current.GetPortalKey().ID == portalKey.ID {
 		portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, timestamp)
 		return true
@@ -464,7 +475,7 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		CanBackfill: true,
 	}
 	if trusted != nil {
-		applyXChatTrustToChatInfo(info, *trusted)
+		tc.applyXChatTrustToChatInfo(info, *trusted)
 	}
 
 	if isGroup {
@@ -758,7 +769,7 @@ func (tc *TwitterClient) conversationToChatInfo(ctx context.Context, conv *types
 		Members:     tc.buildChatMembersFromUserIDs(ctx, conv.ConversationID, participantIDs, inbox),
 		CanBackfill: true,
 	}
-	applyXChatTrustToChatInfo(info, conv.Trusted)
+	tc.applyXChatTrustToChatInfo(info, conv.Trusted)
 
 	isGroup := conv.Type == ConversationTypeGroupDM
 	if isGroup {
