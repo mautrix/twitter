@@ -228,6 +228,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		return nil, fmt.Errorf("get or create XChat portal: %w", err)
 	}
 	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
+	tc.trackXChatMute(chatInfo, portal, conv.Muted)
 	var latestMessage *database.Message
 	if portal.MXID != "" {
 		latestMessage, err = tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))

@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
@@ -49,6 +50,69 @@ func (tc *TwitterClient) queueUserLocalPortalInfo(ctx context.Context, conversat
 		}).Success && success
 	}
 	return success
+}
+
+func (tc *TwitterClient) handleXChatMuteChange(ctx context.Context, evt *types.XChatConversationMuteChange) bool {
+	success := true
+	for _, conversationID := range evt.ConversationIDs {
+		if !tc.portalHasRoom(ctx, conversationID) {
+			continue
+		}
+		mutedUntil := bridgev2.Unmuted
+		if evt.Muted {
+			mutedUntil = event.MutedForever
+		}
+		info := &bridgev2.ChatInfo{UserLocal: &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}}
+		tc.trackXChatMute(info, nil, evt.Muted)
+		success = tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+			EventMeta: simplevent.EventMeta{
+				Type:      bridgev2.RemoteEventChatInfoChange,
+				PortalKey: tc.MakePortalKeyFromID(conversationID),
+				Timestamp: evt.Timestamp,
+			},
+			ChatInfoChange: &bridgev2.ChatInfoChange{ChatInfo: info},
+		}).Success && success
+	}
+	return success
+}
+
+func (tc *TwitterClient) trackXChatMute(info *bridgev2.ChatInfo, portal *bridgev2.Portal, muted bool) {
+	if portal != nil {
+		if meta, _ := portal.Metadata.(*PortalMetadata); meta != nil && meta.XChatMuted != nil && *meta.XChatMuted == muted {
+			return
+		}
+	}
+	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
+		meta := portal.Metadata.(*PortalMetadata)
+		if meta.XChatMuted != nil && *meta.XChatMuted == muted {
+			return false
+		}
+		meta.XChatMuted = &muted
+		if (portal.MXID == "" && muted) || (portal.MXID != "" && !portal.Bridge.Config.MuteOnlyOnCreate) {
+			tc.userLocalLock.Lock()
+			if tc.pendingMuteEchoes == nil {
+				tc.pendingMuteEchoes = make(map[networkid.PortalID][]bool)
+			}
+			tc.pendingMuteEchoes[portal.ID] = append(tc.pendingMuteEchoes[portal.ID], muted)
+			tc.userLocalLock.Unlock()
+		}
+		return true
+	})
+}
+
+func (tc *TwitterClient) consumeMuteEcho(portalID networkid.PortalID, muted bool) bool {
+	tc.userLocalLock.Lock()
+	defer tc.userLocalLock.Unlock()
+	pending := tc.pendingMuteEchoes[portalID]
+	idx := slices.Index(pending, muted)
+	if idx < 0 {
+		return false
+	} else if idx == len(pending)-1 {
+		delete(tc.pendingMuteEchoes, portalID)
+	} else {
+		tc.pendingMuteEchoes[portalID] = pending[idx+1:]
+	}
+	return true
 }
 
 func staticUserLocalInfo(info *bridgev2.UserLocalPortalInfo) func(string) *bridgev2.UserLocalPortalInfo {

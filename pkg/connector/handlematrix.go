@@ -1148,18 +1148,27 @@ func (tc *TwitterClient) HandleMarkedUnread(ctx context.Context, msg *bridgev2.M
 }
 
 func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
-	conversationID := ParsePortalID(msg.Portal.ID)
-	if msg.Content.IsMuted() {
-		// X only has indefinite mutes, so timed mutes stay local to Beeper.
-		if msg.Content.GetMuteDuration() >= 0 {
-			if msg.PrevContent != nil && msg.PrevContent.GetMuteDuration() < 0 {
-				return tc.client.UnmuteConversation(ctx, conversationID)
-			}
-			return nil
-		}
-		return tc.client.MuteConversation(ctx, conversationID)
+	// X only has indefinite mutes, so timed mutes stay local to Beeper.
+	muted := msg.Content.GetMuteDuration() < 0
+	meta := msg.Portal.Metadata.(*PortalMetadata)
+	if tc.consumeMuteEcho(msg.Portal.ID, muted) || (meta.XChatMuted != nil && *meta.XChatMuted == muted) {
+		return nil
 	}
-	return tc.client.UnmuteConversation(ctx, conversationID)
+	conversationID := ParsePortalID(msg.Portal.ID)
+	var err error
+	if muted {
+		err = tc.client.MuteConversation(ctx, conversationID)
+	} else {
+		err = tc.client.UnmuteConversation(ctx, conversationID)
+	}
+	if err != nil {
+		return err
+	}
+	tc.userLocalLock.Lock()
+	delete(tc.pendingMuteEchoes, msg.Portal.ID)
+	tc.userLocalLock.Unlock()
+	meta.XChatMuted = &muted
+	return msg.Portal.Save(ctx)
 }
 
 func (tc *TwitterClient) isXChatConversationTrusted(ctx context.Context, conversationID string) bool {

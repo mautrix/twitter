@@ -535,11 +535,7 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
 	case *types.XChatConversationMuteChange:
-		mutedUntil := bridgev2.Unmuted
-		if evt.Muted {
-			mutedUntil = event.MutedForever
-		}
-		return tc.queueUserLocalPortalInfo(ctx, evt.ConversationIDs, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}))
+		return tc.handleXChatMuteChange(ctx, evt)
 
 	case *types.XChatConversationArchiveChange:
 		return tc.handleXChatArchiveChange(ctx, evt)
