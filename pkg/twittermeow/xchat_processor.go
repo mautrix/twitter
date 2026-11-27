@@ -593,16 +593,18 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 				ConversationIDs: change.UnmuteConversation.UnmutedConversationIds,
 				Timestamp:       ts,
 			})
-		case change.ArchiveConversation != nil:
+		case change.ArchiveConversation != nil, change.UnarchiveConversation != nil:
+			if ptr.Val(evt.SenderId) != p.client.GetCurrentUserID() {
+				p.log.Debug().
+					Str("sequence_id", ptr.Val(evt.SequenceId)).
+					Str("sender_id", ptr.Val(evt.SenderId)).
+					Msg("Ignoring archive change from another user")
+				return nil
+			}
 			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
-				ConversationIDs: conversationIDsOrSelf(change.ArchiveConversation.ConversationIds, evt),
-				Archived:        true,
-				Timestamp:       ts,
-			})
-		case change.UnarchiveConversation != nil:
-			return p.emitEvent(ctx, &types.XChatConversationArchiveChange{
-				ConversationIDs: conversationIDsOrSelf(change.UnarchiveConversation.ConversationIds, evt),
-				Timestamp:       ts,
+				ConversationID: ptr.Val(evt.ConversationId),
+				Archived:       change.ArchiveConversation != nil,
+				Timestamp:      ts,
 			})
 		}
 		p.log.Debug().
@@ -893,15 +895,6 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
 
 	return p.emitConversationCreate(ctx, evt)
-}
-
-func conversationIDsOrSelf(ids []string, evt *payload.MessageEvent) []string {
-	if len(ids) > 0 {
-		return ids
-	} else if conversationID := ptr.Val(evt.ConversationId); conversationID != "" {
-		return []string{conversationID}
-	}
-	return nil
 }
 
 func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *payload.MessageEvent) error {

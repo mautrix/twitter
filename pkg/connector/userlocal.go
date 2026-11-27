@@ -137,16 +137,17 @@ func (tc *TwitterClient) handleXChatArchiveChange(ctx context.Context, evt *type
 	if evt.Archived {
 		tag = tc.connector.Config.ArchiveTag
 	}
-	var conversationIDs []string
-	for _, conversationID := range evt.ConversationIDs {
-		if !tc.isConversationPinned(conversationID) {
-			conversationIDs = append(conversationIDs, NormalizeConversationID(conversationID))
-		}
+	if evt.ConversationID == "" || tc.isConversationPinned(evt.ConversationID) {
+		return true
 	}
+	conversationIDs := []string{NormalizeConversationID(evt.ConversationID)}
 	return tc.queueUserLocalPortalInfo(ctx, conversationIDs, evt.Timestamp, staticUserLocalInfo(&bridgev2.UserLocalPortalInfo{Tag: &tag}))
 }
 
-func xchatItemArchived(item *response.XChatInboxItem) bool {
+func (tc *TwitterClient) xchatItemArchived(item *response.XChatInboxItem) bool {
+	if item.ConversationDetail.IsArchived != nil {
+		return *item.ConversationDetail.IsArchived
+	}
 	var archived bool
 	var latestSequenceID string
 	for _, raw := range slices.Concat(item.LatestMessageEvents, item.EncodedMessageEvents) {
@@ -156,7 +157,7 @@ func xchatItemArchived(item *response.XChatInboxItem) bool {
 		}
 		change := evt.Detail.ConversationMetadataChangeEvent.ConversationMetadataChange
 		if change == nil || (change.ArchiveConversation == nil && change.UnarchiveConversation == nil) ||
-			compareIntStrings(ptr.Val(evt.SequenceId), latestSequenceID) <= 0 {
+			ptr.Val(evt.SenderId) != tc.client.GetCurrentUserID() || compareIntStrings(ptr.Val(evt.SequenceId), latestSequenceID) <= 0 {
 			continue
 		}
 		latestSequenceID = ptr.Val(evt.SequenceId)
