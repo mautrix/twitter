@@ -564,6 +564,15 @@ func (tc *TwitterClient) HandleXChatEvent(ctx context.Context, rawEvt types.Twit
 		changeEvt := tc.buildMemberChangeEvent(evt.ConversationID, evt.ID, evt.Time, evt.Participants, event.MembershipLeave)
 		return xchatRemoteEventHandled(tc.userLogin.QueueRemoteEvent(changeEvt))
 
+	case *types.XChatConversationMuteChange:
+		return tc.handleXChatMuteChange(ctx, evt)
+
+	case *types.XChatConversationArchiveChange:
+		return tc.handleXChatArchiveChange(ctx, evt)
+
+	case *types.XChatPinnedConversations:
+		return tc.handleXChatPinnedConversations(ctx, evt)
+
 	case *types.XChatTyping:
 		typingType := bridgev2.TypingTypeText
 		if evt.ActivityType == payload.MessageActivityTypeRecordingVoiceMessage {

@@ -7,6 +7,7 @@ import (
 
 	up "go.mau.fi/util/configupgrade"
 	"gopkg.in/yaml.v3"
+	"maunium.net/go/mautrix/event"
 )
 
 //go:embed example-config.yaml
@@ -18,6 +19,9 @@ type Config struct {
 	CacheSession          bool   `yaml:"cache_session"`
 
 	X bool `yaml:"x"`
+
+	PinnedTag  event.RoomTag `yaml:"pinned_tag"`
+	ArchiveTag event.RoomTag `yaml:"archive_tag"`
 
 	LogRedactedLoginResponses bool `yaml:"log_redacted_login_responses"`
 
@@ -45,6 +49,8 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Int, "conversation_sync_limit")
 	helper.Copy(up.Bool, "cache_session")
 	helper.Copy(up.Bool, "x")
+	helper.Copy(up.Str|up.Null, "pinned_tag")
+	helper.Copy(up.Str|up.Null, "archive_tag")
 	helper.Copy(up.Bool, "log_redacted_login_responses")
 }
 

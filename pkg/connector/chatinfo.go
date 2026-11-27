@@ -66,6 +66,7 @@ func (tc *TwitterClient) GetChatInfo(ctx context.Context, portal *bridgev2.Porta
 		return nil, fmt.Errorf("failed to build conversation from fetched data")
 	}
 
+	tc.expectMuteEcho(ctx, portal, conv.Muted)
 	return tc.xchatItemToChatInfo(ctx, item, users, conv), nil
 }
 

@@ -168,7 +168,7 @@ func ParseMessageEntryContentsBytes(data []byte) (*payload.MessageEntryContents,
 	return decodeMessageEntryHolder(data, nil)
 }
 
-func DecryptUserMetadataBytes(ciphertext, conversationKey []byte) (err error) {
+func DecryptUserMetadataBytes(ciphertext, conversationKey []byte) (meta *payload.UserMetadata, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("thrift decode panic: %v", recovered)
@@ -177,9 +177,10 @@ func DecryptUserMetadataBytes(ciphertext, conversationKey []byte) (err error) {
 
 	plaintext, err := SecretboxDecrypt(ciphertext, conversationKey)
 	if err != nil {
-		return fmt.Errorf("secretbox decrypt: %w", err)
+		return nil, fmt.Errorf("secretbox decrypt: %w", err)
 	}
-	return payload.Decode(plaintext, new(payload.UserMetadata))
+	meta = new(payload.UserMetadata)
+	return meta, payload.Decode(plaintext, meta)
 }
 
 func decodeMessageEntryHolder(data []byte, log *zerolog.Logger) (_ *payload.MessageEntryContents, err error) {

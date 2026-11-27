@@ -123,6 +123,16 @@ type ConversationMetadataChange struct {
 	DisableScreenCaptureDetection *DisableScreenCaptureDetection `thrift:"disable_screen_capture_detection,6" json:"disable_screen_capture_detection,omitempty"`
 	EnableScreenCaptureBlocking   *EnableScreenCaptureBlocking   `thrift:"enable_screen_capture_blocking,7" json:"enable_screen_capture_blocking,omitempty"`
 	DisableScreenCaptureBlocking  *DisableScreenCaptureBlocking  `thrift:"disable_screen_capture_blocking,8" json:"disable_screen_capture_blocking,omitempty"`
+	ArchiveConversation           *ArchiveConversation           `thrift:"archive_conversation,11" json:"archive_conversation,omitempty"`
+	UnarchiveConversation         *UnarchiveConversation         `thrift:"unarchive_conversation,12" json:"unarchive_conversation,omitempty"`
+}
+
+type ArchiveConversation struct {
+	ConversationIds []string `thrift:"conversation_ids,1" json:"conversation_ids,omitempty"`
+}
+
+type UnarchiveConversation struct {
+	ConversationIds []string `thrift:"conversation_ids,1" json:"conversation_ids,omitempty"`
 }
 
 type ConversationMetadataChangeEvent struct {
@@ -415,6 +425,15 @@ type MessageCreateEvent struct {
 	IsMessageRequest          *bool                      `thrift:"is_message_request,109" json:"is_message_request,omitempty"`
 	SideEffects               []*MessageCreateSideEffect `thrift:"side_effects,111" json:"side_effects,omitempty"`
 	ContentsEncryptionVersion *int16                     `thrift:"contents_encryption_version,112" json:"contents_encryption_version,omitempty"`
+}
+
+func (mce *MessageCreateEvent) HasPinnedConversationsSideEffect() bool {
+	for _, sideEffect := range mce.SideEffects {
+		if sideEffect != nil && sideEffect.PinConversations != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (mce *MessageCreateEvent) IsUserMetadata() bool {

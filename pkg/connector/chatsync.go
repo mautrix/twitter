@@ -238,6 +238,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 
 	if evt := bridgev2.GetRemoteEventFromContext(ctx); evt != nil && evt.GetPortalKey().ID == portal.PortalKey.ID {
 		// Key refresh can run inside this portal's synchronous event handler.
+		tc.expectMuteEcho(ctx, portal, conv.Muted)
 		portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
 	} else if latestMessage == nil || shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
 		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
@@ -245,7 +246,10 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 				Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
 				CreatePortal: true, Timestamp: time.Now(),
 			},
-			ChatInfo: chatInfo,
+			GetChatInfoFunc: func(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+				tc.expectMuteEcho(ctx, portal, conv.Muted)
+				return chatInfo, nil
+			},
 			CheckNeedsBackfillFunc: func(_ context.Context, latestMessage *database.Message) (bool, error) {
 				return latestMessage == nil, nil
 			},
@@ -486,6 +490,15 @@ func (tc *TwitterClient) xchatItemToChatInfo(ctx context.Context, item *response
 		info.Type = ptr.Ptr(database.RoomTypeDM)
 		tc.applySelfDMNameAndAvatar(ctx, conversationID, info, users, nil)
 	}
+	mutedUntil := bridgev2.Unmuted
+	if detail.IsMuted {
+		mutedUntil = event.MutedForever
+	}
+	info.UserLocal = &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}
+	if tc.xchatItemArchived(item) && tc.connector.Config.ArchiveTag != "" && !tc.isConversationPinned(conversationID) {
+		info.UserLocal.Tag = ptr.Ptr(tc.connector.Config.ArchiveTag)
+	}
+	tc.applyPinAtCreation(ctx, conversationID, info)
 
 	return info
 }

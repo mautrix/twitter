@@ -202,6 +202,7 @@ func (item *XChatInboxItem) UnmarshalJSON(data []byte) error {
 type XChatConversationDetail struct {
 	Typename                           string              `json:"__typename,omitempty"`
 	IsMuted                            bool                `json:"is_muted,omitempty"`
+	IsArchived                         *bool               `json:"is_archived,omitempty"`
 	ConversationID                     string              `json:"conversation_id,omitempty"`
 	ParticipantsResults                []XChatUserResult   `json:"participants_results,omitempty"`
 	GroupMetadata                      *XChatGroupMetadata `json:"group_metadata,omitempty"`

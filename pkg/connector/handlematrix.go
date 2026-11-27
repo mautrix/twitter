@@ -53,6 +53,7 @@ import (
 var (
 	_ bridgev2.ReactionHandlingNetworkAPI        = (*TwitterClient)(nil)
 	_ bridgev2.ReadReceiptHandlingNetworkAPI     = (*TwitterClient)(nil)
+	_ bridgev2.MarkedUnreadHandlingNetworkAPI    = (*TwitterClient)(nil)
 	_ bridgev2.EditHandlingNetworkAPI            = (*TwitterClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI          = (*TwitterClient)(nil)
 	_ bridgev2.ChatViewingNetworkAPI             = (*TwitterClient)(nil)
@@ -1190,19 +1191,36 @@ func (tc *TwitterClient) HandleRoomTag(ctx context.Context, msg *bridgev2.Matrix
 	return tc.client.SendXChatUnpinConversation(ctx, conversationID)
 }
 
-func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
-	conversationID := ParsePortalID(msg.Portal.ID)
-	if msg.Content.IsMuted() {
-		// X only has indefinite mutes, so timed mutes stay local to Beeper.
-		if msg.Content.GetMuteDuration() >= 0 {
-			if msg.PrevContent != nil && msg.PrevContent.GetMuteDuration() < 0 {
-				return tc.client.UnmuteConversation(ctx, conversationID)
-			}
-			return nil
-		}
-		return tc.client.MuteConversation(ctx, conversationID)
+func (tc *TwitterClient) HandleMarkedUnread(ctx context.Context, msg *bridgev2.MatrixMarkedUnread) error {
+	meta, _ := msg.Portal.Metadata.(*PortalMetadata)
+	if !msg.Content.Unread || !meta.CanUseXChat() {
+		return nil
 	}
-	return tc.client.UnmuteConversation(ctx, conversationID)
+	return tc.client.SendXChatMarkConversationUnread(ctx, NormalizeConversationID(ParsePortalID(msg.Portal.ID)))
+}
+
+func (tc *TwitterClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute) error {
+	// X only has indefinite mutes, so timed mutes stay local to Beeper.
+	muted := msg.Content.GetMuteDuration() < 0
+	if tc.consumeMuteEcho(msg.Portal.ID, muted) {
+		return nil
+	} else if remoteMuted, known := tc.remoteMuteState(ctx, msg.Portal); known && remoteMuted == muted {
+		return nil
+	}
+	conversationID := ParsePortalID(msg.Portal.ID)
+	var err error
+	if muted {
+		err = tc.client.MuteConversation(ctx, conversationID)
+	} else {
+		err = tc.client.UnmuteConversation(ctx, conversationID)
+	}
+	if err != nil {
+		return err
+	}
+	tc.userLocalLock.Lock()
+	delete(tc.pendingMuteEchoes, msg.Portal.ID)
+	tc.userLocalLock.Unlock()
+	return tc.setRemoteMuteState(ctx, msg.Portal, muted)
 }
 
 func (tc *TwitterClient) isXChatConversationTrusted(ctx context.Context, conversationID string) bool {
