@@ -19,9 +19,11 @@ package connector
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,6 +31,7 @@ import (
 	"unicode"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/random"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/status"
@@ -61,41 +64,45 @@ type TwitterLogin struct {
 	waitingForBrowserIdentity bool
 	waitingForSSOResponse     bool
 
-	client              *twittermeow.Client
-	webLogin            *twittermeow.WebLoginSession
-	webLoginIdentifier  string
-	webLoginPassword    string
-	webLoginCastleStage string
-	webLoginAuthMethod  string
-	webLoginText        string
-	webLoginSSOResponse string
-	webLoginChallenge   *twittermeow.WebLoginChallenge
-	webLoginMethods     []twittermeow.WebLoginAuthMethod
-	browserHeaders      twittermeow.BrowserHeaders
-	profile             twittermeow.CurrentUserProfile
+	client                *twittermeow.Client
+	webLogin              *twittermeow.WebLoginSession
+	webLoginIdentifier    string
+	webLoginPassword      string
+	webLoginCastleStage   string
+	webLoginAuthMethod    string
+	webLoginWebviewSubmit *twittermeow.JetfuelWebviewRequest
+	webLoginText          string
+	webLoginSSOResponse   string
+	webLoginChallenge     *twittermeow.WebLoginChallenge
+	webLoginMethods       []twittermeow.WebLoginAuthMethod
+	browserHeaders        twittermeow.BrowserHeaders
+	profile               twittermeow.CurrentUserProfile
 }
 
 var (
-	LoginFlowIDPassword        = "password"
-	LoginFlowIDCookies         = "cookies"
-	LoginStepIDCredentials     = "fi.mau.twitter.login.enter_credentials"
-	LoginStepIDBrowserIdentity = "fi.mau.twitter.login.browser_identity"
-	LoginStepIDPrepareLogin    = "fi.mau.twitter.login.prepare"
-	LoginStepIDCastleToken     = "fi.mau.twitter.login.castle_token"
-	LoginStepIDVerification    = "fi.mau.twitter.login.enter_verification"
-	LoginStepIDAuthMethod      = "fi.mau.twitter.login.select_auth_method"
-	LoginStepIDCookies         = "fi.mau.twitter.login.enter_cookies"
-	LoginStepJuiceboxPIN       = "fi.mau.twitter.login.juicebox_pin"
-	LoginStepIDComplete        = "fi.mau.twitter.login.complete"
-	loginFieldIdentifier       = "identifier"
-	loginFieldPassword         = "password"
-	loginFieldCastleToken      = "castle_token"
-	loginFieldBrowserUserAgent = "browser_user_agent"
-	loginFieldBrowserSecCHUA   = "browser_sec_ch_ua"
-	loginFieldBrowserPlatform  = "browser_sec_ch_ua_platform"
-	loginFieldBrowserMobile    = "browser_sec_ch_ua_mobile"
-	loginFieldVerificationCode = "verification_code"
-	loginFieldAuthMethod       = "auth_method"
+	LoginFlowIDPassword           = "password"
+	LoginFlowIDCookies            = "cookies"
+	LoginStepIDCredentials        = "fi.mau.twitter.login.enter_credentials"
+	LoginStepIDBrowserIdentity    = "fi.mau.twitter.login.browser_identity"
+	LoginStepIDPrepareLogin       = "fi.mau.twitter.login.prepare"
+	LoginStepIDCastleToken        = "fi.mau.twitter.login.castle_token"
+	LoginStepIDVerification       = "fi.mau.twitter.login.enter_verification"
+	LoginStepIDAuthMethod         = "fi.mau.twitter.login.select_auth_method"
+	LoginStepIDCookies            = "fi.mau.twitter.login.enter_cookies"
+	LoginStepJuiceboxPIN          = "fi.mau.twitter.login.juicebox_pin"
+	LoginStepIDComplete           = "fi.mau.twitter.login.complete"
+	loginFieldIdentifier          = "identifier"
+	loginFieldPassword            = "password"
+	loginFieldCastleToken         = "castle_token"
+	loginFieldPreludeID           = "prelude_dispatch_id"
+	loginFieldWebviewSubmitStatus = "webview_submit_status"
+	loginFieldWebviewSubmitBody   = "webview_submit_body"
+	loginFieldBrowserUserAgent    = "browser_user_agent"
+	loginFieldBrowserSecCHUA      = "browser_sec_ch_ua"
+	loginFieldBrowserPlatform     = "browser_sec_ch_ua_platform"
+	loginFieldBrowserMobile       = "browser_sec_ch_ua_mobile"
+	loginFieldVerificationCode    = "verification_code"
+	loginFieldAuthMethod          = "auth_method"
 )
 
 const (
@@ -110,6 +117,7 @@ const (
 	castleTokenContextURL             = "https://x.com/i/jf/onboarding/web?mode=login"
 	castleTokenHeaderPrefix           = "text/plain, application/x-mautrix-twitter-castle;v="
 	castleTokenBatchSize              = 8
+	preludeDispatchIDBatchSize        = 3
 )
 
 var castleTokenCookieNames = []string{
@@ -185,6 +193,13 @@ func castleTokenFieldID(index int) string {
 	return fmt.Sprintf("%s_%d", loginFieldCastleToken, index)
 }
 
+func preludeDispatchIDFieldID(index int) string {
+	if index <= 1 {
+		return loginFieldPreludeID
+	}
+	return fmt.Sprintf("%s_%d", loginFieldPreludeID, index)
+}
+
 func castleTokenCookieFields() []bridgev2.LoginCookieField {
 	fields := []bridgev2.LoginCookieField{
 		{
@@ -222,6 +237,23 @@ func castleTokenCookieFields() []bridgev2.LoginCookieField {
 			},
 		})
 	}
+	for index := 1; index <= preludeDispatchIDBatchSize; index++ {
+		fieldID := preludeDispatchIDFieldID(index)
+		fields = append(fields, bridgev2.LoginCookieField{
+			ID:      fieldID,
+			Pattern: `^[0-9a-fA-F-]{36}$`,
+			Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: "fi.mau.twitter." + fieldID}},
+		})
+	}
+	fields = append(fields, bridgev2.LoginCookieField{
+		ID:      loginFieldWebviewSubmitStatus,
+		Pattern: `^[0-9]{1,3}$`,
+		Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: "fi.mau.twitter." + loginFieldWebviewSubmitStatus}},
+	}, bridgev2.LoginCookieField{
+		ID:      loginFieldWebviewSubmitBody,
+		Pattern: `^[A-Za-z0-9+/=]*$`,
+		Sources: []bridgev2.LoginCookieFieldSource{{Type: bridgev2.LoginCookieTypeSpecial, Name: "fi.mau.twitter." + loginFieldWebviewSubmitBody}},
+	})
 	for _, field := range browserHeaderFields {
 		fields = append(fields, bridgev2.LoginCookieField{
 			ID:       field.ID,
@@ -460,6 +492,7 @@ func (t *TwitterLogin) clearWebLoginInputs() {
 	t.webLoginPassword = ""
 	t.webLoginCastleStage = ""
 	t.webLoginAuthMethod = ""
+	t.webLoginWebviewSubmit = nil
 	t.webLoginText = ""
 	t.webLoginSSOResponse = ""
 	t.webLoginChallenge = nil
@@ -594,23 +627,49 @@ func makeCredentialsStep(errorLine l10n.Message) *bridgev2.LoginStep {
 	}
 }
 
-func makeCastleTokenStep(info twittermeow.JetfuelCastleTokenInfo, identifier string, errorLine l10n.Message) *bridgev2.LoginStep {
+func makeCastleTokenStep(info twittermeow.JetfuelCastleTokenInfo, identifier string, errorLine l10n.Message, submit *twittermeow.JetfuelWebviewRequest) *bridgev2.LoginStep {
 	instructions := msgStepCastleTokenInstructions.Message()
 	if !errorLine.IsZero() {
 		instructions = msgStepCastleTokenErrorInstructions.Render(l10n.Params{"error": errorLine})
 	}
-	return &bridgev2.LoginStep{
+	var initialCookies []bridgev2.LoginCookie
+	if submit != nil {
+		form, err := json.Marshal(submit.Form)
+		if err != nil {
+			panic(fmt.Errorf("marshal X webview form: %w", err))
+		}
+		formCookieName := "mautrix_twitter_login_form_" + random.String(16)
+		// InitialCookies is redacted by login-step loggers; ExtractJS is not.
+		initialCookies = append(initialCookies, bridgev2.LoginCookie{
+			Name: formCookieName, Value: url.QueryEscape(string(form)),
+			Domain: "x.com", Path: "/robots.txt", Secure: true,
+		})
+		publicSubmit := *submit
+		publicSubmit.Form = nil
+		publicSubmit.FormCookieName = formCookieName
+		submit = &publicSubmit
+	}
+	step := &bridgev2.LoginStep{
 		Type:         bridgev2.LoginStepTypeCookies,
 		StepID:       LoginStepIDCastleToken,
 		Instructions: instructions,
 		CookiesParams: &bridgev2.LoginCookiesParams{
 			URL:               castleTokenWebviewURL,
-			ExtractJS:         castleTokenExtractJS(info, identifier),
+			ExtractJS:         castleTokenExtractJS(info, identifier, submit),
 			WaitForURLPattern: `^https://x\.com/robots\.txt$`,
 			Fields:            castleTokenCookieFields(),
+			InitialCookies:    initialCookies,
 			Hidden:            true,
 		},
 	}
+	if submit != nil {
+		for index := range step.CookiesParams.Fields {
+			if step.CookiesParams.Fields[index].ID == loginFieldWebviewSubmitStatus {
+				step.CookiesParams.Fields[index].Required = true
+			}
+		}
+	}
+	return step
 }
 
 func (t *TwitterLogin) makeWebLoginCastleTokenStep(errorLine l10n.Message) *bridgev2.LoginStep {
@@ -624,9 +683,37 @@ func (t *TwitterLogin) makeWebLoginCastleTokenStep(errorLine l10n.Message) *brid
 		t.User.Log.Warn().Msg("X Castle web metadata missing from login page bootstrap")
 		return t.restartStep(msgErrCastleMetadataMissing.Message())
 	}
-	step := makeCastleTokenStep(info, t.webLoginIdentifier, errorLine)
+	step := makeCastleTokenStep(info, t.webLoginIdentifier, errorLine, t.webLoginWebviewSubmit)
 	step.CookiesParams.UserAgent = t.browserHeaders.UserAgent
+	if t.webLoginWebviewSubmit != nil {
+		client := t.webLogin.Client()
+		for name, value := range client.GetCookies() {
+			step.CookiesParams.InitialCookies = append(step.CookiesParams.InitialCookies, bridgev2.LoginCookie{
+				Name: name, Value: value, Domain: ".x.com", Secure: true,
+				HTTPOnly: name == "auth_token" || name == "att" || name == "kdt",
+			})
+		}
+		for _, name := range jetfuelWebviewCookieNames(client) {
+			if slices.Contains(castleTokenCookieNames, name) {
+				continue
+			}
+			step.CookiesParams.Fields = append(step.CookiesParams.Fields, bridgev2.LoginCookieField{
+				ID: name,
+				Sources: []bridgev2.LoginCookieFieldSource{
+					{Type: bridgev2.LoginCookieTypeCookie, Name: name, CookieDomain: "x.com"},
+					{Type: bridgev2.LoginCookieTypeCookie, Name: name, CookieDomain: ".x.com"},
+				},
+			})
+		}
+		step.CookiesParams.JSRequired = true
+	}
 	return step
+}
+
+func jetfuelWebviewCookieNames(client *twittermeow.Client) []string {
+	names := slices.Concat(client.GetCookieNames(), castleTokenCookieNames, []string{"auth_token", "ct0", "att", "kdt", "twid", "lang", "dtab_local"})
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine l10n.Message) *bridgev2.LoginStep {
@@ -691,6 +778,9 @@ func makeAuthMethodStep(methods []twittermeow.WebLoginAuthMethod, errorLine l10n
 	options := make([]string, 0, len(methods))
 	for _, method := range methods {
 		if !method.Supported {
+			if method.Description != "" {
+				instructions = l10n.Unlocalized(fmt.Sprintf("%s\n\n%s", instructions.Text, method.Description))
+			}
 			continue
 		}
 		if method.Name == "" {
@@ -793,7 +883,20 @@ func (t *TwitterLogin) SubmitCookies(ctx context.Context, cookies map[string]str
 		return makePrepareLoginStep(), nil
 	}
 	if t.isWaitingForWebLoginCastleToken() {
-		return t.mapClientHTTPFailure(t.submitWebCastleTokenInput(ctx, cookies))
+		wasSelectingMethod := t.webLoginCastleStage == webLoginCastleStageAuthMethod
+		wasSubmitting := t.webLoginWebviewSubmit != nil
+		step, err := t.submitWebCastleTokenInput(ctx, cookies)
+		if wasSelectingMethod && err == nil && step != nil && step.StepID == LoginStepIDCastleToken {
+			if !wasSubmitting {
+				t.webLoginAuthMethod = ""
+				t.webLoginCastleStage = ""
+				return makeAuthMethodStep(t.webLoginMethods, msgErrBrowserStepUnfinished.Message()), nil
+			}
+			// Reopening the hidden window may repeat an unacknowledged verification request.
+			t.resetWebLoginState()
+			return makeCredentialsStep(msgErrVerificationUnconfirmed.Message()), nil
+		}
+		return t.mapClientHTTPFailure(step, err)
 	}
 	cookieStruct := twitCookies.NewCookies(cookies)
 	t.Cookies = cookieStruct.String()
@@ -1281,7 +1384,49 @@ func (t *TwitterLogin) submitWebCastleTokenInput(ctx context.Context, input map[
 	t.browserHeaders = client.GetBrowserHeaders()
 	client.SetCookies(castleWebviewCookies(input))
 	client.SetNextJetfuelCastleTokens(castleTokens)
+	preludeIDs := make([]string, 0, preludeDispatchIDBatchSize)
+	for index := 1; index <= preludeDispatchIDBatchSize; index++ {
+		if id := strings.TrimSpace(input[preludeDispatchIDFieldID(index)]); id != "" {
+			preludeIDs = append(preludeIDs, id)
+		}
+	}
+	isWebviewSubmit := t.webLoginWebviewSubmit != nil && t.webLoginCastleStage == webLoginCastleStageAuthMethod
+	if !isWebviewSubmit || len(preludeIDs) > 0 {
+		client.SetNextJetfuelPreludeDispatchIDs(preludeIDs)
+	}
+	if isWebviewSubmit {
+		cookies := make(map[string]string)
+		for _, name := range jetfuelWebviewCookieNames(client) {
+			if value := strings.TrimSpace(input[name]); value != "" {
+				cookies[name] = value
+			}
+		}
+		client.ReplaceCookies(cookies)
+		return t.finishWebviewAuthMethodSubmit(ctx, input)
+	}
 	return t.continueWebCastleLogin(ctx)
+}
+
+func (t *TwitterLogin) finishWebviewAuthMethodSubmit(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	methodID := t.webLoginAuthMethod
+	t.webLoginWebviewSubmit = nil
+	t.webLoginAuthMethod = ""
+	t.webLoginCastleStage = ""
+	status := strings.TrimSpace(input[loginFieldWebviewSubmitStatus])
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(input[loginFieldWebviewSubmitBody]))
+	if status != "200" || err != nil || len(body) == 0 {
+		zerolog.Ctx(ctx).Warn().
+			Str("status", status).
+			Int("body_length", len(input[loginFieldWebviewSubmitBody])).
+			Msg("Client webview did not return the X text message request response")
+		return makeAuthMethodStep(t.webLoginMethods, msgErrSMSRequestFailed.Message()), nil
+	}
+	result, err := t.webLogin.SubmitWebviewAuthMethodResponse(ctx, methodID, body)
+	if err != nil {
+		logWebCastleFailure(ctx, webLoginCastleStageAuthMethod, err)
+		return handleWebLoginAuthMethodError(t.webLoginMethods, err)
+	}
+	return t.handleWebLoginResult(ctx, result)
 }
 
 func browserHeadersFromInput(input map[string]string) twittermeow.BrowserHeaders {
@@ -1440,16 +1585,27 @@ func (t *TwitterLogin) submitWebAuthMethodInput(ctx context.Context, input map[s
 	if methodID == "" {
 		return nil, ErrMissingLoginInput
 	}
+	freshPrelude := false
 	if method, ok := findWebLoginAuthMethod(t.webLoginMethods, methodID); ok {
 		methodID = method.ID
 		if methodID == "" {
 			methodID = method.Name
 		}
+		freshPrelude = method.Kind == twittermeow.WebLoginAuthMethodKindSMS && t.webLogin.Client().JetfuelCastleTokenInfo().HasPrelude()
 	}
 	if t.webLogin.UsesJetfuel() {
 		t.webLoginAuthMethod = methodID
 		t.webLoginCastleStage = webLoginCastleStageAuthMethod
-		if t.webLogin.Client().HasNextJetfuelCastleToken() {
+		t.webLoginWebviewSubmit = nil
+		if freshPrelude {
+			submit, err := t.webLogin.PrepareWebviewAuthMethodSubmit(methodID)
+			if err != nil {
+				t.webLoginCastleStage = ""
+				return handleWebLoginAuthMethodError(t.webLoginMethods, err)
+			}
+			t.webLoginWebviewSubmit = submit
+		}
+		if !freshPrelude && t.webLogin.Client().HasNextJetfuelCastleToken() {
 			return t.continueWebCastleLogin(ctx)
 		}
 		return t.makeWebLoginCastleTokenStep(l10n.Message{}), nil
@@ -1591,6 +1747,10 @@ func handleWebLoginAuthMethodError(methods []twittermeow.WebLoginAuthMethod, err
 	if errors.Is(err, twittermeow.ErrWebLoginMissingAuthMethodState) {
 		return makeCredentialsStep(webLoginErrorInstructions(err)), nil
 	}
+	var webErr *twittermeow.WebLoginError
+	if errors.As(err, &webErr) && webErr.Code == 0 {
+		return makeAuthMethodStep(methods, webLoginErrorInstructions(err)), nil
+	}
 	return nil, webLoginFailureError(err)
 }
 
@@ -1628,6 +1788,7 @@ func isWebLoginVerificationInputError(err error) bool {
 	}
 	msg := strings.ToLower(strings.TrimSpace(webErr.Message))
 	return strings.Contains(msg, "wrong code") ||
+		strings.Contains(msg, "couldn't send you a text message") ||
 		strings.Contains(msg, "incorrect code") ||
 		strings.Contains(msg, "invalid code") ||
 		strings.Contains(msg, "code is incorrect") ||

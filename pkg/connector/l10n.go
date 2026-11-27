@@ -66,6 +66,8 @@ var (
 	msgErrNeedsIdentifier          = L.Define("login.error.needs_identifier", "X still needs your username, email, or phone. Enter your login details again.")
 	msgErrAccountIDUnreadable      = L.Define("login.error.account_id_unreadable", "Couldn't read your X account ID. Please enter your login details again.")
 	msgErrChooseVerificationMethod = L.Define("login.error.choose_verification_method", "Choose a verification method.")
+	msgErrBrowserStepUnfinished    = L.Define("login.error.browser_step_unfinished", "The browser step didn't finish. Choose a verification method to continue.")
+	msgErrVerificationUnconfirmed  = L.Define("login.error.verification_unconfirmed", "X didn't confirm the verification step. Cancel this login and choose Login with Browser to continue.")
 	msgErrEnterVerificationCode    = L.Define("login.error.enter_verification_code", "Enter the X verification code.")
 	msgErrInvalidPasscode          = L.Define("login.error.invalid_passcode", "Invalid passcode.")
 	msgErrInvalidPasscodeGuesses   = L.DefinePlural(
@@ -84,6 +86,7 @@ var (
 	msgErrUnsupportedChallenge  = L.Define("login.error.unsupported_challenge", "X returned a login challenge this bridge does not support yet.")
 	msgErrAuthMethodUnavailable = L.Define("login.error.auth_method_unavailable", "That X verification method is not available for this login.")
 	msgErrAuthMethodExpired     = L.Define("login.error.auth_method_expired", "The X verification method selection expired. Enter your X login details again.")
+	msgErrSMSRequestFailed      = L.Define("login.error.sms_request_failed", "Couldn't ask X to send a text message. Please try again.")
 	msgErrLoginFailed           = L.Define(
 		"login.error.login_failed", "X login failed: {error}",
 		l10n.WithComment("error is an untranslated error message from the bridge or from X"),

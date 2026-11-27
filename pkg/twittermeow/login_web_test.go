@@ -367,8 +367,8 @@ func TestJetfuelLoginResponseFindsAuthMethodChoice(t *testing.T) {
 			t.Fatalf("method[%d] = %#v, want ID %s index %d", i, methods[i], want, i)
 		}
 	}
-	if !methods[0].Supported || methods[1].Supported || !methods[2].Supported {
-		t.Fatalf("only authenticator app and backup code should be supported: %#v", methods)
+	if !methods[0].Supported || !methods[1].Supported || !methods[2].Supported {
+		t.Fatalf("authenticator app, text message and backup code should be supported: %#v", methods)
 	}
 	if methods[1].Kind != WebLoginAuthMethodKindSMS {
 		t.Fatalf("sms method = %#v, want SMS method", methods[1])
@@ -377,8 +377,8 @@ func TestJetfuelLoginResponseFindsAuthMethodChoice(t *testing.T) {
 		t.Fatalf("security key method = %#v, want known unsupported method", methods[3])
 	}
 	supported := supportedWebLoginAuthMethods(methods)
-	if len(supported) != 2 {
-		t.Fatalf("supportedWebLoginAuthMethods() length = %d, want 2: %#v", len(supported), supported)
+	if len(supported) != 3 {
+		t.Fatalf("supportedWebLoginAuthMethods() length = %d, want 3: %#v", len(supported), supported)
 	}
 	if got := parsed.numericValue("user_id"); got != "1127993589949243392" {
 		t.Fatalf("numericValue(user_id) = %q", got)
@@ -402,10 +402,10 @@ func TestJetfuelLoginResponseFindsBareAuthMethodChoice(t *testing.T) {
 	if result.Status != WebLoginStatusNeedsAuthMethod {
 		t.Fatalf("Status = %s, want %s", result.Status, WebLoginStatusNeedsAuthMethod)
 	}
-	if len(result.AuthMethods) != 2 {
-		t.Fatalf("AuthMethods length = %d, want 2 supported methods: %#v", len(result.AuthMethods), result.AuthMethods)
+	if len(result.AuthMethods) != 4 {
+		t.Fatalf("AuthMethods length = %d, want 4 methods: %#v", len(result.AuthMethods), result.AuthMethods)
 	}
-	wantIDs := []string{"Totp", "BackupCode"}
+	wantIDs := []string{"Totp", "Sms", "BackupCode", "U2fSecurityKey"}
 	for i, want := range wantIDs {
 		if result.AuthMethods[i].ID != want {
 			t.Fatalf("AuthMethods[%d].ID = %q, want %q", i, result.AuthMethods[i].ID, want)
@@ -460,8 +460,8 @@ func TestJetfuelLoginResponseClassifiesPhoneAuthMethodAliases(t *testing.T) {
 		if !ok {
 			t.Fatalf("classifyJetfuelAuthMethod(%q) returned false", test.raw)
 		}
-		if method.ID != "Sms" || method.Kind != WebLoginAuthMethodKindSMS || method.Supported {
-			t.Fatalf("classifyJetfuelAuthMethod(%q) = %#v, want coming-soon SMS method", test.raw, method)
+		if method.ID != "Sms" || method.Kind != WebLoginAuthMethodKindSMS || !method.Supported {
+			t.Fatalf("classifyJetfuelAuthMethod(%q) = %#v, want SMS method", test.raw, method)
 		}
 		if method.SubmitID != test.submitID {
 			t.Fatalf("classifyJetfuelAuthMethod(%q).SubmitID = %q, want %q", test.raw, method.SubmitID, test.submitID)
@@ -471,9 +471,8 @@ func TestJetfuelLoginResponseClassifiesPhoneAuthMethodAliases(t *testing.T) {
 
 func TestJetfuelAuthMethodFormShape(t *testing.T) {
 	state := &jetfuelLoginState{
-		sessionToken:      "session-token",
-		preludeDispatchID: "prelude-id",
-		userID:            "1127993589949243392",
+		sessionToken: "session-token",
+		userID:       "1127993589949243392",
 	}
 	form := state.authMethodForm(WebLoginAuthMethod{ID: "Totp", Index: 0})
 
@@ -1187,29 +1186,6 @@ func TestJetfuelAuthMethodChoiceWithOnlyUnsupportedMethod(t *testing.T) {
 	}
 	if len(session.jetfuel.twoFactorMethods) != 1 || session.jetfuel.twoFactorMethods[0].Supported {
 		t.Fatalf("twoFactorMethods = %#v, want one unsupported method", session.jetfuel.twoFactorMethods)
-	}
-}
-
-func TestJetfuelAuthMethodChoiceWithOnlySMSIsComingSoon(t *testing.T) {
-	parsed := parseJetfuelLoginResponse([]byte("Select a method to authenticate\x00two_factor_method\x00Text\x00begin_two_factor_auth"))
-	session := &WebLoginSession{jetfuel: &jetfuelLoginState{}}
-
-	result := session.jetfuelAuthMethodChoiceResult(parsed)
-	if result == nil {
-		t.Fatal("jetfuelAuthMethodChoiceResult() returned nil")
-	}
-	if result.Status != WebLoginStatusUnsupported {
-		t.Fatalf("Status = %s, want %s", result.Status, WebLoginStatusUnsupported)
-	}
-	if len(session.jetfuel.twoFactorMethods) != 1 {
-		t.Fatalf("twoFactorMethods length = %d, want 1: %#v", len(session.jetfuel.twoFactorMethods), session.jetfuel.twoFactorMethods)
-	}
-	method := session.jetfuel.twoFactorMethods[0]
-	if method.ID != "Sms" || method.Supported || method.Description != "Text message verification is coming soon." {
-		t.Fatalf("SMS method = %#v, want coming-soon unsupported method", method)
-	}
-	if result.Challenge == nil || result.Challenge.Description != "Text message verification is coming soon." {
-		t.Fatalf("Challenge = %#v, want coming-soon description", result.Challenge)
 	}
 }
 

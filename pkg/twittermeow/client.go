@@ -81,6 +81,7 @@ type Client struct {
 
 	jetfuelCastleTokens  []string
 	jetfuelCastleInfo    JetfuelCastleTokenInfo
+	jetfuelPreludeIDs    []string
 	browserHeaders       BrowserHeaders
 	jetfuelCastleTokenMu sync.Mutex
 	xchatToken           *cachedXChatToken
@@ -123,6 +124,14 @@ func NewClient(cookies *cookies.Cookies, store crypto.KeyStore, logger zerolog.L
 
 func (c *Client) GetCookieString() string {
 	return c.cookies.String()
+}
+
+func (c *Client) GetCookies() map[string]string {
+	return c.cookies.Map()
+}
+
+func (c *Client) ReplaceCookies(values map[string]string) {
+	c.cookies.Replace(values)
 }
 
 func (c *Client) GetCookieNames() []string {
