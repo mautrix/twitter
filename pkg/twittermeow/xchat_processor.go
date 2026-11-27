@@ -70,6 +70,13 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 	}
 }
 
+func (p *XChatEventProcessor) emitKeyNotForUsNotice(ctx context.Context, evt *payload.MessageEvent, isUserMetadata bool) error {
+	if isUserMetadata || p.isBeforeSnapshotBoundary(ctx, evt) {
+		return nil
+	}
+	return p.emitEvent(ctx, ConvertXChatUndecryptableNotice(evt))
+}
+
 // SetFailedEventPersistence restores durable failures before the first connection.
 // They survive ordering-state resets and only clear when that exact event succeeds.
 func (p *XChatEventProcessor) SetFailedEventPersistence(failed map[string]string, persist func(context.Context, map[string]string) error) error {
@@ -776,18 +783,17 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			if err == nil && (convKey == nil || len(convKey.Key) == 0) {
 				err = crypto.ErrKeyNotFound
 			}
-			if err != nil && isKeyNotForUs(refreshErr, keyVersion) {
-				p.log.Warn().
-					Err(refreshErr).
-					Str("sequence_id", ptr.Val(evt.SequenceId)).
-					Str("conversation_id", conversationID).
-					Str("key_version", keyVersion).
-					Msg("Conversation key for message is not encrypted for our key pair, skipping message")
-				return nil
-			}
 			if err != nil && refreshErr != nil {
 				err = errors.Join(err, refreshErr)
 			}
+		}
+		if errors.Is(err, crypto.ErrKeyNotForUs) {
+			p.log.Debug().
+				Str("sequence_id", ptr.Val(evt.SequenceId)).
+				Str("conversation_id", conversationID).
+				Str("key_version", keyVersion).
+				Msg("Conversation key for message is not encrypted for our key pair, skipping message")
+			return p.emitKeyNotForUsNotice(ctx, evt, isUserMetadata)
 		}
 		if err != nil {
 			p.log.Warn().
@@ -841,13 +847,8 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 	// MessageContents directly contains message data (MessageText, Attachments, etc.)
 	// Check if it has actual message content
 	if contents.Message != nil && (contents.Message.MessageText != nil || len(contents.Message.Attachments) > 0 || HasForwardedText(contents.Message.ForwardedMessage)) {
-		if after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary); ok {
-			ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
-			// REST and XChat IDs cannot be ordered against each other on timestamp ties.
-			if after.timestamp.IsZero() || ts.Before(after.timestamp) ||
-				ts.Equal(after.timestamp) && ptr.Val(evt.SequenceId) == after.sequenceID {
-				return nil
-			}
+		if p.isBeforeSnapshotBoundary(ctx, evt) {
+			return nil
 		}
 		msg := convertXChatMessageToTwitterMessage(evt, contents.Message, keyVersion)
 		return p.emitEvent(ctx, msg)
@@ -865,14 +866,69 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, convertXChatMessageEdit(evt, contents.MessageEdit, keyVersion))
 	}
 
-	// Empty MessageCreateEvent - this often happens when a message request is accepted.
-	// Emit a ConversationCreate event so the connector can create the room and backfill.
+	if notice := ConvertXChatNoticeEntry(evt, contents, keyVersion); notice != nil {
+		if p.isBeforeSnapshotBoundary(ctx, evt) {
+			return nil
+		}
+		return p.emitEvent(ctx, notice)
+	}
+
+	if contents.AcceptMessageRequest != nil || contents.XNumberUsed != nil {
+		// Emit a ConversationCreate event so the connector can create the room, sync trust and backfill.
+		p.log.Debug().
+			Str("sequence_id", ptr.Val(evt.SequenceId)).
+			Str("conversation_id", conversationID).
+			Str("entry_type", xchatEntryType(contents)).
+			Msg("Conversation trusted, emitting ConversationCreate")
+		return p.emitConversationCreate(ctx, evt)
+	}
+
 	p.log.Debug().
 		Str("sequence_id", ptr.Val(evt.SequenceId)).
 		Str("conversation_id", conversationID).
-		Msg("MessageCreateEvent has no message content, emitting ConversationCreate")
+		Str("entry_type", xchatEntryType(contents)).
+		Msg("Ignoring MessageCreateEvent entry without bridgeable content")
+	return nil
+}
 
-	return p.emitConversationCreate(ctx, evt)
+func (p *XChatEventProcessor) isBeforeSnapshotBoundary(ctx context.Context, evt *payload.MessageEvent) bool {
+	after, ok := ctx.Value(xchatSnapshotMessageBoundaryKey{}).(xchatSnapshotMessageBoundary)
+	if !ok {
+		return false
+	}
+	ts := methods.ParseMsecTimestamp(ptr.Val(evt.CreatedAtMsec))
+	// REST and XChat IDs cannot be ordered against each other on timestamp ties.
+	return after.timestamp.IsZero() || ts.Before(after.timestamp) ||
+		ts.Equal(after.timestamp) && ptr.Val(evt.SequenceId) == after.sequenceID
+}
+
+func xchatEntryType(contents *payload.MessageEntryContents) string {
+	switch {
+	case contents.Message != nil:
+		return "message"
+	case contents.MarkConversationRead != nil:
+		return "mark_conversation_read"
+	case contents.MarkConversationUnread != nil:
+		return "mark_conversation_unread"
+	case contents.PinConversation != nil:
+		return "pin_conversation"
+	case contents.UnpinConversation != nil:
+		return "unpin_conversation"
+	case contents.DraftMessage != nil:
+		return "draft_message"
+	case contents.NicknameMessage != nil:
+		return "nickname_message"
+	case contents.SetVerifiedStatus != nil:
+		return "set_verified_status"
+	case contents.ScreenCaptureDetected != nil:
+		return "screen_capture_detected"
+	case contents.AcceptMessageRequest != nil:
+		return "accept_message_request"
+	case contents.XNumberUsed != nil:
+		return "x_number_used"
+	default:
+		return "unknown"
+	}
 }
 
 func (p *XChatEventProcessor) emitConversationCreate(ctx context.Context, evt *payload.MessageEvent) error {
@@ -1006,7 +1062,7 @@ func (p *XChatEventProcessor) processConversationKeyChange(ctx context.Context, 
 			Str("conversation_id", conversationID).
 			Str("key_version", newKeyVersion).
 			Msg("Conversation key in key change event is not encrypted for our key pair")
-		return nil
+		return p.client.keyManager.PutConversationKeyNotForUs(ctx, conversationID, newKeyVersion)
 	} else if err != nil {
 		p.log.Err(err).
 			Str("conversation_id", conversationID).

@@ -84,6 +84,67 @@ func ConvertXChatMessageContentsToMessage(evt *payload.MessageEvent, contents *p
 	return convertXChatMessageToTwitterMessage(evt, contents, keyVersion)
 }
 
+// ConvertXChatNoticeEntry converts call entries to notice messages.
+// It returns nil for entries that aren't shown as notices.
+func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.MessageEntryContents, keyVersion string) *types.Message {
+	var notice types.MessageNotice
+	switch {
+	case contents == nil:
+		return nil
+	case contents.AvCallStarted != nil:
+		notice = types.MessageNotice{
+			Type:      types.MessageNoticeCallStarted,
+			AudioOnly: ptr.Val(contents.AvCallStarted.IsAudioOnly),
+			CallCard:  &payload.ReplyAVCallCard{Started: contents.AvCallStarted},
+		}
+	case contents.AvCallEnded != nil:
+		notice = types.MessageNotice{
+			Type:            types.MessageNoticeCallEnded,
+			AudioOnly:       ptr.Val(contents.AvCallEnded.IsAudioOnly),
+			DurationSeconds: ptr.Val(contents.AvCallEnded.DurationSeconds),
+			CallCard:        &payload.ReplyAVCallCard{Ended: contents.AvCallEnded},
+		}
+	case contents.AvCallMissed != nil:
+		notice = types.MessageNotice{
+			Type:      types.MessageNoticeCallMissed,
+			AudioOnly: ptr.Val(contents.AvCallMissed.IsAudioOnly),
+			CallCard:  &payload.ReplyAVCallCard{Missed: contents.AvCallMissed},
+		}
+	default:
+		return nil
+	}
+	notice.SenderID = ptr.Val(evt.SenderId)
+	return newXChatNoticeMessage(evt, &notice, keyVersion)
+}
+
+func ConvertXChatUndecryptableNotice(evt *payload.MessageEvent) *types.Message {
+	return newXChatNoticeMessage(evt, &types.MessageNotice{
+		Type:       types.MessageNoticeUndecryptable,
+		SenderID:   ptr.Val(evt.SenderId),
+		KeyVersion: ptr.Val(evt.Detail.MessageCreateEvent.ConversationKeyVersion),
+	}, "")
+}
+
+func newXChatNoticeMessage(evt *payload.MessageEvent, notice *types.MessageNotice, keyVersion string) *types.Message {
+	seqID := ptr.Val(evt.SequenceId)
+	return &types.Message{
+		ID:                     seqID,
+		Time:                   ptr.Val(evt.CreatedAtMsec),
+		SequenceID:             seqID,
+		RequestID:              ptr.Val(evt.MessageId),
+		ConversationID:         ptr.Val(evt.ConversationId),
+		Trusted:                evt.IsTrusted,
+		ConversationKeyVersion: keyVersion,
+		MessageData: types.MessageData{
+			ID:                     seqID,
+			Time:                   ptr.Val(evt.CreatedAtMsec),
+			SenderID:               ptr.Val(evt.SenderId),
+			ConversationKeyVersion: keyVersion,
+			Notice:                 notice,
+		},
+	}
+}
+
 // convertXChatMessageEdit converts an XChat MessageEdit to types.MessageEdit.
 func convertXChatMessageEdit(evt *payload.MessageEvent, edit *payload.MessageEdit, keyVersion string) *types.MessageEdit {
 	targetMsgID := ptr.Val(edit.MessageSequenceId)

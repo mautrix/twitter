@@ -11,6 +11,7 @@ type KeyStore interface {
 	// Conversation key operations
 	GetConversationKey(ctx context.Context, conversationID, keyVersion string) (*ConversationKey, error)
 	PutConversationKey(ctx context.Context, key *ConversationKey) error
+	PutConversationKeyNotForUs(ctx context.Context, conversationID, keyVersion string) error
 	DeleteConversationKey(ctx context.Context, conversationID, keyVersion string) error
 	GetLatestConversationKey(ctx context.Context, conversationID string) (*ConversationKey, error)
 
@@ -35,6 +36,10 @@ func (n *NoOpKeyStore) GetConversationKey(ctx context.Context, conversationID, k
 }
 
 func (n *NoOpKeyStore) PutConversationKey(ctx context.Context, key *ConversationKey) error {
+	return nil
+}
+
+func (n *NoOpKeyStore) PutConversationKeyNotForUs(ctx context.Context, conversationID, keyVersion string) error {
 	return nil
 }
 
@@ -100,6 +105,10 @@ func (km *KeyManager) GetLatestConversationKey(ctx context.Context, conversation
 // PutConversationKey stores a conversation key in both cache and persistent store.
 func (km *KeyManager) PutConversationKey(ctx context.Context, key *ConversationKey) error {
 	return km.store.PutConversationKey(ctx, key)
+}
+
+func (km *KeyManager) PutConversationKeyNotForUs(ctx context.Context, conversationID, keyVersion string) error {
+	return km.store.PutConversationKeyNotForUs(ctx, conversationID, keyVersion)
 }
 
 // GetOwnSigningKey returns the user's own signing key for message signing.

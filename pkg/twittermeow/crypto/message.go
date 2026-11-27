@@ -105,7 +105,8 @@ func logHolderContents(log *zerolog.Logger, holder *payload.MessageEntryHolder, 
 			Bool("has_accept_request", c.AcceptMessageRequest != nil).
 			Bool("has_nickname", c.NicknameMessage != nil).
 			Bool("has_verified_status", c.SetVerifiedStatus != nil).
-			Bool("has_av_call_started", c.AvCallStarted != nil)
+			Bool("has_av_call_started", c.AvCallStarted != nil).
+			Bool("has_x_number_used", c.XNumberUsed != nil)
 
 		if c.Message != nil {
 			msg := c.Message

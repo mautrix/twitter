@@ -161,6 +161,7 @@ func (tc *TwitterClient) FetchMessages(ctx context.Context, fetchParams bridgev2
 		Cursor:   networkid.PaginationCursor(nextCursor),
 		HasMore:  hasMore,
 	}
+	dedupeUndecryptableNotices(ctx, fetchParams.Portal, xchatResp)
 	if hasMore {
 		return xchatResp, nil
 	}
@@ -216,13 +217,15 @@ func (tc *TwitterClient) fetchXChatForwardCatchup(ctx context.Context, conversat
 		}
 	}
 	maxPages := int(math.Ceil(float64(count) / float64(pageSize)))
-	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
+	resp, err := fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
 		PageSize:    count,
 		MaxMessages: count,
 		MaxPages:    maxPages,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
 		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
 	})
+	dedupeUndecryptableNotices(ctx, fetchParams.Portal, resp)
+	return resp, err
 }
 
 // fetchCompleteXChatForwardCatchup is used for automatic gap repair. Unlike a
@@ -233,12 +236,14 @@ func (tc *TwitterClient) fetchCompleteXChatForwardCatchup(ctx context.Context, c
 	if pageSize <= 0 {
 		pageSize = 50
 	}
-	return fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
+	resp, err := fetchXChatForwardCatchupPages(ctx, conversationID, fetchParams.AnchorMessage, xchatForwardCatchupOptions{
 		PageSize:        pageSize,
 		RequireComplete: true,
 	}, func(ctx context.Context, cursor string, pageSize int) (*parsedXChatPage, error) {
 		return tc.fetchXChatPage(ctx, fetchParams.Portal, conversationID, cursor, pageSize, fetchParams.AnchorMessage)
 	})
+	dedupeUndecryptableNotices(ctx, fetchParams.Portal, resp)
+	return resp, err
 }
 
 func fetchXChatForwardCatchupPages(
@@ -679,7 +684,10 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 	if isEncryptedXChatBackfillMessage(mce) {
 		km := tc.client.GetKeyManager()
 		convKey, err := km.GetConversationKey(ctx, conversationID, keyVersion)
-		if errors.Is(err, crypto.ErrKeyNotFound) || (err == nil && (convKey == nil || len(convKey.Key) == 0)) {
+		if errors.Is(err, crypto.ErrKeyNotForUs) && !isUserMetadata {
+			notice := twittermeow.ConvertXChatUndecryptableNotice(evt)
+			return notice, methods.ParseMsecTimestamp(notice.Time), methods.ParseSnowflakeInt(notice.SequenceID), ""
+		} else if errors.Is(err, crypto.ErrKeyNotFound) || errors.Is(err, crypto.ErrKeyNotForUs) || (err == nil && (convKey == nil || len(convKey.Key) == 0)) {
 			return nil, time.Time{}, 0, xchatSkipReasonKeyMissing
 		} else if err != nil {
 			return nil, time.Time{}, 0, xchatSkipReasonKeyLoadFailed
@@ -715,6 +723,9 @@ func (tc *TwitterClient) decodeXChatMessageCreateForBackfill(ctx context.Context
 			return nil, time.Time{}, 0, xchatSkipReasonParseFailed
 		}
 		entry = parsed
+	}
+	if notice := twittermeow.ConvertXChatNoticeEntry(evt, entry, keyVersion); notice != nil {
+		return notice, methods.ParseMsecTimestamp(notice.Time), methods.ParseSnowflakeInt(notice.SequenceID), ""
 	}
 	if entry == nil || entry.Message == nil {
 		return nil, time.Time{}, 0, xchatSkipReasonEmptyEntry
@@ -772,7 +783,7 @@ func (tc *TwitterClient) storeConversationKeyFromChangeEvent(ctx context.Context
 
 	convKeyBytes, err := crypto.UnwrapConversationKey(ourEncryptedKey, signingKey.DecryptKeyB64)
 	if errors.Is(err, crypto.ErrKeyNotForUs) {
-		return nil
+		return tc.client.GetKeyManager().PutConversationKeyNotForUs(ctx, conversationID, newKeyVersion)
 	} else if err != nil {
 		return err
 	}
