@@ -537,7 +537,8 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	// Encrypt if we have a key, otherwise send plaintext contents.
 	var contentsBytes []byte
 	var err error
-	if !unencrypted && len(convKey) > 0 {
+	encrypted := !unencrypted && len(convKey) > 0
+	if encrypted {
 		contentsBytes, err = EncryptMessageEntryContentsRaw(entryContents, convKey)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt contents: %w", err)
@@ -550,7 +551,7 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	}
 
 	// Build MessageCreateEvent
-	shouldNotify := true
+	shouldNotify := !b.acceptRequest
 	isPendingPublicKey := false
 	priority := int32(1)
 	mce := &payload.MessageCreateEvent{
@@ -562,8 +563,10 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	if !unencrypted && keyVersion != "" {
 		mce.ConversationKeyVersion = &keyVersion
 	}
-	if b.acceptRequest {
-		mce.AdditionalActionList = []int32{int32(payload.AdditionalActionFetchConvIfMissingCkey)}
+	if b.acceptRequest && encrypted {
+		action := int32(payload.AdditionalActionFetchConvIfMissingCkey)
+		mce.AdditionalActionList = []int32{action}
+		mce.SideEffects = []*payload.MessageCreateSideEffect{{AdditionalAction: &action}}
 	}
 
 	// Get signing key

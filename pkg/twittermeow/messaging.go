@@ -1106,10 +1106,7 @@ func (c *Client) AcceptMessageRequest(ctx context.Context, conversationID, targe
 	} else if resp.Data.UserAddTrust.ErrorCode != "" {
 		return nil, fmt.Errorf("accept message request failed: %s", resp.Data.UserAddTrust.ErrorCode)
 	} else if rebound := resp.Data.UserAddTrust.SendMessageCreateEventResponse; rebound == nil || rebound.EncodedMessageEvent == "" {
-		c.Logger.Warn().
-			Str("conversation_id", conversationID).
-			Msg("Accept message request response had no rebound AcceptMessageRequest event")
-		return nil, nil
+		return nil, errors.New("missing rebound event in accept message request response")
 	}
 	return DecodeSendMessageMutationMessageEvent(resp.Data.UserAddTrust.SendMessageCreateEventResponse.EncodedMessageEvent)
 }
