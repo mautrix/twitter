@@ -228,7 +228,6 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 		return nil, fmt.Errorf("get or create XChat portal: %w", err)
 	}
 	chatInfo := tc.xchatItemToChatInfo(ctx, item, users, conv)
-	tc.trackXChatMute(chatInfo, portal, conv.Muted)
 	var latestMessage *database.Message
 	if portal.MXID != "" {
 		latestMessage, err = tc.connector.br.DB.Message.GetLastNonFakePartAtOrBeforeTime(ctx, portal.PortalKey, time.Now().Add(10*time.Second))
@@ -239,6 +238,7 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 
 	if evt := bridgev2.GetRemoteEventFromContext(ctx); evt != nil && evt.GetPortalKey().ID == portal.PortalKey.ID {
 		// Key refresh can run inside this portal's synchronous event handler.
+		tc.expectMuteEcho(ctx, portal, conv.Muted)
 		portal.UpdateInfo(ctx, chatInfo, tc.userLogin, nil, time.Time{})
 	} else if latestMessage == nil || shouldEmitChatInfoUpdate(chatInfo, portal.RoomType) {
 		result := tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
@@ -246,7 +246,10 @@ func (tc *TwitterClient) syncXChatChannel(ctx context.Context, item *response.XC
 				Type: bridgev2.RemoteEventChatResync, PortalKey: portal.PortalKey,
 				CreatePortal: true, Timestamp: time.Now(),
 			},
-			ChatInfo: chatInfo,
+			GetChatInfoFunc: func(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+				tc.expectMuteEcho(ctx, portal, conv.Muted)
+				return chatInfo, nil
+			},
 			CheckNeedsBackfillFunc: func(_ context.Context, latestMessage *database.Message) (bool, error) {
 				return latestMessage == nil, nil
 			},

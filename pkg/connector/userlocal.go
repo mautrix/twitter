@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
@@ -53,52 +54,70 @@ func (tc *TwitterClient) queueUserLocalPortalInfo(ctx context.Context, conversat
 }
 
 func (tc *TwitterClient) handleXChatMuteChange(ctx context.Context, evt *types.XChatConversationMuteChange) bool {
+	mutedUntil := bridgev2.Unmuted
+	if evt.Muted {
+		mutedUntil = event.MutedForever
+	}
+	info := &bridgev2.ChatInfo{UserLocal: &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}}
 	success := true
 	for _, conversationID := range evt.ConversationIDs {
 		if !tc.portalHasRoom(ctx, conversationID) {
 			continue
 		}
-		mutedUntil := bridgev2.Unmuted
-		if evt.Muted {
-			mutedUntil = event.MutedForever
-		}
-		info := &bridgev2.ChatInfo{UserLocal: &bridgev2.UserLocalPortalInfo{MutedUntil: &mutedUntil}}
-		tc.trackXChatMute(info, nil, evt.Muted)
-		success = tc.userLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
+		success = tc.userLogin.QueueRemoteEvent(&simplevent.ChatResync{
 			EventMeta: simplevent.EventMeta{
-				Type:      bridgev2.RemoteEventChatInfoChange,
+				Type:      bridgev2.RemoteEventChatResync,
 				PortalKey: tc.MakePortalKeyFromID(conversationID),
 				Timestamp: evt.Timestamp,
 			},
-			ChatInfoChange: &bridgev2.ChatInfoChange{ChatInfo: info},
+			GetChatInfoFunc: func(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+				tc.expectMuteEcho(ctx, portal, evt.Muted)
+				return info, nil
+			},
 		}).Success && success
 	}
 	return success
 }
 
-func (tc *TwitterClient) trackXChatMute(info *bridgev2.ChatInfo, portal *bridgev2.Portal, muted bool) {
-	if portal != nil {
-		if meta, _ := portal.Metadata.(*PortalMetadata); meta != nil && meta.XChatMuted != nil && *meta.XChatMuted == muted {
+func (tc *TwitterClient) expectMuteEcho(ctx context.Context, portal *bridgev2.Portal, muted bool) {
+	if portal.MXID == "" {
+		if !muted {
 			return
 		}
+	} else if portal.Bridge.Config.MuteOnlyOnCreate {
+		return
+	} else if prevMuted, known := tc.remoteMuteState(ctx, portal); !known || prevMuted == muted {
+		return
 	}
-	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(ctx context.Context, portal *bridgev2.Portal) bool {
-		meta := portal.Metadata.(*PortalMetadata)
-		if meta.XChatMuted != nil && *meta.XChatMuted == muted {
-			return false
-		}
-		meta.XChatMuted = &muted
-		writesMute := (portal.MXID == "" && muted) || (portal.MXID != "" && !portal.Bridge.Config.MuteOnlyOnCreate)
-		if writesMute && tc.userLogin.User.DoublePuppet(ctx) != nil {
-			tc.userLocalLock.Lock()
-			if tc.pendingMuteEchoes == nil {
-				tc.pendingMuteEchoes = make(map[networkid.PortalID][]bool)
-			}
-			tc.pendingMuteEchoes[portal.ID] = append(tc.pendingMuteEchoes[portal.ID], muted)
-			tc.userLocalLock.Unlock()
-		}
-		return true
-	})
+	if tc.userLogin.User.DoublePuppet(ctx) == nil {
+		return
+	}
+	tc.userLocalLock.Lock()
+	defer tc.userLocalLock.Unlock()
+	if tc.pendingMuteEchoes == nil {
+		tc.pendingMuteEchoes = make(map[networkid.PortalID][]bool)
+	}
+	tc.pendingMuteEchoes[portal.ID] = append(tc.pendingMuteEchoes[portal.ID], muted)
+}
+
+func (tc *TwitterClient) remoteMuteState(ctx context.Context, portal *bridgev2.Portal) (muted, known bool) {
+	up, err := portal.Bridge.DB.UserPortal.Get(ctx, tc.userLogin.UserLogin, portal.PortalKey)
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to get user portal mute state")
+		return false, false
+	} else if up == nil || up.MutedUntil.IsZero() {
+		return false, false
+	}
+	return up.MutedUntil.After(time.Now()), true
+}
+
+func (tc *TwitterClient) setRemoteMuteState(ctx context.Context, portal *bridgev2.Portal, muted bool) error {
+	update := database.UserPortalFor(tc.userLogin.UserLogin, portal.PortalKey)
+	update.MutedUntil = bridgev2.Unmuted
+	if muted {
+		update.MutedUntil = event.MutedForever
+	}
+	return portal.Bridge.DB.UserPortal.Put(ctx, update)
 }
 
 func (tc *TwitterClient) consumeMuteEcho(portalID networkid.PortalID, muted bool) bool {
