@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
@@ -46,6 +47,18 @@ func (cloudflareRateLimitError) Error() string {
 }
 
 func (cloudflareRateLimitError) Is(target error) bool {
+	return errors.Is(ErrRatelimitExceeded, target)
+}
+
+type RateLimitError struct {
+	Reset time.Time
+}
+
+func (e RateLimitError) Error() string {
+	return fmt.Sprintf("rate limited until %s", e.Reset.Format(time.RFC3339))
+}
+
+func (e RateLimitError) Is(target error) bool {
 	return errors.Is(ErrRatelimitExceeded, target)
 }
 
