@@ -624,9 +624,7 @@ func (t *TwitterLogin) makeWebLoginCastleTokenStep(errorLine l10n.Message) *brid
 		t.User.Log.Warn().Msg("X Castle web metadata missing from login page bootstrap")
 		return t.restartStep(msgErrCastleMetadataMissing.Message())
 	}
-	step := makeCastleTokenStep(info, t.webLoginIdentifier, errorLine)
-	step.CookiesParams.UserAgent = t.browserHeaders.UserAgent
-	return step
+	return makeCastleTokenStep(info, t.webLoginIdentifier, errorLine)
 }
 
 func makeVerificationStep(challenge *twittermeow.WebLoginChallenge, errorLine l10n.Message) *bridgev2.LoginStep {
