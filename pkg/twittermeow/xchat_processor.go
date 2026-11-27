@@ -56,7 +56,24 @@ type XChatEventProcessor struct {
 	recentHandledSequenceOrder []string
 
 	unsupportedEncryptionLogged sync.Map
+
+	keyRefreshLock sync.Mutex
+	keyRefreshes   map[string]*keyRefresh
 }
+
+// keyRefresh shares one conversation data fetch per missing key version across concurrent and replayed messages.
+type keyRefresh struct {
+	done       chan struct{}
+	notForUs   bool
+	refreshErr error
+	err        error
+	at         time.Time
+}
+
+const (
+	failedKeyRefreshTTL  = 30 * time.Second
+	keyRefreshCacheLimit = 1024
+)
 
 func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 	return &XChatEventProcessor{
@@ -67,7 +84,83 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		unresolvedConversationGaps: make(map[string]struct{}),
 		failedEvents:               make(map[string]string),
 		recentHandledSequences:     make(map[string]struct{}),
+		keyRefreshes:               make(map[string]*keyRefresh),
 	}
+}
+
+func (p *XChatEventProcessor) refreshMissingKey(ctx context.Context, conversationID, keyVersion string) (notForUs bool, refreshErr, err error) {
+	cacheKey := conversationID + "|" + keyVersion
+	p.keyRefreshLock.Lock()
+	refresh := p.keyRefreshes[cacheKey]
+	for refresh != nil && (refresh.notForUs || refresh.at.IsZero() || time.Since(refresh.at) <= failedKeyRefreshTTL) {
+		p.keyRefreshLock.Unlock()
+		select {
+		case <-refresh.done:
+		case <-ctx.Done():
+			return false, ctx.Err(), ctx.Err()
+		}
+		p.keyRefreshLock.Lock()
+		if p.keyRefreshes[cacheKey] == refresh || (!errors.Is(refresh.err, context.Canceled) && !errors.Is(refresh.err, context.DeadlineExceeded)) {
+			p.keyRefreshLock.Unlock()
+			return refresh.notForUs, refresh.refreshErr, refresh.err
+		}
+		refresh = p.keyRefreshes[cacheKey]
+	}
+	if len(p.keyRefreshes) >= keyRefreshCacheLimit {
+		p.evictKeyRefreshesLocked()
+	}
+	refresh = &keyRefresh{done: make(chan struct{})}
+	p.keyRefreshes[cacheKey] = refresh
+	p.keyRefreshLock.Unlock()
+
+	defer func() {
+		p.keyRefreshLock.Lock()
+		refresh.notForUs, refresh.refreshErr, refresh.err, refresh.at = notForUs, refreshErr, err, time.Now()
+		if (!notForUs && err == nil) || ctx.Err() != nil {
+			if p.keyRefreshes[cacheKey] == refresh {
+				delete(p.keyRefreshes, cacheKey)
+			}
+		}
+		close(refresh.done)
+		p.keyRefreshLock.Unlock()
+	}()
+	return p.fetchMissingKey(ctx, conversationID, keyVersion)
+}
+
+func (p *XChatEventProcessor) evictKeyRefreshesLocked() {
+	maps.DeleteFunc(p.keyRefreshes, func(_ string, refresh *keyRefresh) bool {
+		return !refresh.at.IsZero() && !refresh.notForUs && time.Since(refresh.at) > failedKeyRefreshTTL
+	})
+	for cacheKey, refresh := range p.keyRefreshes {
+		if len(p.keyRefreshes) < keyRefreshCacheLimit {
+			break
+		} else if !refresh.at.IsZero() {
+			delete(p.keyRefreshes, cacheKey)
+		}
+	}
+}
+
+func (p *XChatEventProcessor) fetchMissingKey(ctx context.Context, conversationID, keyVersion string) (notForUs bool, refreshErr, err error) {
+	refreshErr = p.client.RefreshConversationKeys(ctx, conversationID)
+	if refreshErr != nil {
+		p.log.Warn().Err(refreshErr).
+			Str("conversation_id", conversationID).
+			Msg("Failed to refresh conversation keys")
+	}
+	// A refresh can store the requested key even if another key-change event
+	// on the same response was malformed, so always retry the local lookup.
+	convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+	if err == nil && (convKey == nil || len(convKey.Key) == 0) {
+		err = crypto.ErrKeyNotFound
+	}
+	if err == nil {
+		return false, refreshErr, nil
+	} else if isKeyNotForUs(refreshErr, keyVersion) {
+		return true, refreshErr, refreshErr
+	} else if refreshErr != nil {
+		err = errors.Join(err, refreshErr)
+	}
+	return false, refreshErr, err
 }
 
 // SetFailedEventPersistence restores durable failures before the first connection.
@@ -247,6 +340,9 @@ func (p *XChatEventProcessor) MarkReconnected() {
 	p.sequenceStateLock.Lock()
 	p.reconnectGeneration++
 	p.sequenceStateLock.Unlock()
+	p.keyRefreshLock.Lock()
+	maps.DeleteFunc(p.keyRefreshes, func(_ string, refresh *keyRefresh) bool { return !refresh.at.IsZero() && !refresh.notForUs })
+	p.keyRefreshLock.Unlock()
 }
 
 func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousSequenceID string) (needed, previousUnhandled bool) {
@@ -520,12 +616,7 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 		p.reconnectGeneration++
 		p.sequenceStateLock.Unlock()
 	}
-	var keyMissing bool
-	var refreshed *xchatConversationKeysRefresh
-	if needsCatchup {
-		keyMissing, refreshed = p.messageKeyMissing(ctx, evt)
-	}
-	if needsCatchup && keyMissing {
+	if needsCatchup && p.messageKeyMissing(ctx, evt) {
 		p.markConversationGapUnresolved(conversationID)
 		p.log.Debug().
 			Str("conversation_id", conversationID).
@@ -566,9 +657,6 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 	// Process based on event type
 	switch {
 	case detail.MessageCreateEvent != nil:
-		if refreshed != nil {
-			ctx = context.WithValue(ctx, xchatConversationKeysRefreshedKey{}, refreshed)
-		}
 		return p.processMessageCreateEvent(ctx, evt, detail.MessageCreateEvent)
 
 	case detail.MessageDeleteEvent != nil:
@@ -702,26 +790,22 @@ func isEncryptedMessageCreateEvent(mce *payload.MessageCreateEvent) bool {
 	return mce != nil && ptr.Val(mce.ConversationKeyVersion) != ""
 }
 
-func (p *XChatEventProcessor) messageKeyMissing(ctx context.Context, evt *payload.MessageEvent) (bool, *xchatConversationKeysRefresh) {
+func (p *XChatEventProcessor) messageKeyMissing(ctx context.Context, evt *payload.MessageEvent) bool {
 	if evt.Detail == nil {
-		return false, nil
+		return false
 	}
 	mce := evt.Detail.MessageCreateEvent
 	if !isEncryptedMessageCreateEvent(mce) || ptr.Val(mce.ContentsEncryptionVersion) != 0 || len(mce.Contents) == 0 {
-		return false, nil
+		return false
 	}
 	conversationID := ptr.Val(evt.ConversationId)
 	keyVersion := ptr.Val(mce.ConversationKeyVersion)
-	keyMissing := func() bool {
-		convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
-		return errors.Is(err, crypto.ErrKeyNotFound) || err == nil && (convKey == nil || len(convKey.Key) == 0)
+	convKey, err := p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+	if !errors.Is(err, crypto.ErrKeyNotFound) && (err != nil || convKey != nil && len(convKey.Key) > 0) {
+		return false
 	}
-	if !keyMissing() {
-		return false, nil
-	}
-	refreshed := &xchatConversationKeysRefresh{err: p.client.RefreshConversationKeys(ctx, conversationID)}
-	keyUnavailable := refreshed.err == nil || errors.Is(refreshed.err, response.ErrConversationDataMissing)
-	return keyUnavailable && keyMissing(), refreshed
+	_, refreshErr, err := p.refreshMissingKey(ctx, conversationID, keyVersion)
+	return err != nil && (refreshErr == nil || errors.Is(refreshErr, response.ErrConversationDataMissing))
 }
 
 // processMessageCreateEvent handles a MessageCreateEvent, decrypting or parsing contents.
@@ -758,25 +842,8 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 			err = crypto.ErrKeyNotFound
 		}
 		if errors.Is(err, crypto.ErrKeyNotFound) {
-			// Try to fetch missing keys
-			var refreshErr error
-			if refreshed, ok := ctx.Value(xchatConversationKeysRefreshedKey{}).(*xchatConversationKeysRefresh); ok {
-				refreshErr = refreshed.err
-			} else {
-				refreshErr = p.client.RefreshConversationKeys(ctx, conversationID)
-			}
-			if refreshErr != nil {
-				p.log.Warn().Err(refreshErr).
-					Str("conversation_id", conversationID).
-					Msg("Failed to refresh conversation keys")
-			}
-			// A refresh can store the requested key even if another key-change event
-			// on the same response was malformed, so always retry the local lookup.
-			convKey, err = p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
-			if err == nil && (convKey == nil || len(convKey.Key) == 0) {
-				err = crypto.ErrKeyNotFound
-			}
-			if err != nil && isKeyNotForUs(refreshErr, keyVersion) {
+			notForUs, refreshErr, fetchErr := p.refreshMissingKey(ctx, conversationID, keyVersion)
+			if notForUs {
 				p.log.Warn().
 					Err(refreshErr).
 					Str("sequence_id", ptr.Val(evt.SequenceId)).
@@ -784,9 +851,11 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 					Str("key_version", keyVersion).
 					Msg("Conversation key for message is not encrypted for our key pair, skipping message")
 				return nil
-			}
-			if err != nil && refreshErr != nil {
-				err = errors.Join(err, refreshErr)
+			} else if err = fetchErr; err == nil {
+				convKey, err = p.client.keyManager.GetConversationKey(ctx, conversationID, keyVersion)
+				if err == nil && (convKey == nil || len(convKey.Key) == 0) {
+					err = crypto.ErrKeyNotFound
+				}
 			}
 		}
 		if err != nil {
@@ -1438,12 +1507,6 @@ func (p *XChatEventProcessor) ProcessMessageAndReadEvents(ctx context.Context, i
 }
 
 type xchatSnapshotMessageBoundaryKey struct{}
-
-type xchatConversationKeysRefreshedKey struct{}
-
-type xchatConversationKeysRefresh struct {
-	err error
-}
 
 type xchatSnapshotMessageBoundary struct {
 	timestamp  time.Time
