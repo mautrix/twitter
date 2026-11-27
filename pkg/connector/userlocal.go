@@ -82,13 +82,14 @@ func (tc *TwitterClient) trackXChatMute(info *bridgev2.ChatInfo, portal *bridgev
 			return
 		}
 	}
-	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(_ context.Context, portal *bridgev2.Portal) bool {
+	info.ExtraUpdates = bridgev2.MergeExtraUpdaters(info.ExtraUpdates, func(ctx context.Context, portal *bridgev2.Portal) bool {
 		meta := portal.Metadata.(*PortalMetadata)
 		if meta.XChatMuted != nil && *meta.XChatMuted == muted {
 			return false
 		}
 		meta.XChatMuted = &muted
-		if (portal.MXID == "" && muted) || (portal.MXID != "" && !portal.Bridge.Config.MuteOnlyOnCreate) {
+		writesMute := (portal.MXID == "" && muted) || (portal.MXID != "" && !portal.Bridge.Config.MuteOnlyOnCreate)
+		if writesMute && tc.userLogin.User.DoublePuppet(ctx) != nil {
 			tc.userLocalLock.Lock()
 			if tc.pendingMuteEchoes == nil {
 				tc.pendingMuteEchoes = make(map[networkid.PortalID][]bool)
