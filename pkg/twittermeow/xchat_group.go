@@ -50,7 +50,7 @@ func (c *Client) EditXChatGroupAvatar(ctx context.Context, conversationID string
 	if conversationID == "" {
 		return "", errors.New("conversation ID is required")
 	}
-	uploaded, err := c.UploadXChatMedia(ctx, conversationID, fmt.Sprintf("avatar-%s-%s", conversationID, uuid.NewString()), avatar)
+	uploaded, err := c.UploadXChatMedia(ctx, conversationID, fmt.Sprintf("avatar-%s-%s", conversationID, uuid.NewString()), avatar, 0)
 	if err != nil {
 		return "", fmt.Errorf("upload group avatar: %w", err)
 	}

@@ -31,6 +31,7 @@ import (
 )
 
 var generalCaps = &bridgev2.NetworkGeneralCapabilities{
+	DisappearingMessages: true,
 	Provisioning: bridgev2.ProvisioningCapabilities{
 		ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
 			CreateDM:       true,
@@ -45,7 +46,7 @@ func (tc *TwitterConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabiliti
 }
 
 func (tc *TwitterConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 12
+	return 1, 13
 }
 
 func supportedIfFFmpeg() event.CapabilitySupportLevel {
@@ -56,7 +57,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 }
 
 func capID() string {
-	base := "fi.mau.twitter.capabilities.2026_11_12"
+	base := "fi.mau.twitter.capabilities.2026_11_13"
 	if ffmpeg.Supported() {
 		return base + "+ffmpeg"
 	}
@@ -64,6 +65,18 @@ func capID() string {
 }
 
 const MaxTextLength = 10000
+
+var disappearingCaps = &event.DisappearingTimerCapability{
+	Types: []event.DisappearingType{event.DisappearingTypeAfterRead},
+	Timers: []jsontime.Milliseconds{
+		jsontime.MS(5 * time.Minute),
+		jsontime.MS(1 * time.Hour),
+		jsontime.MS(8 * time.Hour),
+		jsontime.MS(24 * time.Hour),
+		jsontime.MS(7 * 24 * time.Hour),
+		jsontime.MS(28 * 24 * time.Hour),
+	},
+}
 
 const MaxFileSize = 100 * 1024 * 1024
 const maxXChatGIFSize = 15 * 1024 * 1024
@@ -145,8 +158,9 @@ var groupCaps = &event.RoomFeatures{
 		event.MemberActionInvite: event.CapLevelFullySupported,
 	},
 	State: event.StateFeatureMap{
-		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
-		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
+		event.StateRoomName.Type:                {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type:              {Level: event.CapLevelFullySupported},
+		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
 	},
 
 	MaxTextLength: MaxTextLength,
@@ -163,6 +177,8 @@ var groupCaps = &event.RoomFeatures{
 	DeleteChat:            true,
 	DeleteChatForEveryone: false,
 
+	DisappearingTimer: disappearingCaps,
+
 	MessageRequest: &event.MessageRequestFeatures{
 		AcceptWithButton: event.CapLevelFullySupported,
 	},
@@ -174,13 +190,16 @@ var xchatGroupCaps = ptr.Clone(groupCaps)
 
 func init() {
 	xchatGroupCaps.State = event.StateFeatureMap{
-		event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
-		event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
+		event.StateRoomName.Type:                {Level: event.CapLevelFullySupported},
+		event.StateRoomAvatar.Type:              {Level: event.CapLevelFullySupported},
+		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
 	}
 	xchatGroupCaps.MemberActions = nil
 	xchatGroupCaps.ID += "+xchat.2"
 
-	dmCaps.State = nil
+	dmCaps.State = event.StateFeatureMap{
+		event.StateBeeperDisappearingTimer.Type: {Level: event.CapLevelFullySupported},
+	}
 	dmCaps.MemberActions = nil
 	dmCaps.ID += "+dm"
 
@@ -213,6 +232,9 @@ func (tc *TwitterClient) GetCapabilities(_ context.Context, portal *bridgev2.Por
 		caps := ptr.Clone(baseCaps)
 		caps.Edit = event.CapLevelRejected
 		caps.Delete = event.CapLevelRejected
+		caps.DisappearingTimer = nil
+		caps.State = maps.Clone(baseCaps.State)
+		delete(caps.State, event.StateBeeperDisappearingTimer.Type)
 		if baseCaps == xchatGroupCaps {
 			caps.State = nil
 		}

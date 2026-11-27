@@ -65,6 +65,7 @@ var (
 	_ bridgev2.TagHandlingNetworkAPI             = (*TwitterClient)(nil)
 	_ bridgev2.MuteHandlingNetworkAPI            = (*TwitterClient)(nil)
 	_ bridgev2.UserBlockingNetworkAPI            = (*TwitterClient)(nil)
+	_ bridgev2.DisappearTimerChangingNetworkAPI  = (*TwitterClient)(nil)
 )
 
 var _ bridgev2.TransactionIDGeneratingNetwork = (*TwitterConnector)(nil)
@@ -131,6 +132,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 		ConversationID: conversationID,
 		MessageID:      messageID,
 		Text:           text,
+		TTL:            msg.Portal.Disappear.Timer,
 	}
 
 	if msg.ReplyTo != nil {
@@ -267,7 +269,7 @@ func (tc *TwitterClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.
 			size := int64(len(data))
 
 			if sendMode == messageSendXChatEncrypted {
-				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data)
+				uploadResult, err := tc.client.UploadXChatMedia(ctx, conversationID, messageID, data, msg.Portal.Disappear.Timer)
 				if errors.Is(err, twittermeow.ErrXChatMediaSizeUnsupported) {
 					return nil, bridgev2.ErrMediaTooLarge
 				} else if err != nil {
@@ -1275,4 +1277,23 @@ func withoutNotice(err error) error {
 		return ms.WithSendNotice(false)
 	}
 	return err
+}
+
+func (tc *TwitterClient) HandleMatrixDisappearingTimer(ctx context.Context, msg *bridgev2.MatrixDisappearingTimer) (bool, error) {
+	if !msg.Portal.Metadata.(*PortalMetadata).CanUseXChat() {
+		return false, fmt.Errorf("disappearing messages are only supported in encrypted X chats")
+	}
+	timer := msg.Content.Timer.Duration
+	if msg.Content.Type == event.DisappearingTypeNone {
+		timer = 0
+	}
+	err := tc.client.SetXChatConversationTTL(ctx, ParsePortalID(msg.Portal.ID), timer)
+	if err != nil {
+		return false, wrapTwitterMatrixError(err)
+	}
+	msg.Portal.Disappear = database.DisappearingSetting{Type: event.DisappearingTypeAfterRead, Timer: timer}
+	if timer == 0 {
+		msg.Portal.Disappear = database.DisappearingSetting{}
+	}
+	return true, nil
 }

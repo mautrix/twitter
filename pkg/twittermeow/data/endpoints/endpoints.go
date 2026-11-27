@@ -45,6 +45,8 @@ const (
 	EDIT_GROUP_CONVERSATION_URL        = API_BASE_URL + "/graphql/r2vVejQICfaWiPDV_5p44A/EditGroupConversationMutation"
 	MUTE_CONVERSATION_URL              = API_BASE_URL + "/graphql/9hq3baCBRMAG9JuLtb0ubg/MuteConversationMutation"
 	UNMUTE_CONVERSATION_URL            = API_BASE_URL + "/graphql/UCN8vZu2Mui2iDY0MSYfLA/UnmuteConversationMutation"
+	UPDATE_CONVERSATION_TTL_URL        = API_BASE_URL + "/graphql/Gu3kCEwNN2V-Az8NDk30Zg/UpdateConversationTTLMutation"
+	REMOVE_CONVERSATION_TTL_URL        = API_BASE_URL + "/graphql/EqSXvxskUyw99ARuIbhYlg/RemoveConversationTTLMutation"
 	DELETE_CONVERSATION_MUTATION_URL   = API_BASE_URL + "/graphql/9nsAnKrQvpifR3UmdtIdOg/ConversationDeletion"
 	DM_BLOCK_MUTATION_URL              = API_BASE_URL + "/graphql/8OFwIC6-G-KVg4LCu7V0oQ/DmBlockMutation"
 	DM_UNBLOCK_MUTATION_URL            = API_BASE_URL + "/graphql/cuEZmoGT48VdcfOLHXj1zA/DmUnblockMutation"

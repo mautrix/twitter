@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/ptr"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/payload"
 )
@@ -346,6 +348,7 @@ type MessageBuilder struct {
 	reactionAdd    *payload.MessageReactionAdd
 	reactionRemove *payload.MessageReactionRemove
 	messageEdit    *payload.MessageEdit
+	ttl            time.Duration
 
 	// Pin/unpin fields
 	pinConversation   *payload.PinConversation
@@ -365,6 +368,12 @@ func NewMessageBuilder(km *KeyManager, ownUserID string) *MessageBuilder {
 		km:        km,
 		ownUserID: ownUserID,
 	}
+}
+
+// SetTTL sets the disappearing message timer of the message.
+func (b *MessageBuilder) SetTTL(ttl time.Duration) *MessageBuilder {
+	b.ttl = ttl
+	return b
 }
 
 // SetMessageID sets the message ID (required).
@@ -552,6 +561,9 @@ func (b *MessageBuilder) Build(ctx context.Context) (*payload.MessageEvent, erro
 	}
 	if !unencrypted && keyVersion != "" {
 		mce.ConversationKeyVersion = &keyVersion
+	}
+	if b.ttl > 0 {
+		mce.TtlMsec = ptr.Ptr(b.ttl.Milliseconds())
 	}
 
 	// Get signing key

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"go.mau.fi/util/ffmpeg"
+	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/random"
 
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/crypto"
@@ -231,7 +232,7 @@ type XChatMediaUploadResult struct {
 
 // UploadXChatMedia uploads media for XChat messages.
 // Media is encrypted using secretstream (XChaCha20-Poly1305) with the conversation key.
-func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID string, mediaBytes []byte) (*XChatMediaUploadResult, error) {
+func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID string, mediaBytes []byte, ttl time.Duration) (*XChatMediaUploadResult, error) {
 	// Get the conversation key for encryption
 	convKey, err := c.keyManager.GetLatestConversationKey(ctx, conversationID)
 	if err != nil {
@@ -279,6 +280,7 @@ func (c *Client) UploadXChatMedia(ctx context.Context, conversationID, messageID
 		initResp.Data.XChatInitializeMediaUpload.MediaHashKey,
 		initResp.Data.XChatInitializeMediaUpload.ResumeID,
 		numParts,
+		ttl,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("finalize upload: %w", err)
@@ -391,7 +393,7 @@ func (c *Client) uploadMediaBytes(ctx context.Context, resumeUploadURL string, m
 }
 
 // finalizeXChatMediaUpload finalizes an XChat media upload.
-func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, messageID, mediaHashKey, resumeID string, numParts int) (*response.FinalizeXChatMediaUploadResponse, error) {
+func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, messageID, mediaHashKey, resumeID string, numParts int, ttl time.Duration) (*response.FinalizeXChatMediaUploadResponse, error) {
 	pl := (&payload.FinalizeXChatMediaUploadPayload{}).Default()
 	pl.Variables = payload.FinalizeXChatMediaUploadVariables{
 		ConversationID: conversationID,
@@ -399,7 +401,9 @@ func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, m
 		MediaHashKey:   mediaHashKey,
 		ResumeID:       resumeID,
 		NumParts:       strconv.Itoa(numParts),
-		TTLMsec:        nil,
+	}
+	if ttl > 0 {
+		pl.Variables.TTLMsec = ptr.Ptr(strconv.FormatInt(ttl.Milliseconds(), 10))
 	}
 
 	// Extract sha256 hash from endpoint URL path

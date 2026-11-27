@@ -352,10 +352,17 @@ func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.P
 		}
 	}
 
-	return &bridgev2.ConvertedMessage{
+	converted := &bridgev2.ConvertedMessage{
 		ReplyTo: replyTo,
 		Parts:   parts,
 	}
+	if msg.TTL > 0 {
+		converted.Disappear = database.DisappearingSetting{
+			Type:  event.DisappearingTypeAfterRead,
+			Timer: msg.TTL,
+		}
+	}
+	return converted
 }
 
 func markForwarded(part *bridgev2.ConvertedMessagePart) {
