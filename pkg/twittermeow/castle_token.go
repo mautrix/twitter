@@ -77,9 +77,6 @@ func (c *Client) SetNextJetfuelPreludeDispatchIDs(ids []string) {
 			c.jetfuelPreludeIDs = append(c.jetfuelPreludeIDs, id)
 		}
 	}
-	if len(c.jetfuelPreludeIDs) == 0 {
-		c.jetfuelCastleInfo.PreludeScriptURL = ""
-	}
 }
 
 func (c *Client) takeNextJetfuelPreludeDispatchID() string {

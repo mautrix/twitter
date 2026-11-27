@@ -13,6 +13,7 @@
 }) => {
   const cookieNames = new Set(cookieNameList);
   const castleStorageKey = "fi.mau.twitter.castle_token";
+  let webviewForm;
 
   let browserStatusText;
   function showBrowserLoginStatus(message) {
@@ -107,12 +108,15 @@
     throw new Error(message);
   }
   function resetStoredResult() {
+    globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__ = undefined;
+    globalThis.__BEEP_BEEP_AUTH_RESULTS__ = undefined;
     try {
       const storage = getLocalStorage();
       if (!storage) {
         return;
       }
       storage.removeItem(castleStorageKey);
+      storage.removeItem(castleStorageKey + ".request_id");
       for (let index = 2; index <= castleTokenBatchSize; index++) {
         storage.removeItem(castleTokenStorageKeyForIndex(index));
       }
@@ -136,6 +140,7 @@
       if (!storage) {
         return;
       }
+      storage.setItem(castleStorageKey + ".request_id", requestID);
       storage.setItem(castleStorageKey, result.castle_token || "");
       for (let index = 2; index <= castleTokenBatchSize; index++) {
         const key = castleTokenResultKey(index);
@@ -166,7 +171,7 @@
         return null;
       }
       const token = storage.getItem(castleStorageKey);
-      if (!token) {
+      if (!token || storage.getItem(castleStorageKey + ".request_id") !== requestID) {
         return null;
       }
       const result = { castle_token: token };
@@ -333,16 +338,25 @@
 
   async function submitInWebview(dispatchPrelude, castleToken) {
     const form = new URLSearchParams();
-    for (const [key, value] of Object.entries(webviewSubmit.form || {})) {
+    for (const [key, value] of Object.entries(webviewForm)) {
       form.set(key, value);
     }
     form.set("prelude_dispatch_id", await dispatchPrelude());
     form.set("$castle_token", castleToken);
+    const headers = { ...(webviewSubmit.headers || {}), "content-type": "application/x-www-form-urlencoded" };
+    for (const [name, header] of [["ct0", "x-csrf-token"], ["gt", "x-guest-token"]]) {
+      delete headers[header];
+      const cookie = document.cookie.split(";").map(part => part.trim()).find(part => part.startsWith(name + "="));
+      if (cookie) {
+        headers[header] = cookie.slice(name.length + 1);
+      }
+    }
     const resp = await fetch(webviewSubmit.url, {
       method: "POST",
       credentials: "include",
-      headers: { ...(webviewSubmit.headers || {}), "content-type": "application/x-www-form-urlencoded" },
+      headers,
       body: form.toString(),
+      signal: extractionController.signal,
     });
     const bytes = new Uint8Array(await resp.arrayBuffer());
     let binary = "";
@@ -430,7 +444,7 @@
   }
 
   async function loadFetchedContextFrame() {
-    const resp = await fetch(contextURL, { credentials: "include" });
+    const resp = await fetch(contextURL, { credentials: "include", signal: extractionController.signal });
     if (!resp.ok) {
       throw new Error("Failed to fetch X login context: HTTP " + resp.status);
     }
@@ -469,47 +483,85 @@
 
   __MAUTRIX_TWITTER_BROWSER_HEADERS__
 
+  const extractionController = new AbortController();
+  let extractionTimer;
   try {
-    browserLog("loading X context");
-    const context = await loadFetchedContextFrame();
-    browserLog("context ready");
-    browserLog("creating module token");
-    showBrowserLoginStatus("Completing sign-in...");
-    await synthesizeCastleActivity(context.win, context.doc);
-    const castleTokens = await createTokenInContext(context.win, context.doc);
-    const submitCastleToken = webviewSubmit && castleTokens.length > 1 ? castleTokens.pop() : "";
-    const castleToken = castleTokens[0] || "";
-    browserLog("module tokens ready, count " + castleTokens.length + ", first length " + String(castleToken || "").length);
-    const result = { castle_token: castleToken };
-    Object.assign(result, captureBrowserHeaders());
-    for (let index = 1; index < castleTokens.length; index++) {
-      result[castleTokenResultKey(index + 1)] = castleTokens[index];
-    }
-    if (preludeScriptURL && preludeSDKKey) {
-      try {
-        const dispatchPrelude = await loadPreludeDispatch(context.win, context.doc);
-        for (let index = 0; index < preludeBatchSize; index++) {
-          result[index === 0 ? "prelude_dispatch_id" : "prelude_dispatch_id_" + (index + 1)] = await dispatchPrelude();
+    return await Promise.race([(async () => {
+      if (webviewSubmit) {
+        const prefix = webviewSubmit.formCookieName + "=";
+        const formCookie = document.cookie.split(";").map(part => part.trim()).find(part => part.startsWith(prefix));
+        if (!formCookie) {
+          throw new Error("X login request form is unavailable");
         }
-        if (webviewSubmit && submitCastleToken) {
-          browserLog("sending X request from webview");
-          Object.assign(result, await submitInWebview(dispatchPrelude, submitCastleToken));
+        document.cookie = prefix + "; Max-Age=0; Path=/robots.txt; Secure";
+        document.cookie = prefix + "; Max-Age=0; Domain=x.com; Path=/robots.txt; Secure";
+        try {
+          const values = JSON.parse(decodeURIComponent(formCookie.slice(prefix.length).replace(/\+/g, " ")));
+          if (!values || Array.isArray(values) || Object.getPrototypeOf(values) !== Object.prototype || Object.values(values).some(value => typeof value !== "string")) {
+            throw new Error();
+          }
+          webviewForm = values;
+        } catch (_) {
+          throw new Error("X login request form is invalid");
         }
-      } catch (err) {
-        browserLog("prelude dispatch failed: " + (err && err.message));
       }
-    }
-    copyCookies(result, document.cookie);
-    copyCookies(result, context.doc.cookie);
-    storeBrowserAuthResult(result);
-    browserLog("result stored");
-    showBrowserLoginStatus("Finishing...");
-    return result;
+      browserLog("loading X context");
+      const context = await loadFetchedContextFrame();
+      browserLog("context ready");
+      browserLog("creating module token");
+      showBrowserLoginStatus("Completing sign-in...");
+      await synthesizeCastleActivity(context.win, context.doc);
+      const castleTokens = await createTokenInContext(context.win, context.doc);
+      const submitCastleToken = webviewSubmit && castleTokens.length > 1 ? castleTokens.pop() : "";
+      const castleToken = castleTokens[0] || "";
+      browserLog("module tokens ready, count " + castleTokens.length + ", first length " + String(castleToken || "").length);
+      const result = { castle_token: castleToken };
+      if (webviewSubmit) {
+        result.webview_submit_status = "0";
+      }
+      Object.assign(result, captureBrowserHeaders());
+      for (let index = 1; index < castleTokens.length; index++) {
+        result[castleTokenResultKey(index + 1)] = castleTokens[index];
+      }
+      if (preludeScriptURL && preludeSDKKey) {
+        try {
+          const dispatchPrelude = await loadPreludeDispatch(context.win, context.doc);
+          if (webviewSubmit && submitCastleToken) {
+            browserLog("sending X request from webview");
+            Object.assign(result, await submitInWebview(dispatchPrelude, submitCastleToken));
+          } else {
+            const ids = await Promise.all(Array.from({ length: preludeBatchSize }, () => dispatchPrelude()));
+            ids.forEach((id, index) => {
+              result[index === 0 ? "prelude_dispatch_id" : "prelude_dispatch_id_" + (index + 1)] = id;
+            });
+          }
+        } catch (err) {
+          browserLog("prelude dispatch failed: " + (err && err.message));
+        }
+      }
+      copyCookies(result, document.cookie);
+      copyCookies(result, context.doc.cookie);
+      if (extractionController.signal.aborted) {
+        throw new Error("X browser login request timed out");
+      }
+      storeBrowserAuthResult(result);
+      browserLog("result stored");
+      showBrowserLoginStatus("Finishing...");
+      return result;
+    })(), new Promise((_, reject) => {
+      extractionTimer = setTimeout(() => {
+        extractionController.abort();
+        reject(new Error("X browser login request timed out"));
+      }, 25000);
+    })]);
   } catch (err) {
     showBrowserLoginStatus("Unable to finish signing in.");
     try {
       globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = false;
     } catch (_) {}
     throw err;
+  } finally {
+    clearTimeout(extractionTimer);
+    extractionController.abort();
   }
 })(__MAUTRIX_TWITTER_CASTLE_CONFIG__)

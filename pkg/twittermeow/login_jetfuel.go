@@ -690,9 +690,10 @@ func (wls *WebLoginSession) jetfuelAuthMethodAction(methodID string) (WebLoginAu
 // TLS fingerprint of the request that asks X for a text message with the one that dispatched the Prelude
 // signals, so that request has to come from the same webview.
 type JetfuelWebviewRequest struct {
-	URL     string            `json:"url"`
-	Form    map[string]string `json:"form"`
-	Headers map[string]string `json:"headers"`
+	URL            string            `json:"url"`
+	Form           map[string]string `json:"form"`
+	Headers        map[string]string `json:"headers"`
+	FormCookieName string            `json:"formCookieName,omitempty"`
 }
 
 func (wls *WebLoginSession) PrepareWebviewAuthMethodSubmit(methodID string) (*JetfuelWebviewRequest, error) {
@@ -852,12 +853,6 @@ func (c *Client) jetfuelWebviewHeaders(fullURL string) map[string]string {
 		"x-jf-v":                    jetfuelHeaderVersion,
 		"x-twitter-active-user":     "yes",
 		"x-twitter-client-language": "en",
-	}
-	if guestToken := c.cookies.Get(cookies.XGuestToken); guestToken != "" {
-		headers["x-guest-token"] = guestToken
-	}
-	if csrfToken := c.cookies.Get(cookies.XCt0); csrfToken != "" {
-		headers["x-csrf-token"] = csrfToken
 	}
 	return headers
 }
