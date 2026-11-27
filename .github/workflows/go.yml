@@ -4,6 +4,7 @@ on: [push, pull_request]
 
 env:
   GOTOOLCHAIN: local
+  GOEXPERIMENT: jsonv2
 
 jobs:
   lint:
