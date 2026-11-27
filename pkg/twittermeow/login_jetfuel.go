@@ -896,7 +896,7 @@ func (c *Client) jetfuelRequest(ctx context.Context, path, method string, body [
 		URL:         fullURL,
 		Method:      method,
 		Headers:     headers,
-		Payload:     bytes.NewReader(body),
+		Payload:     body,
 		ContentType: contentType,
 	})
 	if resp != nil {
@@ -974,7 +974,7 @@ func (c *Client) sendJetfuelViewerContextEvent(ctx context.Context) error {
 		URL:         endpoints.VIEWER_CONTEXT_URL,
 		Method:      http.MethodPost,
 		Headers:     headers,
-		Payload:     bytes.NewReader([]byte(form.Encode())),
+		Payload:     []byte(form.Encode()),
 		ContentType: types.ContentTypeForm,
 	})
 	if resp != nil {

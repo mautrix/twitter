@@ -106,6 +106,7 @@ func (c *Client) SetUserDMBlocked(ctx context.Context, userID string, blocked bo
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            reqURL,
 		Method:         http.MethodPost,
+		Idempotent:     true,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
 		Body:           body,
@@ -196,6 +197,7 @@ func (c *Client) SetPushNotificationConfig(ctx context.Context, action PushNotif
 	apiRequestOpts := apiRequestOpts{
 		URL:            url,
 		Method:         http.MethodPost,
+		Idempotent:     true,
 		WithClientUUID: true,
 		Referer:        endpoints.BASE_NOTIFICATION_SETTINGS_URL,
 		Origin:         endpoints.BASE_URL,
@@ -229,6 +231,7 @@ func (c *Client) GenerateXChatToken(ctx context.Context) (*response.XChatGetAuth
 	apiRequestOpts := apiRequestOpts{
 		URL:            endpoints.GENERATE_XCHAT_TOKEN_MUTATION_URL,
 		Method:         http.MethodPost,
+		Idempotent:     true,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,

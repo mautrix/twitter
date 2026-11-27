@@ -1,7 +1,6 @@
 package twittermeow
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -425,7 +424,7 @@ func subtaskName(st *onboardingSubtask) string {
 }
 
 func (c *Client) activateGuest(ctx context.Context) error {
-	resp, respBody, err := c.MakeRequest(ctx, endpoints.GUEST_ACTIVATE_URL, http.MethodPost, c.buildHeaders(HeaderOpts{
+	resp, respBody, err := c.makeIdempotentPost(ctx, endpoints.GUEST_ACTIVATE_URL, c.buildHeaders(HeaderOpts{
 		WithNonAuthBearer:   true,
 		WithCookies:         true,
 		WithXTwitterHeaders: true,
@@ -479,7 +478,7 @@ func (c *Client) sendOnboardingTask(ctx context.Context, url string, payload onb
 				"sec-fetch-site":          "same-site",
 			},
 		}),
-		Payload:     bytes.NewReader(body),
+		Payload:     body,
 		ContentType: types.ContentTypeJSON,
 	})
 	if resp != nil {

@@ -57,7 +57,7 @@ func (c *Client) UploadMedia(ctx context.Context, params *payload.UploadMediaQue
 	}
 	headers := c.buildHeaders(headerOpts)
 
-	_, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, nil, types.ContentTypeNone)
+	_, respBody, err := c.makeIdempotentPost(ctx, url, headers, nil, types.ContentTypeNone)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (c *Client) UploadMedia(ctx context.Context, params *payload.UploadMediaQue
 			headers.Add("content-type", contentType)
 
 			url = fmt.Sprintf("%s?command=APPEND&media_id=%s&segment_index=%d", endpoints.UPLOAD_MEDIA_URL, initUploadResponse.MediaIDString, segmentIndex)
-			resp, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, appendMediaPayload, types.ContentTypeNone)
+			resp, respBody, err := c.makeIdempotentPost(ctx, url, headers, appendMediaPayload, types.ContentTypeNone)
 			if err != nil {
 				return nil, err
 			}
@@ -108,7 +108,7 @@ func (c *Client) UploadMedia(ctx context.Context, params *payload.UploadMediaQue
 
 		url = fmt.Sprintf("%s?%s", endpoints.UPLOAD_MEDIA_URL, string(encodedQuery))
 		headers.Del("content-type")
-		resp, respBody, err := c.MakeRequest(ctx, url, http.MethodPost, headers, nil, types.ContentTypeNone)
+		resp, respBody, err := c.makeIdempotentPost(ctx, url, headers, nil, types.ContentTypeNone)
 		if err != nil {
 			return nil, err
 		}
@@ -325,6 +325,7 @@ func (c *Client) initializeXChatMediaUpload(ctx context.Context, conversationID,
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            endpoints.INITIALIZE_XCHAT_MEDIA_UPLOAD_URL,
 		Method:         http.MethodPost,
+		Idempotent:     true,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,
@@ -373,7 +374,7 @@ func (c *Client) uploadMediaBytes(ctx context.Context, resumeUploadURL string, m
 	for chunk := range slices.Chunk(mediaBytes, chunkSize) {
 		uploadURL := endpoints.TON_UPLOAD_BASE_URL + "/i/ton/data" + resumeUploadURL + "&partNumber=" + strconv.Itoa(partNumber)
 
-		resp, respBody, err := c.MakeRequest(ctx, uploadURL, http.MethodPost, headers, chunk, types.ContentTypeNone)
+		resp, respBody, err := c.makeIdempotentPost(ctx, uploadURL, headers, chunk, types.ContentTypeNone)
 		if err != nil {
 			return 0, fmt.Errorf("upload part %d: %w", partNumber, err)
 		}
@@ -428,6 +429,7 @@ func (c *Client) finalizeXChatMediaUpload(ctx context.Context, conversationID, m
 	_, respBody, err := c.makeAPIRequest(ctx, apiRequestOpts{
 		URL:            endpoints.FINALIZE_XCHAT_MEDIA_UPLOAD_URL,
 		Method:         http.MethodPost,
+		Idempotent:     true,
 		WithClientUUID: true,
 		Origin:         endpoints.BASE_URL,
 		ContentType:    types.ContentTypeJSON,
