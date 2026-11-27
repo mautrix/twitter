@@ -2,10 +2,9 @@ package types
 
 import (
 	"encoding/json"
-	"maps"
-	"slices"
 
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/shape"
 )
 
 type TwitterEvent interface {
@@ -118,7 +117,7 @@ func (rte *RawTwitterEvent) ParseWithErrorLog(log *zerolog.Logger) TwitterEvent 
 		}
 		logEvt.Msg("Failed to parse entry")
 	} else if unrecognized != nil {
-		logEvt := log.Warn().Strs("type_keys", slices.Collect(maps.Keys(unrecognized)))
+		logEvt := log.Warn().Strs("type_keys", shape.Keys(unrecognized))
 		if log.GetLevel() == zerolog.TraceLevel {
 			logEvt.Any("entry_data", unrecognized)
 		}

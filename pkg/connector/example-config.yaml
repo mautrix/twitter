@@ -1,8 +1,3 @@
-# Proxy to use for all Twitter connections.
-proxy: null
-# Alternative to proxy: an HTTP endpoint that returns the proxy URL to use for Twitter connections.
-get_proxy_url: null
-
 # Displayname template for Twitter users.
 # {{ .DisplayName }} is replaced with the display name of the Twitter user.
 # {{ .Username }} is replaced with the username of the Twitter user.

@@ -94,6 +94,38 @@ func NewDeleteMessageMutationPayload(vars DeleteMessageMutationVariables) *Delet
 	}
 }
 
+type EditGroupFieldName string
+
+const (
+	EditGroupFieldTitle  EditGroupFieldName = "Title"
+	EditGroupFieldAvatar EditGroupFieldName = "Avatar"
+)
+
+type EditGroupConversationMutationVariables struct {
+	ConversationID         string                         `json:"conversation_id"`
+	ConversationKeyVersion string                         `json:"conversation_key_version"`
+	GroupName              *string                        `json:"group_name,omitempty"`
+	AvatarURL              *string                        `json:"avatar_url,omitempty"`
+	ModifiedFields         []EditGroupFieldName           `json:"modified_fields"`
+	ActionSignatures       []DeleteMessageActionSignature `json:"action_signatures"`
+}
+
+type EditGroupConversationMutationPayload struct {
+	OperationName string                                 `json:"operationName"`
+	Variables     EditGroupConversationMutationVariables `json:"variables"`
+	Extensions    ApolloExtensions                       `json:"extensions"`
+}
+
+func NewEditGroupConversationMutationPayload(vars EditGroupConversationMutationVariables) *EditGroupConversationMutationPayload {
+	ext := DefaultApolloExtensions()
+	ext.PersistedQuery.Sha256Hash = "r2vVejQICfaWiPDV_5p44A"
+	return &EditGroupConversationMutationPayload{
+		OperationName: "EditGroupConversationMutation",
+		Variables:     vars,
+		Extensions:    ext,
+	}
+}
+
 // MuteConversationMutationVariables contains the variables for the MuteConversation mutation
 type MuteConversationMutationVariables struct {
 	ConversationIDs  []string                       `json:"conversationIds"`
@@ -110,9 +142,9 @@ type MuteConversationMutationPayload struct {
 // NewMuteConversationMutationPayload creates a new MuteConversationMutationPayload with default extensions
 func NewMuteConversationMutationPayload(vars MuteConversationMutationVariables) *MuteConversationMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "Dy7geJg7CL5dqhsl6QBteg"
+	ext.PersistedQuery.Sha256Hash = "9hq3baCBRMAG9JuLtb0ubg"
 	return &MuteConversationMutationPayload{
-		OperationName: "MuteConversation",
+		OperationName: "MuteConversationMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}
@@ -134,9 +166,9 @@ type UnmuteConversationMutationPayload struct {
 // NewUnmuteConversationMutationPayload creates a new UnmuteConversationMutationPayload with default extensions
 func NewUnmuteConversationMutationPayload(vars UnmuteConversationMutationVariables) *UnmuteConversationMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "LnNSeGu4vnbwqXAvh7OlGQ"
+	ext.PersistedQuery.Sha256Hash = "UCN8vZu2Mui2iDY0MSYfLA"
 	return &UnmuteConversationMutationPayload{
-		OperationName: "UnmuteConversation",
+		OperationName: "UnmuteConversationMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}
@@ -296,9 +328,9 @@ type SendMessageMutationPayload struct {
 
 func NewSendMessageMutationPayload(vars SendMessageMutationVariables) *SendMessageMutationPayload {
 	ext := DefaultApolloExtensions()
-	ext.PersistedQuery.Sha256Hash = "LkAIEchf8AGj-WgeLoTVcw"
+	ext.PersistedQuery.Sha256Hash = "TWRPP7gnKwV_R8-tE-Dd3Q"
 	return &SendMessageMutationPayload{
-		OperationName: "SendMessageMutation",
+		OperationName: "SendMessageCreateMutation",
 		Variables:     vars,
 		Extensions:    ext,
 	}
@@ -361,7 +393,7 @@ type InitializeXChatMediaUploadVariables struct {
 }
 
 func (p *InitializeXChatMediaUploadPayload) Default() *InitializeXChatMediaUploadPayload {
-	p.OperationName = "InitializeXChatMediaUpload"
+	p.OperationName = "InitializeXChatMediaUploadMutation"
 	p.Extensions = DefaultApolloExtensions()
 	return p
 }
@@ -383,7 +415,7 @@ type FinalizeXChatMediaUploadVariables struct {
 }
 
 func (p *FinalizeXChatMediaUploadPayload) Default() *FinalizeXChatMediaUploadPayload {
-	p.OperationName = "FinalizeXChatMediaUpload"
+	p.OperationName = "FinalizeXChatMediaUploadMutation"
 	p.Extensions = DefaultApolloExtensions()
 	return p
 }

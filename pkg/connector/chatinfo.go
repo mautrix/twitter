@@ -501,7 +501,7 @@ func (tc *TwitterConnector) wrapUserInfo(cli *twittermeow.Client, user *types.Us
 }
 
 func makeAvatar(cli *twittermeow.Client, avatarURL string) *bridgev2.Avatar {
-	if strings.HasPrefix(avatarURL, "http://") && isPublicCDNURL(avatarURL) {
+	if strings.HasPrefix(avatarURL, "http://") && twittermeow.IsPublicCDNURL(avatarURL) {
 		avatarURL = "https://" + strings.TrimPrefix(avatarURL, "http://")
 	}
 	return &bridgev2.Avatar{
@@ -608,6 +608,16 @@ func (tc *TwitterClient) makeGroupAvatar(conversationID, avatarURL, keyVersion s
 		ID: networkid.AvatarID(avatarURL),
 		Get: func(ctx context.Context) ([]byte, error) {
 			log := zerolog.Ctx(ctx).With().Str("conversation_id", conversationID).Str("url", avatarURL).Logger()
+
+			if twittermeow.IsPublicCDNURL(avatarURL) {
+				resp, err := downloadFile(ctx, tc.client, avatarURL)
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to download group avatar")
+					return nil, err
+				}
+				defer resp.Body.Close()
+				return io.ReadAll(resp.Body)
+			}
 
 			resp, err := tc.client.FetchRaw(ctx, avatarURL)
 			if err != nil {

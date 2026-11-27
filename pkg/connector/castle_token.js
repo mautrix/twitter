@@ -5,9 +5,15 @@
   contextURL,
   identifier,
   castleTokenBatchSize,
+  preludeScriptURL,
+  preludeSDKKey,
+  preludeBatchSize,
+  webviewSubmit,
+  requestID,
 }) => {
   const cookieNames = new Set(cookieNameList);
   const castleStorageKey = "fi.mau.twitter.castle_token";
+  let webviewForm;
 
   let browserStatusText;
   function showBrowserLoginStatus(message) {
@@ -102,12 +108,15 @@
     throw new Error(message);
   }
   function resetStoredResult() {
+    globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__ = undefined;
+    globalThis.__BEEP_BEEP_AUTH_RESULTS__ = undefined;
     try {
       const storage = getLocalStorage();
       if (!storage) {
         return;
       }
       storage.removeItem(castleStorageKey);
+      storage.removeItem(castleStorageKey + ".request_id");
       for (let index = 2; index <= castleTokenBatchSize; index++) {
         storage.removeItem(castleTokenStorageKeyForIndex(index));
       }
@@ -119,6 +128,7 @@
   function storeBrowserAuthResult(result) {
     try {
       globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__ = result;
+      globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT_ID__ = requestID;
       globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = false;
       globalThis.__BEEP_BEEP_AUTH_RESULTS__ = result;
       if (typeof window !== "undefined") {
@@ -130,6 +140,7 @@
       if (!storage) {
         return;
       }
+      storage.setItem(castleStorageKey + ".request_id", requestID);
       storage.setItem(castleStorageKey, result.castle_token || "");
       for (let index = 2; index <= castleTokenBatchSize; index++) {
         const key = castleTokenResultKey(index);
@@ -147,17 +158,20 @@
   function storedBrowserAuthResult() {
     try {
       const result = globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT__;
-      if (result && result.castle_token) {
+      if (result && result.castle_token && globalThis.__MAUTRIX_TWITTER_CASTLE_RESULT_ID__ === requestID) {
         return result;
       }
     } catch (_) {}
+    if ((preludeScriptURL && preludeSDKKey) || webviewSubmit) {
+      return null;
+    }
     try {
       const storage = getLocalStorage();
       if (!storage) {
         return null;
       }
       const token = storage.getItem(castleStorageKey);
-      if (!token) {
+      if (!token || storage.getItem(castleStorageKey + ".request_id") !== requestID) {
         return null;
       }
       const result = { castle_token: token };
@@ -183,11 +197,11 @@
     browserLog("returning stored result");
     return existingResult;
   }
-  if (globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__) {
+  if (globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ === requestID) {
     browserLog("waiting for in-flight result");
-    return await waitFor(() => storedBrowserAuthResult(), "X Castle token generation did not finish", 30000);
+    return await waitFor(() => storedBrowserAuthResult(), "X Castle token generation did not finish", 45000);
   }
-  globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = true;
+  globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = requestID;
   resetStoredResult();
 
   function addModules(entry, modules) {
@@ -245,11 +259,7 @@
     return modules;
   }
 
-  async function createTokenInContext(win, doc) {
-    const modules = installModuleCapture(win);
-    await loadScript(doc, scriptURL);
-    await waitFor(() => Object.keys(modules).length > 0, "X Castle script did not register modules", 15000);
-
+  function chunkRequire(win, modules, chunkURL) {
     const cache = {};
     function req(id) {
       const key = String(id);
@@ -258,11 +268,11 @@
       }
       const fn = modules[key];
       if (typeof fn !== "function") {
-        throw new Error("Missing X Castle module " + key);
+        throw new Error("Missing X module " + key);
       }
       const module = { exports: {} };
       cache[key] = module;
-      fn(module, module.exports, req);
+      fn.call(module.exports, module, module.exports, req);
       return module.exports;
     }
     req.d = (exports, definition) => {
@@ -279,7 +289,89 @@
       }
       Object.defineProperty(exports, "__esModule", { value: true });
     };
+    req.cw = fn => {
+      let module;
+      return () => {
+        if (fn) {
+          const init = fn;
+          fn = 0;
+          module = { exports: {} };
+          init.call(module.exports, module, module.exports);
+        }
+        return module.exports;
+      };
+    };
+    req.p = chunkURL.slice(0, chunkURL.lastIndexOf("/") + 1);
+    req.b = win.document.baseURI;
+    return req;
+  }
 
+  async function loadPreludeDispatch(win, doc) {
+    const chunk = win.webpackChunk_twitter_responsive_web = win.webpackChunk_twitter_responsive_web || [];
+    const loadedBefore = chunk.length;
+    await loadScript(doc, preludeScriptURL);
+    const modules = {};
+    for (const entry of chunk.slice(loadedBefore)) {
+      addModules(entry, modules);
+    }
+    const req = chunkRequire(win, modules, preludeScriptURL);
+    let dispatchSignals;
+    for (const id of Object.keys(modules)) {
+      try {
+        const exports = req(id);
+        if (exports && typeof exports.dispatchSignals === "function") {
+          dispatchSignals = exports.dispatchSignals;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (typeof dispatchSignals !== "function") {
+      throw new Error("X Prelude module is unavailable");
+    }
+    return () => Promise.race([
+      dispatchSignals(preludeSDKKey),
+      sleep(10000).then(() => {
+        throw new Error("Timed out dispatching X Prelude signals");
+      }),
+    ]);
+  }
+
+  async function submitInWebview(dispatchPrelude, castleToken) {
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(webviewForm)) {
+      form.set(key, value);
+    }
+    form.set("prelude_dispatch_id", await dispatchPrelude());
+    form.set("$castle_token", castleToken);
+    const headers = { ...(webviewSubmit.headers || {}), "content-type": "application/x-www-form-urlencoded" };
+    for (const [name, header] of [["ct0", "x-csrf-token"], ["gt", "x-guest-token"]]) {
+      delete headers[header];
+      const cookie = document.cookie.split(";").map(part => part.trim()).find(part => part.startsWith(name + "="));
+      if (cookie) {
+        headers[header] = cookie.slice(name.length + 1);
+      }
+    }
+    const resp = await fetch(webviewSubmit.url, {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: form.toString(),
+      signal: extractionController.signal,
+    });
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + 0x8000));
+    }
+    return { webview_submit_status: String(resp.status), webview_submit_body: btoa(binary) };
+  }
+
+  async function createTokenInContext(win, doc) {
+    const modules = installModuleCapture(win);
+    await loadScript(doc, scriptURL);
+    await waitFor(() => Object.keys(modules).length > 0, "X Castle script did not register modules", 15000);
+
+    const req = chunkRequire(win, modules, scriptURL);
     let configure;
     for (const id of Object.keys(modules)) {
       try {
@@ -352,7 +444,7 @@
   }
 
   async function loadFetchedContextFrame() {
-    const resp = await fetch(contextURL, { credentials: "include" });
+    const resp = await fetch(contextURL, { credentials: "include", signal: extractionController.signal });
     if (!resp.ok) {
       throw new Error("Failed to fetch X login context: HTTP " + resp.status);
     }
@@ -391,32 +483,85 @@
 
   __MAUTRIX_TWITTER_BROWSER_HEADERS__
 
+  const extractionController = new AbortController();
+  let extractionTimer;
   try {
-    browserLog("loading X context");
-    const context = await loadFetchedContextFrame();
-    browserLog("context ready");
-    browserLog("creating module token");
-    showBrowserLoginStatus("Completing sign-in...");
-    await synthesizeCastleActivity(context.win, context.doc);
-    const castleTokens = await createTokenInContext(context.win, context.doc);
-    const castleToken = castleTokens[0] || "";
-    browserLog("module tokens ready, count " + castleTokens.length + ", first length " + String(castleToken || "").length);
-    const result = { castle_token: castleToken };
-    Object.assign(result, captureBrowserHeaders());
-    for (let index = 1; index < castleTokens.length; index++) {
-      result[castleTokenResultKey(index + 1)] = castleTokens[index];
-    }
-    copyCookies(result, document.cookie);
-    copyCookies(result, context.doc.cookie);
-    storeBrowserAuthResult(result);
-    browserLog("result stored");
-    showBrowserLoginStatus("Finishing...");
-    return result;
+    return await Promise.race([(async () => {
+      if (webviewSubmit) {
+        const prefix = webviewSubmit.formCookieName + "=";
+        const formCookie = document.cookie.split(";").map(part => part.trim()).find(part => part.startsWith(prefix));
+        if (!formCookie) {
+          throw new Error("X login request form is unavailable");
+        }
+        document.cookie = prefix + "; Max-Age=0; Path=/robots.txt; Secure";
+        document.cookie = prefix + "; Max-Age=0; Domain=x.com; Path=/robots.txt; Secure";
+        try {
+          const values = JSON.parse(decodeURIComponent(formCookie.slice(prefix.length).replace(/\+/g, " ")));
+          if (!values || Array.isArray(values) || Object.getPrototypeOf(values) !== Object.prototype || Object.values(values).some(value => typeof value !== "string")) {
+            throw new Error();
+          }
+          webviewForm = values;
+        } catch (_) {
+          throw new Error("X login request form is invalid");
+        }
+      }
+      browserLog("loading X context");
+      const context = await loadFetchedContextFrame();
+      browserLog("context ready");
+      browserLog("creating module token");
+      showBrowserLoginStatus("Completing sign-in...");
+      await synthesizeCastleActivity(context.win, context.doc);
+      const castleTokens = await createTokenInContext(context.win, context.doc);
+      const submitCastleToken = webviewSubmit && castleTokens.length > 1 ? castleTokens.pop() : "";
+      const castleToken = castleTokens[0] || "";
+      browserLog("module tokens ready, count " + castleTokens.length + ", first length " + String(castleToken || "").length);
+      const result = { castle_token: castleToken };
+      if (webviewSubmit) {
+        result.webview_submit_status = "0";
+      }
+      Object.assign(result, captureBrowserHeaders());
+      for (let index = 1; index < castleTokens.length; index++) {
+        result[castleTokenResultKey(index + 1)] = castleTokens[index];
+      }
+      if (preludeScriptURL && preludeSDKKey) {
+        try {
+          const dispatchPrelude = await loadPreludeDispatch(context.win, context.doc);
+          if (webviewSubmit && submitCastleToken) {
+            browserLog("sending X request from webview");
+            Object.assign(result, await submitInWebview(dispatchPrelude, submitCastleToken));
+          } else {
+            const ids = await Promise.all(Array.from({ length: preludeBatchSize }, () => dispatchPrelude()));
+            ids.forEach((id, index) => {
+              result[index === 0 ? "prelude_dispatch_id" : "prelude_dispatch_id_" + (index + 1)] = id;
+            });
+          }
+        } catch (err) {
+          browserLog("prelude dispatch failed: " + (err && err.message));
+        }
+      }
+      copyCookies(result, document.cookie);
+      copyCookies(result, context.doc.cookie);
+      if (extractionController.signal.aborted) {
+        throw new Error("X browser login request timed out");
+      }
+      storeBrowserAuthResult(result);
+      browserLog("result stored");
+      showBrowserLoginStatus("Finishing...");
+      return result;
+    })(), new Promise((_, reject) => {
+      extractionTimer = setTimeout(() => {
+        extractionController.abort();
+        reject(new Error("X browser login request timed out"));
+      }, 25000);
+    })]);
   } catch (err) {
     showBrowserLoginStatus("Unable to finish signing in.");
     try {
       globalThis.__MAUTRIX_TWITTER_CASTLE_IN_PROGRESS__ = false;
     } catch (_) {}
     throw err;
+  } finally {
+    clearTimeout(extractionTimer);
+    extractionController.abort();
   }
 })(__MAUTRIX_TWITTER_CASTLE_CONFIG__)

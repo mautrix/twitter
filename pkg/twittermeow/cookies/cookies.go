@@ -2,11 +2,13 @@ package cookies
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"go.mau.fi/util/shape"
 )
 
 type XCookieName string
@@ -81,15 +83,22 @@ func (c *Cookies) String() string {
 	return strings.Join(out, "; ")
 }
 
+func (c *Cookies) Map() map[string]string {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return maps.Clone(c.store)
+}
+
+func (c *Cookies) Replace(store map[string]string) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.store = maps.Clone(store)
+}
+
 func (c *Cookies) Names() []string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	names := make([]string, 0, len(c.store))
-	for name := range c.store {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
+	return shape.Keys(c.store)
 }
 
 func (c *Cookies) IsCookieEmpty(key XCookieName) bool {

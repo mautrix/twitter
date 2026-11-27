@@ -75,24 +75,6 @@ func (wle *WebLoginError) Error() string {
 	return fmt.Sprintf("X login failed: %s", wle.Message)
 }
 
-func (wle *WebLoginError) UserMessage() string {
-	if wle == nil {
-		return "X rejected this login. Please check the details and try again."
-	}
-	switch wle.Code {
-	case 32, 64, 89, 99:
-		return "X rejected the username or password. Check the details and try again."
-	case 88, 226, 326, 399:
-		return "X rejected this login attempt. Wait a bit, then try again."
-	default:
-		msg := strings.TrimSpace(wle.Message)
-		if msg == "" {
-			return "X rejected this login. Please check the details and try again."
-		}
-		return fmt.Sprintf("X rejected this login: %s", msg)
-	}
-}
-
 type WebLoginChallenge struct {
 	SubtaskID   string
 	Hint        string
@@ -241,6 +223,15 @@ func (wls *WebLoginSession) SubmitCombinedCredentials(ctx context.Context, ident
 		return wls.submitJetfuelCombinedCredentials(ctx, identifier, password)
 	}
 	return wls.SubmitCredentials(ctx, identifier, password)
+}
+
+// SubmitSSO submits a Google or Apple sign-in result as x.com's own buttons do: the JSON of the
+// Google Identity Services credential response, or of AppleID.auth.signIn()'s result.
+func (wls *WebLoginSession) SubmitSSO(ctx context.Context, provider, response string) (*WebLoginResult, error) {
+	if wls.backend != webLoginBackendJetfuel {
+		return nil, fmt.Errorf("%w: SSO login is unsupported for %s login", ErrWebLoginUnexpectedSubtask, wls.backend)
+	}
+	return wls.submitJetfuelSSO(ctx, provider, response)
 }
 
 func (wls *WebLoginSession) SubmitPassword(ctx context.Context, password string) (*WebLoginResult, error) {
