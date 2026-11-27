@@ -16,10 +16,10 @@ import (
 	"go.mau.fi/mautrix-twitter/pkg/twittermeow/data/types"
 )
 
-func convertXChatNotice(portal *bridgev2.Portal, notice *types.MessageNotice) *bridgev2.ConvertedMessage {
+func convertXChatNotice(portal *bridgev2.Portal, notice *types.MessageNotice, fromMe bool) *bridgev2.ConvertedMessage {
 	content := &event.MessageEventContent{
 		MsgType: event.MsgNotice,
-		Body:    xchatNoticeText(portal, notice),
+		Body:    xchatNoticeText(portal, notice, fromMe),
 	}
 	switch notice.Type {
 	case types.MessageNoticeCallStarted, types.MessageNoticeCallEnded, types.MessageNoticeCallMissed:
@@ -46,7 +46,7 @@ func convertXChatNotice(portal *bridgev2.Portal, notice *types.MessageNotice) *b
 	}
 }
 
-func xchatNoticeText(portal *bridgev2.Portal, notice *types.MessageNotice) string {
+func xchatNoticeText(portal *bridgev2.Portal, notice *types.MessageNotice, fromMe bool) string {
 	callKind := "Video call"
 	if portal != nil && portal.RoomType != database.RoomTypeDM {
 		callKind = "Group call"
@@ -62,11 +62,10 @@ func xchatNoticeText(portal *bridgev2.Portal, notice *types.MessageNotice) strin
 		}
 		return callKind + " ended"
 	case types.MessageNoticeCallMissed:
+		if fromMe {
+			return callKind + " ended"
+		}
 		return callKind + " missed"
-	case types.MessageNoticeScreenshot:
-		return "Took a screenshot"
-	case types.MessageNoticeScreenRecording:
-		return "Recorded the screen"
 	case types.MessageNoticeUndecryptable:
 		return "Unable to decrypt messages in this chat that were encrypted for another X Chat key."
 	default:

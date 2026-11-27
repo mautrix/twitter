@@ -84,7 +84,7 @@ func ConvertXChatMessageContentsToMessage(evt *payload.MessageEvent, contents *p
 	return convertXChatMessageToTwitterMessage(evt, contents, keyVersion)
 }
 
-// ConvertXChatNoticeEntry converts call and screen capture entries to notice messages.
+// ConvertXChatNoticeEntry converts call entries to notice messages.
 // It returns nil for entries that aren't shown as notices.
 func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.MessageEntryContents, keyVersion string) *types.Message {
 	var notice types.MessageNotice
@@ -110,21 +110,11 @@ func ConvertXChatNoticeEntry(evt *payload.MessageEvent, contents *payload.Messag
 			AudioOnly: ptr.Val(contents.AvCallMissed.IsAudioOnly),
 			CallCard:  &payload.ReplyAVCallCard{Missed: contents.AvCallMissed},
 		}
-	case contents.ScreenCaptureDetected != nil:
-		notice.Type = types.MessageNoticeScreenshot
-		if payload.ScreenCaptureType(ptr.Val(contents.ScreenCaptureDetected.Type)) == payload.ScreenCaptureTypeRecording {
-			notice.Type = types.MessageNoticeScreenRecording
-		}
 	default:
 		return nil
 	}
 	notice.SenderID = ptr.Val(evt.SenderId)
-	msg := newXChatNoticeMessage(evt, &notice, keyVersion)
-	if notice.CallCard != nil {
-		// Call entries are posted by X's own call service account rather than a chat member.
-		msg.MessageData.SenderID = ""
-	}
-	return msg
+	return newXChatNoticeMessage(evt, &notice, keyVersion)
 }
 
 func ConvertXChatUndecryptableNotice(evt *payload.MessageEvent) *types.Message {

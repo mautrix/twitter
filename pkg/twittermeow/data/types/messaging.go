@@ -32,22 +32,19 @@ type MessageData struct {
 type MessageNoticeType string
 
 const (
-	MessageNoticeCallStarted     MessageNoticeType = "call_started"
-	MessageNoticeCallEnded       MessageNoticeType = "call_ended"
-	MessageNoticeCallMissed      MessageNoticeType = "call_missed"
-	MessageNoticeScreenshot      MessageNoticeType = "screenshot"
-	MessageNoticeScreenRecording MessageNoticeType = "screen_recording"
-	MessageNoticeUndecryptable   MessageNoticeType = "undecryptable"
+	MessageNoticeCallStarted   MessageNoticeType = "call_started"
+	MessageNoticeCallEnded     MessageNoticeType = "call_ended"
+	MessageNoticeCallMissed    MessageNoticeType = "call_missed"
+	MessageNoticeUndecryptable MessageNoticeType = "undecryptable"
 )
 
 type MessageNotice struct {
 	Type            MessageNoticeType
 	AudioOnly       bool
 	DurationSeconds int64
-	// SenderID is the sender of the X entry, which isn't always the Matrix sender of the notice.
-	SenderID   string
-	KeyVersion string
-	CallCard   *payload.ReplyAVCallCard
+	SenderID        string
+	KeyVersion      string
+	CallCard        *payload.ReplyAVCallCard
 }
 
 type Message struct {

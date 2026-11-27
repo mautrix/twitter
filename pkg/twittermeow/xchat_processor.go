@@ -810,12 +810,13 @@ func (p *XChatEventProcessor) processMessageCreateEvent(ctx context.Context, evt
 		return p.emitEvent(ctx, notice)
 	}
 
-	if contents.AcceptMessageRequest != nil {
+	if contents.AcceptMessageRequest != nil || contents.XNumberUsed != nil {
 		// Emit a ConversationCreate event so the connector can create the room, sync trust and backfill.
 		p.log.Debug().
 			Str("sequence_id", ptr.Val(evt.SequenceId)).
 			Str("conversation_id", conversationID).
-			Msg("Message request accepted, emitting ConversationCreate")
+			Str("entry_type", xchatEntryType(contents)).
+			Msg("Conversation trusted, emitting ConversationCreate")
 		return p.emitConversationCreate(ctx, evt)
 	}
 
@@ -856,6 +857,12 @@ func xchatEntryType(contents *payload.MessageEntryContents) string {
 		return "nickname_message"
 	case contents.SetVerifiedStatus != nil:
 		return "set_verified_status"
+	case contents.ScreenCaptureDetected != nil:
+		return "screen_capture_detected"
+	case contents.AcceptMessageRequest != nil:
+		return "accept_message_request"
+	case contents.XNumberUsed != nil:
+		return "x_number_used"
 	default:
 		return "unknown"
 	}

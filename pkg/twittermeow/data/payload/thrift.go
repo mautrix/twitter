@@ -457,6 +457,7 @@ type MessageEntryContents struct {
 	NicknameMessage        *NicknameMessage        `thrift:"nickname_message,14" json:"nickname_message,omitempty"`
 	SetVerifiedStatus      *SetVerifiedStatus      `thrift:"set_verified_status,15" json:"set_verified_status,omitempty"`
 	AvCallStarted          *AVCallStarted          `thrift:"av_call_started,16" json:"av_call_started,omitempty"`
+	XNumberUsed            *XNumberUsed            `thrift:"x_number_used,17" json:"x_number_used,omitempty"`
 }
 
 type MessageEntryHolder struct {
@@ -782,6 +783,9 @@ type UrlAttachmentImage struct {
 }
 
 type UrlRichTextContent struct {
+}
+
+type XNumberUsed struct {
 }
 
 // SendMessageEventResponse is the decoded response from the SendMessageMutation.

@@ -283,7 +283,7 @@ func mergeXChatEditData(original, edit *types.MessageData) types.MessageData {
 
 func (tc *TwitterClient) convertToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, msg *types.MessageData) *bridgev2.ConvertedMessage {
 	if msg.Notice != nil {
-		return convertXChatNotice(portal, msg.Notice)
+		return convertXChatNotice(portal, msg.Notice, msg.SenderID == tc.client.GetCurrentUserID())
 	}
 	var replyTo *networkid.MessageOptionalPartID
 	if msg.ReplyData.ID != "" {
