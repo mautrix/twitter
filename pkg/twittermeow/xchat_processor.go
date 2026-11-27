@@ -52,6 +52,8 @@ type XChatEventProcessor struct {
 	unresolvedConversationGaps map[string]struct{}
 	maxHandledSequenceID       string
 	checkpointPublicationHolds int
+	recentHandledSequences     map[string]struct{}
+	recentHandledSequenceOrder []string
 
 	unsupportedEncryptionLogged sync.Map
 }
@@ -64,6 +66,7 @@ func newXChatEventProcessor(client *Client) *XChatEventProcessor {
 		catchupGeneration:          make(map[string]uint64),
 		unresolvedConversationGaps: make(map[string]struct{}),
 		failedEvents:               make(map[string]string),
+		recentHandledSequences:     make(map[string]struct{}),
 	}
 }
 
@@ -86,6 +89,8 @@ func (p *XChatEventProcessor) SetFailedEventPersistence(failed map[string]string
 }
 
 var ErrXChatFailurePersistence = errors.New("failed to persist XChat event failure state")
+
+const recentHandledSequenceLimit = 256
 
 func (p *XChatEventProcessor) FailedEventPersistenceError() error {
 	p.sequenceStateLock.Lock()
@@ -244,21 +249,18 @@ func (p *XChatEventProcessor) MarkReconnected() {
 	p.sequenceStateLock.Unlock()
 }
 
-func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousSequenceID string) bool {
+func (p *XChatEventProcessor) needsConversationCatchup(conversationID, previousSequenceID string) (needed, previousUnhandled bool) {
 	if conversationID == "" {
-		return false
+		return false, false
 	}
 	p.sequenceStateLock.Lock()
 	defer p.sequenceStateLock.Unlock()
-	if _, unresolved := p.unresolvedConversationGaps[conversationID]; unresolved {
-		return true
-	}
-	if p.catchupGeneration[conversationID] < p.reconnectGeneration {
-		return true
-	}
 	lastSequenceID := p.lastConversationSequence[conversationID]
-	return previousSequenceID != "" && lastSequenceID != "" &&
-		compareXChatSequenceIDs(previousSequenceID, lastSequenceID) > 0
+	_, handled := p.recentHandledSequences[previousSequenceID]
+	previousUnhandled = previousSequenceID != "" && !handled &&
+		(lastSequenceID == "" || compareXChatSequenceIDs(previousSequenceID, lastSequenceID) > 0)
+	_, unresolved := p.unresolvedConversationGaps[conversationID]
+	return unresolved || p.catchupGeneration[conversationID] < p.reconnectGeneration || previousUnhandled, previousUnhandled
 }
 
 func (p *XChatEventProcessor) markConversationCaughtUp(conversationID string) {
@@ -339,6 +341,8 @@ func (p *XChatEventProcessor) ResetSequenceState() {
 	p.reconnectGeneration = 0
 	p.maxHandledSequenceID = ""
 	p.checkpointPublicationHolds = 0
+	p.recentHandledSequences = make(map[string]struct{})
+	p.recentHandledSequenceOrder = nil
 	p.sequenceStateLock.Unlock()
 }
 
@@ -374,6 +378,14 @@ func (p *XChatEventProcessor) recordHandledSequence(conversationID, sequenceID s
 	}
 	if sequenceID != "" && compareXChatSequenceIDs(sequenceID, p.maxHandledSequenceID) > 0 {
 		p.maxHandledSequenceID = sequenceID
+	}
+	if _, seen := p.recentHandledSequences[sequenceID]; sequenceID != "" && !seen {
+		p.recentHandledSequences[sequenceID] = struct{}{}
+		p.recentHandledSequenceOrder = append(p.recentHandledSequenceOrder, sequenceID)
+		if len(p.recentHandledSequenceOrder) > recentHandledSequenceLimit {
+			delete(p.recentHandledSequences, p.recentHandledSequenceOrder[0])
+			p.recentHandledSequenceOrder = p.recentHandledSequenceOrder[1:]
+		}
 	}
 	checkpointSequenceID := ""
 	callback := p.sequenceIDCallback
@@ -498,7 +510,16 @@ func (p *XChatEventProcessor) processMessageEventWithGapCatchup(
 			p.markConversationGapUnresolved(conversationID)
 		}
 	}()
-	needsCatchup := allowGapCatchup && p.needsConversationCatchup(conversationID, previousSequenceID) && p.gapHandler != nil
+	needsCatchup, previousUnhandled := false, false
+	if allowGapCatchup && p.gapHandler != nil {
+		needsCatchup, previousUnhandled = p.needsConversationCatchup(conversationID, previousSequenceID)
+	}
+	if previousUnhandled {
+		// The missed event may belong to any conversation, so every conversation re-verifies like after a reconnect.
+		p.sequenceStateLock.Lock()
+		p.reconnectGeneration++
+		p.sequenceStateLock.Unlock()
+	}
 	var keyMissing bool
 	var refreshed *xchatConversationKeysRefresh
 	if needsCatchup {
