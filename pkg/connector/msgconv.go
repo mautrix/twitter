@@ -389,11 +389,12 @@ func removeEntityLinkFromText(msgPart *bridgev2.ConvertedMessagePart, indices []
 	}
 
 	start, end := indices[0], indices[1]
-	if start <= 0 || end <= start || end > len(msgPart.Content.Body) {
+	body := []rune(msgPart.Content.Body)
+	if start <= 0 || end <= start || end > len(body) {
 		return
 	}
 
-	msgPart.Content.Body = msgPart.Content.Body[:start-1] + msgPart.Content.Body[end:]
+	msgPart.Content.Body = string(body[:start-1]) + string(body[end:])
 }
 
 func (tc *TwitterClient) getDisplayNameForUser(ctx context.Context, userID string) string {
